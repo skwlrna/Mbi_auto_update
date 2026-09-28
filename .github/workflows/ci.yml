@@ -1,4 +1,4 @@
-name: Check V0.1.78 Loot Retry
+name: Check V0.1.79 Maintenance Safety
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.78"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.79"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.78</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.79</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -49,3 +49,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Loot/retry regressions failed' }
           dotnet run --project tests/retry-flow/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Retry flow regressions failed' }
+
+      - name: Maintenance safety checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(-not (Test-Path source/tools/RollbackPrevious.ps1)){throw 'RollbackPrevious.ps1 missing'}
+          if(-not (Test-Path source/ROLLBACK_PREVIOUS.cmd)){throw 'ROLLBACK_PREVIOUS.cmd missing'}
+          [ScriptBlock]::Create((Get-Content source/tools/ApplyUpdate.ps1 -Raw)) | Out-Null
+          [ScriptBlock]::Create((Get-Content source/tools/RollbackPrevious.ps1 -Raw)) | Out-Null
+          $u=Get-Content source/tools/ApplyUpdate.ps1 -Raw
+          if($u -notmatch '\.previous_version'){throw 'previous-version retention missing'}
+          $f=Get-Content source/FishingAutomation/FishingBot.cs -Raw
+          if($f -notmatch 'MaxDebugBytes = 100L \* 1024 \* 1024'){throw 'fishing debug cap missing'}
