@@ -113,16 +113,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create V0.1.79 `
-            artifacts/MabiAuto_V0.1.79_Windows_Lite.zip `
-            artifacts/MabiAuto_V0.1.79_Windows_Lite.zip.sha256 `
-            artifacts/MabiAuto_V0.1.79_Source.zip `
-            --draft --target $env:GITHUB_SHA --title 'Mabi Auto V0.1.79' `
-            --notes-file source/RELEASE_NOTES.md
-          if($LASTEXITCODE-ne0){throw 'Release upload failed'}
-          $r=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V0.1.79" | ConvertFrom-Json
-          if($LASTEXITCODE-ne0){throw 'Release verification failed'}
+          $ErrorActionPreference='Stop'
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list failed'}
+          $r = @($releases | Where-Object { $_.tag_name -eq 'V0.1.79' }) | Select-Object -First 1
+
+          if(-not $r) {
+            gh release create V0.1.79 `
+              artifacts/MabiAuto_V0.1.79_Windows_Lite.zip `
+              artifacts/MabiAuto_V0.1.79_Windows_Lite.zip.sha256 `
+              artifacts/MabiAuto_V0.1.79_Source.zip `
+              --draft --target $env:GITHUB_SHA --title 'Mabi Auto V0.1.79' `
+              --notes-file source/RELEASE_NOTES.md
+            if($LASTEXITCODE-ne0){throw 'Release upload failed'}
+
+            $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+            if($LASTEXITCODE-ne0){throw 'Release list after upload failed'}
+            $r = @($releases | Where-Object { $_.tag_name -eq 'V0.1.79' }) | Select-Object -First 1
+          }
+
+          if(-not $r){throw 'V0.1.79 draft release not found'}
           $expected=@('MabiAuto_V0.1.79_Windows_Lite.zip','MabiAuto_V0.1.79_Windows_Lite.zip.sha256','MabiAuto_V0.1.79_Source.zip')
           foreach($name in $expected){if($name -notin $r.assets.name){throw "Missing release asset: $name"}}
-          gh release edit V0.1.79 --draft=false --latest
-          if($LASTEXITCODE-ne0){throw 'Release publication failed'}
+
+          if($r.draft) {
+            gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($r.id)" -F draft=false -f make_latest=true | Out-Null
+            if($LASTEXITCODE-ne0){throw 'Release publication failed'}
+          }
+
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V0.1.79" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or $published.draft){throw 'Published release verification failed'}
