@@ -731,9 +731,13 @@ public sealed partial class MainForm
         try
         {
             string package = UpdateManager.FindPackageRoot();
-            return File.Exists(Path.Combine(package, "FishingAutomation", "templates", "hook.png"))
-                && File.Exists(Path.Combine(package, "FishingAutomation", "templates", "gauge.png"))
-                && File.Exists(Path.Combine(package, "FishingAutomation", "abyss", "templates", "menu.png"));
+            bool RuntimeTreeReady(string root) =>
+                File.Exists(Path.Combine(root, "templates", "hook.png"))
+                && File.Exists(Path.Combine(root, "templates", "gauge.png"))
+                && File.Exists(Path.Combine(root, "abyss", "templates", "menu.png"));
+
+            if (RuntimeTreeReady(Path.Combine(package, "release"))) return true;
+            return RuntimeTreeReady(Path.Combine(package, "FishingAutomation"));
         }
         catch { return false; }
     }
