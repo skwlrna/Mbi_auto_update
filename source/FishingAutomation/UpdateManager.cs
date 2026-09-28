@@ -16,7 +16,7 @@ internal sealed record ReleaseUpdateInfo(
 
 internal static class UpdateManager
 {
-    public const string CurrentVersion = "V0.1.78";
+    public const string CurrentVersion = "V0.1.79";
     public const string RepositoryOwner = "skwlrna";
     public const string RepositoryName = "Mbi_auto_update";
 
@@ -210,6 +210,50 @@ internal static class UpdateManager
         var updaterProcess = Process.Start(psi);
         if (updaterProcess is null)
             throw new InvalidOperationException("업데이트 도우미를 실행하지 못했습니다.");
+    }
+
+    public static bool IsUpdatePending()
+    {
+        try { return File.Exists(Path.Combine(FindPackageRoot(), ".update_pending")); }
+        catch { return false; }
+    }
+
+    public static bool PreserveRollbackForManualRestore()
+    {
+        try
+        {
+            string root = FindPackageRoot();
+            string pending = Path.Combine(root, ".update_pending");
+            string rollback = Path.Combine(root, ".update_rollback");
+            string previous = Path.Combine(root, ".previous_version");
+            if (!File.Exists(pending) || !Directory.Exists(rollback)) return false;
+
+            string staging = previous + ".staging";
+            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            CopyDirectory(rollback, staging);
+            if (!File.Exists(Path.Combine(staging, "release", "FishingAutomation.exe")))
+            {
+                Directory.Delete(staging, true);
+                return false;
+            }
+            if (Directory.Exists(previous)) Directory.Delete(previous, true);
+            Directory.Move(staging, previous);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (string dir in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, dir)));
+        foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, true);
+        }
     }
 
     public static void MarkStartupHealthy()
