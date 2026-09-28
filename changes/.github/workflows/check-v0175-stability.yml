@@ -1,0 +1,88 @@
+name: Check V0.1.75 Stability
+
+on:
+  push:
+    branches: [fix/v0175-stability]
+    paths:
+      - 'release-source/v0175*'
+      - 'release-source/v0175-overlay/**'
+      - 'tests/stability/**'
+      - 'release-source/v0175_release_notes.md'
+      - '.github/workflows/check-v0175-stability.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore V0.1.74 and apply V0.1.75
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item source -ItemType Directory -Force | Out-Null
+          gh release download V0.1.74 --repo $env:GITHUB_REPOSITORY --pattern 'MabiAuto_V0.1.74_Source.zip' --dir source
+          if($LASTEXITCODE-ne0){throw 'V0.1.74 source download failed'}
+          Expand-Archive source/MabiAuto_V0.1.74_Source.zip source/current -Force
+          $root=(Resolve-Path source/current).Path
+
+          python release-source/v0175_apply.py $root
+          if($LASTEXITCODE-ne0){throw 'V0.1.75 patch failed'}
+
+          "SOURCE_ROOT=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host 'V0175_PATCH_OK'
+
+      - name: Build patched Windows app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $fish=Join-Path $env:SOURCE_ROOT 'FishingAutomation/FishingAutomation.csproj'
+          $watch=Join-Path $env:SOURCE_ROOT 'MacroWatchdog/MacroWatchdog.csproj'
+          dotnet build $fish -c Release -r win-x64
+          if($LASTEXITCODE-ne0){throw 'FishingAutomation build failed'}
+          dotnet build $watch -c Release
+          if($LASTEXITCODE-ne0){throw 'MacroWatchdog build failed'}
+          Write-Host 'V0175_BUILD_OK'
+
+      - name: Production regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/stability/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Stability regressions failed'}
+          $errors=$null
+          $tokens=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:SOURCE_ROOT 'tools/ApplyUpdate.ps1'),[ref]$tokens,[ref]$errors) | Out-Null
+          if($errors.Count -gt 0){throw ($errors | Out-String)}
+
+      - name: Updater failure injection tests
+        shell: pwsh
+        run: |
+          ./tests/stability/Updater.Tests.ps1 -Updater "$env:SOURCE_ROOT/tools/ApplyUpdate.ps1"
+          if($LASTEXITCODE-ne0){throw 'Updater regression tests failed'}
+
+      - name: Publish and smoke test
+        shell: pwsh
+        run: |
+          dotnet publish "$env:SOURCE_ROOT/FishingAutomation/FishingAutomation.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -o stage/release
+          if($LASTEXITCODE-ne0){throw 'Publish failed'}
+          $exe=(Resolve-Path stage/release/FishingAutomation.exe).Path
+          $p=Start-Process $exe -WorkingDirectory (Resolve-Path stage/release).Path -PassThru
+          Start-Sleep 5
+          $p.Refresh()
+          if($p.HasExited){throw "Smoke test exited $($p.ExitCode)"}
+          Stop-Process $p.Id -Force
+          Get-Process MacroWatchdog -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v0175-verified-source
+          path: source/current

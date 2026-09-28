@@ -1,0 +1,9 @@
+﻿**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+dist/
+artifacts/
+BUILD_LOG.txt
+GITHUB_MIGRATION_LOG.txt

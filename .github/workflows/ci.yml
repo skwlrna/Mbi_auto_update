@@ -1,0 +1,38 @@
+name: Check V0.1.76 Migration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          dotnet restore changes/tests/stability/Regression.csproj
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+      - name: Stability regression tests
+        shell: pwsh
+        run: dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
+      - name: Verify migration constants
+        shell: pwsh
+        run: |
+          $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.76"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
+          $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          if ($p -notmatch '<Version>0\.1\.76</Version>') { throw 'project version mismatch' }

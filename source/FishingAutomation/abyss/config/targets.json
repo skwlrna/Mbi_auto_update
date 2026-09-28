@@ -1,0 +1,474 @@
+[
+  {
+    "Id": "abyss_menu",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/menu.png",
+    "Threshold": 0.82
+  },
+  {
+    "Id": "abyss_icon",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/abyss.png",
+    "Threshold": 0.8,
+    "TemplateScaleMin": 1.0,
+    "TemplateScaleMax": 1.0,
+    "TemplateScaleStep": 0.1
+  },
+  {
+    "Id": "abyss_dungeon_hallucination_anchorage",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/hallucination_anchorage.png",
+    "Threshold": 0.8,
+    "TemplateScaleMin": 1.0,
+    "TemplateScaleMax": 1.0,
+    "TemplateScaleStep": 0.1
+  },
+  {
+    "Id": "abyss_dungeon_madness_cave",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/madness_cave.png",
+    "Threshold": 0.8,
+    "TemplateScaleMin": 1.0,
+    "TemplateScaleMax": 1.0,
+    "TemplateScaleStep": 0.1
+  },
+  {
+    "Id": "abyss_dungeon_scattered_waterway",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/scattered_waterway.png",
+    "Threshold": 0.8,
+    "TemplateScaleMin": 1.0,
+    "TemplateScaleMax": 1.0,
+    "TemplateScaleStep": 0.1
+  },
+  {
+    "Id": "abyss_enter",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/enter.png",
+    "Threshold": 0.84
+  },
+  {
+    "Id": "abyss_touch_screen",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/touch_screen.png",
+    "Threshold": 0.68,
+    "TemplateScaleMin": 0.6,
+    "TemplateScaleMax": 1.55,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_treasure_chest",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/treasure_chest.png",
+    "Threshold": 0.8
+  },
+  {
+    "Id": "abyss_exit",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/exit.png",
+    "Threshold": 0.72,
+    "Text": "나가기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true,
+    "TemplateScaleMin": 0.7,
+    "TemplateScaleMax": 1.4,
+    "TemplateScaleStep": 0.06
+  },
+  {
+    "Id": "abyss_leave_dungeon",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "TemplatePath": "templates/leave_dungeon.png",
+    "Threshold": 0.68,
+    "Text": "던전 퇴장",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true,
+    "TemplateScaleMin": 0.6,
+    "TemplateScaleMax": 1.5,
+    "TemplateScaleStep": 0.06
+  },
+  {
+    "Id": "scene_skip",
+    "Kind": "template",
+    "Roi": {
+      "X": 620,
+      "Y": 20,
+      "Width": 180,
+      "Height": 90
+    },
+    "TemplatePath": "templates/scene_skip_phone.jpg",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.8,
+    "TemplateScaleMax": 1.25,
+    "TemplateScaleStep": 0.04,
+    "Text": "장면 넘기기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "abyss_popup_close",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 500,
+      "Width": 800,
+      "Height": 500
+    },
+    "TemplatePath": "templates/popup_close.png",
+    "Threshold": 0.7,
+    "TemplateScaleMin": 0.5,
+    "TemplateScaleMax": 1.6,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_dungeon_clear_visual",
+    "Kind": "template",
+    "Roi": {
+      "X": 120,
+      "Y": 120,
+      "Width": 560,
+      "Height": 300
+    },
+    "TemplatePath": "templates/dungeon_clear_v66.png",
+    "Threshold": 0.64,
+    "TemplateScaleMin": 0.65,
+    "TemplateScaleMax": 1.35,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_outside_home_key",
+    "Kind": "template",
+    "Roi": {
+      "X": 590,
+      "Y": 20,
+      "Width": 150,
+      "Height": 130
+    },
+    "TemplatePath": "templates/outside_home_v75.png",
+    "Threshold": 0.76,
+    "TemplateScaleMin": 0.85,
+    "TemplateScaleMax": 1.15,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_outside_end_key",
+    "Kind": "template",
+    "Roi": {
+      "X": 630,
+      "Y": 20,
+      "Width": 150,
+      "Height": 130
+    },
+    "TemplatePath": "templates/outside_end_v75.png",
+    "Threshold": 0.7,
+    "TemplateScaleMin": 0.85,
+    "TemplateScaleMax": 1.15,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_outside_k_hud",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 820,
+      "Width": 180,
+      "Height": 180
+    },
+    "TemplatePath": "templates/outside_k_v75.png",
+    "Threshold": 0.72,
+    "TemplateScaleMin": 0.85,
+    "TemplateScaleMax": 1.15,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_outside_i_hud",
+    "Kind": "template",
+    "Roi": {
+      "X": 620,
+      "Y": 800,
+      "Width": 180,
+      "Height": 200
+    },
+    "TemplatePath": "templates/outside_i_v75.png",
+    "Threshold": 0.72,
+    "TemplateScaleMin": 0.85,
+    "TemplateScaleMax": 1.15,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_potion_popup_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 70,
+      "Y": 120,
+      "Width": 660,
+      "Height": 430
+    },
+    "Text": "회복 물약이 부족합니다",
+    "MaxEditDistance": 3,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "abyss_exit_confirm_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 120,
+      "Y": 620,
+      "Width": 560,
+      "Height": 220
+    },
+    "Text": "던전에서 퇴장하시겠습니까",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "abyss_loot_mor_corsair_coat",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_mor_corsair_coat.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_mor_corsair_gloves",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_mor_corsair_gloves.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_mor_corsair_boots",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_mor_corsair_boots.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_mor_corsair_tricorne",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_mor_corsair_tricorne.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_hallucination_stone",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_hallucination_stone.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_devouring_stone",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_devouring_stone.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_abyss_stone",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_abyss_stone.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_rune_engraving_10",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_rune_engraving_10.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_rune_engraving_10_plus",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_rune_engraving_10_plus.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_rune_binding_10",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_rune_binding_10.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "abyss_loot_rune_binding_10_plus",
+    "Kind": "template",
+    "Roi": {
+      "X": 20,
+      "Y": 80,
+      "Width": 760,
+      "Height": 800
+    },
+    "TemplatePath": "templates/loot_v173/loot_rune_binding_10_plus.png",
+    "Threshold": 0.74,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.85,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "network_unstable_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 150,
+      "Y": 600,
+      "Width": 520,
+      "Height": 180
+    },
+    "Text": "네트워크 상태가 불안정합니다",
+    "MaxEditDistance": 3,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "network_retry_button",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 370,
+      "Y": 835,
+      "Width": 270,
+      "Height": 145
+    },
+    "Text": "다시 시도하기",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  }
+]

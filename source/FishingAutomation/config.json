@@ -1,0 +1,57 @@
+{
+  "GameProcessName": "MabinogiMobile",
+  "GameWindowTitleContains": "",
+  "ClientWidth": 800,
+  "ClientHeight": 1000,
+  "AutoPlaceWindow": true,
+  "HookRoi": {
+    "X": 300,
+    "Y": 780,
+    "Width": 200,
+    "Height": 190
+  },
+  "GaugeRoi": {
+    "X": 250,
+    "Y": 200,
+    "Width": 310,
+    "Height": 270
+  },
+  "MessageRoi": {
+    "X": 240,
+    "Y": 700,
+    "Width": 340,
+    "Height": 90
+  },
+  "NetworkRoi": {
+    "X": 120,
+    "Y": 250,
+    "Width": 560,
+    "Height": 500
+  },
+  "HookThreshold": 0.85,
+  "CompassThreshold": 0.85,
+  "GaugeStrongThreshold": 0.88,
+  "GaugeWeakThreshold": 0.8,
+  "HealthBarThreshold": 0.78,
+  "GaugeLength": 125,
+  "CaptureIntervalMs": 60,
+  "MessageOcrIntervalMs": 200,
+  "NetworkOcrIntervalMs": 1000,
+  "Stage2TimeoutMs": 15000,
+  "Stage3TimeoutMs": 8000,
+  "Stage4TimeoutMs": 15000,
+  "DropPixels": 12,
+  "DropFrames": 3,
+  "Stage3MissingMs": 600,
+  "LateDropSecondRoundMs": 1000,
+  "ReboundStartPixels": 5,
+  "ReboundConfirmPixels": 4,
+  "ReboundWindowMs": 1000,
+  "ReboundCancelPixels": 5,
+  "Stage4MissingMs": 1000,
+  "InputMode": "Interception",
+  "InterceptionKeyboardDevice": 0,
+  "DebugFolder": "debug",
+  "LogFile": "fishing.log",
+  "LogMaxBytes": 5242880
+}

@@ -1,0 +1,40 @@
+{
+  "Name": "Dungeon 5-step loop",
+  "Repeat": true,
+  "Monitors": [
+    {
+      "Target": "scene_skip",
+      "Action": "click",
+      "CooldownMs": 2500,
+      "ScanIntervalMs": 1200
+    }
+  ],
+  "Steps": [
+    {
+      "Name": "1. 도전 상태 확인",
+      "Type": "wait",
+      "Target": "challenge",
+      "TimeoutSeconds": 90,
+      "AlternativeTarget": "selected",
+      "ClickAlternativeThenWaitPrimary": true
+    },
+    {
+      "Name": "2. 입장하기",
+      "Type": "wait_click",
+      "Target": "enter_bottom",
+      "TimeoutSeconds": 60
+    },
+    {
+      "Name": "3. 전투 종료 대기",
+      "Type": "wait_click",
+      "Target": "touch_result",
+      "TimeoutSeconds": 600
+    },
+    {
+      "Name": "4. 다시하기",
+      "Type": "wait_click",
+      "Target": "retry",
+      "TimeoutSeconds": 60
+    }
+  ]
+}

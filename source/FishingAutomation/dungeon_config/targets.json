@@ -1,0 +1,225 @@
+[
+  {
+    "value": [
+      {
+        "Id": "challenge",
+        "Kind": "ocr",
+        "Roi": {
+          "X": 300,
+          "Y": 650,
+          "Width": 516,
+          "Height": 250
+        },
+        "Text": "도전",
+        "MaxEditDistance": 1,
+        "OcrRetryAt2x": true
+      },
+      {
+        "Id": "selected",
+        "Kind": "ocr",
+        "Roi": {
+          "X": 300,
+          "Y": 650,
+          "Width": 516,
+          "Height": 250
+        },
+        "Text": "선택됨",
+        "MaxEditDistance": 1,
+        "OcrRetryAt2x": true
+      },
+      {
+        "Id": "enter_bottom",
+        "Kind": "ocr",
+        "Roi": {
+          "X": 0,
+          "Y": 930,
+          "Width": 816,
+          "Height": 100
+        },
+        "Text": "입장하기",
+        "MaxEditDistance": 1,
+        "OcrRetryAt2x": true
+      },
+      {
+        "Id": "enter_confirm",
+        "Kind": "ocr",
+        "Roi": {
+          "X": 140,
+          "Y": 900,
+          "Width": 560,
+          "Height": 120
+        },
+        "Text": "입장하기",
+        "MaxEditDistance": 1,
+        "OcrRetryAt2x": true
+      },
+      {
+        "Id": "touch_result",
+        "Kind": "ocr",
+        "Roi": {
+          "X": 240,
+          "Y": 930,
+          "Width": 360,
+          "Height": 80
+        },
+        "Text": "터치해",
+        "MaxEditDistance": 1,
+        "OcrRetryAt2x": true
+      },
+      {
+        "Id": "retry",
+        "Kind": "ocr",
+        "Roi": {
+          "X": 340,
+          "Y": 930,
+          "Width": 360,
+          "Height": 100
+        },
+        "Text": "다시하기",
+        "MaxEditDistance": 1,
+        "OcrRetryAt2x": true
+      },
+      {
+        "Id": "example_image_target",
+        "Kind": "template",
+        "Roi": {
+          "X": 0,
+          "Y": 0,
+          "Width": 800,
+          "Height": 1000
+        },
+        "TemplatePath": "templates/example.png",
+        "Threshold": 0.75
+      }
+    ],
+    "Count": 7
+  },
+  {
+    "Id": "challenge_confirm_strict",
+    "Kind": "ocr",
+    "Roi": {
+      "X": [
+        300,
+        300,
+        0,
+        140,
+        240,
+        340,
+        0
+      ],
+      "Y": [
+        650,
+        650,
+        930,
+        900,
+        930,
+        930,
+        0
+      ],
+      "Width": [
+        516,
+        516,
+        816,
+        560,
+        360,
+        360,
+        800
+      ],
+      "Height": [
+        250,
+        250,
+        100,
+        120,
+        80,
+        100,
+        1000
+      ]
+    },
+    "Text": "도전",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "challenge",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 300,
+      "Y": 650,
+      "Width": 516,
+      "Height": 250
+    },
+    "Text": "도전",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "selected",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 300,
+      "Y": 650,
+      "Width": 516,
+      "Height": 250
+    },
+    "Text": "선택됨",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "enter_bottom",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 0,
+      "Y": 930,
+      "Width": 816,
+      "Height": 100
+    },
+    "Text": "입장하기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "touch_result",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 240,
+      "Y": 930,
+      "Width": 360,
+      "Height": 80
+    },
+    "Text": "터치해",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "retry",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 340,
+      "Y": 930,
+      "Width": 360,
+      "Height": 100
+    },
+    "Text": "다시하기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "scene_skip",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "Text": "장면 넘기기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/scene_skip_phone.jpg",
+    "Threshold": 0.62,
+    "TemplateScaleMin": 0.5,
+    "TemplateScaleMax": 1.4,
+    "TemplateScaleStep": 0.08
+  }
+]

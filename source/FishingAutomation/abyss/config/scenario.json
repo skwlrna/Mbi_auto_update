@@ -1,0 +1,67 @@
+{
+  "Name": "Abyss infinite loop - 10min timeout exit recovery",
+  "Repeat": true,
+  "Monitors": [
+    {
+      "Target": "abyss_potion_popup_title",
+      "Action": "escape",
+      "CooldownMs": 3000,
+      "ScanIntervalMs": 500
+    },
+    {
+      "Target": "abyss_popup_close",
+      "Action": "escape",
+      "CooldownMs": 3000,
+      "ScanIntervalMs": 700
+    },
+    {
+      "Target": "scene_skip",
+      "Action": "click",
+      "CooldownMs": 2500,
+      "ScanIntervalMs": 1200
+    }
+  ],
+  "Steps": [
+    {
+      "Name": "1. 메뉴 클릭",
+      "Type": "wait_click",
+      "Target": "abyss_menu",
+      "TimeoutSeconds": 90
+    },
+    {
+      "Name": "2. 어비스 클릭",
+      "Type": "wait_click",
+      "Target": "abyss_icon",
+      "TimeoutSeconds": 60
+    },
+    {
+      "Name": "3. 선택 던전 클릭",
+      "Type": "wait_click",
+      "Target": "abyss_selected_dungeon",
+      "TimeoutSeconds": 60
+    },
+    {
+      "Name": "4. 입장하기 클릭",
+      "Type": "wait_click",
+      "Target": "abyss_enter",
+      "TimeoutSeconds": 60
+    },
+    {
+      "Name": "5. 클리어 화면 대기 (최대 10분) / 초과 시 강제 퇴장",
+      "Type": "wait_click",
+      "Target": "abyss_touch_screen",
+      "TimeoutSeconds": 600,
+      "TimeoutClickTarget": "abyss_leave_dungeon",
+      "TimeoutClickTargetWaitSeconds": 90,
+      "TimeoutFollowupClickTarget": "abyss_exit",
+      "TimeoutFollowupWaitSeconds": 120,
+      "TimeoutRestartDelaySeconds": 30
+    },
+    {
+      "Name": "6. 결과 화면 확인 후 다시 하기",
+      "Type": "wait_click",
+      "Target": "abyss_result_retry",
+      "TimeoutSeconds": 120
+    }
+  ]
+}

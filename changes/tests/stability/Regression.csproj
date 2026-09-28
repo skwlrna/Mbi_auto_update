@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+<ItemGroup>
+<Compile Include="../../release-source/v0175-overlay/FishingAutomation/dungeon/ScenarioEngine.AbyssTimeout.cs" Link="Timeout.cs" />
+<Compile Include="../../release-source/v0175-overlay/FishingAutomation/dungeon/ScenarioEngine.AbyssState.cs" Link="State.cs" />
+<Compile Include="../../release-source/v0175-overlay/FishingAutomation/dungeon/ScenarioEngine.NetworkRecovery.cs" Link="Network.cs" />
+</ItemGroup>
+</Project>

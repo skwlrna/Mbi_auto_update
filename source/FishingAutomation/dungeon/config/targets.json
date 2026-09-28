@@ -1,0 +1,490 @@
+[
+  {
+    "Id": "challenge_confirm_strict",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 390,
+      "Y": 635,
+      "Width": 370,
+      "Height": 215
+    },
+    "Text": "도전",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "challenge",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 390,
+      "Y": 635,
+      "Width": 370,
+      "Height": 215
+    },
+    "Text": "도전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/challenge_visual.png",
+    "Threshold": 0.68,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.25,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "challenge_visual",
+    "Kind": "template",
+    "Roi": {
+      "X": 390,
+      "Y": 635,
+      "Width": 370,
+      "Height": 215
+    },
+    "TemplatePath": "templates/challenge_visual.png",
+    "Threshold": 0.68,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.25,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "selected",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 390,
+      "Y": 635,
+      "Width": 370,
+      "Height": 215
+    },
+    "Text": "선택됨",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/selected_red_visual.png",
+    "Threshold": 0.6,
+    "TemplateScaleMin": 0.72,
+    "TemplateScaleMax": 1.28,
+    "TemplateScaleStep": 0.04
+  },
+  {
+    "Id": "enter_bottom",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 360,
+      "Y": 900,
+      "Width": 440,
+      "Height": 100
+    },
+    "Text": "입장하기",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "enter_confirm",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 360,
+      "Y": 900,
+      "Width": 440,
+      "Height": 100
+    },
+    "Text": "입장하기",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "touch_result",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 240,
+      "Y": 900,
+      "Width": 360,
+      "Height": 100
+    },
+    "Text": "터치해",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "retry",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 180,
+      "Y": 830,
+      "Width": 440,
+      "Height": 170
+    },
+    "Text": "다시 하기",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/retry_visual_v0129.jpg",
+    "Threshold": 0.7,
+    "TemplateScaleMin": 0.5,
+    "TemplateScaleMax": 1.3,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "retry_ocr_strict",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 180,
+      "Y": 830,
+      "Width": 440,
+      "Height": 170
+    },
+    "Text": "다시 하기",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "selected_ocr_strict",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 390,
+      "Y": 635,
+      "Width": 370,
+      "Height": 215
+    },
+    "Text": "선택됨",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "selected_red_visual",
+    "Kind": "template",
+    "Roi": {
+      "X": 390,
+      "Y": 635,
+      "Width": 370,
+      "Height": 215
+    },
+    "TemplatePath": "templates/selected_red_visual.png",
+    "Threshold": 0.7,
+    "TemplateScaleMin": 0.82,
+    "TemplateScaleMax": 1.18,
+    "TemplateScaleStep": 0.03
+  },
+  {
+    "Id": "scene_skip",
+    "Kind": "hybrid",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 800,
+      "Height": 1000
+    },
+    "Text": "장면 넘기기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/scene_skip_phone.jpg",
+    "Threshold": 0.62,
+    "TemplateScaleMin": 0.5,
+    "TemplateScaleMax": 1.4,
+    "TemplateScaleStep": 0.08
+  },
+  {
+    "Id": "route_ulla_continent",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 330,
+      "Height": 140
+    },
+    "Text": "울라 대륙",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_peaca_map",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 20,
+      "Y": 110,
+      "Width": 660,
+      "Height": 650
+    },
+    "Text": "페카 고분",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_peaca_popup_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 100,
+      "Y": 500,
+      "Width": 600,
+      "Height": 300
+    },
+    "Text": "페카 고분",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_go_here",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 80,
+      "Y": 790,
+      "Width": 640,
+      "Height": 210
+    },
+    "Text": "여기로 가기",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_peaca_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 300,
+      "Height": 170
+    },
+    "Text": "페카 고분",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_deep_tab",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 40,
+      "Y": 70,
+      "Width": 360,
+      "Height": 170
+    },
+    "Text": "심층 던전",
+    "MaxEditDistance": 1,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_d1_1",
+    "Kind": "slot-hybrid",
+    "Roi": {
+      "X": 200,
+      "Y": 440,
+      "Width": 300,
+      "Height": 180
+    },
+    "Text": "D1-1",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/slot_peaca_d1_1_v0139.jpg",
+    "Threshold": 0.86,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.3,
+    "TemplateScaleStep": 0.025
+  },
+  {
+    "Id": "route_d2_1",
+    "Kind": "slot-hybrid",
+    "Roi": {
+      "X": 200,
+      "Y": 700,
+      "Width": 320,
+      "Height": 190
+    },
+    "Text": "D2-1",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/slot_peaca_d2_1_v0139.jpg",
+    "Threshold": 0.86,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.3,
+    "TemplateScaleStep": 0.025
+  },
+  {
+    "Id": "route_enter_d1_1",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 80,
+      "Y": 830,
+      "Width": 640,
+      "Height": 170
+    },
+    "Text": "심층 1층 1구역 진입",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_enter_d2_1",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 80,
+      "Y": 830,
+      "Width": 640,
+      "Height": 170
+    },
+    "Text": "심층 2층 1구역 진입",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_runda_map",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 20,
+      "Y": 110,
+      "Width": 660,
+      "Height": 650
+    },
+    "Text": "룬다 던전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_fiod_map",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 20,
+      "Y": 110,
+      "Width": 660,
+      "Height": 650
+    },
+    "Text": "피오드 던전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_runda_popup_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 90,
+      "Y": 480,
+      "Width": 620,
+      "Height": 320
+    },
+    "Text": "룬다 던전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_fiod_popup_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 90,
+      "Y": 480,
+      "Width": 620,
+      "Height": 320
+    },
+    "Text": "피오드 던전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_runda_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 330,
+      "Height": 150
+    },
+    "Text": "룬다 던전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_fiod_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 330,
+      "Height": 150
+    },
+    "Text": "피오드 던전",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_regular_1_1",
+    "Kind": "slot-hybrid",
+    "Roi": {
+      "X": 180,
+      "Y": 500,
+      "Width": 360,
+      "Height": 180
+    },
+    "Text": "1-1",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/slot_regular_1_1_v0139.jpg",
+    "Threshold": 0.86,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.3,
+    "TemplateScaleStep": 0.025
+  },
+  {
+    "Id": "route_regular_2_1",
+    "Kind": "slot-hybrid",
+    "Roi": {
+      "X": 200,
+      "Y": 700,
+      "Width": 360,
+      "Height": 220
+    },
+    "Text": "2-1",
+    "MaxEditDistance": 0,
+    "OcrRetryAt2x": true,
+    "TemplatePath": "templates/slot_regular_2_1_v0139.jpg",
+    "Threshold": 0.86,
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.3,
+    "TemplateScaleStep": 0.025
+  },
+  {
+    "Id": "route_enter_regular_1_1",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 100,
+      "Y": 870,
+      "Width": 600,
+      "Height": 130
+    },
+    "Text": "1층 1구역 진입",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "route_enter_regular_2_1",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 100,
+      "Y": 870,
+      "Width": 600,
+      "Height": 130
+    },
+    "Text": "2층 1구역 진입",
+    "MaxEditDistance": 2,
+    "OcrRetryAt2x": true
+  },
+  {
+    "Id": "potion_popup_close",
+    "Kind": "template",
+    "Roi": {
+      "X": 0,
+      "Y": 500,
+      "Width": 800,
+      "Height": 500
+    },
+    "TemplatePath": "templates/popup_close.png",
+    "Threshold": 0.7,
+    "TemplateScaleMin": 0.5,
+    "TemplateScaleMax": 1.6,
+    "TemplateScaleStep": 0.05
+  },
+  {
+    "Id": "potion_popup_title",
+    "Kind": "ocr",
+    "Roi": {
+      "X": 70,
+      "Y": 120,
+      "Width": 660,
+      "Height": 430
+    },
+    "Text": "회복 물약이 부족합니다",
+    "MaxEditDistance": 3,
+    "OcrRetryAt2x": true
+  }
+]

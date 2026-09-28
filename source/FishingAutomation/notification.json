@@ -1,0 +1,11 @@
+{
+  "Enabled": false,
+  "BotToken": "",
+  "ChatId": "",
+  "FishingStallSeconds": 10,
+  "WatchdogSeconds": 90,
+  "ExitProcedureTimeoutSeconds": 90,
+  "NetworkRetryAlertCount": 3,
+  "SendScreenshot": true,
+  "RemoteControlEnabled": true
+}

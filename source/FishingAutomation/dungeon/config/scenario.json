@@ -1,0 +1,50 @@
+{
+  "Name": "Dungeon 5-step loop",
+  "Repeat": true,
+  "Monitors": [
+    {
+      "Target": "potion_popup_title",
+      "Action": "escape",
+      "CooldownMs": 3000,
+      "ScanIntervalMs": 500
+    },
+    {
+      "Target": "potion_popup_close",
+      "Action": "escape",
+      "CooldownMs": 3000,
+      "ScanIntervalMs": 700
+    },
+    {
+      "Target": "scene_skip",
+      "Action": "click",
+      "CooldownMs": 2500,
+      "ScanIntervalMs": 1200
+    }
+  ],
+  "Steps": [
+    {
+      "Name": "1. 입장 화면 확인",
+      "Type": "wait",
+      "Target": "enter_bottom",
+      "TimeoutSeconds": 45
+    },
+    {
+      "Name": "2. 입장하기",
+      "Type": "wait_click",
+      "Target": "enter_bottom",
+      "TimeoutSeconds": 60
+    },
+    {
+      "Name": "3. 전투 종료 대기",
+      "Type": "wait_click",
+      "Target": "touch_result",
+      "TimeoutSeconds": 600
+    },
+    {
+      "Name": "4. 다시하기",
+      "Type": "wait_click",
+      "Target": "retry",
+      "TimeoutSeconds": 60
+    }
+  ]
+}

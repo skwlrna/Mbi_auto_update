@@ -1,0 +1,12 @@
+{
+  "tools/ApplyUpdate.ps1": "18b6d2a750fec9333382dff4675fc6eef0c5553cc3e139d3a77e011d266db270",
+  "FishingAutomation/UpdateManager.cs": "3697ac2aa3b73bc9395616add695df5a96321fc24b0acad060149ab80646d0a3",
+  "FishingAutomation/FishingAutomation.csproj": "fe394e09de2756b3f06e5d59a45fd2082b6d330ecc8d174ced01be858ac48c58",
+  "FishingAutomation/dungeon/GuardedInputController.cs": null,
+  "FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs": "99522bec57e4317f0d3c9c3916e88634038cfa4f8ba93dd7a3481be988384416",
+  "FishingAutomation/dungeon/ScenarioEngine.NetworkRecovery.cs": "191f59c364660b4834a74e0be4719a750dcd34186ecd87d006c56bff9d63d37e",
+  "FishingAutomation/dungeon/ScenarioEngine.AbyssTimeout.cs": "503d22677c9fc6dbd31dcde4de355f5b5fd8d3e38ffc54faf510888eb07d8dcf",
+  "FishingAutomation/dungeon/ScenarioEngine.AbyssState.cs": "7d772ff3e5e8216faa2679347773e657a3feeba92feeb3e84ae83699b9612511",
+  "FishingAutomation/dungeon/ScenarioEngine.cs": "4ebfbca21082099048e47d55ddcb6523d1bef8c48846853c1d11932a2c0c3e31",
+  "FishingAutomation/dungeon/InputController.cs": "1f0da776a03893e7a0f0754d4c5bde380cc5997082d9a868dc0e05d6013f465f"
+}
