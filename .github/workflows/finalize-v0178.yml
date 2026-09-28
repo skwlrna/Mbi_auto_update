@@ -1,0 +1,58 @@
+name: Finalize verified V0.1.78
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/finalize-v0178.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: release-v0178
+  cancel-in-progress: false
+jobs:
+  finalize:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify successful build gates and uploaded draft
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo=$env:GITHUB_REPOSITORY
+          $run=gh api "repos/$repo/actions/runs/36426299673" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Cannot read verified build'}
+          if($run.head_sha-ne'd0b1acc2e2072491b0af176ed731fa27e9976a4a'){throw 'Build commit mismatch'}
+          $jobs=gh api "repos/$repo/actions/runs/36426299673/jobs" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Cannot read build gates'}
+          foreach($name in @('Restore and test','Loot and retry regression tests','Publish Windows binaries','Smoke test published app','Package')){
+            $step=@($jobs.jobs.steps | Where-Object {$_.name-eq$name})
+            if($step.Count-ne1 -or $step[0].conclusion-ne'success'){throw "Gate not successful: $name"}
+          }
+          $r=gh api "repos/$repo/releases/398261040" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Cannot read release'}
+          if($r.tag_name-ne'V0.1.78' -or $r.target_commitish-ne$run.head_sha){throw 'Release provenance mismatch'}
+          foreach($name in @('MabiAuto_V0.1.78_Windows_Lite.zip','MabiAuto_V0.1.78_Windows_Lite.zip.sha256','MabiAuto_V0.1.78_Source.zip')){
+            $asset=@($r.assets | Where-Object {$_.name-eq$name -and $_.state-eq'uploaded' -and $_.size-gt0})
+            if($asset.Count-ne1){throw "Missing asset: $name"}
+          }
+          gh release download V0.1.78 --repo $repo --pattern '*Windows_Lite*' --dir verify
+          if($LASTEXITCODE-ne0){throw 'Cannot verify draft downloads'}
+          $zip='verify/MabiAuto_V0.1.78_Windows_Lite.zip'
+          $actual=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected=((Get-Content "$zip.sha256" -Raw).Trim() -split '\s+')[0]
+          if($actual-ne$expected -or $actual-ne'c88035cdef8da26d98debc53fd3c536c51b8ad12443a7eeb0f41ae92ec2d217f'){throw 'ZIP checksum mismatch'}
+          Expand-Archive $zip verify/unpacked
+          if((Get-Item verify/unpacked/release/FishingAutomation.exe).VersionInfo.FileVersion-ne'0.1.78.0'){throw 'Packaged EXE version mismatch'}
+          if(-not(Test-Path verify/unpacked/release/interception.dll)){throw 'Packaged input DLL missing'}
+          Write-Host "VERIFIED V0.1.78 SHA256=$actual"
+      - name: Publish verified release by ID
+        shell: pwsh
+        run: |
+          $repo=$env:GITHUB_REPOSITORY
+          gh api --method PATCH "repos/$repo/releases/398261040" -F draft=false -f make_latest=true --silent
+          if($LASTEXITCODE-ne0){throw 'Release publication failed'}
+          $latest=gh api "repos/$repo/releases/latest" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or $latest.tag_name-ne'V0.1.78' -or $latest.draft -or $latest.prerelease){throw 'Auto-update channel verification failed'}
+          Write-Host 'V0.1.78 AUTO UPDATE RELEASE VERIFIED'
