@@ -49,6 +49,29 @@ public sealed partial class MainForm
         finally { _diagnosticRunning = false; }
     }
 
+    private async Task<bool> WaitForCriticalUpdateHealthAsync()
+    {
+        const int Attempts = 20;
+        const int DelayMs = 500;
+        for (int i = 0; i < Attempts; i++)
+        {
+            if (IsDisposed) return false;
+            bool templates = TemplatesReady();
+            bool input = _fishingBot.InputReady;
+            bool ocr = CheckOcrAvailable();
+            if (templates && input && ocr)
+            {
+                _log.Write("[업데이트] 필수 시작 점검 통과: 템플릿=정상 · OCR=정상 · 입력=정상");
+                return true;
+            }
+            if (i == 0 || i == Attempts - 1 || (i + 1) % 5 == 0)
+                _log.Write($"[업데이트] 필수 시작 점검 대기 {i + 1}/{Attempts}: 템플릿={(templates ? "정상" : "실패")} · OCR={(ocr ? "정상" : "실패")} · 입력={(input ? "정상" : "실패")}");
+            await Task.Delay(DelayMs);
+        }
+        _log.Write("[업데이트] 필수 시작 점검 실패 -> 업데이트 성공 신호를 보내지 않습니다. 자동 복구를 기다립니다.");
+        return false;
+    }
+
     private bool IsTelegramConfigured()
     {
         var s = _notifier.Settings;

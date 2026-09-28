@@ -92,10 +92,27 @@ public sealed partial class MainForm : Form
 
         Shown += async (_, _) =>
         {
-            // 창이 실제로 표시된 뒤 잠시 정상 실행되는 것을 확인하고 업데이트 성공을 기록한다.
             await Task.Delay(1200);
             if (IsDisposed) return;
-            UpdateManager.MarkStartupHealthy();
+
+            if (UpdateManager.IsUpdatePending())
+            {
+                bool criticalHealthy = await WaitForCriticalUpdateHealthAsync();
+                if (criticalHealthy)
+                {
+                    bool backupPreserved = UpdateManager.PreserveRollbackForManualRestore();
+                    if (backupPreserved)
+                    {
+                        UpdateManager.MarkStartupHealthy();
+                        _log.Write("[업데이트] 필수 점검 통과 + 직전 버전 백업 보존 완료 -> 업데이트 확정");
+                    }
+                    else
+                    {
+                        _log.Write("[업데이트] 직전 버전 백업 보존 실패 -> 업데이트 성공 신호를 보내지 않습니다.");
+                    }
+                }
+            }
+
             _notifier.StartRemoteControl(HandleTelegramCommandAsync);
             await RunStartupDiagnosticsAsync();
             await CheckForUpdatesAsync(false);

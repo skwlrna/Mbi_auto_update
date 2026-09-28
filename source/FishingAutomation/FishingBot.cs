@@ -5,6 +5,9 @@ namespace FishingAutomation;
 
 public sealed class FishingBot : IDisposable
 {
+    private const int MaxDebugFiles = 150;
+    private const long MaxDebugBytes = 100L * 1024 * 1024;
+
     private readonly AutomationConfig _cfg;
     private readonly AppLog _log;
     private readonly CaptureService _capture = new();
@@ -33,6 +36,7 @@ public sealed class FishingBot : IDisposable
         _input = InputSenderFactory.Create(cfg, log);
         _ocr = new OcrCoordinator(log);
         Directory.CreateDirectory(Path.Combine(baseDir, cfg.DebugFolder));
+        PruneDebugScreenshots();
         _log.Write("입력 방식: " + _input.Name);
     }
 
@@ -680,12 +684,34 @@ public sealed class FishingBot : IDisposable
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, $"{DateTime.Now:yyyyMMdd_HHmmss_fff}_{reason}.png");
             bitmap.Save(path, ImageFormat.Png);
+            PruneDebugScreenshots();
             _log.Write("DEBUG 저장: " + Path.GetFileName(path));
         }
         catch (Exception ex)
         {
             _log.Write("DEBUG 저장 실패: " + ex.Message);
         }
+    }
+
+    private void PruneDebugScreenshots()
+    {
+        try
+        {
+            string dir = Path.Combine(AppContext.BaseDirectory, _cfg.DebugFolder);
+            if (!Directory.Exists(dir)) return;
+            var files = new DirectoryInfo(dir).GetFiles("*.png").OrderByDescending(f => f.LastWriteTimeUtc).ToList();
+            long total = 0;
+            for (int i = 0; i < files.Count; i++)
+            {
+                FileInfo file = files[i];
+                if (i >= MaxDebugFiles || total + file.Length > MaxDebugBytes)
+                {
+                    try { file.Delete(); } catch { }
+                }
+                else total += file.Length;
+            }
+        }
+        catch { }
     }
 
     private void Status(string text) => StatusChanged?.Invoke(text);

@@ -10,6 +10,7 @@ $work = Join-Path $env:TEMP "MabiAutoUpdate_$stamp"
 $preserveRoot = Join-Path $work 'preserve'
 $extract = Join-Path $work 'extract'
 $rollback = Join-Path $InstallRoot '.update_rollback'
+$previous = Join-Path $InstallRoot '.previous_version'
 $pending = Join-Path $InstallRoot '.update_pending'
 $healthy = Join-Path $InstallRoot '.update_healthy'
 $log = Join-Path $InstallRoot 'update.log'
@@ -79,7 +80,7 @@ function Copy-TreeItem([string]$src, [string]$dst) {
 $replaceNames = @(
     'release','FishingAutomation','tools','START.cmd','1_INSTALL_INTERCEPTION.cmd',
     'SETUP_PHONE_ALERT.cmd','SETUP_PHONE_ALERT_ALT.bat','ADD_TEMPLATES.cmd','OPEN_TEMPLATES.cmd',
-    'PHONE_ALERT_README.txt','AUTO_UPDATE_README.txt','WINDOWS_LITE.txt'
+    'PHONE_ALERT_README.txt','AUTO_UPDATE_README.txt','WINDOWS_LITE.txt','ROLLBACK_PREVIOUS.cmd'
 )
 
 $preserve = @(
@@ -186,7 +187,9 @@ try {
     if ($ok) {
         Log 'New version startup health check OK. Update committed.'
         Remove-Item -LiteralPath $pending,$healthy -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $rollback -Recurse -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Recurse -Force -ErrorAction Stop }
+        if (Test-Path -LiteralPath $rollback) { Move-Item -LiteralPath $rollback -Destination $previous -Force }
+        Log 'Previous version retained in .previous_version for manual rollback.'
     } else {
         Log 'New version startup health check FAILED. Rolling back.'
         foreach ($p in @('FishingAutomation','MacroWatchdog')) {
