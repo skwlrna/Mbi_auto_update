@@ -1,4 +1,4 @@
-name: Check V0.1.76 Migration
+name: Check V0.1.77 Focus Fix
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.76"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.77"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.76</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.77</Version>') { throw 'project version mismatch' }

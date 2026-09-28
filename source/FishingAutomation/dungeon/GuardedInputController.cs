@@ -43,10 +43,32 @@ internal sealed class GuardedInputController : IInputController
             NativeMethods.IsIconic(hwnd) || !NativeMethods.ClientToScreen(hwnd, ref origin) ||
             origin.X != _origin.X || origin.Y != _origin.Y)
             throw new OperationCanceledException("화면 인식 후 게임 창 위치/크기가 바뀌어 입력을 정지합니다.");
-        NativeMethods.SetForegroundWindow(hwnd);
-        if (GetForegroundWindow() != hwnd)
+        if (!EnsureGameForeground(hwnd))
             throw new OperationCanceledException("게임 창 포커스 확인 실패 -> 입력 정지");
         _ct.ThrowIfCancellationRequested();
+    }
+
+    // V0.1.77: Windows/remote-control environments can take a short moment to
+    // complete foreground activation. Keep the safety check, but retry briefly
+    // instead of stopping on the very first foreground read.
+    private bool EnsureGameForeground(nint hwnd)
+    {
+        const int attempts = 8;
+        for (int i = 0; i < attempts; i++)
+        {
+            _ct.ThrowIfCancellationRequested();
+
+            if (GetForegroundWindow() == hwnd)
+                return true;
+
+            NativeMethods.SetForegroundWindow(hwnd);
+            Thread.Sleep(i == 0 ? 80 : 120);
+
+            if (GetForegroundWindow() == hwnd)
+                return true;
+        }
+
+        return false;
     }
     public void ClickClientPoint(nint hwnd, Point point)
     {

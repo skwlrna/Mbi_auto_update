@@ -1,3 +1,10 @@
+# V0.1.77 - game focus retry fix
+
+- Fixed the immediate safety stop that could occur with `게임 창 포커스 확인 실패 -> 입력 정지`.
+- The game-window focus safety guard is still enforced; it now retries foreground activation for about one second before stopping.
+- OCR, templates, Interception installation files, dungeon/abyss recognition logic, and user configuration behavior are otherwise unchanged from V0.1.76.
+- Auto-update continues through `skwlrna/Mbi_auto_update`.
+
 ﻿# V0.1.76 - GitHub account migration
 
 - Auto-update repository owner changed from `insubi` to `skwlrna`.
