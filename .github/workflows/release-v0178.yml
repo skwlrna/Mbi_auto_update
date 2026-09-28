@@ -77,6 +77,7 @@ jobs:
           $compat = Join-Path $pkg 'FishingAutomation'
           New-Item $release,$tools,$compat -ItemType Directory -Force | Out-Null
           Copy-Item artifacts/app/* $release -Recurse -Force
+          Copy-Item source/FishingAutomation/interception.dll (Join-Path $release 'interception.dll') -Force
           Copy-Item artifacts/watchdog/MacroWatchdog.exe (Join-Path $release 'MacroWatchdog.exe') -Force
           Copy-Item source/tools/ApplyUpdate.ps1 (Join-Path $tools 'ApplyUpdate.ps1') -Force
           Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
@@ -100,7 +101,8 @@ jobs:
           Copy-Item changes (Join-Path $srcStage 'changes') -Recurse -Force
           Copy-Item BUILD_VERIFY.ps1,README.txt,GITHUB_MIGRATION.md $srcStage -Force
           Copy-Item tests (Join-Path $srcStage 'tests') -Recurse -Force
-          Get-ChildItem $srcStage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') } | Remove-Item -Recurse -Force
+          $buildDirs = @(Get-ChildItem $srcStage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') })
+          foreach ($dir in ($buildDirs | Sort-Object { $_.FullName.Length } -Descending)) { if(Test-Path $dir.FullName){ Remove-Item $dir.FullName -Recurse -Force } }
           $srcZip = Join-Path $PWD 'artifacts/MabiAuto_V0.1.78_Source.zip'
           [System.IO.Compression.ZipFile]::CreateFromDirectory($srcStage,$srcZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
       - name: Publish GitHub release
