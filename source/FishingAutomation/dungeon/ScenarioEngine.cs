@@ -721,6 +721,15 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                     continue;
                 }
 
+                await RetryClickDelay.WaitAsync(ct);
+                using var settledRetryFrame = await CaptureGameWindowAsync(ct);
+                if ((await _detector.DetectAsync("selected_ocr_strict", settledRetryFrame, ct)).Found ||
+                    (await _detector.DetectAsync("challenge_confirm_strict", settledRetryFrame, ct)).Found ||
+                    (await _detector.DetectAsync("enter_bottom", settledRetryFrame, ct)).Found)
+                    continue;
+                var settledRetry = await _detector.DetectAsync("retry_ocr_strict", settledRetryFrame, ct);
+                if (!settledRetry.Found || !settledRetry.Bounds.IntersectsWith(retryConfirm.Bounds)) continue;
+                retryConfirm = settledRetry;
                 normalResultRetryClicks++;
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                 NativeMethods.SetForegroundWindow(_hwnd);
@@ -896,9 +905,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                     if (step.Target.Equals("retry", StringComparison.OrdinalIgnoreCase))
                     {
-                        var retryGuardSelected = await _detector.DetectAsync("selected_ocr_strict", frame, ct);
-                        var retryGuardChallenge = await _detector.DetectAsync("challenge_confirm_strict", frame, ct);
-                        var retryGuardEnter = await _detector.DetectAsync("enter_bottom", frame, ct);
+                        await RetryClickDelay.WaitAsync(ct);
+                        using var settledRetryFrame = await CaptureGameWindowAsync(ct);
+                        var settledRetry = await _detector.DetectAsync("retry_ocr_strict", settledRetryFrame, ct);
+                        if (!settledRetry.Found || !settledRetry.Bounds.IntersectsWith(found.Bounds)) continue;
+                        found = settledRetry;
+                        var retryGuardSelected = await _detector.DetectAsync("selected_ocr_strict", settledRetryFrame, ct);
+                        var retryGuardChallenge = await _detector.DetectAsync("challenge_confirm_strict", settledRetryFrame, ct);
+                        var retryGuardEnter = await _detector.DetectAsync("enter_bottom", settledRetryFrame, ct);
 
                         if (retryGuardSelected.Found || retryGuardChallenge.Found || retryGuardEnter.Found)
                         {

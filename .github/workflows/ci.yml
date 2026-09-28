@@ -1,4 +1,4 @@
-name: Check V0.1.77 Focus Fix
+name: Check V0.1.78 Loot Retry
 
 on:
   push:
@@ -18,13 +18,18 @@ jobs:
         shell: pwsh
         run: |
           dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet restore changes/tests/stability/Regression.csproj
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
       - name: Build
         shell: pwsh
         run: |
           dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
       - name: Stability regression tests
         shell: pwsh
         run: dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
@@ -32,7 +37,15 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.77"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.78"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.77</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.78</Version>') { throw 'project version mismatch' }
+
+      - name: Loot and retry regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/loot-retry/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Loot/retry regressions failed' }
+          dotnet run --project tests/retry-flow/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Retry flow regressions failed' }

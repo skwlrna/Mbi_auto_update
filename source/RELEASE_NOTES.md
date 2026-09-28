@@ -1,39 +1,12 @@
-# V0.1.77 - game focus retry fix
+# Mabi Auto V0.1.78
 
-- Fixed the immediate safety stop that could occur with `게임 창 포커스 확인 실패 -> 입력 정지`.
-- The game-window focus safety guard is still enforced; it now retries foreground activation for about one second before stopping.
-- OCR, templates, Interception installation files, dungeon/abyss recognition logic, and user configuration behavior are otherwise unchanged from V0.1.76.
-- Auto-update continues through `skwlrna/Mbi_auto_update`.
+정상 작동 중인 V0.1.77 기준으로 전리품 집계와 다시하기 입력만 보완합니다.
 
-﻿# V0.1.76 - GitHub account migration
+- 허상의 마력석은 동일 위치 아이콘이 두 프레임 모두 0.85 이상이고, 그 옆의 정확한 이름도 두 프레임에서 확인돼야 집계 후보로 인정합니다.
+- 아이콘만 보이거나 OCR 이름만 잡힌 경우 집계하지 않습니다. 이름이 표시되지 않거나 읽히지 않는 화면은 집계를 보류합니다.
+- 허상의 마력석 후보 판정 시 결과 화면 2장, 아이콘 점수/좌표, OCR 결과와 승인/보류 사유를 `release/abyss/debug/loot_hallucination`에 자동 저장합니다. 최대 150파일/100MB로 제한합니다.
+- 어비스와 일반 던전 결과의 다시하기는 인식 후 1초 기다리고, 최신 화면에서 같은 버튼과 입장 화면 여부를 다시 확인한 뒤 클릭합니다. 대기 중 정지하면 클릭하지 않습니다.
+- 기존 누적 집계는 초기화하거나 차감하지 않습니다. /item 및 /itemreset 유지.
+- V0.1.77 창 포커스 재시도, 설정·템플릿·OCR/Interception 환경 및 자동업데이트 채널 유지.
 
-- Auto-update repository owner changed from `insubi` to `skwlrna`.
-- No gameplay automation behavior was intentionally changed from the Astra V0.1.75 stability source.
-- This build is the one-time bridge to the new GitHub release channel.
-- After V0.1.76 is installed manually once, future updates can be discovered from `skwlrna/Mbi_auto_update`.
-
-# Mabi Auto V0.1.74
-
-이번 버전은 V0.1.73 실사용 오류 로그를 기준으로 두 가지를 보완합니다.
-
-## 1. 회복 물약 부족 팝업 ESC 재시도
-- V0.1.73에서 실제 팝업이 남아 있는데 ESC 1회만 전송하고 닫힘 확인 실패로 전체 매크로가 정지한 사례가 반복 확인됨.
-- 동일 팝업을 2프레임 확인한 뒤 ESC를 최대 3회까지 재시도.
-- 각 ESC 입력 뒤 2프레임 연속으로 팝업이 사라졌는지 확인.
-- ESC 전마다 게임 창을 다시 foreground로 가져오고 짧은 안정화 대기 추가.
-- 거래소 구매 버튼은 절대 클릭하지 않음.
-- ESC 3회 뒤에도 같은 팝업이 남아 있으면 전체 매크로를 정지시키지 않고 다음 감시 주기에 다시 시도.
-
-## 2. 전리품 중복 카운트 방지
-- 어비스 특수 전리품은 한 판에 하나만 나온다는 규칙을 적용.
-- 이미지 템플릿이 2프레임 연속으로 여러 개 동시에 잡혀도 최소 점수가 가장 높은 1개만 최종 카운트.
-- 유사한 룬 장식 일반/+ 교차매칭으로 한 판에 2개가 올라가던 현상 방지.
-- OCR fallback에서도 복수 후보가 생기면 1개만 최종 인정.
-- 기존 /item, /itemreset 누적 형식 유지.
-
-## 유지 사항
-- V0.1.73 네트워크 자동 재접속 유지.
-- V0.1.73 전리품 이미지 템플릿 11개 유지.
-- V0.1.72 클리어 타이틀 fallback 유지.
-- 사망 로직 제거 상태 유지.
-- 어비스 판당 10분 제한 유지.
+아이템 미획득/획득 실화면은 아직 확보하지 못했습니다. 보수적인 판정 기준을 적용했으며, 저장된 진단으로 실제 오인식 원인과 인식 누락을 추가 조정할 수 있습니다.

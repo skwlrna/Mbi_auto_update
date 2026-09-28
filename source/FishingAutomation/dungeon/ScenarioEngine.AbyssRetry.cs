@@ -277,6 +277,13 @@ internal sealed partial class ScenarioEngine
             }
         }
 
+        string hallucinationKey = FishingAutomation.LootStats.HallucinationStone;
+        bool hallucinationChecked = first[hallucinationKey].Found || second[hallucinationKey].Found;
+        bool hallucinationConfirmed = hallucinationChecked && await ConfirmHallucinationLootAsync(
+            frame, secondFrame, first, second, ct);
+        if (!hallucinationConfirmed)
+            stable.RemoveAll(x => x.Key == hallucinationKey);
+
         if (stable.Count > 0)
         {
             var winner = stable
@@ -325,6 +332,11 @@ internal sealed partial class ScenarioEngine
             foreach (var line in lines)
                 ClassifyAbyssLootLine(secondFrame, line, found);
         }
+
+        // OCR-only matches must never bypass the protected item's icon+name gate.
+        if (found.Contains(hallucinationKey) && !hallucinationChecked)
+            hallucinationConfirmed = await ConfirmHallucinationLootAsync(frame, secondFrame, first, second, ct);
+        if (!hallucinationConfirmed) found.Remove(hallucinationKey);
 
         if (found.Count == 0)
             return found;
@@ -402,6 +414,9 @@ internal sealed partial class ScenarioEngine
                         Log?.Invoke($"[어비스 전리품] 인식/저장 실패 -> 다시 하기 흐름 계속: {ex.Message}");
                     }
                 }
+
+                Log?.Invoke("[어비스] 다시 하기 인식 -> 1초 대기 후 버튼 재확인");
+                await RetryClickDelay.WaitAsync(ct);
 
                 // OCR/template counting can take seconds. Revalidate before sending input.
                 using var fresh = await CaptureGameWindowAsync(ct);

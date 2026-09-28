@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+<ItemGroup>
+<Compile Include="../../source/FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs" Link="Retry.cs" />
+<Compile Include="../../source/FishingAutomation/dungeon/FuzzyText.cs" Link="FuzzyText.cs" />
+<Compile Include="../../source/FishingAutomation/dungeon/RetryClickDelay.cs" Link="RetryClickDelay.cs" />
+</ItemGroup>
+</Project>
