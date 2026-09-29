@@ -30,9 +30,11 @@ internal sealed partial class ScenarioEngine
 
     private async Task<bool> HasAbyssCombatEvidenceAsync(Bitmap frame, CancellationToken ct)
     {
-        if ((await _detector.DetectAsync("abyss_enter", frame, ct)).Found ||
-            await DetectAbyssOutsideWorkflowAsync(frame, ct)) return false;
-        // Positive in-dungeon evidence, not absence of the entry/result dialog.
+        if ((await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
+            return false;
+
+        // Positive in-dungeon evidence only. Shared Home/End/K/I HUD markers must not
+        // veto combat evidence because those markers are also present inside the Abyss.
         return (await _detector.DetectAsync("abyss_leave_dungeon", frame, ct)).Found ||
             (await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct)).Found ||
             (await _detector.DetectAsync("abyss_touch_screen", frame, ct)).Found;
@@ -43,7 +45,8 @@ internal sealed partial class ScenarioEngine
         if ((await DetectAbyssResultRetryAsync(frame, ct)).Found)
             return FindDungeonStepIndex("abyss_result_retry");
         if (await HasAbyssCombatEvidenceAsync(frame, ct)) return AbyssCombatStepIndex;
-        if (await DetectAbyssOutsideWorkflowAsync(frame, ct)) return 0;
+        // Network reconnect does not prove an intentional exit. Do not classify the
+        // shared Home/End/K/I HUD as outside here; wait for explicit entry or dungeon evidence.
         if ((await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
             return FindDungeonStepIndex("abyss_enter");
         return -1;
