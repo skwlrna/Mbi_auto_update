@@ -35,7 +35,7 @@ namespace DungeonVisionBot
   public event Action<string>? Log;
   int captures;bool disappear;long detectedAt;
   Task<nint> ResolveRequiredGameWindowAsync(CancellationToken ct)=>Task.FromResult((nint)1);
-  Task<bool> DetectAbyssOutsideWorkflowAsync(Bitmap b,CancellationToken ct)=>Task.FromResult(false);
+  Task<bool> DetectAbyssOutsideWorkflowAsync(Bitmap b,CancellationToken ct)=>throw new Exception("retry transition must not query outside HUD");
   Task<bool> HasAbyssCombatEvidenceAsync(Bitmap b,CancellationToken ct)=>Task.FromResult(true);
   Task<bool> ConfirmHallucinationLootAsync(Bitmap a,Bitmap b,Dictionary<string,DetectionResult> x,Dictionary<string,DetectionResult> y,CancellationToken ct)=>Task.FromResult(false);
   Task<Bitmap> CaptureGameWindowAsync(CancellationToken ct)
@@ -49,6 +49,10 @@ namespace DungeonVisionBot
   static void Check(bool v,string s){if(!v)throw new Exception(s);Console.WriteLine("PASS "+s);}
   static async Task Main()
   {
+   Check(!AbyssOutsidePolicy.CanAccept(false,4,false,false),"outside HUD cannot count without explicit exit");
+   Check(AbyssOutsidePolicy.CanAccept(true,3,false,false),"outside HUD accepted only after exit is armed");
+   Check(!AbyssOutsidePolicy.CanAccept(true,4,true,false),"clear screen blocks outside acceptance");
+   Check(!AbyssOutsidePolicy.CanAccept(true,4,false,true),"touch prompt blocks outside acceptance");
    var e=new ScenarioEngine();e._detector.Hallucination=true;
    using(var frame=new Bitmap(800,1000))Check((await e.DetectAbyssLootAsync(frame,default)).Count==0,"production template winner cannot bypass protected-item gate");
    e=new();OcrRecognizer.Lines=new[]{new DetectionResult(true,new(150,300,150,20),1,"허상의 마력석")};

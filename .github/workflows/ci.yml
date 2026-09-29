@@ -1,4 +1,4 @@
-name: Check V0.1.80 Strict Loot
+name: Check V0.1.81 Abyss Outside Gate
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.80"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.81"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.80</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.81</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -49,6 +49,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Loot/retry regressions failed' }
           dotnet run --project tests/retry-flow/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Retry flow regressions failed' }
+          $retry = Get-Content source/FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs -Raw
+          if ($retry -match 'DetectAbyssOutsideWorkflowAsync') { throw 'retry transition must not use outside HUD detector' }
+          $outside = Get-Content source/FishingAutomation/dungeon/ScenarioEngine.cs -Raw
+          if ($outside -notmatch 'exitConfirmed') { throw 'outside detection exit gate missing' }
 
       - name: Maintenance safety checks
         shell: pwsh
