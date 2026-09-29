@@ -139,5 +139,5 @@ internal static class StrictLootPolicy
     }
 
     private static string Normalize(string value)
-        => new(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        => new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 }
