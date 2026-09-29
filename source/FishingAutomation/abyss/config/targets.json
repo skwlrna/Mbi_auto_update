@@ -22,8 +22,8 @@
     },
     "TemplatePath": "templates/abyss.png",
     "Threshold": 0.8,
-    "TemplateScaleMin": 1.0,
-    "TemplateScaleMax": 1.0,
+    "TemplateScaleMin": 1,
+    "TemplateScaleMax": 1,
     "TemplateScaleStep": 0.1
   },
   {
@@ -37,8 +37,8 @@
     },
     "TemplatePath": "templates/hallucination_anchorage.png",
     "Threshold": 0.8,
-    "TemplateScaleMin": 1.0,
-    "TemplateScaleMax": 1.0,
+    "TemplateScaleMin": 1,
+    "TemplateScaleMax": 1,
     "TemplateScaleStep": 0.1
   },
   {
@@ -52,8 +52,8 @@
     },
     "TemplatePath": "templates/madness_cave.png",
     "Threshold": 0.8,
-    "TemplateScaleMin": 1.0,
-    "TemplateScaleMax": 1.0,
+    "TemplateScaleMin": 1,
+    "TemplateScaleMax": 1,
     "TemplateScaleStep": 0.1
   },
   {
@@ -67,8 +67,8 @@
     },
     "TemplatePath": "templates/scattered_waterway.png",
     "Threshold": 0.8,
-    "TemplateScaleMin": 1.0,
-    "TemplateScaleMax": 1.0,
+    "TemplateScaleMin": 1,
+    "TemplateScaleMax": 1,
     "TemplateScaleStep": 0.1
   },
   {
@@ -290,10 +290,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_mor_corsair_coat.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_mor_corsair_gloves",
@@ -305,10 +305,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_mor_corsair_gloves.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_mor_corsair_boots",
@@ -320,10 +320,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_mor_corsair_boots.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_mor_corsair_tricorne",
@@ -335,10 +335,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_mor_corsair_tricorne.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_hallucination_stone",
@@ -350,10 +350,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_hallucination_stone.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_devouring_stone",
@@ -365,10 +365,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_devouring_stone.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_abyss_stone",
@@ -380,10 +380,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_abyss_stone.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_rune_engraving_10",
@@ -395,10 +395,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_rune_engraving_10.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_rune_engraving_10_plus",
@@ -410,10 +410,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_rune_engraving_10_plus.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_rune_binding_10",
@@ -425,10 +425,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_rune_binding_10.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "abyss_loot_rune_binding_10_plus",
@@ -440,10 +440,10 @@
       "Height": 800
     },
     "TemplatePath": "templates/loot_v173/loot_rune_binding_10_plus.png",
-    "Threshold": 0.74,
-    "TemplateScaleMin": 0.75,
-    "TemplateScaleMax": 1.85,
-    "TemplateScaleStep": 0.05
+    "Threshold": 0.82,
+    "TemplateScaleMin": 0.9,
+    "TemplateScaleMax": 1.12,
+    "TemplateScaleStep": 0.02
   },
   {
     "Id": "network_unstable_title",
