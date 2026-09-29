@@ -169,75 +169,6 @@ internal sealed partial class ScenarioEngine
         return accepted;
     }
 
-    private static bool AbyssLootTextLooksPlus(Bitmap frame, Rectangle textBounds, string rawText)
-    {
-        if (rawText.Contains('+'))
-            return true;
-
-        Rectangle bounds = Rectangle.Intersect(
-            new Rectangle(Point.Empty, frame.Size),
-            Rectangle.Inflate(textBounds, 4, 3));
-        if (bounds.Width <= 0 || bounds.Height <= 0)
-            return false;
-
-        int blue = 0;
-        int green = 0;
-        for (int y = bounds.Top; y < bounds.Bottom; y += 2)
-        {
-            for (int x = bounds.Left; x < bounds.Right; x += 2)
-            {
-                Color c = frame.GetPixel(x, y);
-                if (c.B >= 125 && c.B >= c.G + 18 && c.B >= c.R + 28)
-                    blue++;
-                if (c.G >= 115 && c.G >= c.B + 12 && c.G >= c.R + 22)
-                    green++;
-            }
-        }
-
-        return blue >= 4 && blue > green * 1.15;
-    }
-
-    private static void ClassifyAbyssLootLine(
-        Bitmap frame,
-        DetectionResult line,
-        HashSet<string> found)
-    {
-        string raw = line.ReadText ?? "";
-        string norm = FuzzyText.Normalize(raw);
-        if (string.IsNullOrEmpty(norm))
-            return;
-
-        if (norm.Contains(FuzzyText.Normalize("허상의 마력석"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.HallucinationStone);
-        if (norm.Contains(FuzzyText.Normalize("포식의 마력석"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.DevouringStone);
-        if (norm.Contains(FuzzyText.Normalize("심해의 마력석"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.AbyssStone);
-
-        if (norm.Contains(FuzzyText.Normalize("룬새김 장식"), StringComparison.OrdinalIgnoreCase))
-        {
-            found.Add(AbyssLootTextLooksPlus(frame, line.Bounds, raw)
-                ? FishingAutomation.LootStats.RuneEngraving10Plus
-                : FishingAutomation.LootStats.RuneEngraving10);
-        }
-
-        if (norm.Contains(FuzzyText.Normalize("룬결속 장식"), StringComparison.OrdinalIgnoreCase))
-        {
-            found.Add(AbyssLootTextLooksPlus(frame, line.Bounds, raw)
-                ? FishingAutomation.LootStats.RuneBinding10Plus
-                : FishingAutomation.LootStats.RuneBinding10);
-        }
-
-        if (norm.Contains(FuzzyText.Normalize("모르 코르셰어 코트"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.MorCorsairCoat);
-        if (norm.Contains(FuzzyText.Normalize("모르 코르셰어 글러브"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.MorCorsairGloves);
-        if (norm.Contains(FuzzyText.Normalize("모르 코르셰어 부츠"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.MorCorsairBoots);
-        if (norm.Contains(FuzzyText.Normalize("모르 코르셰어 트리코른"), StringComparison.OrdinalIgnoreCase))
-            found.Add(FishingAutomation.LootStats.MorCorsairTricorne);
-    }
-
     private async Task<Dictionary<string, DetectionResult>> DetectAbyssLootTemplateFrameAsync(
         Bitmap frame,
         CancellationToken ct)
@@ -252,118 +183,120 @@ internal sealed partial class ScenarioEngine
         return hits;
     }
 
+    private async Task<IReadOnlyList<DetectionResult>> ReadAbyssLootLinesAsync(
+        Bitmap frame,
+        CancellationToken ct)
+    {
+        _abyssLootOcr ??= new OcrRecognizer();
+        var roi = ScaleAbyssResultRoi(AbyssLootCanonicalRoi, frame.Size);
+        var lines = new List<DetectionResult>();
+        foreach (int scale in new[] { 1, 2 })
+        {
+            ct.ThrowIfCancellationRequested();
+            lines.AddRange(await _abyssLootOcr.ReadLinesAsync(frame, roi, scale, ct));
+        }
+        return lines;
+    }
+
+    private static string FormatLootTopScores(
+        IReadOnlyDictionary<string, DetectionResult> hits,
+        int take = 4)
+        => string.Join(
+            ", ",
+            hits.OrderByDescending(kv => double.IsFinite(kv.Value.Score) ? kv.Value.Score : double.NegativeInfinity)
+                .Take(take)
+                .Select(kv =>
+                    $"{FishingAutomation.LootStats.GetDisplayName(kv.Key)}={kv.Value.Score:0.000}"));
+
     private async Task<HashSet<string>> DetectAbyssLootAsync(Bitmap frame, CancellationToken ct)
     {
-        // V0174_ABYSS_LOOT_SINGLE_WINNER
-        // The tracked special loot is awarded one item at a time. Require the same
-        // template in two consecutive frames, then count only the strongest candidate.
+        // V0180_ABYSS_LOOT_STRICT_PROOF
+        // False positives are worse than a missed statistic. Count only when the same
+        // item has strong/stable visual evidence in three frames, clearly beats all
+        // competing tracked templates, and its exact name is next to that icon in
+        // at least two frames. OCR alone is never allowed to create a loot count.
         var first = await DetectAbyssLootTemplateFrameAsync(frame, ct);
+
         await Task.Delay(180, ct);
         using var secondFrame = await CaptureGameWindowAsync(ct);
         var second = await DetectAbyssLootTemplateFrameAsync(secondFrame, ct);
 
-        var stable = new List<(string Key, double Score, double First, double Second)>();
+        await Task.Delay(180, ct);
+        using var thirdFrame = await CaptureGameWindowAsync(ct);
+        var third = await DetectAbyssLootTemplateFrameAsync(thirdFrame, ct);
+
+        var stable = new List<(string Key, double MinScore, double First, double Second, double Third)>();
         foreach (var item in AbyssLootTemplateTargets)
         {
-            if (first.TryGetValue(item.LootKey, out var a) &&
-                second.TryGetValue(item.LootKey, out var b) &&
-                a.Found && b.Found)
-            {
-                stable.Add((
-                    item.LootKey,
-                    Math.Min(a.Score, b.Score),
-                    a.Score,
-                    b.Score));
-            }
+            var a = first[item.LootKey];
+            var b = second[item.LootKey];
+            var d = third[item.LootKey];
+
+            if (!StrictLootPolicy.IsStable(
+                    a, b, d,
+                    frame.Size, secondFrame.Size, thirdFrame.Size))
+                continue;
+
+            stable.Add((
+                item.LootKey,
+                Math.Min(a.Score, Math.Min(b.Score, d.Score)),
+                a.Score,
+                b.Score,
+                d.Score));
         }
 
-        string hallucinationKey = FishingAutomation.LootStats.HallucinationStone;
-        bool hallucinationChecked = first[hallucinationKey].Found || second[hallucinationKey].Found;
-        bool hallucinationConfirmed = hallucinationChecked && await ConfirmHallucinationLootAsync(
-            frame, secondFrame, first, second, ct);
-        if (!hallucinationConfirmed)
-            stable.RemoveAll(x => x.Key == hallucinationKey);
-
-        if (stable.Count > 0)
+        if (stable.Count == 0)
         {
-            var winner = stable
-                .OrderByDescending(x => x.Score)
-                .ThenBy(x => x.Key, StringComparer.Ordinal)
-                .First();
-
             Log?.Invoke(
-                $"[어비스 전리품 이미지] 최종 1개 확정: " +
-                $"{FishingAutomation.LootStats.GetDisplayName(winner.Key)} " +
-                $"score={winner.First:0.000}/{winner.Second:0.000}");
-
-            if (stable.Count > 1)
-            {
-                string suppressed = string.Join(
-                    ", ",
-                    stable
-                        .Where(x => !string.Equals(x.Key, winner.Key, StringComparison.Ordinal))
-                        .OrderByDescending(x => x.Score)
-                        .Select(x =>
-                            $"{FishingAutomation.LootStats.GetDisplayName(x.Key)}={x.Score:0.000}"));
-                Log?.Invoke(
-                    $"[어비스 전리품 이미지] 동시 교차매칭 {stable.Count - 1}개 제외: {suppressed}");
-            }
-
-            return new HashSet<string>(StringComparer.Ordinal) { winner.Key };
+                $"[어비스 전리품 엄격판정] 3프레임 강한 동일위치 후보 없음 -> +0 · " +
+                $"최근 상위: {FormatLootTopScores(third)}");
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
-        // Image matching stays primary. OCR is only a fallback.
-        var best = second
-            .OrderByDescending(kv => kv.Value.Score)
-            .Take(3)
-            .Select(kv =>
-                $"{FishingAutomation.LootStats.GetDisplayName(kv.Key)}={kv.Value.Score:0.000}");
-        Log?.Invoke(
-            $"[어비스 전리품 이미지] 2프레임 확정 없음 · 상위 점수: " +
-            $"{string.Join(", ", best)} -> OCR 보조 확인");
-
-        _abyssLootOcr ??= new OcrRecognizer();
-        var roi = ScaleAbyssResultRoi(AbyssLootCanonicalRoi, secondFrame.Size);
-        var found = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (int scale in new[] { 1, 2 })
-        {
-            var lines = await _abyssLootOcr.ReadLinesAsync(secondFrame, roi, scale, ct);
-            foreach (var line in lines)
-                ClassifyAbyssLootLine(secondFrame, line, found);
-        }
-
-        // OCR-only matches must never bypass the protected item's icon+name gate.
-        if (found.Contains(hallucinationKey) && !hallucinationChecked)
-            hallucinationConfirmed = await ConfirmHallucinationLootAsync(frame, secondFrame, first, second, ct);
-        if (!hallucinationConfirmed) found.Remove(hallucinationKey);
-
-        if (found.Count == 0)
-            return found;
-
-        // OCR can also produce several fuzzy hits from the same visual row.
-        // Honor the one-loot-per-round rule and use template similarity only as a
-        // tie-breaker among OCR-recognized keys.
-        string ocrWinner = found
-            .OrderByDescending(key =>
-                second.TryGetValue(key, out var hit) ? hit.Score : 0.0)
-            .ThenBy(key => key, StringComparer.Ordinal)
+        var winner = stable
+            .OrderByDescending(x => x.MinScore)
+            .ThenBy(x => x.Key, StringComparer.Ordinal)
             .First();
 
-        if (found.Count > 1)
+        if (!StrictLootPolicy.IsUnambiguousWinner(winner.Key, first, second, third))
         {
+            string candidates = string.Join(
+                ", ",
+                stable.OrderByDescending(x => x.MinScore)
+                    .Select(x => $"{FishingAutomation.LootStats.GetDisplayName(x.Key)}={x.MinScore:0.000}"));
             Log?.Invoke(
-                $"[어비스 전리품 OCR 보조] 복수 후보 {found.Count}개 -> " +
-                $"가장 강한 1개만 인정: {FishingAutomation.LootStats.GetDisplayName(ocrWinner)}");
-        }
-        else
-        {
-            Log?.Invoke(
-                $"[어비스 전리품 OCR 보조] " +
-                $"{FishingAutomation.LootStats.GetDisplayName(ocrWinner)}");
+                $"[어비스 전리품 엄격판정] 유사 아이콘 점수 차이 부족/프레임별 우승 불일치 -> +0 · " +
+                $"후보: {candidates}");
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
-        return new HashSet<string>(StringComparer.Ordinal) { ocrWinner };
+        string expectedName = FishingAutomation.LootStats.GetDisplayName(winner.Key);
+        var firstLines = await ReadAbyssLootLinesAsync(frame, ct);
+        var secondLines = await ReadAbyssLootLinesAsync(secondFrame, ct);
+        var thirdLines = await ReadAbyssLootLinesAsync(thirdFrame, ct);
+
+        int exactNameFrames = 0;
+        if (StrictLootPolicy.HasExactAdjacentName(expectedName, first[winner.Key], firstLines, frame.Size))
+            exactNameFrames++;
+        if (StrictLootPolicy.HasExactAdjacentName(expectedName, second[winner.Key], secondLines, secondFrame.Size))
+            exactNameFrames++;
+        if (StrictLootPolicy.HasExactAdjacentName(expectedName, third[winner.Key], thirdLines, thirdFrame.Size))
+            exactNameFrames++;
+
+        if (exactNameFrames < 2)
+        {
+            Log?.Invoke(
+                $"[어비스 전리품 엄격판정] {expectedName} 아이콘은 강하지만 정확한 인접 이름이 " +
+                $"{exactNameFrames}/3프레임만 확인됨 -> +0");
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        Log?.Invoke(
+            $"[어비스 전리품 엄격판정] 최종 1개 확정: {expectedName} · " +
+            $"icon={winner.First:0.000}/{winner.Second:0.000}/{winner.Third:0.000} · " +
+            $"exactName={exactNameFrames}/3");
+
+        return new HashSet<string>(StringComparer.Ordinal) { winner.Key };
     }
 
     private async Task RetryAbyssResultAsync(CancellationToken ct)
