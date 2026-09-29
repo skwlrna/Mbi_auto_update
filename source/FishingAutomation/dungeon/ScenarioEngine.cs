@@ -358,8 +358,9 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         bool clearTransitionConfirmed = false;
         int clearGoneConsecutive = 0;
         int outsideConsecutive = 0;
+        bool outsideCheckArmed = false;
 
-        Log?.Invoke("[어비스 자동복구] 상태 기반 복구 시작: 전투 대기 -> 클리어 터치 -> 보물상자 확인 -> 나가기 -> 던전 밖 HUD 확인");
+        Log?.Invoke("[어비스 자동복구] 상태 기반 복구 시작: 전투 대기 -> 클리어 터치 -> 보물상자 확인 -> 나가기 -> 퇴장 후 던전 밖 HUD 확인");
 
         while (sw.Elapsed < TimeSpan.FromSeconds(RecoveryTimeoutSeconds))
         {
@@ -373,7 +374,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
             long now = Environment.TickCount64;
 
-            if (await DetectAbyssOutsideWorkflowAsync(frame, ct))
+            if (outsideCheckArmed && await DetectAbyssOutsideWorkflowAsync(frame, ct, exitConfirmed: true))
             {
                 if (++outsideConsecutive < 3)
                 {
@@ -510,7 +511,9 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                     exitClicks++;
                     Log?.Invoke($"[어비스 자동복구] 나가기 확인 {exitClicks}회 -> 클릭 @ {exit.Bounds}");
                     _input.ClickClientPoint(_hwnd, exit.Center);
+                    outsideCheckArmed = true;
                     lastExitClick = now;
+                    Log?.Invoke("[어비스 자동복구] 나가기 입력 완료 -> 던전 밖 판정 활성화");
                     await Task.Delay(Math.Max(1000, _settings.ClickSettleMs), ct);
                     continue;
                 }
@@ -1326,7 +1329,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         await WaitForAbyssClearScreenGoneAsync(ct);
     }
 
-    private async Task<bool> DetectAbyssOutsideWorkflowAsync(Bitmap frame, CancellationToken ct)
+    private async Task<bool> DetectAbyssOutsideWorkflowAsync(
+        Bitmap frame,
+        CancellationToken ct,
+        bool exitConfirmed)
     {
         var home = await _detector.DetectAsync("abyss_outside_home_key", frame, ct);
         var end = await _detector.DetectAsync("abyss_outside_end_key", frame, ct);
@@ -1342,27 +1348,42 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         long now = Environment.TickCount64;
         bool scoreLogDue = _lastAbyssOutsideHudScoreLog == 0 || now - _lastAbyssOutsideHudScoreLog >= 2000;
 
-        if (matched < 3)
+        // Home/End/K/I also exist inside the Abyss. They are supporting evidence only.
+        // Outside acceptance is armed exclusively by an explicit exit flow.
+        if (!exitConfirmed)
         {
             if (scoreLogDue)
             {
                 Log?.Invoke(
-                    $"[어비스] 던전 밖 HUD 점수 Home={home.Score:0.000} End={end.Score:0.000} K={kHud.Score:0.000} I={iHud.Score:0.000} / 인식={matched}/4 -> 3개 미만");
+                    $"[어비스] 던전 밖 HUD 점수 Home={home.Score:0.000} End={end.Score:0.000} K={kHud.Score:0.000} I={iHud.Score:0.000} / 인식={matched}/4 -> 퇴장 흐름 미확인, 밖 판정 금지");
                 _lastAbyssOutsideHudScoreLog = now;
             }
             return false;
         }
 
-        // Three of four fixed outside HUD markers are enough. A clear/result overlay is still
-        // explicit dungeon-internal evidence and blocks outside acceptance.
+        if (matched < 3)
+        {
+            if (scoreLogDue)
+            {
+                Log?.Invoke(
+                    $"[어비스] 퇴장 후 HUD 점수 Home={home.Score:0.000} End={end.Score:0.000} K={kHud.Score:0.000} I={iHud.Score:0.000} / 인식={matched}/4 -> 3개 미만");
+                _lastAbyssOutsideHudScoreLog = now;
+            }
+            return false;
+        }
+
         var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
         var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-        bool outside = !clearTitle.Found && !touch.Found;
+        bool outside = AbyssOutsidePolicy.CanAccept(
+            exitConfirmed,
+            matched,
+            clearTitle.Found,
+            touch.Found);
 
         if (outside || scoreLogDue)
         {
             Log?.Invoke(
-                $"[어비스] 던전 밖 HUD 점수 Home={home.Score:0.000} End={end.Score:0.000} K={kHud.Score:0.000} I={iHud.Score:0.000} / 인식={matched}/4 / Clear={(clearTitle.Found ? 1 : 0)} Touch={(touch.Found ? 1 : 0)} -> {(outside ? "밖 인정" : "클리어 화면으로 보류")}");
+                $"[어비스] 퇴장 후 HUD 점수 Home={home.Score:0.000} End={end.Score:0.000} K={kHud.Score:0.000} I={iHud.Score:0.000} / 인식={matched}/4 / Clear={(clearTitle.Found ? 1 : 0)} Touch={(touch.Found ? 1 : 0)} -> {(outside ? "밖 후보" : "던전 내부 신호로 보류")}");
             _lastAbyssOutsideHudScoreLog = now;
         }
 
@@ -1379,13 +1400,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
-            if (await DetectAbyssOutsideWorkflowAsync(frame, ct))
+            if (await DetectAbyssOutsideWorkflowAsync(frame, ct, exitConfirmed: true))
             {
                 outsideConsecutive++;
-                Log?.Invoke($"[어비스] 던전 밖 HUD 3/4 이상 확인 {outsideConsecutive}/3");
+                Log?.Invoke($"[어비스] 퇴장 후 던전 밖 HUD 3/4 이상 확인 {outsideConsecutive}/3");
                 if (outsideConsecutive >= 3)
                 {
-                    Log?.Invoke("[어비스] 던전 밖 HUD 3회 연속 확인 완료 -> 다음 입장 준비");
+                    Log?.Invoke("[어비스] 퇴장 후 던전 밖 HUD 3회 연속 확인 완료 -> 다음 입장 준비");
                     return;
                 }
             }
@@ -1396,7 +1417,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
         }
 
-        throw new TimeoutException("나가기 후 60초 안에 던전 밖 고정 HUD 4개 중 3개 이상을 확인하지 못했습니다.");
+        throw new TimeoutException("나가기 후 60초 안에 퇴장 상태 + 던전 밖 HUD 4개 중 3개 이상을 확인하지 못했습니다.");
     }
 
     private async Task ClickTargetWithTimeoutAsync(
