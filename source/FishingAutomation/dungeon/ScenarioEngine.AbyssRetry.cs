@@ -394,8 +394,8 @@ internal sealed partial class ScenarioEngine
             else
             {
                 var enter = await _detector.DetectAsync("abyss_enter", frame, ct);
-                if (enter.Found || await DetectAbyssOutsideWorkflowAsync(frame, ct))
-                    throw new InvalidOperationException("어비스 다시 하기 후 예상과 다른 입장/필드 화면입니다. 추가 입력 없이 정지합니다.");
+                if (enter.Found)
+                    throw new InvalidOperationException("어비스 다시 하기 후 입장하기 화면으로 돌아왔습니다. 추가 입력 없이 정지합니다.");
                 if (!await HasAbyssCombatEvidenceAsync(frame, ct)) { gone = 0; await Task.Delay(300, ct); continue; }
                 if (++gone >= 3)
                 {
