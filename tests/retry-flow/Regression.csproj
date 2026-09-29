@@ -3,6 +3,7 @@
 <ItemGroup>
 <Compile Include="../../source/FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs" Link="Retry.cs" />
 <Compile Include="../../source/FishingAutomation/dungeon/FuzzyText.cs" Link="FuzzyText.cs" />
+<Compile Include="../../source/FishingAutomation/dungeon/StrictLootPolicy.cs" Link="StrictLootPolicy.cs" />
 <Compile Include="../../source/FishingAutomation/dungeon/RetryClickDelay.cs" Link="RetryClickDelay.cs" />
 </ItemGroup>
 </Project>
