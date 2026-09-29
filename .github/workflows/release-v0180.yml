@@ -53,7 +53,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
-          if ((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '0.1.79.0') { throw 'EXE version mismatch' }
+          if ((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '0.1.80.0') { throw 'EXE version mismatch' }
       - name: Smoke test published app
         shell: pwsh
         run: |
