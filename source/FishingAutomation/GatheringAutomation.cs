@@ -23,8 +23,8 @@ internal interface IGatheringData
     Task<long> ItemCountAsync(string name, CancellationToken ct);
 }
 
-// This interface deliberately has no CLI action or paid-navigation operation.
-// The screen implementation must follow the user's ordinary obtain-method route.
+// Execution adapter. V0.1.91 uses the guarded game CLI implementation while
+// keeping the automation loop independent for tests and fallback implementations.
 internal interface IGatheringScreen : IDisposable
 {
     Task StartAsync(GatheringPlan plan, CancellationToken ct);
@@ -57,7 +57,7 @@ internal sealed class GatheringAutomation
         Exception? failure = null;
         try
         {
-            Log?.Invoke($"[자동채집] {plan.DisplayName} 추가 {plan.TargetQuantity}개 · 정령의 날개 사용 0개");
+            Log?.Invoke($"[자동채집] {plan.DisplayName} 추가 {plan.TargetQuantity}개 · CLI 직접 실행");
             // Set before input so a partially successful start is still stopped on failure.
             started = true;
             await _screen.StartAsync(plan, ct);
@@ -120,7 +120,7 @@ internal sealed class GatheringAutomation
         long finalCount=await _data.ItemCountAsync(plan.DisplayName,ct);
         if(finalCount-baseline<Gained) throw new InvalidOperationException("정지 후 재료 수량이 감소해 완료 수량을 확정할 수 없습니다.");
         Gained=finalCount-baseline;
-        Log?.Invoke($"[자동채집] 완료 · {plan.DisplayName} +{Gained}개 · 정령의 날개 사용 0개");
+        Log?.Invoke($"[자동채집] 완료 · {plan.DisplayName} +{Gained}개 · CLI 상태 검증 완료");
     }
 
     private async Task CheckToolAsync(GatheringPlan plan, CancellationToken ct)
