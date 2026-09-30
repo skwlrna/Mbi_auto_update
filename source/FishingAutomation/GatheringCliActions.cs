@@ -2,11 +2,6 @@ using System.Text.Json;
 
 namespace FishingAutomation;
 
-internal interface IDirectGatheringAction
-{
-    Task ExecuteOnceAsync(GatheringPlan plan, CancellationToken ct);
-}
-
 /// <summary>
 /// One-shot direct CLI gathering action. GatheringAutomation owns validation, inventory
 /// deltas and repetition. A capability requiring confirmation is blocked by ZeroWingMode.
