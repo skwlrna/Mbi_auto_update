@@ -16,22 +16,52 @@ public sealed partial class MainForm
             if (_cancelStart || IsDisposed) return;
             using var dialog = new AlteringSettingsDialog(recipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not AlteringPlan plan || _cancelStart) return;
-            var windows = WindowTools.EnumerateVisibleWindows();
-            if (windows.Count != 1) throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
-            var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
-            WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
-            await Task.Delay(500);
-            if (_cancelStart || IsDisposed) return;
-            var screen = new AlteringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "altering"));
+            IAlteringScreen screen;
+            string actionInput;
+            bool directCli = false;
+            try
+            {
+                var capabilities = await _cli.GetCapabilitiesAsync(CancellationToken.None);
+                directCli = plan.RecipeOrdinal == 1 &&
+                    capabilities.Any(x => x.Command == "execute_altering") &&
+                    capabilities.Any(x => x.Command == "complete_altering_work");
+            }
+            catch (Exception ex)
+            {
+                _log.Write("[자동 가공] CLI capabilities 확인 실패 · 화면 방식 유지 · " + ex.Message);
+            }
+
+            if (directCli)
+            {
+                var cliActions = new AlteringCliActions(_cli);
+                cliActions.Log += text => Ui(() => _log.Write(text));
+                screen = cliActions;
+                actionInput = cliActions.InputMode;
+                _log.Write("[자동 가공] CLI 주체 모드 · OCR/키보드 가공 입력 미사용");
+            }
+            else
+            {
+                var windows = WindowTools.EnumerateVisibleWindows();
+                if (windows.Count != 1) throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
+                var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
+                WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
+                await Task.Delay(500);
+                if (_cancelStart || IsDisposed) return;
+                var visual = new AlteringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "altering"));
+                visual.Log += text => Ui(() => _log.Write(text));
+                screen = visual;
+                actionInput = visual.InputMode;
+                _log.Write("[자동 가공] CLI 실행 명령 미지원 · 기존 화면 방식 fallback");
+            }
+
             var automation = new AlteringAutomation(data, screen);
-            screen.Log += text => Ui(() => _log.Write(text));
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
             _activeMode = "가공"; _mode.Enabled = false;
             _alteringDisplay = $"{plan.ScreenTitle} · {plan.DisplayName} {plan.TargetQuantity}개";
             _dungeonStartedAt = DateTime.Now; _dungeonStoppedAt = null;
             _dungeonCycles = _dungeonCompleted = 0; _runError = null;
-            _inputValue.Text = _dungeonInputName = screen.InputMode;
+            _inputValue.Text = _dungeonInputName = actionInput;
             SetStatus("가공 시작 준비", Blue);
             automation.Log += text => Ui(() =>
             {

@@ -31,6 +31,11 @@ internal interface IGatheringScreen : IDisposable
     Task StopAsync(CancellationToken ct);
 }
 
+internal interface IDirectGatheringAction
+{
+    Task ExecuteOnceAsync(GatheringPlan plan, CancellationToken ct);
+}
+
 internal sealed class GatheringAutomation
 {
     private readonly IGatheringData _data;
@@ -53,6 +58,19 @@ internal sealed class GatheringAutomation
             throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동채집을 시작하세요.");
         await CheckWeightAsync(ct);
         long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
+
+        if (_screen is IDirectGatheringAction direct)
+        {
+            Log?.Invoke($"[자동채집] {plan.DisplayName} 추가 {plan.TargetQuantity}개 · CLI 직접 실행 · 정령의 날개 사용 0개");
+            await RunDirectCliAsync(plan, baseline, direct, ct);
+            long directFinal = await _data.ItemCountAsync(plan.DisplayName, ct);
+            if (directFinal - baseline < Gained)
+                throw new InvalidOperationException("CLI 채집 완료 후 재료 수량이 감소해 완료 수량을 확정할 수 없습니다.");
+            Gained = directFinal - baseline;
+            Log?.Invoke($"[자동채집] 완료 · {plan.DisplayName} +{Gained}개 · CLI · 정령의 날개 사용 0개");
+            return;
+        }
+
         bool started = false;
         Exception? failure = null;
         try
@@ -121,6 +139,56 @@ internal sealed class GatheringAutomation
         if(finalCount-baseline<Gained) throw new InvalidOperationException("정지 후 재료 수량이 감소해 완료 수량을 확정할 수 없습니다.");
         Gained=finalCount-baseline;
         Log?.Invoke($"[자동채집] 완료 · {plan.DisplayName} +{Gained}개 · 정령의 날개 사용 0개");
+    }
+
+    private async Task RunDirectCliAsync(GatheringPlan plan, long baseline, IDirectGatheringAction direct, CancellationToken ct)
+    {
+        while (Gained < plan.TargetQuantity)
+        {
+            ct.ThrowIfCancellationRequested();
+            var activity = await _data.ActivityAsync(ct);
+            if (activity.IsFishing)
+                throw new InvalidOperationException("낚시 상태에서는 일반 CLI 자동채집을 실행하지 않습니다.");
+            if (!activity.IsSafeField || activity.IsGathering || activity.IsAutoTraveling || activity.MainButtonState == "Stop")
+                throw new InvalidOperationException("다른 행동이 진행 중이라 CLI 채집 명령을 보내지 않습니다.");
+
+            await CheckToolAsync(plan, ct);
+            await CheckWeightAsync(ct);
+
+            long before = await _data.ItemCountAsync(plan.DisplayName, ct);
+            if (before < baseline || before - baseline < Gained)
+                throw new InvalidOperationException("CLI 채집 중 대상 재료 수량이 감소해 추가 실행을 중단합니다.");
+            Gained = before - baseline;
+            if (Gained >= plan.TargetQuantity) break;
+
+            await direct.ExecuteOnceAsync(plan, ct);
+
+            bool verified = false;
+            for (int attempt = 0; attempt < 40; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                long current = await _data.ItemCountAsync(plan.DisplayName, ct);
+                if (current < before)
+                    throw new InvalidOperationException("CLI 채집 실행 후 대상 재료 수량이 감소했습니다.");
+                Gained = current - baseline;
+                if (current > before)
+                {
+                    verified = true;
+                    Log?.Invoke($"[자동채집] CLI 획득 확인 · {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개");
+                    break;
+                }
+
+                activity = await _data.ActivityAsync(ct);
+                if (activity.IsFishing)
+                    throw new InvalidOperationException("CLI 채집이 낚시 상태로 전환되어 일반 자동채집을 중단합니다.");
+                if (!activity.IsSafeField)
+                    throw new InvalidOperationException("CLI 채집 실행 중 안전하지 않은 게임 상태가 확인되어 중단합니다.");
+                await _delay(TimeSpan.FromMilliseconds(500), ct);
+            }
+
+            if (!verified)
+                throw new InvalidOperationException("CLI 채집 명령 후 재료 증가를 확인하지 못했습니다. 같은 명령을 재실행하지 않고 정지합니다.");
+        }
     }
 
     private async Task CheckToolAsync(GatheringPlan plan, CancellationToken ct)

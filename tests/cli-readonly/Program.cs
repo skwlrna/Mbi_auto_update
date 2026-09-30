@@ -18,7 +18,7 @@ foreach (bool zeroWing in new[] { true, false })
         launches++;
         return Task.FromResult(new CliProcessOutput(0, "{}", ""));
     });
-    foreach (string command in new[] { "execute_gathering", "execute_altering", "execute_crafting", "complete_altering_work", "capabilities", "get_items extra", "STATUS", "status;execute_crafting", "" })
+    foreach (string command in new[] { "execute_gathering", "execute_altering", "execute_crafting", "complete_altering_work", "stop_action", "get_items extra", "STATUS", "status;execute_crafting", "" })
         Check((await cli.QueryAsync(command)).State == "blocked", "forbidden command reached runner");
 }
 Check(launches == 0, "blocked commands launched a process");
@@ -51,6 +51,45 @@ try { await defaults.StatusAsync(cancelled.Token); throw new Exception("cancella
 catch (OperationCanceledException) { checks++; }
 Check(lines.Count > 0 && lines.All(x => x.Contains("[CLI]")), "existing logger integration failed");
 
+var wrappedCapabilities = MabinogiMobileCli.Parse("capabilities", new(0,
+    "{\"status\":\"accepted\",\"body\":\"{\\\"commands\\\":[{\\\"Command\\\":\\\"execute_gathering\\\",\\\"Metadata\\\":{\\\"requiresConfirm\\\":\\\"false\\\"}}]}\"}", ""));
+Check(wrappedCapabilities.Success && wrappedCapabilities.Data!.Value.GetProperty("commands")[0].GetProperty("Command").GetString() == "execute_gathering",
+    "string body capabilities were not decoded");
+string expectedBody = "base64:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("{\"displayName\":\"철 광석\"}"));
+Check(MabinogiMobileCli.BodyArgument("{\"displayName\":\"철 광석\"}") == expectedBody, "base64 body argument mismatch");
+
+var actionLaunches = new List<(string Command, string? Body)>();
+var actionCli = new MabinogiMobileCli(log, true, (command, body, _) =>
+{
+    if (command == "capabilities")
+        return Task.FromResult(new CliProcessOutput(0,
+            "{\"commands\":[{\"Command\":\"execute_gathering\",\"Metadata\":{\"requiresConfirm\":\"false\"}},{\"Command\":\"execute_altering\",\"Metadata\":{\"requiresConfirm\":\"true\"}},{\"Command\":\"complete_altering_work\",\"Metadata\":{\"requiresConfirm\":\"true\"}}]}", ""));
+    actionLaunches.Add((command, body));
+    return Task.FromResult(new CliProcessOutput(0, "{\"status\":\"accepted\",\"body\":{\"message\":\"ok\"}}", ""));
+});
+Check((await actionCli.ExecuteGatheringAsync("철 광석")).Success, "zero-wing unconfirmed gathering action did not execute");
+Check(actionLaunches.Count == 1 && actionLaunches[0].Command == "execute_gathering" &&
+    actionLaunches[0].Body == expectedBody, "gathering action body or command mismatch");
+Check(!(await actionCli.ExecuteAlteringAsync("강철괴", false)).Success && actionLaunches.Count == 1,
+    "confirmation-required altering bypassed explicit cost approval");
+Check((await actionCli.ExecuteAlteringAsync("강철괴", true)).Success && actionLaunches.Count == 2,
+    "approved altering action did not execute");
+Check((await actionCli.CompleteAlteringWorkAsync("강철괴")).Success && actionLaunches.Count == 3,
+    "completed altering work action did not execute");
+
+int blockedGatherLaunches = 0;
+var blockedGather = new MabinogiMobileCli(log, true, (command, body, _) =>
+{
+    if (command == "capabilities")
+        return Task.FromResult(new CliProcessOutput(0,
+            "{\"commands\":[{\"Command\":\"execute_gathering\",\"Metadata\":{\"requiresConfirm\":true}}]}", ""));
+    blockedGatherLaunches++;
+    return Task.FromResult(new CliProcessOutput(0, "{\"message\":\"unexpected\"}", ""));
+});
+var blockedGatherResult = await blockedGather.ExecuteGatheringAsync("철 광석");
+Check(!blockedGatherResult.Success && blockedGatherResult.Error == "confirmation_required" && blockedGatherLaunches == 0,
+    "ZeroWingMode allowed confirmation-required execute_gathering");
+
 var recipes = AlteringQueries.ParseRecipes(MabinogiMobileCli.Parse("get_alterable_items", new(0,
     "{\"items\":[{\"DisplayName\":\"목재+\",\"Alterable\":true,\"ProducedPerWork\":3},{\"DisplayName\":\"강철괴\",\"Alterable\":false,\"ProducedPerWork\":3,\"Reason\":\"not_enough_ingredient\",\"MissingIngredients\":[{\"DisplayName\":\"철괴\",\"Required\":3,\"Owned\":2}]}]}", "")));
 Check(recipes.Count == 2 && recipes[0].DisplayName == "목재+" && recipes[0].ProducedPerWork == 3, "recipe name and produced amount lost");
@@ -74,7 +113,7 @@ catch (InvalidDataException) { checks++; }
 if (args.Contains("--live"))
 {
     // Only allowlisted reads are ever launched here. Never launch the macro UI.
-    foreach (string command in new[] { "status", "get_items", "get_activity", "get_current_environment", "get_alterable_items", "get_altering_works" })
+    foreach (string command in new[] { "status", "capabilities", "get_items", "get_activity", "get_current_environment", "get_alterable_items", "get_altering_works" })
     {
         var result = await defaults.QueryAsync(command);
         Console.WriteLine($"LIVE {command}: success={result.Success} state={result.State} exit={result.ExitCode}");
