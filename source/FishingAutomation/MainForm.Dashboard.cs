@@ -686,7 +686,7 @@ public sealed partial class MainForm
         else if (production && _dungeonStartedAt.HasValue && DungeonRunning)
         {
             var elapsed = DateTime.Now - _dungeonStartedAt.Value;
-            _stageTime.Text = $"경과 {elapsed:hh\:mm\:ss} · F10 정지";
+            _stageTime.Text = $"경과 {elapsed:hh\\:mm\\:ss} · F10 정지";
         }
         else _stageTime.Text = abyss ? "10분 초과 시 자동 퇴장 · 실패 시 Smart Recovery"
             : production ? "F9 설정/시작 · F10 정지"
