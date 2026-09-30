@@ -1,5 +1,6 @@
 using FishingAutomation;
 using System.Text.Json;
+using System.Text;
 
 int checks = 0;
 void Check(bool passed, string label)
@@ -22,6 +23,33 @@ foreach (bool zeroWing in new[] { true, false })
         Check((await cli.QueryAsync(command)).State == "blocked", "forbidden command reached runner");
 }
 Check(launches == 0, "blocked commands launched a process");
+
+var actionCalls = new List<string[]>();
+var actionCli = new MabinogiMobileCli(log, true,
+    (_, _) => Task.FromResult(new CliProcessOutput(0, "{}", "")),
+    (arguments, _) =>
+    {
+        actionCalls.Add(arguments.ToArray());
+        return Task.FromResult(new CliProcessOutput(0, "{\"result\":\"accepted\"}", ""));
+    });
+Check((await actionCli.ExecuteGatheringAsync("철 광석")).Success, "execute_gathering typed action rejected");
+Check((await actionCli.ExecuteAlteringAsync("강철괴")).Success, "execute_altering typed action rejected");
+Check((await actionCli.CompleteAlteringWorkAsync("강철괴")).Success, "complete_altering_work typed action rejected");
+Check((await actionCli.StopActionAsync()).Success, "stop_action typed action rejected");
+Check(actionCalls.Count == 4, "typed action launch count mismatch");
+Check(actionCalls[0][0] == "execute_gathering" && actionCalls[1][0] == "execute_altering" &&
+      actionCalls[2][0] == "complete_altering_work" && actionCalls[3].SequenceEqual(new[] { "stop_action" }),
+    "typed action command names or stop_action shape changed");
+foreach (var call in actionCalls.Take(3))
+{
+    Check(call.Length == 2 && call[1].StartsWith("base64:", StringComparison.Ordinal), "action body is not a single base64 argument");
+    string json = Encoding.UTF8.GetString(Convert.FromBase64String(call[1]["base64:".Length..]));
+    using var body = JsonDocument.Parse(json);
+    Check(!string.IsNullOrWhiteSpace(body.RootElement.GetProperty("displayName").GetString()), "action displayName missing from body");
+}
+int beforeInvalid = actionCalls.Count;
+Check((await actionCli.ExecuteGatheringAsync("")).State == "blocked", "empty gathering name was accepted");
+Check(actionCalls.Count == beforeInvalid, "invalid typed action reached process runner");
 foreach (string reason in new[] { "game_off", "option_off" })
     foreach (int exit in new[] { 0, 1, 5 })
         Check(MabinogiMobileCli.Parse("status", new(exit, $"{{\"pipe\":\"disconnected\",\"reason\":\"{reason}\"}}", "")).State == reason, "connection reason lost");
