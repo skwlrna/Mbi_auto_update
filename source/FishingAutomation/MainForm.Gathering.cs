@@ -17,13 +17,45 @@ public sealed partial class MainForm
             if (_cancelStart || IsDisposed) return;
             using var dialog = new GatheringSettingsDialog(catalog,recipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not GatheringPlan plan || _cancelStart) return;
-            var windows = WindowTools.EnumerateVisibleWindows();
-            if (windows.Count != 1) throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
-            var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
-            WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
-            await Task.Delay(500);
-            if (_cancelStart || IsDisposed) return;
-            var screen = new GatheringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"),_cli,data);
+            IGatheringScreen screen;
+            string actionInput;
+            bool directCli = false;
+            try
+            {
+                var capabilities = await _cli.GetCapabilitiesAsync(CancellationToken.None);
+                var gatheringCapability = capabilities.SingleOrDefault(x => x.Command == "execute_gathering");
+                directCli = gatheringCapability is not null && (!_cli.ZeroWingMode || !gatheringCapability.RequiresConfirm);
+                if (gatheringCapability is not null && _cli.ZeroWingMode && gatheringCapability.RequiresConfirm)
+                    _log.Write("[자동채집] execute_gathering requiresConfirm=true · ZeroWingMode 보호로 화면 방식 유지");
+            }
+            catch (Exception ex)
+            {
+                _log.Write("[자동채집] CLI capabilities 확인 실패 · 화면 방식 유지 · " + ex.Message);
+            }
+
+            if (directCli)
+            {
+                var cliActions = new GatheringCliActions(_cli);
+                cliActions.Log += text => Ui(() => _log.Write(text));
+                screen = cliActions;
+                actionInput = cliActions.InputMode;
+                _log.Write("[자동채집] CLI 주체 모드 · execute_gathering 직접 사용");
+            }
+            else
+            {
+                var windows = WindowTools.EnumerateVisibleWindows();
+                if (windows.Count != 1) throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
+                var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
+                WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
+                await Task.Delay(500);
+                if (_cancelStart || IsDisposed) return;
+                var visual = new GatheringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"),_cli,data);
+                visual.Log += text=>Ui(()=>_log.Write(text));
+                screen = visual;
+                actionInput = visual.InputMode;
+                _log.Write("[자동채집] 안전한 CLI 실행 조건 미충족 · 기존 화면 방식 fallback");
+            }
+
             var automation = new GatheringAutomation(data, screen);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
@@ -31,9 +63,8 @@ public sealed partial class MainForm
             _gatheringDisplay = $"{plan.DisplayName} {plan.TargetQuantity}개";
             _dungeonStartedAt = DateTime.Now; _dungeonStoppedAt = null;
             _dungeonCycles = _dungeonCompleted = 0; _runError = null;
-            _inputValue.Text = _dungeonInputName = screen.InputMode;
+            _inputValue.Text = _dungeonInputName = actionInput;
             SetStatus("채집 시작 준비", Blue);
-            screen.Log += text=>Ui(()=>_log.Write(text));
             automation.Log += text => Ui(() =>
             {
                 _log.Write(text); _dungeonCycles = checked((int)Math.Min(automation.Gained,int.MaxValue));
