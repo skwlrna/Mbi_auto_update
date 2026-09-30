@@ -650,8 +650,15 @@ public sealed partial class MainForm
         string displayMode = _activeMode ?? SelectedMode;
         bool abyss = displayMode == "어비스";
         bool dungeon = displayMode == "던전";
-        _currentModeValue.Text = displayMode;
-        _currentDungeonValue.Text = abyss ? SelectedAbyssDungeon : dungeon ? SelectedDungeonDestination : displayMode == "페카 심층" ? SelectedPeacaDestination : displayMode == "가공" ? _alteringDisplay : displayMode == "채집" ? _gatheringDisplay : "—";
+        bool production = displayMode is "가공" or "채집";
+        string displayModeText = DisplayModeName(displayMode);
+        _currentModeValue.Text = displayModeText;
+        _currentDungeonValue.Text = abyss ? SelectedAbyssDungeon
+            : dungeon ? SelectedDungeonDestination
+            : displayMode == "페카 심층" ? SelectedPeacaDestination
+            : displayMode == "가공" ? _alteringDisplay
+            : displayMode == "채집" ? _gatheringDisplay
+            : "—";
         string currentStepText = string.IsNullOrWhiteSpace(_statusValue.Text) ? "준비" : _statusValue.Text;
         if (abyss && currentStepText.StartsWith("어비스 준비 완료", StringComparison.Ordinal))
             currentStepText = $"어비스 준비 완료\n{SelectedAbyssDungeon}";
@@ -676,16 +683,29 @@ public sealed partial class MainForm
             var elapsed = DateTime.Now - _stageStartedAt.Value;
             _stageTime.Text = $"경과 {elapsed:mm\\:ss} · 제한까지 {Math.Max(0, _stageLimit - (int)elapsed.TotalSeconds)}초";
         }
-        else _stageTime.Text = abyss ? "10분 초과 시 자동 퇴장 · 실패 시 Smart Recovery" : "F9 시작 · F10 정지 · F8 테스트";
+        else if (production && _dungeonStartedAt.HasValue && DungeonRunning)
+        {
+            var elapsed = DateTime.Now - _dungeonStartedAt.Value;
+            _stageTime.Text = $"경과 {elapsed:hh\\:mm\\:ss} · F10 정지";
+        }
+        else _stageTime.Text = abyss ? "10분 초과 시 자동 퇴장 · 실패 시 Smart Recovery"
+            : production ? "F9 설정/시작 · F10 정지"
+            : "F9 시작 · F10 정지 · F8 테스트";
 
-        _miniInfo.Text = $"{(abyss ? SelectedAbyssDungeon : dungeon ? SelectedDungeonDestination : displayMode == "페카 심층" ? SelectedPeacaDestination : displayMode)} · {_stageTime.Text}";
+        _miniInfo.Text = $"{(abyss ? SelectedAbyssDungeon : dungeon ? SelectedDungeonDestination : displayMode == "페카 심층" ? SelectedPeacaDestination : displayModeText)} · {_stageTime.Text}";
         _readyBadge.Text = AnyRunning ? "●  매크로 실행 중" : "●  매크로 준비됨";
         _readyBadge.ForeColor = AnyRunning ? Color.FromArgb(83, 192, 255) : Color.White;
         if (_mainActionButton is not null)
         {
-            _mainActionButton.Text = AnyRunning ? "■  자동 실행 정지" : "▶  자동 실행 시작";
+            _mainActionButton.Text = AnyRunning
+                ? "■  자동 실행 정지"
+                : displayMode == "가공" ? "▶  자동 가공 설정 / 시작"
+                : displayMode == "채집" ? "▶  자동 채집 설정 / 시작"
+                : "▶  자동 실행 시작";
             _mainActionButton.BackColor = AnyRunning ? Color.FromArgb(130, 41, 57) : Accent;
         }
+        if (production && _productionTargetQuantity > 0)
+            _stageProgress = (int)Math.Clamp(_productionCurrentQuantity * 100 / _productionTargetQuantity, 0, 100);
         _progress.Value = Math.Max(0, Math.Min(100, _stageProgress));
 
         var ns = _notifier.Settings;

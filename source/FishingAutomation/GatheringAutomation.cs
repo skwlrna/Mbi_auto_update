@@ -50,14 +50,14 @@ internal sealed class GatheringAutomation
         await CheckToolAsync(plan, ct);
         var initial = await _data.ActivityAsync(ct);
         if (!initial.IsSafeField || initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling || initial.MainButtonState == "Stop")
-            throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동채집을 시작하세요.");
+            throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동 채집을 시작하세요.");
         await CheckWeightAsync(ct);
         long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
         bool started = false;
         Exception? failure = null;
         try
         {
-            Log?.Invoke($"[자동채집] {plan.DisplayName} 추가 {plan.TargetQuantity}개 · CLI 직접 실행");
+            Log?.Invoke($"[자동 채집] {plan.DisplayName} 추가 {plan.TargetQuantity}개 · CLI 직접 실행");
             // Set before input so a partially successful start is still stopped on failure.
             started = true;
             await _screen.StartAsync(plan, ct);
@@ -68,7 +68,7 @@ internal sealed class GatheringAutomation
                 ct.ThrowIfCancellationRequested();
                 var activity = await _data.ActivityAsync(ct);
                 if (activity.IsFishing)
-                    throw new InvalidOperationException("선택 품목이 낚시로 연결되었습니다. 현재 자동채집에서는 낚시를 지원하지 않아 정지합니다.");
+                    throw new InvalidOperationException("선택 품목이 낚시로 연결되었습니다. 현재 자동 채집에서는 낚시를 지원하지 않아 정지합니다.");
                 if (!activity.IsSafeField)
                     throw new InvalidOperationException("전투·사망·대화 등 채집을 계속할 수 없는 상태가 확인되어 정지합니다.");
                 long count = await _data.ItemCountAsync(plan.DisplayName, ct);
@@ -79,7 +79,7 @@ internal sealed class GatheringAutomation
                 if(travelPolls >= 900) throw new InvalidOperationException("이동이 장시간 끝나지 않아 정지합니다.");
                 idlePolls = activity.IsAutoTraveling || gained > Gained ? 0 : idlePolls + 1;
                 Gained = gained;
-                Log?.Invoke($"[자동채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개");
+                Log?.Invoke($"[자동 채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개");
                 if (Gained >= plan.TargetQuantity) break;
                 await CheckToolAsync(plan, ct);
                 await CheckWeightAsync(ct);
@@ -113,14 +113,14 @@ internal sealed class GatheringAutomation
                 }
                 catch(Exception stopError) when (failure is not null)
                 {
-                    Log?.Invoke("[자동채집] 정지 확인 실패: " + stopError.Message + " · 게임에서 채집/이동 상태를 확인하세요.");
+                    Log?.Invoke("[자동 채집] 정지 확인 실패: " + stopError.Message + " · 게임에서 채집/이동 상태를 확인하세요.");
                 }
             }
         }
         long finalCount=await _data.ItemCountAsync(plan.DisplayName,ct);
         if(finalCount-baseline<Gained) throw new InvalidOperationException("정지 후 재료 수량이 감소해 완료 수량을 확정할 수 없습니다.");
         Gained=finalCount-baseline;
-        Log?.Invoke($"[자동채집] 완료 · {plan.DisplayName} +{Gained}개 · CLI 상태 검증 완료");
+        Log?.Invoke($"[자동 채집] 완료 · {plan.DisplayName} +{Gained}개 · CLI 상태 검증 완료");
     }
 
     private async Task CheckToolAsync(GatheringPlan plan, CancellationToken ct)

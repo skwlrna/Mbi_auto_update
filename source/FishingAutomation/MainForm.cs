@@ -200,6 +200,12 @@ public sealed partial class MainForm : Form
     }
 
     private string SelectedMode => _mode.SelectedItem?.ToString() ?? "낚시";
+    private static string DisplayModeName(string mode) => mode switch
+    {
+        "가공" => "자동 가공",
+        "채집" => "자동 채집",
+        _ => mode
+    };
     private string SelectedDungeonDestination => "현재 위치";
     private string _selectedPeacaRoute = "peaca_d1_1";
     private string SelectedPeacaDestination => _selectedPeacaRoute == "peaca_d2_1" ? "페카 심층 2-1" : "페카 심층 1-1";
@@ -581,8 +587,9 @@ public sealed partial class MainForm : Form
         else
         {
             var windows = WindowTools.EnumerateVisibleWindows();
-            _log.Write($"[{SelectedMode}] 마비노기 모바일 창 새로고침: {windows.Count}개 발견");
-            SetStatus(windows.Count > 0 ? $"{SelectedMode} 준비 완료" : "게임 창 없음", windows.Count > 0 ? Green : Color.Firebrick);
+            string modeText = DisplayModeName(SelectedMode);
+            _log.Write($"[{modeText}] 마비노기 모바일 창 새로고침: {windows.Count}개 발견");
+            SetStatus(windows.Count > 0 ? $"{modeText} 준비 완료" : "게임 창 없음", windows.Count > 0 ? Green : Color.Firebrick);
         }
     }
 
@@ -600,7 +607,7 @@ public sealed partial class MainForm : Form
             int count = WindowTools.EnumerateVisibleWindows().Count;
             string readyText = SelectedMode == "어비스"
                 ? $"어비스 준비 완료 · {SelectedAbyssDungeon}"
-                : $"{SelectedMode} 준비 완료";
+                : $"{DisplayModeName(SelectedMode)} 준비 완료";
             SetStatus(count > 0 ? readyText : "게임 창 확인 필요", count > 0 ? Green : Color.DarkOrange);
         }
     }
@@ -616,7 +623,20 @@ public sealed partial class MainForm : Form
     {
         UpdateDashboard();
         string mode = _activeMode ?? SelectedMode;
-        if (mode == "던전" || mode == "어비스" || mode == "페카 심층")
+        if (mode is "가공" or "채집")
+        {
+            var elapsed = _dungeonStartedAt.HasValue ? (_dungeonStoppedAt ?? DateTime.Now) - _dungeonStartedAt.Value : TimeSpan.Zero;
+            long current = Math.Max(0, _productionCurrentQuantity);
+            int target = Math.Max(0, _productionTargetQuantity);
+            _elapsedValue.Text = elapsed.ToString(@"hh\:mm\:ss");
+            _roundValue.Text = target > 0 ? target.ToString() : "0";
+            _successValue.Text = current.ToString();
+            _failureValue.Text = _runError is null ? "0" : "1";
+            _rateValue.Text = target > 0 ? $"{Math.Clamp(current * 100.0 / target, 0, 100):0}%" : "0%";
+            _averageValue.Text = "—";
+            _startTimeValue.Text = _dungeonStartedAt?.ToString("HH:mm:ss") ?? "—";
+        }
+        else if (mode == "던전" || mode == "어비스" || mode == "페카 심층")
         {
             var elapsed = _dungeonStartedAt.HasValue ? (_dungeonStoppedAt ?? DateTime.Now) - _dungeonStartedAt.Value : TimeSpan.Zero;
             int failures = Math.Max(0, _dungeonCycles - _dungeonCompleted - (DungeonRunning ? 1 : 0));

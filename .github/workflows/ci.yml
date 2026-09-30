@@ -1,4 +1,4 @@
-name: Check V0.1.93 Production UI
+name: Check V0.1.94 Unified UI
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.93"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.94"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.93</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.94</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -99,18 +99,25 @@ jobs:
           if($g -notmatch 'EnsureCapabilitiesAsync' -or $a -notmatch 'EnsureCapabilitiesAsync'){throw 'mode capability preflight wiring missing'}
           if($g -notmatch 'CliIdentityGuard.CaptureAsync' -or $a -notmatch 'CliIdentityGuard.CaptureAsync'){throw 'mode identity capture wiring missing'}
 
-      - name: Production UI wiring checks
+      - name: Unified production UI checks
         shell: pwsh
         run: |
-          $ui = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
-          foreach($text in @('자동가공','자동 채집','CLI 연결','캐릭터 확인','상세 로그')){
-            if($ui -notmatch [regex]::Escape($text)){throw "production UI text missing: $text"}
-          }
+          $state = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
+          if($state -match 'class ProductionDashboard'){throw 'separate production overlay must stay removed'}
           $layout = Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw
-          if($layout -notmatch 'new ProductionDashboard\(this\)'){throw 'production dashboard is not attached'}
+          if($layout -match 'new ProductionDashboard\(this\)'){throw 'separate production dashboard is still attached'}
+          foreach($text in @('자동 가공','자동 채집','작업 대상','진행 수량')){
+            if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
+          }
+          if($layout -notmatch 'AddButton\("자동 가공",[\s\S]*?SelectMode\(4\)'){throw 'home to automatic altering one-click route missing'}
+          if($layout -notmatch 'AddButton\("자동 채집",[\s\S]*?SelectMode\(5\)'){throw 'home to automatic gathering one-click route missing'}
+          if($layout -match '자동채집'){throw 'automatic gathering spacing is inconsistent in reference UI'}
           $main = Get-Content source/FishingAutomation/MainForm.cs -Raw
-          if($main -notmatch 'UpdateProductionDashboardVisibility'){throw 'production dashboard mode switch missing'}
-          if($ui -match '정령의 날개'){throw 'production dashboard must not display spirit-wing text'}
+          if($main -notmatch 'DisplayModeName'){throw 'display mode normalization missing'}
+          if($main -notmatch 'mode is "가공" or "채집"'){throw 'production statistics branch missing'}
+          $dashboard = Get-Content source/FishingAutomation/MainForm.Dashboard.cs -Raw
+          if($dashboard -notmatch '자동 가공 설정 / 시작'){throw 'altering action caption missing'}
+          if($dashboard -notmatch '자동 채집 설정 / 시작'){throw 'gathering action caption missing'}
 
       - name: Inventory loot regression tests
         shell: pwsh
