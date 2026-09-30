@@ -31,6 +31,11 @@ public sealed partial class MainForm
             using var dialog = new AlteringSettingsDialog(cliRecipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not AlteringPlan plan || _cancelStart) return;
             if (_cancelStart || IsDisposed) return;
+            _productionDisplayName = plan.DisplayName;
+            _productionTargetQuantity = plan.TargetQuantity;
+            _productionCurrentQuantity = 0;
+            _productionFacilityName = plan.ScreenTitle;
+            RefreshProductionDashboard();
             var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
             _log.Write("[자동 가공] 캐릭터 문맥 저장 · " + identity.Description);
             var screen = new AlteringCliScreen(_cli, identity);
@@ -46,8 +51,13 @@ public sealed partial class MainForm
             SetStatus("가공 시작 준비", Blue);
             automation.Log += text => Ui(() =>
             {
-                _log.Write(text); _dungeonCycles = automation.QueuedWorks;
-                SetStatus(text.Replace("[자동 가공] ", ""), Blue); UpdateStats();
+                _log.Write(text);
+                _dungeonCycles = automation.QueuedWorks;
+                _productionCurrentQuantity = Math.Min((long)plan.TargetQuantity,
+                    (long)automation.QueuedWorks * plan.ProducedPerWork);
+                SetStatus(text.Replace("[자동 가공] ", ""), Blue);
+                UpdateStats();
+                RefreshProductionDashboard();
             });
             _log.Write("[자동 가공] 시작(F9) · " + _alteringDisplay);
             _dungeonTask = Task.Run(async () =>
@@ -57,7 +67,13 @@ public sealed partial class MainForm
                     try
                     {
                         await automation.RunAsync(plan, token);
-                        Ui(() => { _dungeonCompleted = automation.QueuedWorks; _log.Write("[자동 가공] 목표 작업 완료"); });
+                        Ui(() =>
+                        {
+                            _dungeonCompleted = automation.QueuedWorks;
+                            _productionCurrentQuantity = plan.TargetQuantity;
+                            _log.Write("[자동 가공] 목표 작업 완료");
+                            RefreshProductionDashboard();
+                        });
                     }
                     catch (OperationCanceledException)
                     { Ui(() => _log.Write("[자동 가공] 정지되었습니다. 이미 등록된 작업은 게임에서 계속 진행될 수 있습니다.")); }
