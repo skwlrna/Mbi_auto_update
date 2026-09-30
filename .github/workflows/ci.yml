@@ -1,4 +1,4 @@
-name: Check V0.1.87 Automatic Altering
+name: Check V0.1.88 Automatic Altering
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.87"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.88"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.87</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.88</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
