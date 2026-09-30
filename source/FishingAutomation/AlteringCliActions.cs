@@ -4,7 +4,7 @@ namespace FishingAutomation;
 /// Direct CLI implementation of the altering action surface. Catalog and work verification
 /// remain in AlteringAutomation; this class only replaces OCR/keyboard action delivery.
 /// </summary>
-internal sealed class AlteringCliActions : IAlteringScreen
+internal sealed class AlteringCliActions : IAlteringScreen, IDirectAlteringActions
 {
     private readonly MabinogiMobileCli _cli;
     internal string InputMode => "MabinogiMobile CLI";
