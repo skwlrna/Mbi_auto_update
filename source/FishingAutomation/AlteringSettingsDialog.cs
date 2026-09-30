@@ -33,7 +33,7 @@ internal sealed class AlteringSettingsDialog : Form
         for (int i = 0; i < 4; i++) layout.RowStyles.Add(new(SizeType.Absolute, 44));
         layout.RowStyles.Add(new(SizeType.Absolute, 50)); layout.RowStyles.Add(new(SizeType.Absolute, 60));
         layout.RowStyles.Add(new(SizeType.Percent, 100)); layout.RowStyles.Add(new(SizeType.Absolute, 42));
-        string[] captions = { "가공 시설", "품목 검색", "전체 가공 품목", "목표 생산 수량" };
+        string[] captions = { "가공 시설", "품목 검색", "전체 가공 품목", "추가 생산 수량" };
         Control[] fields = { _facility, _filter, _item, _quantity };
         for (int i = 0; i < fields.Length; i++)
         {
@@ -44,7 +44,7 @@ internal sealed class AlteringSettingsDialog : Form
         layout.Controls.Add(_summary, 0, 5); layout.SetColumnSpan(_summary, 2);
         var note = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
         note.Controls.Add(_paid);
-        note.Controls.Add(new Label { AutoSize = true, Text = "게임의 시설과 품목을 맞춰 선택하세요. 완료된 기존 작업은 먼저 수령합니다." });
+        note.Controls.Add(new Label { AutoSize = true, Text = "기존 동일 품목 작업은 완료·수령 후 이어갑니다. 입력 수량은 추가 생산량입니다." });
         layout.Controls.Add(note, 0, 6); layout.SetColumnSpan(note, 2);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         var cancel = new Button { Text = "취소", DialogResult = DialogResult.Cancel, AutoSize = true };

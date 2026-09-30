@@ -1,6 +1,6 @@
 # Automatic altering verification
 
-Run `dotnet run --project tests/altering/Regression.csproj -c Release` for quantity, seven-slot queue, receipt, cancellation, existing-job and bounded paid-click checks.
+Run `dotnet run --project tests/altering/Regression.csproj -c Release` for quantity, seven-slot queue, receipt, cancellation, existing-queue draining, extra-production targets and bounded paid-click checks.
 
 The visual harness takes a user-provided screenshot path, client crop offsets, text and ROI kind. It never opens the game or sends input. Screenshot files must stay outside this repository.
 

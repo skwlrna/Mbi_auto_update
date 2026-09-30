@@ -33,10 +33,22 @@ success = await Run(plan with { TargetQuantity = 4 }, w => w.Bonus = 2);
 Check(success.World.Owned == 10, "critical rewards can exceed minimum target");
 success = await Run(plan with { TargetQuantity = 4 }, w => w.AddCompleted(3));
 Check(success.World.Owned == 9, "existing completed work collected before baseline");
-var existing = new FakeWorld(plan); existing.AddPending();
-var existingAuto = new AlteringAutomation(existing, existing, (_, _) => Task.CompletedTask, 2);
-try { await existingAuto.RunAsync(plan, default); throw new Exception("mixed jobs accepted"); }
-catch (InvalidOperationException) { Check(existing.QueueCalls == 0, "existing target jobs never attributed to new run"); }
+success = await Run(plan with { TargetQuantity = 10 }, w => { for(int i=0;i<7;i++) w.AddPending(waitingOnly:i>0); });
+Check(success.World.QueueCalls == 4 && success.World.Owned == 33 && success.Automation.ReservedWings == 20, "full existing queue drained then extra target registered without counting old rewards");
+success = await Run(plan with { TargetQuantity = 4 }, w => { w.AddPending(); w.AddCompleted(3); w.Bonus=2; });
+Check(success.World.QueueCalls == 2 && success.World.Owned == 20, "mixed completed and pending jobs with critical rewards excluded from new target");
+success = await Run(plan with { TargetQuantity = 1 }, w => { w.AddPending(); w.Available=false; w.UnlockAfterExisting=true; });
+Check(success.World.QueueCalls == 1 && success.World.Owned == 6, "recipe availability refreshed after existing rewards received");
+var waiting = new FakeWorld(plan) { Freeze = true }; waiting.AddPending();
+using(var cts = new CancellationTokenSource())
+{
+    var waitingAuto = new AlteringAutomation(waiting, waiting, (_, token) => { cts.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; }, 2);
+    try { await waitingAuto.RunAsync(plan, cts.Token); throw new Exception("existing wait ignored cancellation"); }
+    catch(OperationCanceledException) { Check(waiting.QueueCalls == 0 && waitingAuto.ReservedWings == 0, "stop during existing-work wait never spends currency"); }
+}
+var stalled = new FakeWorld(plan) { Freeze = true }; stalled.AddPending(waitingOnly:true);
+try { await new AlteringAutomation(stalled, stalled, (_,_) => Task.CompletedTask, 2).RunAsync(plan, default); throw new Exception("stalled existing queue ignored"); }
+catch(InvalidOperationException) { Check(stalled.QueueCalls == 0, "stalled existing queue stops without paid input"); }
 var missing = new FakeWorld(plan) { Available = false };
 try { await new AlteringAutomation(missing, missing).RunAsync(plan, default); throw new Exception("missing materials accepted"); }
 catch (InvalidOperationException) { Check(missing.QueueCalls == 0, "insufficient ingredients prevent paid click"); }
@@ -69,23 +81,29 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     private readonly AlteringPlan _plan;
     private readonly List<AlteringWork> _works = new();
     private int _polls;
-    internal int QueueCalls, MaxQueue, Bonus;
+    internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining;
     internal long Owned;
-    internal bool Register = true, Available = true, CreditRewards = true, Duplicate;
+    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var r = new AlteringRecipe(_plan.DisplayName, Available, _plan.ProducedPerWork, Available ? null : "not_enough_ingredient", Array.Empty<AlteringIngredient>());
+        bool available = Available || (UnlockAfterExisting && ExistingRemaining == 0);
+        var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : "not_enough_ingredient", Array.Empty<AlteringIngredient>());
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
     public Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (++_polls % 3 == 0)
+        if (++_polls % 3 == 0 && !Freeze)
         {
             int index = _works.FindIndex(x => !x.IsCompleted);
-            if (index >= 0) _works[index] = _works[index] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+            if (index >= 0)
+            {
+                _works[index] = _works[index] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+                int next = _works.FindIndex(x => !x.IsCompleted);
+                if(next >= 0) _works[next] = _works[next] with { State = "InProgress" };
+            }
         }
         return Task.FromResult<IReadOnlyList<AlteringWork>>(_works.ToArray());
     }
@@ -93,7 +111,9 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     { ct.ThrowIfCancellationRequested(); if (name != _plan.OutputName) throw new Exception("wrong output mapping"); return Task.FromResult(Owned); }
     public Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested(); reserveFiveWings(); QueueCalls++;
+        ct.ThrowIfCancellationRequested();
+        if(ExistingRemaining > 0) throw new Exception("new work queued before existing jobs were drained");
+        reserveFiveWings(); QueueCalls++;
         if (Register) _works.Add(new(plan.OutputName, plan.FacilityName, "InProgress", false, 5));
         MaxQueue = Math.Max(MaxQueue, _works.Count);
         return Task.CompletedTask;
@@ -101,11 +121,12 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        ExistingRemaining = Math.Max(0, ExistingRemaining - _works.Count(x => x.IsCompleted));
         if (CreditRewards) Owned += _works.Count(x => x.IsCompleted) * (plan.ProducedPerWork + Bonus);
         _works.RemoveAll(x => x.IsCompleted);
         return Task.CompletedTask;
     }
-    internal void AddPending() => _works.Add(new(_plan.OutputName, _plan.FacilityName, "InProgress", false, 5));
-    internal void AddCompleted(int count) { _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
+    internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
+    internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
     public void Dispose() { }
 }

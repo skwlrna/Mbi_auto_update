@@ -87,10 +87,31 @@ internal sealed class AlteringAutomation
             throw new InvalidOperationException("선택 품목의 조회 결과가 바뀌었습니다. 목록을 다시 불러오세요.");
         plan = plan with { RecipeCount = selected.Length, VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName)) };
         var works = await _data.WorksAsync(ct);
-        // No work IDs exist in the CLI schema. Existing same-recipe jobs cannot be safely
-        // attributed to this run, so never count them toward a newly requested target.
-        if (Matching(works, plan).Any(x => !x.IsCompleted))
-            throw new InvalidOperationException("선택 품목의 기존 작업이 진행 중입니다. 완료·수령한 뒤 시작하세요.");
+        // No work IDs or actual critical yields exist in the CLI schema. Drain existing
+        // same-output jobs before taking the baseline, then produce the requested extra
+        // quantity. This permits continuation without counting old rewards as new ones.
+        int existingCount = Matching(works, plan).Count();
+        if (existingCount > 0)
+        {
+            Log?.Invoke($"[자동 가공] 기존 {plan.DisplayName} 작업 {existingCount}건을 먼저 완료·수령합니다. 이후 추가 {plan.TargetQuantity}개를 가공합니다.");
+            int idlePolls = 0;
+            while (Matching(works, plan).Any())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (await CollectIfReadyAsync(plan, works, ct)) works = await _data.WorksAsync(ct);
+                if (!Matching(works, plan).Any()) break;
+                bool progressing = works.Any(x => x.FacilityName == plan.FacilityName && x.State == "InProgress");
+                idlePolls = progressing ? 0 : idlePolls + 1;
+                if (idlePolls >= _verificationAttempts)
+                    throw new InvalidOperationException("기존 가공 작업이 진행되지 않아 정지합니다. 게임에서 대기열 상태를 확인하세요.");
+                long remaining = works.Where(x => x.FacilityName == plan.FacilityName && x.State == "InProgress")
+                    .Select(x => x.RemainingSeconds).DefaultIfEmpty(5).Min();
+                Log?.Invoke($"[자동 가공] 기존 작업 완료 대기 · 남은 {Matching(works, plan).Count()}건 · 진행 작업 {remaining}초 · 새 작업 등록 0회");
+                await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
+                works = await _data.WorksAsync(ct);
+            }
+            Log?.Invoke("[자동 가공] 기존 동일 품목 작업 수령 완료 · 새 목표 수량의 기준을 설정합니다.");
+        }
         await CollectIfReadyAsync(plan, works, ct);
         long baseline = await _data.ItemCountAsync(plan.OutputName, ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 목표 {plan.TargetQuantity}개 · {plan.RequiredWorks}회 / 최소 {plan.ExpectedQuantity}개 · 버튼 비용 상한 {plan.MaximumWings}개");
