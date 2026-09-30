@@ -183,6 +183,7 @@ internal sealed class AlteringAutomation
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
         int totalBefore = works.Count(x => x.FacilityName == plan.FacilityName);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 {count}건 수령 시작");
         await _screen.CollectAsync(plan, ct);
         // Another queued work may finish during collection. Total queue shrinkage is
         // the receipt signal; completedCount alone can stay unchanged or increase.
