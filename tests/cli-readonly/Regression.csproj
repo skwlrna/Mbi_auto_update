@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
     <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringQueries.cs" Link="AlteringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/AutomationConfig.cs" Link="AutomationConfig.cs" />
     <Using Include="System.Drawing" />
   </ItemGroup>

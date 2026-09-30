@@ -651,7 +651,7 @@ public sealed partial class MainForm
         bool abyss = displayMode == "어비스";
         bool dungeon = displayMode == "던전";
         _currentModeValue.Text = displayMode;
-        _currentDungeonValue.Text = abyss ? SelectedAbyssDungeon : dungeon ? SelectedDungeonDestination : displayMode == "페카 심층" ? SelectedPeacaDestination : displayMode == "페카 심층" ? SelectedPeacaDestination : "—";
+        _currentDungeonValue.Text = abyss ? SelectedAbyssDungeon : dungeon ? SelectedDungeonDestination : displayMode == "페카 심층" ? SelectedPeacaDestination : displayMode == "가공" ? _alteringDisplay : "—";
         string currentStepText = string.IsNullOrWhiteSpace(_statusValue.Text) ? "준비" : _statusValue.Text;
         if (abyss && currentStepText.StartsWith("어비스 준비 완료", StringComparison.Ordinal))
             currentStepText = $"어비스 준비 완료\n{SelectedAbyssDungeon}";
@@ -776,5 +776,3 @@ public sealed partial class MainForm
         catch { }
     }
 }
-
-

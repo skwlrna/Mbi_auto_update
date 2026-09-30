@@ -18,7 +18,7 @@ foreach (bool zeroWing in new[] { true, false })
         launches++;
         return Task.FromResult(new CliProcessOutput(0, "{}", ""));
     });
-    foreach (string command in new[] { "execute_gathering", "execute_altering", "execute_crafting", "capabilities", "get_items extra", "STATUS", "status;execute_crafting", "" })
+    foreach (string command in new[] { "execute_gathering", "execute_altering", "execute_crafting", "complete_altering_work", "capabilities", "get_items extra", "STATUS", "status;execute_crafting", "" })
         Check((await cli.QueryAsync(command)).State == "blocked", "forbidden command reached runner");
 }
 Check(launches == 0, "blocked commands launched a process");
@@ -51,14 +51,36 @@ try { await defaults.StatusAsync(cancelled.Token); throw new Exception("cancella
 catch (OperationCanceledException) { checks++; }
 Check(lines.Count > 0 && lines.All(x => x.Contains("[CLI]")), "existing logger integration failed");
 
+var recipes = AlteringQueries.ParseRecipes(MabinogiMobileCli.Parse("get_alterable_items", new(0,
+    "{\"items\":[{\"DisplayName\":\"목재+\",\"Alterable\":true,\"ProducedPerWork\":3},{\"DisplayName\":\"강철괴\",\"Alterable\":false,\"ProducedPerWork\":3,\"Reason\":\"not_enough_ingredient\",\"MissingIngredients\":[{\"DisplayName\":\"철괴\",\"Required\":3,\"Owned\":2}]}]}", "")));
+Check(recipes.Count == 2 && recipes[0].DisplayName == "목재+" && recipes[0].ProducedPerWork == 3, "recipe name and produced amount lost");
+Check(!recipes[1].Alterable && recipes[1].MissingIngredients[0].Owned == 2, "missing materials lost");
+var works = AlteringQueries.ParseWorks(MabinogiMobileCli.Parse("get_altering_works", new(0,
+    "{\"completedCount\":1,\"works\":[{\"DisplayName\":\"강철괴\",\"FacilityName\":\"금속 가공 시설\",\"State\":\"Completed\",\"IsCompleted\":true,\"RemainingSeconds\":0},{\"DisplayName\":\"강철괴\",\"FacilityName\":\"금속 가공 시설\",\"State\":\"NotStarted\",\"IsCompleted\":false,\"RemainingSeconds\":300}]}", "")));
+Check(works.Count == 2 && works[0].IsCompleted && works[1].State == "NotStarted", "work states conflated");
+try
+{
+    AlteringQueries.ParseWorks(MabinogiMobileCli.Parse("get_altering_works", new(0, "{\"completedCount\":1,\"works\":[]}", "")));
+    throw new Exception("inconsistent completed count accepted");
+}
+catch (InvalidDataException) { checks++; }
+try
+{
+    AlteringQueries.ParseRecipes(new("get_alterable_items", false, "disconnected", null, 5, "game_off"));
+    throw new Exception("failed recipe query accepted");
+}
+catch (InvalidDataException) { checks++; }
+
 if (args.Contains("--live"))
 {
-    // Only the four allowlisted reads are ever launched here. Never launch the macro UI.
-    foreach (string command in new[] { "status", "get_items", "get_activity", "get_current_environment" })
+    // Only allowlisted reads are ever launched here. Never launch the macro UI.
+    foreach (string command in new[] { "status", "get_items", "get_activity", "get_current_environment", "get_alterable_items", "get_altering_works" })
     {
         var result = await defaults.QueryAsync(command);
         Console.WriteLine($"LIVE {command}: success={result.Success} state={result.State} exit={result.ExitCode}");
         Check(result.Success && result.Data is not null, $"Live {command} failed: {result.State}/{result.Error}");
+        if (command == "get_alterable_items") Check(AlteringQueries.ParseRecipes(result).Count > 0, "live recipe parsing failed");
+        if (command == "get_altering_works") { AlteringQueries.ParseWorks(result); checks++; }
     }
 }
 Console.WriteLine($"PASS {checks} checks");

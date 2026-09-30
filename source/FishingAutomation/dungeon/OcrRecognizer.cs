@@ -34,6 +34,79 @@ internal sealed class OcrRecognizer
         return DetectionResult.NotFound;
     }
 
+    // Exact recipe matching must retain '+' and ingredient suffixes.
+    internal async Task<IReadOnlyList<DetectionResult>> FindAlteringLabelsAsync(Bitmap frame, Rectangle roi, string wanted, CancellationToken ct, bool cardCandidate = false)
+    {
+        roi = Rectangle.Intersect(new Rectangle(Point.Empty, frame.Size), roi);
+        var found = new List<DetectionResult>();
+        foreach (var mode in new[] { (Scale: 2, Threshold: 70), (Scale: 3, Threshold: 70), (Scale: 3, Threshold: 80), (Scale: 3, Threshold: 90), (Scale: 3, Threshold: 100), (Scale: 3, Threshold: 0) })
+        {
+            int scale = mode.Scale;
+            ct.ThrowIfCancellationRequested();
+            using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
+            using var prepared = PrepareAlteringText(crop, scale, mode.Threshold);
+            using var software = await ToSoftwareBitmapAsync(prepared);
+            var result = await _engine.RecognizeAsync(software);
+            ct.ThrowIfCancellationRequested();
+            string normalized = FishingAutomation.AlteringText.Normalize(wanted);
+            foreach (var line in result.Lines)
+            for (int start = 0; start < line.Words.Count; start++)
+            for (int count = 1; count <= 12 && start + count <= line.Words.Count; count++)
+            {
+                var words = line.Words.Skip(start).Take(count).ToArray();
+                string text = string.Concat(words.Select(w => w.Text));
+                if (cardCandidate ? !FishingAutomation.AlteringText.IsCardCandidate(text, wanted) :
+                    !FishingAutomation.AlteringText.Normalize(text).Equals(normalized, StringComparison.OrdinalIgnoreCase)) continue;
+                if (wanted != "5" && start > 0 && line.Words[start - 1].Text.Any(char.IsLetter) &&
+                    words[0].BoundingRect.X - line.Words[start - 1].BoundingRect.Right < 20 * scale)
+                    continue;
+                if (wanted != "5" && start + count < line.Words.Count && line.Words[start + count].Text.Any(char.IsLetter) &&
+                    line.Words[start + count].BoundingRect.X - words[^1].BoundingRect.Right < 20 * scale)
+                    continue;
+                // A trailing '+' can be a separate OCR word: do not match the base item.
+                if (start + count < line.Words.Count && line.Words[start + count].Text.Trim() == "+" &&
+                    line.Words[start + count].BoundingRect.X - words[^1].BoundingRect.Right < 30 * scale)
+                    continue;
+                var bounds = Rectangle.FromLTRB(roi.X + (int)(words.Min(w => w.BoundingRect.X) / scale),
+                    roi.Y + (int)(words.Min(w => w.BoundingRect.Y) / scale),
+                    roi.X + (int)(words.Max(w => w.BoundingRect.Right) / scale),
+                    roi.Y + (int)(words.Max(w => w.BoundingRect.Bottom) / scale));
+                if (!found.Any(x => x.Bounds.IntersectsWith(bounds))) found.Add(new(true, bounds, 1, text));
+            }
+        }
+        return found.OrderBy(x => x.Bounds.Top).ThenBy(x => x.Bounds.Left).ToArray();
+    }
+
+    private static Bitmap PrepareAlteringText(Bitmap crop, int scale, int threshold)
+    {
+        var result = new Bitmap(crop.Width * scale, crop.Height * scale, PixelFormat.Format24bppRgb);
+        using (var graphics = Graphics.FromImage(result))
+        {
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            graphics.DrawImage(crop, new Rectangle(0, 0, result.Width, result.Height));
+        }
+        if (threshold == 0) return result;
+        var rect = new Rectangle(0, 0, result.Width, result.Height);
+        var data = result.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format24bppRgb);
+        try
+        {
+            int length = Math.Abs(data.Stride) * result.Height;
+            var pixels = new byte[length];
+            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, pixels, 0, length);
+            for (int y = 0; y < result.Height; y++)
+            for (int x = 0; x < result.Width; x++)
+            {
+                int index = y * data.Stride + x * 3;
+                int brightness = (pixels[index] + pixels[index + 1] + pixels[index + 2]) / 3;
+                byte value = brightness >= threshold ? (byte)0 : (byte)255;
+                pixels[index] = pixels[index + 1] = pixels[index + 2] = value;
+            }
+            System.Runtime.InteropServices.Marshal.Copy(pixels, 0, data.Scan0, length);
+        }
+        finally { result.UnlockBits(data); }
+        return result;
+    }
+
     private async Task<DetectionResult> FindExactCompactAtScaleAsync(Bitmap frame, Rectangle roi, string wanted, int scale, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

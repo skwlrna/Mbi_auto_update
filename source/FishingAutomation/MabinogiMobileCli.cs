@@ -32,12 +32,14 @@ public sealed class MabinogiMobileCli
     public Task<MabinogiCliResult> GetItemsAsync(CancellationToken token = default) => QueryAsync("get_items", token);
     public Task<MabinogiCliResult> GetActivityAsync(CancellationToken token = default) => QueryAsync("get_activity", token);
     public Task<MabinogiCliResult> GetCurrentEnvironmentAsync(CancellationToken token = default) => QueryAsync("get_current_environment", token);
+    public Task<MabinogiCliResult> GetAlterableItemsAsync(CancellationToken token = default) => QueryAsync("get_alterable_items", token);
+    public Task<MabinogiCliResult> GetAlteringWorksAsync(CancellationToken token = default) => QueryAsync("get_altering_works", token);
 
     public async Task<MabinogiCliResult> QueryAsync(string command, CancellationToken token = default)
     {
         // Exact allowlist also rejects extra arguments, shell syntax, and every future command.
         // Costs remain blocked even if ZeroWingMode is explicitly set to false in this phase.
-        if (command is not ("status" or "get_items" or "get_activity" or "get_current_environment"))
+        if (!IsAllowedQuery(command))
             return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
 
         token.ThrowIfCancellationRequested();
@@ -123,7 +125,7 @@ public sealed class MabinogiMobileCli
     private static async Task<CliProcessOutput> RunProcessAsync(string command, CancellationToken token)
     {
         // Defense at the actual launch boundary as well as the public API.
-        if (command is not ("status" or "get_items" or "get_activity" or "get_current_environment"))
+        if (!IsAllowedQuery(command))
             throw new InvalidOperationException("command_not_allowed");
         var start = new ProcessStartInfo(DefaultPath)
         {
@@ -153,4 +155,8 @@ public sealed class MabinogiMobileCli
             await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
         }
     }
+
+    private static bool IsAllowedQuery(string command)
+        => command is "status" or "get_items" or "get_activity" or "get_current_environment"
+            or "get_alterable_items" or "get_altering_works";
 }

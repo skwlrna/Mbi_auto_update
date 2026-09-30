@@ -1,4 +1,4 @@
-name: Check V0.1.83 Inventory Loot
+name: Check V0.1.84 Automatic Altering
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.83"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.84"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.83</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.84</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -78,3 +78,12 @@ jobs:
         run: |
           dotnet run --project tests/inventory-loot/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Inventory loot regressions failed' }
+
+
+      - name: Automatic altering regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering regressions failed' }
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering visual harness build failed' }
