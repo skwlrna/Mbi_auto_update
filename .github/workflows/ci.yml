@@ -1,4 +1,4 @@
-name: Check V0.1.81 Abyss Outside Gate
+name: Check V0.1.82 Read-only CLI
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.81"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.82"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.81</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.82</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -66,3 +66,9 @@ jobs:
           if($u -notmatch '\.previous_version'){throw 'previous-version retention missing'}
           $f=Get-Content source/FishingAutomation/FishingBot.cs -Raw
           if($f -notmatch 'MaxDebugBytes = 100L \* 1024 \* 1024'){throw 'fishing debug cap missing'}
+
+      - name: Read-only CLI regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/cli-readonly/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'CLI regressions failed' }

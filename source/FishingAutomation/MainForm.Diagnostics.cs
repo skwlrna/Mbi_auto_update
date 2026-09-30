@@ -26,6 +26,7 @@ public sealed partial class MainForm
                 _sysOcrValue.ForeColor = _sysTelegramValue.ForeColor = _sysUpdateValue.ForeColor = Color.Orange;
             });
 
+            await _cli.StatusAsync();
             bool game = WindowTools.EnumerateVisibleWindows().Count > 0;
             bool templates = TemplatesReady();
             bool input = _fishingBot.InputReady;

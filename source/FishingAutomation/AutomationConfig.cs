@@ -13,6 +13,7 @@ public sealed class Roi
 
 public sealed class AutomationConfig
 {
+    public bool ZeroWingMode { get; set; } = true;
     public string GameProcessName { get; set; } = "MabinogiMobile";
     public string GameWindowTitleContains { get; set; } = "";
     public int ClientWidth { get; set; } = 800;

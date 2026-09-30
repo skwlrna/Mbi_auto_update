@@ -11,6 +11,7 @@ public sealed partial class MainForm : Form
 
     private readonly FishingBot _fishingBot;
     private readonly AppLog _log;
+    private readonly MabinogiMobileCli _cli;
     private readonly TelegramNotifier _notifier;
     private readonly RuntimeErrorUploader _errorUploader;
     private readonly WatchdogClient _watchdog;
@@ -67,6 +68,7 @@ public sealed partial class MainForm : Form
         AutomationConfig cfg = AutomationConfig.Load(Path.Combine(baseDir, "config.json"));
         string runtimeLogPath = Path.Combine(baseDir, cfg.LogFile);
         _log = new AppLog(runtimeLogPath, cfg.LogMaxBytes);
+        _cli = new MabinogiMobileCli(_log, cfg.ZeroWingMode);
         _notifier = new TelegramNotifier(Path.Combine(baseDir, "notification.json"), _log);
         _errorUploader = new RuntimeErrorUploader(_log, runtimeLogPath);
         _watchdog = new WatchdogClient(baseDir);
