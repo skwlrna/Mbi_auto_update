@@ -154,6 +154,7 @@ public sealed partial class MainForm : Form
                 RefreshModeStatus();
                 UpdateStats();
             }
+            UpdateProductionDashboardVisibility();
         };
 
         _dungeonDestination.SelectedIndexChanged += (_, _) =>
@@ -175,7 +176,14 @@ public sealed partial class MainForm : Form
             }
         };
 
-        _uiTimer.Tick += (_, _) => { _watchdog.Touch(); CheckAlertHealth(); CheckAutoStop(); UpdateStats(); };
+        _uiTimer.Tick += (_, _) =>
+        {
+            _watchdog.Touch();
+            CheckAlertHealth();
+            CheckAutoStop();
+            UpdateStats();
+            RefreshProductionDashboard();
+        };
         _uiTimer.Start();
 
         FormClosed += (_, _) =>

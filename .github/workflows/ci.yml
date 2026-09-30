@@ -1,4 +1,4 @@
-name: Check V0.1.92 CLI Guards
+name: Check V0.1.93 Production UI
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.92"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.93"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.92</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.93</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -98,6 +98,19 @@ jobs:
           if($guards -notmatch 'CurrencyChanges'){throw 'currency delta tracking missing'}
           if($g -notmatch 'EnsureCapabilitiesAsync' -or $a -notmatch 'EnsureCapabilitiesAsync'){throw 'mode capability preflight wiring missing'}
           if($g -notmatch 'CliIdentityGuard.CaptureAsync' -or $a -notmatch 'CliIdentityGuard.CaptureAsync'){throw 'mode identity capture wiring missing'}
+
+      - name: Production UI wiring checks
+        shell: pwsh
+        run: |
+          $ui = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
+          foreach($text in @('자동가공','자동 채집','CLI 연결','캐릭터 확인','상세 로그')){
+            if($ui -notmatch [regex]::Escape($text)){throw "production UI text missing: $text"}
+          }
+          $layout = Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw
+          if($layout -notmatch 'new ProductionDashboard\(this\)'){throw 'production dashboard is not attached'}
+          $main = Get-Content source/FishingAutomation/MainForm.cs -Raw
+          if($main -notmatch 'UpdateProductionDashboardVisibility'){throw 'production dashboard mode switch missing'}
+          if($ui -match '정령의 날개'){throw 'production dashboard must not display spirit-wing text'}
 
       - name: Inventory loot regression tests
         shell: pwsh
