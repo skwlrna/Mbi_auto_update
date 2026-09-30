@@ -19,8 +19,6 @@ public sealed partial class MainForm
         _fullView = new Panel { Dock = DockStyle.Fill, BackColor = WindowBg };
         _referenceDashboard = new ReferenceDashboard(this) { Dock = DockStyle.Fill };
         _fullView.Controls.Add(_referenceDashboard);
-        _productionDashboard = new ProductionDashboard(this) { Dock = DockStyle.Fill, Visible = false };
-        _fullView.Controls.Add(_productionDashboard);
         Controls.Add(_fullView);
 
         _miniView = new Panel { Dock = DockStyle.Fill, BackColor = NavBg, Padding = new Padding(12), Visible = false };
@@ -95,8 +93,11 @@ public sealed partial class MainForm
         private readonly Color _line = Color.FromArgb(0, 79, 126);
         private float ScaleX => Math.Max(1, Width) / 1448f;
         private float ScaleY => Math.Max(1, Height) / 1086f;
+        private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";
         private bool ShouldShowAbyssDungeonPicker =>
-            string.Equals(_owner._activeMode ?? _owner._mode.SelectedItem?.ToString(), "어비스", StringComparison.Ordinal);
+            string.Equals(EffectiveMode, "어비스", StringComparison.Ordinal);
+        private bool ShouldShowProductionPage =>
+            EffectiveMode is "가공" or "채집";
 
         public ReferenceDashboard(MainForm owner)
         {
@@ -214,7 +215,7 @@ public sealed partial class MainForm
             AddButton("에러 전송", new(18, 441, 170, 59), owner.ShowErrorUploadSettings, "send", "nav");
             AddButton("인식", new(18, 511, 170, 59), owner.ShowVisualRecognitionTest, "image", "nav");
             AddButton("자동 가공", new(18, 581, 170, 59), () => SelectMode(4), "game", "nav");
-            AddButton("자동채집",new(18,651,170,59),()=>SelectMode(5),"game","nav");
+            AddButton("자동 채집", new(18, 651, 170, 59), () => SelectMode(5), "leaf", "nav");
             AddButton("미니 모드", new(18, 991, 170, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
@@ -285,7 +286,7 @@ public sealed partial class MainForm
         private void ShowModeMenu()
         {
             if (_owner.AnyRunning || _owner._activeMode is not null) return;
-            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집" }, SelectMode, 418, 312);
+            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "자동 가공", "자동 채집" }, SelectMode, 418, 312);
         }
 
         private void ShowDungeonMenu()
@@ -528,10 +529,16 @@ public sealed partial class MainForm
             TextAt(g, "모든 시스템 상태를 확인하고 자동 진행을 준비합니다.", new(319, 169, 440, 31), 18);
             Card(g, new(1054, 151, 312, 54));
 
+            bool production = ShouldShowProductionPage;
             Info(g, new(219, 241, 248, 83), "crosshair", "현재 모드", _owner._currentModeValue.Text, 239);
-            Info(g, new(479, 241, 249, 83), "map", "선택 던전", _owner._currentDungeonValue.Text, 499);
+            Info(g, new(479, 241, 249, 83), production ? "game" : "map", production ? "작업 대상" : "선택 던전", _owner._currentDungeonValue.Text, 499);
             Info(g, new(740, 241, 202, 83), "list", "현재 단계", _owner._currentStepValue.Text, 757);
-            Info(g, new(954, 241, 168, 83), "image", "최근 인식", _owner._recentDetectValue.Text, 973);
+            string fourthValue = production
+                ? (_owner._productionTargetQuantity > 0
+                    ? $"{_owner._productionCurrentQuantity} / {_owner._productionTargetQuantity}"
+                    : "시작 전")
+                : _owner._recentDetectValue.Text;
+            Info(g, new(954, 241, 168, 83), production ? "stats" : "image", production ? "진행 수량" : "최근 인식", fourthValue, 973);
 
             Card(g, new(219, 338, 583, 282));
             Icon(g, "play", new(240, 354, 27, 27), _text);
@@ -581,6 +588,41 @@ public sealed partial class MainForm
                 TextAt(g, status[i].Value.Text, new(1315, y, 95, 37), 14, true, c, StringAlignment.Far);
             }
             TextAt(g, _owner._updateStatusValue.Text, new(1153, 582, 98, 34), 14, false, _owner._updateStatusValue.ForeColor);
+
+            if (ShouldShowProductionPage)
+            {
+                Card(g, new(219, 634, 1212, 305));
+                string modeTitle = EffectiveMode == "가공" ? "자동 가공" : "자동 채집";
+                Icon(g, EffectiveMode == "가공" ? "game" : "leaf", new(240, 650, 29, 29), _cyan);
+                TextAt(g, modeTitle + " 설정 / 상태", new(286, 644, 1089, 39), 21, true, Color.White);
+
+                Card(g, new(239, 694, 563, 218));
+                TextAt(g, "선택 작업", new(260, 708, 130, 31), 16, false, _text);
+                TextAt(g, _owner._productionDisplayName, new(395, 708, 376, 31), 18, true, Color.White);
+                using (var pen = new Pen(Color.FromArgb(11, 53, 81))) g.DrawLine(pen, 260, 747, 780, 747);
+                TextAt(g, "목표 수량", new(260, 756, 130, 31), 16, false, _text);
+                TextAt(g, _owner._productionTargetQuantity > 0 ? _owner._productionTargetQuantity + "개" : "시작 시 설정",
+                    new(395, 756, 376, 31), 18, true, Color.White);
+                using (var pen = new Pen(Color.FromArgb(11, 53, 81))) g.DrawLine(pen, 260, 795, 780, 795);
+                TextAt(g, EffectiveMode == "가공" ? "가공 위치" : "실행 방식", new(260, 804, 130, 31), 16, false, _text);
+                TextAt(g, EffectiveMode == "가공"
+                        ? (_owner._productionFacilityName == "—" ? "시작 시 설정" : _owner._productionFacilityName)
+                        : "CLI 상태 확인 후 자동 진행",
+                    new(395, 804, 376, 31), 17, true, Color.White);
+                TextAt(g, "F9 시작 · F10 정지 · 시작 시 품목과 수량을 설정합니다.",
+                    new(260, 858, 500, 33), 15, false, _text);
+
+                Card(g, new(814, 694, 596, 218));
+                TextAt(g, "실행 정보", new(838, 708, 180, 31), 18, true, Color.White);
+                TextAt(g, "CLI 직접 실행", new(838, 754, 190, 30), 16, false, _text);
+                Dot(g, 1072, 769, 4, _green);
+                TextAt(g, "활성", new(1090, 754, 100, 30), 16, true, _green);
+                TextAt(g, "캐릭터 문맥 확인", new(838, 795, 190, 30), 16, false, _text);
+                Dot(g, 1072, 810, 4, _green);
+                TextAt(g, "실행 전·후 확인", new(1090, 795, 180, 30), 16, true, _green);
+                TextAt(g, "재화 변화", new(838, 836, 190, 30), 16, false, _text);
+                TextAt(g, "상세 로그에서 확인", new(1090, 836, 205, 30), 16, true, _cyan);
+            }
 
             if (ShouldShowAbyssDungeonPicker)
             {
