@@ -1,6 +1,6 @@
 # Local automatic gathering
 
-Based on V0.1.86, isolated from the other chat’s altering fixes. Do not push or publish without a new user request.
+V0.1.89 integrates GitHub V0.1.88 altering fixes and gathering. Publication authorized by the user.
 
 Implemented: free CLI reads, strict activity/weight/catalog validation, additional inventory quantity target, tool/capacity checks, safe cancellation and confirmed stop. All CLI actions remain blocked, including execute_gathering and stop_action.
 

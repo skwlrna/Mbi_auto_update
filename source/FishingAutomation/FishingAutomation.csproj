@@ -10,9 +10,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>0.1.88</Version>
-    <AssemblyVersion>0.1.88.0</AssemblyVersion>
-    <FileVersion>0.1.88.0</FileVersion>
+    <Version>0.1.89</Version>
+    <AssemblyVersion>0.1.89.0</AssemblyVersion>
+    <FileVersion>0.1.89.0</FileVersion>
     <RunAnalyzers>false</RunAnalyzers>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
