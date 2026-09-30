@@ -24,6 +24,7 @@ public sealed partial class MainForm
             if (_cancelStart || IsDisposed) return;
             var screen = new AlteringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "altering"));
             var automation = new AlteringAutomation(data, screen);
+            screen.Log += text => Ui(() => _log.Write(text));
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
             _activeMode = "가공"; _mode.Enabled = false;
