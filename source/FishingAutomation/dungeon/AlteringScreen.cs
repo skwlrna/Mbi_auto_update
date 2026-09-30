@@ -13,6 +13,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle Header = new(0, 15, 450, 110);
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
+    private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     internal string InputMode => _input.ModeName;
     internal event Action<string>? Log;
 
@@ -43,6 +44,20 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
         => _ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
+
+    private async Task<bool> HasCollectPromptAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
+    {
+        if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+            return false;
+
+        if (await FindAsync(frame, CollectButton, "모두 받기", ct) is not null)
+            return true;
+
+        // The button label is much larger and more stable than the tiny Space badge,
+        // but keep the compact OCR path as a fallback for anti-aliased UI text.
+        var compact = await _ocr.FindCompactLabelAsync(frame, CollectButton, "모두 받기", ct);
+        return compact.Found;
+    }
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
@@ -235,14 +250,18 @@ internal sealed class AlteringScreen : IAlteringScreen
     public async Task CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         await EnterFacilityAsync(plan, ct);
-        // The provided facility view advertises Space for collecting all completed work.
+
+        // Confirm the stable large facility title plus the visible "모두 받기" button.
+        // Do not gate collection on the tiny Space badge; it is only a keyboard hint
+        // and proved unreliable in the live V0.1.88 failure screenshot.
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
-            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null ||
-                await FindAsync(frame, new(0, 260, 170, 110), "Space", ct) is null)
-                Fail(frame, "완료 작업 수령 단축키 Space를 확인하지 못했습니다.");
+            if (!await HasCollectPromptAsync(frame, plan, ct))
+                Fail(frame, "완료 작업 수령 화면(시설 제목 + 모두 받기)을 확인하지 못했습니다.");
             if (pass == 0) { await Task.Delay(180, ct); continue; }
+
+            Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + 모두 받기 · 1차 입력");
             _input.TapScanCode(0x39);
         }
         await Task.Delay(550, ct);
@@ -250,30 +269,27 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     public async Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
     {
-        // First Space may only start automatic travel. Do not navigate or press K while
-        // the character is moving. Wait passively for the same facility + Space prompt
-        // to reappear, verify it on a fresh frame, then press Space exactly once.
+        // First input may only start automatic travel. Do not navigate or press K while
+        // the character is moving. Wait passively for the same facility title plus
+        // "모두 받기" button to reappear, verify both on a fresh frame, then press Space once.
         for (int i = 1; i <= 45; i++)
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(500, ct);
             using var frame = Capture(ct);
-            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null) continue;
-            if (await FindAsync(frame, new(0, 260, 170, 110), "Space", ct) is null) continue;
+            if (!await HasCollectPromptAsync(frame, plan, ct)) continue;
 
             await Task.Delay(180, ct);
             using var fresh = Capture(ct);
-            if (await FindFacilityHeaderAsync(fresh, plan.ScreenTitle, ct) is null ||
-                await FindAsync(fresh, new(0, 260, 170, 110), "Space", ct) is null)
-                continue;
+            if (!await HasCollectPromptAsync(fresh, plan, ct)) continue;
 
-            Log?.Invoke($"[자동 가공] 가공대 도착 확인 · 모두 받기 2차 입력");
+            Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + 모두 받기 · 2차 입력");
             _input.TapScanCode(0x39);
             await Task.Delay(700, ct);
             return true;
         }
 
-        Log?.Invoke("[자동 가공] 가공대 도착 후 모두 받기 화면을 제한 시간 안에 확인하지 못했습니다.");
+        Log?.Invoke("[자동 가공] 가공대 도착 후 시설 제목 + 모두 받기 화면을 제한 시간 안에 확인하지 못했습니다.");
         return false;
     }
     private void Fail(Bitmap frame, string message)
