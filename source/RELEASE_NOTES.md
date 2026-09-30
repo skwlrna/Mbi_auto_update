@@ -1,13 +1,27 @@
-# Mabi Auto V0.1.91
+# Mabi Auto V0.1.92
 
-자동채집과 자동가공의 실행 경로를 업로드된 mobi-Support의 게임 CLI 방식에 맞춰 변경했습니다.
+V0.1.91의 직접 CLI 자동채집·자동가공에 mobi-Support에서 사용하던 세 가지 검증 계층을 추가했습니다.
 
-자동채집은 화면 OCR이나 좌표 이동 대신 `execute_gathering`을 직접 호출합니다. 대상 이름은 UTF-8 JSON `{"displayName":"..."}`을 Base64로 인코딩해 CLI의 단일 `base64:` 인자로 전달합니다. 진행 상태와 실제 증가 수량은 기존처럼 `get_activity`, `get_items`, `get_inventory`, `get_gatherable_items`로 확인하며 목표에 도달하거나 F10으로 중단하면 `stop_action`으로 정지합니다.
+## 1. capabilities 사전검사
 
-자동가공은 품목 등록을 `execute_altering`, 완료 작업 수령을 `complete_altering_work`으로 처리합니다. 화면의 시설명, 모두 받기, Space, 좌표 클릭은 자동가공 실행 조건에서 제거했습니다. 등록 뒤에는 `get_altering_works`로 실제 작업 증가를 확인하고, 완료 수령 뒤에는 대기열 감소와 `get_items` 결과로 실제 수령을 다시 검증합니다. 결과가 불확실한 경우 같은 유료 실행을 자동 재시도하지 않습니다.
+자동채집/자동가공 시작 시 먼저 `status`와 `capabilities`를 조회합니다. 현재 게임 CLI가 해당 모드에 필요한 조회·실행 명령을 모두 제공하는지 확인하고, 하나라도 빠져 있으면 실행하지 않습니다.
 
-게임 CLI는 같은 DisplayName의 가공 제법이 여러 개일 때 첫 번째 항목을 실행하므로, CLI 자동가공에서는 같은 이름의 첫 번째 제법만 선택할 수 있게 제한했습니다.
+`commands[].Command`와 `commands[].Metadata.requiresConfirm`을 읽으며, CLI 응답의 `body`가 JSON 문자열 형태로 전달되는 경우에도 내부 JSON을 다시 파싱합니다.
 
-기존 자동채집의 "정령의 날개 0개" 보장은 제거했습니다. `execute_gathering`의 실제 이동·비용 처리는 게임 CLI의 규칙을 따르며, 프로그램은 0개 사용을 거짓으로 표시하지 않습니다. 자동가공은 기존과 동일하게 작업 등록당 정령의 날개 5개를 비용 상한으로 예약하고 중복 실행을 방지합니다.
+## 2. get_my_info 캐릭터 문맥 고정
 
-던전, 낚시, Interception 입력, 어비스 전리품 판정과 자동 업데이트 구조는 변경하지 않았습니다.
+설정창에서 시작을 확정한 직후 `get_my_info`를 읽어 캐릭터/계정/서버 문맥의 기준을 저장합니다.
+
+이후 `execute_gathering`, `stop_action`, `execute_altering`, `complete_altering_work` 실행 직전과 직후에 다시 `get_my_info`를 조회합니다. 기준으로 확보한 CharacterId, CharacterName, AccountCode, RealmName 계열 필드 중 하나라도 바뀌면 추가 CLI 실행을 중단합니다.
+
+게임 CLI가 제공하는 필드 수에 따라 비교 강도는 달라질 수 있으며, 로그에는 실제 식별자 값 대신 비교 가능한 필드 수와 검증 강도만 기록합니다.
+
+## 3. get_currencies 실제 재화 변화 추적
+
+비용이나 보상이 발생할 수 있는 CLI 명령 전후에 `get_currencies`를 조회합니다. DisplayName별 Amount를 비교해 실제로 달라진 재화만 로그에 기록합니다.
+
+예: `정령의 날개 100→95 (-5)`
+
+따라서 자동채집의 `execute_gathering` 시작 시 실제 재화가 감소하는지 확인할 수 있고, 자동가공도 프로그램의 예상 비용과 실제 CLI 재화 변화를 비교할 수 있습니다.
+
+던전, 낚시, 어비스, Interception 입력, 전리품 판정과 기존 자동업데이트 구조는 변경하지 않았습니다.
