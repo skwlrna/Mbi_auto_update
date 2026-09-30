@@ -1,10 +1,5 @@
 namespace FishingAutomation;
 
-internal interface IDirectCliAlteringScreen
-{
-    Task CompleteAsync(string displayName, CancellationToken ct);
-}
-
 internal sealed class AlteringCliScreen : IAlteringScreen, IDirectCliAlteringScreen
 {
     private readonly MabinogiMobileCli _cli;
