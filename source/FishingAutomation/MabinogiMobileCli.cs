@@ -25,6 +25,7 @@ public sealed class MabinogiMobileCli
     private readonly AppLog _log;
     private readonly Func<string, string?, CancellationToken, Task<CliProcessOutput>> _run;
     private readonly SemaphoreSlim _serial = new(1, 1);
+    private int _ownedFishing;
     public bool ZeroWingMode { get; }
 
     public MabinogiMobileCli(AppLog log, bool zeroWingMode = true)
@@ -102,8 +103,36 @@ public sealed class MabinogiMobileCli
         CancellationToken token = default)
         => ActionAsync("execute_altering", displayName, allowConfirmedCost, token);
 
-    public Task<MabinogiCliResult> ExecuteGatheringAsync(string displayName, CancellationToken token = default)
-        => ActionAsync("execute_gathering", displayName, allowConfirmationRequired: !ZeroWingMode, token);
+    public async Task<MabinogiCliResult> ExecuteGatheringAsync(string displayName, CancellationToken token = default)
+    {
+        var result = await ActionAsync("execute_gathering", displayName,
+            allowConfirmationRequired: !ZeroWingMode, token).ConfigureAwait(false);
+        if (result.Success && result.Data is JsonElement data && data.ValueKind == JsonValueKind.Object &&
+            TryProperty(data, "result", out var state) && state.ValueKind == JsonValueKind.String &&
+            state.GetString()?.Equals("started", StringComparison.OrdinalIgnoreCase) == true)
+            Interlocked.Exchange(ref _ownedFishing, 1);
+        return result;
+    }
+
+    public async Task<MabinogiCliResult> StopOwnedFishingAsync(CancellationToken token = default)
+    {
+        const string command = "stop_action";
+        if (Interlocked.CompareExchange(ref _ownedFishing, 0, 0) == 0)
+            return Finish(new(command, false, "blocked", null, null, "action_not_owned"));
+
+        try
+        {
+            _ = await ActionRequiresConfirmAsync(command, token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException)
+        {
+            return Finish(new(command, false, "blocked", null, null, "capability_unavailable"));
+        }
+
+        var result = await RequestAsync(command, null, token).ConfigureAwait(false);
+        if (result.Success) Interlocked.Exchange(ref _ownedFishing, 0);
+        return result;
+    }
 
     public async Task<MabinogiCliResult> QueryAsync(string command, CancellationToken token = default)
     {
@@ -276,5 +305,5 @@ public sealed class MabinogiMobileCli
             or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
 
     private static bool IsAllowedAction(string command)
-        => command is "execute_gathering" or "execute_altering" or "complete_altering_work";
+        => command is "execute_gathering" or "execute_altering" or "complete_altering_work" or "stop_action";
 }
