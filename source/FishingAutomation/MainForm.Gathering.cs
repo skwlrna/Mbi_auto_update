@@ -17,13 +17,8 @@ public sealed partial class MainForm
             if (_cancelStart || IsDisposed) return;
             using var dialog = new GatheringSettingsDialog(catalog,recipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not GatheringPlan plan || _cancelStart) return;
-            var windows = WindowTools.EnumerateVisibleWindows();
-            if (windows.Count != 1) throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
-            var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
-            WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
-            await Task.Delay(500);
             if (_cancelStart || IsDisposed) return;
-            var screen = new GatheringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"),_cli,data);
+            var screen = new GatheringCliScreen(_cli);
             var automation = new GatheringAutomation(data, screen);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
