@@ -57,6 +57,9 @@ public sealed class MabinogiMobileCli
     public Task<MabinogiCliResult> GetAlteringWorksAsync(CancellationToken token = default) => QueryAsync("get_altering_works", token);
     public Task<MabinogiCliResult> GetGatherableItemsAsync(CancellationToken token = default) => QueryAsync("get_gatherable_items", token);
     public Task<MabinogiCliResult> GetInventoryAsync(CancellationToken token = default) => QueryAsync("get_inventory", token);
+    public Task<MabinogiCliResult> CapabilitiesAsync(CancellationToken token = default) => QueryAsync("capabilities", token);
+    public Task<MabinogiCliResult> GetMyInfoAsync(CancellationToken token = default) => QueryAsync("get_my_info", token);
+    public Task<MabinogiCliResult> GetCurrenciesAsync(CancellationToken token = default) => QueryAsync("get_currencies", token);
     public Task<MabinogiCliResult> ExecuteGatheringAsync(string displayName, CancellationToken token = default)
         => ActionAsync("execute_gathering", displayName, token);
     public Task<MabinogiCliResult> ExecuteAlteringAsync(string displayName, CancellationToken token = default)
@@ -153,28 +156,39 @@ public sealed class MabinogiMobileCli
                 null, output.ExitCode, "invalid_json");
         }
 
-        string? pipe = Text(root, "pipe");
-        string? reason = Text(root, "reason");
         string? status = Text(root, "status");
-        string? error = Text(root, "error");
         JsonElement body = Property(root, "body") ?? root;
-        reason ??= Text(body, "reason");
-        error ??= Text(body, "error");
+        if (body.ValueKind == JsonValueKind.String)
+        {
+            string? text = body.GetString();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                try
+                {
+                    using var bodyDoc = JsonDocument.Parse(text);
+                    body = bodyDoc.RootElement.Clone();
+                }
+                catch (JsonException) { }
+            }
+        }
+        string? pipe = Text(body, "pipe") ?? Text(root, "pipe");
+        string? reason = Text(body, "reason") ?? Text(root, "reason");
+        string? error = Text(body, "error") ?? Text(root, "error");
         status ??= Text(body, "status");
         if (reason is "game_off" or "option_off" || error is "game_off" or "option_off")
-            return new(command, false, reason is "game_off" or "option_off" ? reason : error!, root, output.ExitCode, error ?? reason);
+            return new(command, false, reason is "game_off" or "option_off" ? reason : error!, body.Clone(), output.ExitCode, error ?? reason);
         if (output.ExitCode == 5 || pipe == "disconnected" || status == "disconnected" || error == "disconnected")
-            return new(command, false, "disconnected", root, output.ExitCode, "disconnected");
+            return new(command, false, "disconnected", body.Clone(), output.ExitCode, "disconnected");
         if (output.ExitCode != 0 || status is "rejected" or "error" or "failed" || error is not null)
-            return new(command, false, "error", root, output.ExitCode, "cli_rejected");
+            return new(command, false, "error", body.Clone(), output.ExitCode, "cli_rejected");
 
         bool valid = command switch
         {
             "status" => pipe == "connected",
-            "get_items" => body.ValueKind == JsonValueKind.Array,
+            "get_items" or "get_currencies" => body.ValueKind == JsonValueKind.Array,
             _ => body.ValueKind == JsonValueKind.Object
         };
-        return new(command, valid, valid ? "connected" : "error", root, output.ExitCode,
+        return new(command, valid, valid ? "connected" : "error", body.Clone(), output.ExitCode,
             valid ? null : "unexpected_response");
     }
 
@@ -246,7 +260,8 @@ public sealed class MabinogiMobileCli
     }
 
     private static bool IsAllowedQuery(string command)
-        => command is "status" or "get_items" or "get_activity" or "get_current_environment"
+        => command is "status" or "capabilities" or "get_my_info" or "get_currencies"
+            or "get_items" or "get_activity" or "get_current_environment"
             or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
 
     private static bool IsAllowedAction(string command)
