@@ -13,16 +13,14 @@ public sealed partial class MainForm
         {
             var data = new AlteringCliData(_cli);
             var recipes = await data.RecipesAsync(CancellationToken.None);
+            // execute_altering resolves duplicate display names to the first CLI row.
+            // Only expose that exact row in direct-CLI mode so a later duplicate cannot be selected accidentally.
+            var cliRecipes = recipes.GroupBy(x => x.DisplayName, StringComparer.Ordinal).Select(g => g.First()).ToArray();
             if (_cancelStart || IsDisposed) return;
-            using var dialog = new AlteringSettingsDialog(recipes);
+            using var dialog = new AlteringSettingsDialog(cliRecipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not AlteringPlan plan || _cancelStart) return;
-            var windows = WindowTools.EnumerateVisibleWindows();
-            if (windows.Count != 1) throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
-            var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
-            WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
-            await Task.Delay(500);
             if (_cancelStart || IsDisposed) return;
-            var screen = new AlteringScreen(windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "altering"));
+            var screen = new AlteringCliScreen(_cli);
             var automation = new AlteringAutomation(data, screen);
             screen.Log += text => Ui(() => _log.Write(text));
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
