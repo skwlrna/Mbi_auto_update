@@ -19,6 +19,8 @@ public sealed partial class MainForm
         _fullView = new Panel { Dock = DockStyle.Fill, BackColor = WindowBg };
         _referenceDashboard = new ReferenceDashboard(this) { Dock = DockStyle.Fill };
         _fullView.Controls.Add(_referenceDashboard);
+        _productionDashboard = new ProductionDashboard(this) { Dock = DockStyle.Fill, Visible = false };
+        _fullView.Controls.Add(_productionDashboard);
         Controls.Add(_fullView);
 
         _miniView = new Panel { Dock = DockStyle.Fill, BackColor = NavBg, Padding = new Padding(12), Visible = false };
