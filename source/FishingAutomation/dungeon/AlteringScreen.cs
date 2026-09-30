@@ -55,12 +55,12 @@ internal sealed class AlteringScreen : IAlteringScreen
         // Two observations; the second one alone supplies the input coordinates.
         using (var first = Capture(ct))
         {
-            if (header is not null && await FindAsync(first, Header, header, ct) is null) return false;
+            if (header is not null && await FindFacilityHeaderAsync(first, header, ct) is null) return false;
             if (await FindAsync(first, roi, text, ct, facilityTitle) is null) return false;
         }
         await Task.Delay(180, ct);
         using var second = Capture(ct);
-        if (header is not null && await FindAsync(second, Header, header, ct) is null) return false;
+        if (header is not null && await FindFacilityHeaderAsync(second, header, ct) is null) return false;
         var found = await FindAsync(second, roi, text, ct, facilityTitle);
         if (found is null) return false;
         _input.ClickClientPoint(_hwnd, found.Value.Center);
