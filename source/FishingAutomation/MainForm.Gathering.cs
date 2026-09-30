@@ -29,6 +29,11 @@ public sealed partial class MainForm
             using var dialog = new GatheringSettingsDialog(catalog,recipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not GatheringPlan plan || _cancelStart) return;
             if (_cancelStart || IsDisposed) return;
+            _productionDisplayName = plan.DisplayName;
+            _productionTargetQuantity = plan.TargetQuantity;
+            _productionCurrentQuantity = 0;
+            _productionFacilityName = "자동 채집 경로";
+            RefreshProductionDashboard();
             var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
             _log.Write("[자동채집] 캐릭터 문맥 저장 · " + identity.Description);
             var screen = new GatheringCliScreen(_cli, identity);
@@ -44,8 +49,12 @@ public sealed partial class MainForm
             screen.Log += text=>Ui(()=>_log.Write(text));
             automation.Log += text => Ui(() =>
             {
-                _log.Write(text); _dungeonCycles = checked((int)Math.Min(automation.Gained,int.MaxValue));
-                SetStatus(text.Replace("[자동채집] ", ""), Blue); UpdateStats();
+                _log.Write(text);
+                _dungeonCycles = checked((int)Math.Min(automation.Gained,int.MaxValue));
+                _productionCurrentQuantity = automation.Gained;
+                SetStatus(text.Replace("[자동채집] ", ""), Blue);
+                UpdateStats();
+                RefreshProductionDashboard();
             });
             _log.Write("[자동채집] 시작(F9) · " + _gatheringDisplay);
             _dungeonTask = Task.Run(async () =>
@@ -55,7 +64,13 @@ public sealed partial class MainForm
                     try
                     {
                         await automation.RunAsync(plan, token);
-                        Ui(() => { _dungeonCompleted = checked((int)Math.Min(automation.Gained,int.MaxValue)); _log.Write("[자동채집] 목표 작업 완료"); });
+                        Ui(() =>
+                        {
+                            _dungeonCompleted = checked((int)Math.Min(automation.Gained,int.MaxValue));
+                            _productionCurrentQuantity = automation.Gained;
+                            _log.Write("[자동채집] 목표 작업 완료");
+                            RefreshProductionDashboard();
+                        });
                     }
                     catch (OperationCanceledException)
                     { Ui(() => _log.Write("[자동채집] 정지되었습니다. 게임의 채집/이동 정지 여부를 확인하세요.")); }
