@@ -30,7 +30,13 @@ internal sealed class GatheringCliActions : IGatheringScreen, IDirectGatheringAc
         if (result.Data is JsonElement data && data.ValueKind == JsonValueKind.Object &&
             data.TryGetProperty("result", out var state) && state.ValueKind == JsonValueKind.String &&
             state.GetString()?.Equals("started", StringComparison.OrdinalIgnoreCase) == true)
-            throw new InvalidOperationException("CLI가 지속형 채집(낚시) 시작 상태를 반환했습니다. 일반 자동채집에서는 실행을 계속하지 않습니다.");
+        {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var stopped = await _cli.StopOwnedFishingAsync(cleanup.Token).ConfigureAwait(false);
+            throw new InvalidOperationException(stopped.Success
+                ? "CLI가 지속형 낚시를 시작해 stop_action으로 즉시 정리했습니다. 일반 자동채집에서는 낚시를 지원하지 않습니다."
+                : "CLI가 지속형 낚시를 시작했지만 stop_action 확인에 실패했습니다. 게임에서 낚시 상태를 확인하세요.");
+        }
     }
 
     // Existing interface compatibility. Direct mode uses ExecuteOnceAsync from
