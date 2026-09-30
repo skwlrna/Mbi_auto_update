@@ -1,4 +1,4 @@
-name: Check V0.1.90 Automatic Altering
+name: Check V0.1.91 Direct CLI Automation
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.90"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.91"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.90</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.91</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -72,6 +72,21 @@ jobs:
         run: |
           dotnet run --project tests/cli-readonly/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'CLI regressions failed' }
+
+      - name: Direct CLI action wiring checks
+        shell: pwsh
+        run: |
+          $cli = Get-Content source/FishingAutomation/MabinogiMobileCli.cs -Raw
+          foreach($command in @('execute_gathering','execute_altering','complete_altering_work','stop_action')){
+            if($cli -notmatch $command){throw "missing CLI action: $command"}
+          }
+          if($cli -notmatch '"base64:"'){throw 'base64 CLI action body missing'}
+          $g = Get-Content source/FishingAutomation/MainForm.Gathering.cs -Raw
+          if($g -notmatch 'new GatheringCliScreen\(_cli\)'){throw 'gathering is not wired to CLI screen'}
+          $a = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
+          if($a -notmatch 'new AlteringCliScreen\(_cli\)'){throw 'altering is not wired to CLI screen'}
+          if($g -match 'new GatheringScreen\('){throw 'gathering still instantiates OCR screen'}
+          if($a -match 'new AlteringScreen\('){throw 'altering still instantiates OCR screen'}
 
       - name: Inventory loot regression tests
         shell: pwsh
