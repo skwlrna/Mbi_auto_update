@@ -238,6 +238,35 @@ internal sealed class AlteringScreen : IAlteringScreen
         }
         await Task.Delay(550, ct);
     }
+
+    public async Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        // First Space may only start automatic travel. Do not navigate or press K while
+        // the character is moving. Wait passively for the same facility + Space prompt
+        // to reappear, verify it on a fresh frame, then press Space exactly once.
+        for (int i = 1; i <= 45; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(500, ct);
+            using var frame = Capture(ct);
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null) continue;
+            if (await FindAsync(frame, new(0, 260, 170, 110), "Space", ct) is null) continue;
+
+            await Task.Delay(180, ct);
+            using var fresh = Capture(ct);
+            if (await FindFacilityHeaderAsync(fresh, plan.ScreenTitle, ct) is null ||
+                await FindAsync(fresh, new(0, 260, 170, 110), "Space", ct) is null)
+                continue;
+
+            Log?.Invoke($"[자동 가공] 가공대 도착 확인 · 모두 받기 2차 입력");
+            _input.TapScanCode(0x39);
+            await Task.Delay(700, ct);
+            return true;
+        }
+
+        Log?.Invoke("[자동 가공] 가공대 도착 후 모두 받기 화면을 제한 시간 안에 확인하지 못했습니다.");
+        return false;
+    }
     private void Fail(Bitmap frame, string message)
     {
         Directory.CreateDirectory(_debugDir);
