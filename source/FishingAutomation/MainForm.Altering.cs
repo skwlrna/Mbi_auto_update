@@ -11,6 +11,17 @@ public sealed partial class MainForm
         _starting = true; _cancelStart = false;
         try
         {
+            string[] requiredCommands =
+            {
+                "get_my_info", "get_currencies", "get_alterable_items", "get_altering_works",
+                "get_items", "execute_altering", "complete_altering_work"
+            };
+            var capabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(_cli, requiredCommands, CancellationToken.None);
+            var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
+            _log.Write("[자동 가공] CLI capabilities 확인 완료 · 필수 명령 " + requiredCommands.Length + "개");
+            if (confirmCommands.Length > 0)
+                _log.Write("[자동 가공] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 설정창 시작 확인을 사용자 승인으로 사용합니다.");
+
             var data = new AlteringCliData(_cli);
             var recipes = await data.RecipesAsync(CancellationToken.None);
             // execute_altering resolves duplicate display names to the first CLI row.
@@ -20,7 +31,9 @@ public sealed partial class MainForm
             using var dialog = new AlteringSettingsDialog(cliRecipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not AlteringPlan plan || _cancelStart) return;
             if (_cancelStart || IsDisposed) return;
-            var screen = new AlteringCliScreen(_cli);
+            var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
+            _log.Write("[자동 가공] 캐릭터 문맥 저장 · " + identity.Description);
+            var screen = new AlteringCliScreen(_cli, identity);
             var automation = new AlteringAutomation(data, screen);
             screen.Log += text => Ui(() => _log.Write(text));
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();

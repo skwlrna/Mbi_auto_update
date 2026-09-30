@@ -1,4 +1,4 @@
-name: Check V0.1.91 Direct CLI Automation
+name: Check V0.1.92 CLI Guards
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.91"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.92"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.91</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.92</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -82,13 +82,22 @@ jobs:
           }
           if($cli -notmatch '"base64:"'){throw 'base64 CLI action body missing'}
           $g = Get-Content source/FishingAutomation/MainForm.Gathering.cs -Raw
-          if($g -notmatch 'new GatheringCliScreen\(_cli\)'){throw 'gathering is not wired to CLI screen'}
+          if($g -notmatch 'new GatheringCliScreen\(_cli, identity\)'){throw 'gathering is not wired to CLI screen'}
           $a = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
-          if($a -notmatch 'new AlteringCliScreen\(_cli\)'){throw 'altering is not wired to CLI screen'}
+          if($a -notmatch 'new AlteringCliScreen\(_cli, identity\)'){throw 'altering is not wired to CLI screen'}
           if($g -match 'new GatheringScreen\('){throw 'gathering still instantiates OCR screen'}
           if($a -match 'new AlteringScreen\('){throw 'altering still instantiates OCR screen'}
           $gs = Get-Content source/FishingAutomation/GatheringSettingsDialog.cs -Raw
           if($gs -match '날개 사용 0개'){throw 'obsolete zero-wing guarantee remains in gathering UI'}
+          foreach($command in @('capabilities','get_my_info','get_currencies')){
+            if($cli -notmatch $command){throw "missing CLI guard query: $command"}
+          }
+          $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
+          if($guards -notmatch 'EnsureCapabilitiesAsync'){throw 'capability preflight missing'}
+          if($guards -notmatch 'CliIdentityGuard'){throw 'identity guard missing'}
+          if($guards -notmatch 'CurrencyChanges'){throw 'currency delta tracking missing'}
+          if($g -notmatch 'EnsureCapabilitiesAsync' -or $a -notmatch 'EnsureCapabilitiesAsync'){throw 'mode capability preflight wiring missing'}
+          if($g -notmatch 'CliIdentityGuard.CaptureAsync' -or $a -notmatch 'CliIdentityGuard.CaptureAsync'){throw 'mode identity capture wiring missing'}
 
       - name: Inventory loot regression tests
         shell: pwsh

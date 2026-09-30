@@ -11,6 +11,17 @@ public sealed partial class MainForm
         _starting = true; _cancelStart = false;
         try
         {
+            string[] requiredCommands =
+            {
+                "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",
+                "get_inventory", "get_items", "execute_gathering", "stop_action"
+            };
+            var capabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(_cli, requiredCommands, CancellationToken.None);
+            var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
+            _log.Write("[자동채집] CLI capabilities 확인 완료 · 필수 명령 " + requiredCommands.Length + "개");
+            if (confirmCommands.Length > 0)
+                _log.Write("[자동채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 설정창 시작 확인을 사용자 승인으로 사용합니다.");
+
             var data = new GatheringCliData(_cli);
             var catalog=await data.CatalogAsync(CancellationToken.None);
             var recipes=AlteringQueries.ParseRecipes(await _cli.GetAlterableItemsAsync());
@@ -18,7 +29,9 @@ public sealed partial class MainForm
             using var dialog = new GatheringSettingsDialog(catalog,recipes);
             if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not GatheringPlan plan || _cancelStart) return;
             if (_cancelStart || IsDisposed) return;
-            var screen = new GatheringCliScreen(_cli);
+            var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
+            _log.Write("[자동채집] 캐릭터 문맥 저장 · " + identity.Description);
+            var screen = new GatheringCliScreen(_cli, identity);
             var automation = new GatheringAutomation(data, screen);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
