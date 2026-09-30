@@ -203,6 +203,9 @@ internal sealed class AlteringAutomation
             await _delay(TimeSpan.FromSeconds(2), ct);
         }
 
+        if (_screen is AlteringCliActions)
+            throw new InvalidOperationException("CLI 완료 작업 수령 명령 후 작업 감소를 확인하지 못했습니다. 상태 변경 명령을 재전송하지 않고 정지합니다.");
+
         Log?.Invoke($"[자동 가공] 1차 모두 받기는 이동으로 확인됨 · 가공대 도착 후 2차 모두 받기 대기");
         if (!await _screen.CollectAfterTravelAsync(plan, ct))
             throw new InvalidOperationException("가공대 도착 후 2차 모두 받기 화면을 확인하지 못했습니다. 추가 입력 없이 정지합니다.");
