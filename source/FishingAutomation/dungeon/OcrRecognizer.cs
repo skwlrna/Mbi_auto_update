@@ -42,6 +42,21 @@ internal sealed class OcrRecognizer
         return await FindAlteringLabelsAsync(frame, new(20, 140, 760, 660), title, ct, acceptedBounds: area);
     }
 
+    internal async Task<DetectionResult?> FindAlteringFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
+    {
+        // Facility views use a fixed large title at the top-left. Keep this ROI tight so
+        // currency text and the help icon cannot make the exact line ambiguous.
+        var roi = new Rectangle(42, 24, 220, 72);
+        var exact = await FindAlteringLabelsAsync(frame, roi, title, ct);
+        if (exact.Count == 1) return exact[0];
+
+        // Windows OCR occasionally misreads one Hangul syllable on the dark facility
+        // header. A one-edit fallback is safe here because the ROI contains only the
+        // already-selected facility title and no paid action is taken from this result.
+        var fuzzy = await FindTextAsync(frame, roi, title, 1, retry2x: true, ct: ct);
+        return fuzzy.Found ? fuzzy : null;
+    }
+
     // Exact recipe matching must retain '+' and ingredient suffixes.
     internal async Task<IReadOnlyList<DetectionResult>> FindAlteringLabelsAsync(Bitmap frame, Rectangle roi, string wanted, CancellationToken ct, bool cardCandidate = false, Rectangle? acceptedBounds = null, bool dimText = false)
     {

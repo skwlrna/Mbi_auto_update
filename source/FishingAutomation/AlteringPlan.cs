@@ -54,6 +54,7 @@ internal interface IAlteringScreen : IDisposable
 {
     Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct);
     Task CollectAsync(AlteringPlan plan, CancellationToken ct);
+    Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct);
 }
 
 internal interface IAlteringData
@@ -183,12 +184,34 @@ internal sealed class AlteringAutomation
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
         int totalBefore = works.Count(x => x.FacilityName == plan.FacilityName);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 {count}건 수령 시작");
+
+        // In the live client the first '모두 받기' can start automatic travel to the
+        // processing bench instead of collecting immediately. Press once, then prove
+        // through the read-only CLI whether the queue actually shrank before allowing
+        // a second input.
         await _screen.CollectAsync(plan, ct);
+        for (int i = 0; i < 4; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            int current = (await _data.WorksAsync(ct)).Count(x => x.FacilityName == plan.FacilityName);
+            if (current < totalBefore)
+            {
+                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 1차 모두 받기");
+                return true;
+            }
+            await _delay(TimeSpan.FromSeconds(2), ct);
+        }
+
+        Log?.Invoke($"[자동 가공] 1차 모두 받기는 이동으로 확인됨 · 가공대 도착 후 2차 모두 받기 대기");
+        if (!await _screen.CollectAfterTravelAsync(plan, ct))
+            throw new InvalidOperationException("가공대 도착 후 2차 모두 받기 화면을 확인하지 못했습니다. 추가 입력 없이 정지합니다.");
+
         // Another queued work may finish during collection. Total queue shrinkage is
         // the receipt signal; completedCount alone can stay unchanged or increase.
         await VerifyAsync(async token => (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
-            "완료 작업 수령을 확인하지 못했습니다. 반복 클릭 없이 정지합니다.", ct);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인");
+            "2차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 클릭 없이 정지합니다.", ct);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 2차 모두 받기");
         return true;
     }
 
