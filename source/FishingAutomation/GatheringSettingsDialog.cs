@@ -21,7 +21,7 @@ internal sealed class GatheringSettingsDialog : Form
         _ = recipes; // Kept in the signature for compatibility with existing callers.
         _choices = catalog.Select(x => new Choice(x)).ToArray();
 
-        Text = "자동채집 설정";
+        Text = "자동 채집 설정";
         ClientSize = new(650, 360);
         StartPosition = FormStartPosition.CenterParent;
         Font = new("맑은 고딕", 10);
