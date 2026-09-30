@@ -53,7 +53,7 @@ jobs:
       - name: Inventory loot regression tests
         shell: pwsh
         run: |
-          dotnet run --project tests/automatic-altering/Regression.csproj -c Release
+          dotnet run --project tests/inventory-loot/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Inventory loot regressions failed' }
       - name: Automatic altering regression tests
         shell: pwsh
