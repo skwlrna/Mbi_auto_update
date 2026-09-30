@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 
 namespace FishingAutomation;
 
@@ -155,7 +156,8 @@ public sealed class MabinogiMobileCli
         if (requiresConfirm && !allowConfirmationRequired)
             return Finish(new(command, false, "blocked", null, null, "confirmation_required"));
 
-        string body = JsonSerializer.Serialize(new { displayName });
+        string body = JsonSerializer.Serialize(new { displayName },
+            new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         return await RequestAsync(command, BodyArgument(body), token).ConfigureAwait(false);
     }
 
