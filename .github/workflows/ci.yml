@@ -109,6 +109,8 @@ jobs:
           foreach($text in @('자동 가공','자동 채집','작업 대상','진행 수량')){
             if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
           }
+          if($layout -notmatch 'AddButton\("자동 가공",[\s\S]*?SelectMode\(4\)'){throw 'home to automatic altering one-click route missing'}
+          if($layout -notmatch 'AddButton\("자동 채집",[\s\S]*?SelectMode\(5\)'){throw 'home to automatic gathering one-click route missing'}
           if($layout -match '자동채집'){throw 'automatic gathering spacing is inconsistent in reference UI'}
           $main = Get-Content source/FishingAutomation/MainForm.cs -Raw
           if($main -notmatch 'DisplayModeName'){throw 'display mode normalization missing'}
