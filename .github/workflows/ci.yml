@@ -87,6 +87,8 @@ jobs:
           if($a -notmatch 'new AlteringCliScreen\(_cli\)'){throw 'altering is not wired to CLI screen'}
           if($g -match 'new GatheringScreen\('){throw 'gathering still instantiates OCR screen'}
           if($a -match 'new AlteringScreen\('){throw 'altering still instantiates OCR screen'}
+          $gs = Get-Content source/FishingAutomation/GatheringSettingsDialog.cs -Raw
+          if($gs -match '날개 사용 0개'){throw 'obsolete zero-wing guarantee remains in gathering UI'}
 
       - name: Inventory loot regression tests
         shell: pwsh
