@@ -57,6 +57,11 @@ internal interface IAlteringScreen : IDisposable
     Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct);
 }
 
+internal interface IDirectCliAlteringScreen
+{
+    Task CompleteAsync(string displayName, CancellationToken ct);
+}
+
 internal interface IAlteringData
 {
     Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct);
