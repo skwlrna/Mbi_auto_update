@@ -33,8 +33,14 @@ internal sealed class AlteringCliActions : IAlteringScreen, IDirectAlteringActio
 
     public async Task CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
-        Log?.Invoke($"[자동 가공] CLI 완료 작업 수령 요청 · {plan.DisplayName}");
-        var result = await _cli.CompleteAlteringWorkAsync(plan.DisplayName, ct).ConfigureAwait(false);
+        var works = AlteringQueries.ParseWorks(await _cli.GetAlteringWorksAsync(ct).ConfigureAwait(false));
+        var target = works.FirstOrDefault(x => x.IsCompleted && x.FacilityName == plan.FacilityName &&
+            (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
+        if (target is null)
+            throw new InvalidOperationException("CLI 완료 작업 목록에서 선택한 가공품의 정확한 수령 대상을 확인하지 못했습니다.");
+
+        Log?.Invoke($"[자동 가공] CLI 완료 작업 수령 요청 · {target.DisplayName}");
+        var result = await _cli.CompleteAlteringWorkAsync(target.DisplayName, ct).ConfigureAwait(false);
         if (!result.Success)
             throw new InvalidOperationException($"CLI 완료 작업 수령 실패: {result.Error ?? result.State}");
     }
