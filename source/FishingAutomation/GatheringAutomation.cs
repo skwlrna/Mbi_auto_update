@@ -31,6 +31,11 @@ internal interface IGatheringScreen : IDisposable
     Task StopAsync(CancellationToken ct);
 }
 
+internal interface IDirectGatheringAction
+{
+    Task ExecuteOnceAsync(GatheringPlan plan, CancellationToken ct);
+}
+
 internal sealed class GatheringAutomation
 {
     private readonly IGatheringData _data;
