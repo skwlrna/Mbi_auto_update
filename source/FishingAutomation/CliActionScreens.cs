@@ -98,9 +98,9 @@ internal sealed class GatheringCliScreen : IGatheringScreen
         var currenciesAfter = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
         string[] changes = CliAutomationGuards.CurrencyChanges(currenciesBefore, currenciesAfter);
         Log?.Invoke(changes.Length == 0
-            ? "[자동채집] 시작 재화 변화 · 변화 없음"
-            : "[자동채집] 시작 재화 변화 · " + string.Join(" · ", changes));
-        Log?.Invoke($"[자동채집] CLI execute_gathering 완료 · {plan.DisplayName} · 캐릭터 문맥 재확인");
+            ? "[자동 채집] 시작 재화 변화 · 변화 없음"
+            : "[자동 채집] 시작 재화 변화 · " + string.Join(" · ", changes));
+        Log?.Invoke($"[자동 채집] CLI execute_gathering 완료 · {plan.DisplayName} · 캐릭터 문맥 재확인");
     }
 
     public async Task StopAsync(CancellationToken ct)
@@ -111,7 +111,7 @@ internal sealed class GatheringCliScreen : IGatheringScreen
         if (!result.Success)
             throw new InvalidOperationException($"CLI stop_action 실패: {result.State}/{result.Error ?? "unknown"}");
         await _identity.VerifyAsync(ct).ConfigureAwait(false);
-        Log?.Invoke("[자동채집] CLI stop_action 완료 · 캐릭터 문맥 재확인");
+        Log?.Invoke("[자동 채집] CLI stop_action 완료 · 캐릭터 문맥 재확인");
     }
 
     public void Dispose() { }
