@@ -19,7 +19,7 @@ foreach (bool zeroWing in new[] { true, false })
         launches++;
         return Task.FromResult(new CliProcessOutput(0, "{}", ""));
     });
-    foreach (string command in new[] { "execute_gathering", "execute_altering", "execute_crafting", "complete_altering_work", "capabilities", "get_items extra", "STATUS", "status;execute_crafting", "" })
+    foreach (string command in new[] { "execute_gathering", "execute_altering", "execute_crafting", "complete_altering_work", "get_items extra", "STATUS", "status;execute_crafting", "" })
         Check((await cli.QueryAsync(command)).State == "blocked", "forbidden command reached runner");
 }
 Check(launches == 0, "blocked commands launched a process");
@@ -50,6 +50,48 @@ foreach (var call in actionCalls.Take(3))
 int beforeInvalid = actionCalls.Count;
 Check((await actionCli.ExecuteGatheringAsync("")).State == "blocked", "empty gathering name was accepted");
 Check(actionCalls.Count == beforeInvalid, "invalid typed action reached process runner");
+
+var wrappedStatus = MabinogiMobileCli.Parse("status", new(0,
+    "{\"status\":\"accepted\",\"body\":\"{\\\"pipe\\\":\\\"connected\\\"}\"}", ""));
+Check(wrappedStatus.Success && wrappedStatus.Data!.Value.GetProperty("pipe").GetString() == "connected",
+    "JSON string body was not decoded");
+
+var preflightCli = new MabinogiMobileCli(log, true, (command, _) =>
+{
+    string stdout = command switch
+    {
+        "status" => "{\"status\":\"accepted\",\"body\":{\"pipe\":\"connected\"}}",
+        "capabilities" => "{\"status\":\"accepted\",\"body\":{\"loading\":false,\"commands\":[{\"Command\":\"get_my_info\",\"Metadata\":{}},{\"Command\":\"get_currencies\",\"Metadata\":{}},{\"Command\":\"execute_gathering\",\"Metadata\":{\"requiresConfirm\":\"true\"}},{\"Command\":\"stop_action\",\"Metadata\":{\"requiresConfirm\":false}}]}}",
+        _ => "{}"
+    };
+    return Task.FromResult(new CliProcessOutput(0, stdout, ""));
+});
+var caps = await CliAutomationGuards.EnsureCapabilitiesAsync(preflightCli,
+    new[] { "get_my_info", "get_currencies", "execute_gathering", "stop_action" });
+Check(caps.Count == 4 && caps["execute_gathering"].RequiresConfirm && !caps["stop_action"].RequiresConfirm,
+    "capabilities or requiresConfirm parsing failed");
+try
+{
+    await CliAutomationGuards.EnsureCapabilitiesAsync(preflightCli, new[] { "execute_altering" });
+    throw new Exception("missing capability accepted");
+}
+catch (InvalidOperationException) { checks++; }
+
+var identity = CliAutomationGuards.ParseIdentity(MabinogiMobileCli.Parse("get_my_info", new(0,
+    "{\"CharacterId\":\"char-1\",\"CharacterName\":\"테스트\",\"AccountCode\":\"account-1\",\"RealmName\":\"서버A\"}", "")));
+Check(identity.ComparableFields == 4 && identity.Strength == "강함", "identity fields not parsed");
+var sameIdentity = new CliIdentityContext("char-1", "테스트", "account-1", "서버A");
+var changedIdentity = new CliIdentityContext("char-2", "테스트", "account-1", "서버A");
+Check(identity.Matches(sameIdentity) && !identity.Matches(changedIdentity), "identity change guard failed");
+
+var currenciesBefore = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
+    "[{\"DisplayName\":\"정령의 날개\",\"Amount\":100},{\"DisplayName\":\"골드\",\"Amount\":5000}]", "")));
+var currenciesAfter = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
+    "[{\"DisplayName\":\"정령의 날개\",\"Amount\":95},{\"DisplayName\":\"골드\",\"Amount\":5100}]", "")));
+var currencyChanges = CliAutomationGuards.CurrencyChanges(currenciesBefore, currenciesAfter);
+Check(currencyChanges.Any(x => x.Contains("정령의 날개") && x.Contains("-5")) &&
+      currencyChanges.Any(x => x.Contains("골드") && x.Contains("+100")),
+    "currency delta tracking failed");
 foreach (string reason in new[] { "game_off", "option_off" })
     foreach (int exit in new[] { 0, 1, 5 })
         Check(MabinogiMobileCli.Parse("status", new(exit, $"{{\"pipe\":\"disconnected\",\"reason\":\"{reason}\"}}", "")).State == reason, "connection reason lost");
@@ -102,11 +144,14 @@ catch (InvalidDataException) { checks++; }
 if (args.Contains("--live"))
 {
     // Only allowlisted reads are ever launched here. Never launch the macro UI.
-    foreach (string command in new[] { "status", "get_items", "get_activity", "get_current_environment", "get_alterable_items", "get_altering_works" })
+    foreach (string command in new[] { "status", "capabilities", "get_my_info", "get_currencies", "get_items", "get_activity", "get_current_environment", "get_alterable_items", "get_altering_works" })
     {
         var result = await defaults.QueryAsync(command);
         Console.WriteLine($"LIVE {command}: success={result.Success} state={result.State} exit={result.ExitCode}");
         Check(result.Success && result.Data is not null, $"Live {command} failed: {result.State}/{result.Error}");
+        if (command == "capabilities") Check((await CliAutomationGuards.EnsureCapabilitiesAsync(defaults, new[] { "get_my_info", "get_currencies" })).Count > 0, "live capabilities parsing failed");
+        if (command == "get_my_info") Check(CliAutomationGuards.ParseIdentity(result).ComparableFields > 0, "live identity parsing failed");
+        if (command == "get_currencies") { CliAutomationGuards.ParseCurrencies(result); checks++; }
         if (command == "get_alterable_items") Check(AlteringQueries.ParseRecipes(result).Count > 0, "live recipe parsing failed");
         if (command == "get_altering_works") { AlteringQueries.ParseWorks(result); checks++; }
     }
