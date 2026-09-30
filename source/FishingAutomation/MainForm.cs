@@ -154,6 +154,7 @@ public sealed partial class MainForm : Form
                 RefreshModeStatus();
                 UpdateStats();
             }
+            UpdateProductionDashboardVisibility();
         };
 
         _dungeonDestination.SelectedIndexChanged += (_, _) =>
