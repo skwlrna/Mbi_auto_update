@@ -34,6 +34,8 @@ public sealed class MabinogiMobileCli
     public Task<MabinogiCliResult> GetCurrentEnvironmentAsync(CancellationToken token = default) => QueryAsync("get_current_environment", token);
     public Task<MabinogiCliResult> GetAlterableItemsAsync(CancellationToken token = default) => QueryAsync("get_alterable_items", token);
     public Task<MabinogiCliResult> GetAlteringWorksAsync(CancellationToken token = default) => QueryAsync("get_altering_works", token);
+    public Task<MabinogiCliResult> GetGatherableItemsAsync(CancellationToken token = default) => QueryAsync("get_gatherable_items", token);
+    public Task<MabinogiCliResult> GetInventoryAsync(CancellationToken token = default) => QueryAsync("get_inventory", token);
 
     public async Task<MabinogiCliResult> QueryAsync(string command, CancellationToken token = default)
     {
@@ -158,5 +160,5 @@ public sealed class MabinogiMobileCli
 
     private static bool IsAllowedQuery(string command)
         => command is "status" or "get_items" or "get_activity" or "get_current_environment"
-            or "get_alterable_items" or "get_altering_works";
+            or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
 }
