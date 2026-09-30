@@ -32,7 +32,9 @@ Check(success.World.Owned == 3, "qualified recipe work and inventory verificatio
 success = await Run(plan with { TargetQuantity = 4 }, w => w.Bonus = 2);
 Check(success.World.Owned == 10, "critical rewards can exceed minimum target");
 success = await Run(plan with { TargetQuantity = 4 }, w => w.AddCompleted(3));
-Check(success.World.Owned == 9, "existing completed work collected before baseline");
+Check(success.World.Owned == 9 && success.World.SecondStageCalls == 0, "existing completed work collected before baseline");
+success = await Run(plan with { TargetQuantity = 4 }, w => { w.AddCompleted(3); w.TwoStageCollect = true; });
+Check(success.World.Owned == 9 && success.World.SecondStageCalls == 1, "travel-first collect waits for second confirmed Space without duplicate receipt");
 success = await Run(plan with { TargetQuantity = 10 }, w => { for(int i=0;i<7;i++) w.AddPending(waitingOnly:i>0); });
 Check(success.World.QueueCalls == 4 && success.World.Owned == 33 && success.Automation.ReservedWings == 20, "full existing queue drained then extra target registered without counting old rewards");
 success = await Run(plan with { TargetQuantity = 4 }, w => { w.AddPending(); w.AddCompleted(3); w.Bonus=2; });
@@ -81,9 +83,9 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     private readonly AlteringPlan _plan;
     private readonly List<AlteringWork> _works = new();
     private int _polls;
-    internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining;
+    internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls;
     internal long Owned;
-    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting;
+    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
@@ -121,10 +123,22 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (!TwoStageCollect) ApplyCollection(plan);
+        return Task.CompletedTask;
+    }
+    public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        SecondStageCalls++;
+        if (!TwoStageCollect) return Task.FromResult(false);
+        ApplyCollection(plan);
+        return Task.FromResult(true);
+    }
+    private void ApplyCollection(AlteringPlan plan)
+    {
         ExistingRemaining = Math.Max(0, ExistingRemaining - _works.Count(x => x.IsCompleted));
         if (CreditRewards) Owned += _works.Count(x => x.IsCompleted) * (plan.ProducedPerWork + Bonus);
         _works.RemoveAll(x => x.IsCompleted);
-        return Task.CompletedTask;
     }
     internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
     internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
