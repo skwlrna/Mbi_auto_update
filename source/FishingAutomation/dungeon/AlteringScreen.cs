@@ -14,6 +14,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     internal string InputMode => _input.ModeName;
+    internal event Action<string>? Log;
 
     internal AlteringScreen(nint hwnd, AppSettings settings, string debugDir)
     {
@@ -39,6 +40,9 @@ internal sealed class AlteringScreen : IAlteringScreen
             await _ocr.FindAlteringLabelsAsync(frame, roi, text, ct);
         return found.Count == 1 ? found[0] : null;
     }
+
+    private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
+        => _ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
@@ -66,51 +70,99 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private async Task EnterFacilityAsync(AlteringPlan plan, CancellationToken ct)
     {
-        using (var frame = Capture(ct))
+        const int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            if (await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null)
+            ct.ThrowIfCancellationRequested();
+
+            using (var frame = Capture(ct))
             {
-                _input.TapScanCode(0x01);
-                await Task.Delay(400, ct);
+                if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
+                {
+                    Log?.Invoke($"[자동 가공] 현재 화면={plan.ScreenTitle} · 시설 진입 확인");
+                    return;
+                }
+
+                if (await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null)
+                {
+                    Log?.Invoke("[자동 가공] 현재 화면=품목 상세 · 닫고 시설 화면을 다시 확인합니다.");
+                    _input.TapScanCode(0x01);
+                    await Task.Delay(700, ct);
+                    continue;
+                }
+
+                string? otherFacility = null;
+                foreach (string name in AlteringPlan.Facilities.Select(x => x.Replace(" 시설", "")))
+                {
+                    if (name == plan.ScreenTitle) continue;
+                    if (await FindFacilityHeaderAsync(frame, name, ct) is not null)
+                    {
+                        otherFacility = name;
+                        break;
+                    }
+                }
+
+                if (otherFacility is not null)
+                {
+                    Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다.");
+                    _input.ClickClientPoint(_hwnd, new(33, 55));
+                    await Task.Delay(900, ct);
+                    continue;
+                }
+
+                if (await FindFacilityHeaderAsync(frame, "가공", ct) is not null)
+                {
+                    Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
+                    if (!await ClickLabelAsync(plan.ScreenTitle, AlteringFacilityLayout.TitleArea(plan.ScreenTitle), "가공", ct, facilityTitle: true))
+                    {
+                        Log?.Invoke($"[자동 가공] 시설 제목 확인 실패 {attempt}/{maxAttempts} · 추가 입력 없이 재판정합니다.");
+                        await Task.Delay(1200, ct);
+                        continue;
+                    }
+
+                    await Task.Delay(1200, ct);
+                    using var verify = Capture(ct);
+                    if (await FindFacilityHeaderAsync(verify, plan.ScreenTitle, ct) is not null)
+                    {
+                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle}");
+                        return;
+                    }
+
+                    Log?.Invoke($"[자동 가공] 시설 전환 확인 대기 {attempt}/{maxAttempts} · 현재 화면을 다시 판정합니다.");
+                    await Task.Delay(900, ct);
+                    continue;
+                }
+
+                // Unknown after collection can be a transient reward/result screen or the
+                // ordinary field. Do one bounded K re-entry only; never spam keys blindly.
+                Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
+                _input.TapScanCode(0x25);
+            }
+
+            await Task.Delay(1000, ct);
+            using (var menu = Capture(ct))
+            {
+                if (await FindFacilityHeaderAsync(menu, plan.ScreenTitle, ct) is not null)
+                {
+                    Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle}");
+                    return;
+                }
+
+                if (await FindFacilityHeaderAsync(menu, "가공", ct) is null)
+                {
+                    if (!await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
+                    {
+                        Log?.Invoke($"[자동 가공] 가공 메뉴 확인 실패 {attempt}/{maxAttempts} · 추가 입력 없이 재판정합니다.");
+                        await Task.Delay(1200, ct);
+                        continue;
+                    }
+                    await Task.Delay(900, ct);
+                }
             }
         }
-        using (var frame = Capture(ct))
-            if (await FindAsync(frame, Header, plan.ScreenTitle, ct) is not null) return;
-        using (var frame = Capture(ct))
-        {
-            foreach (string name in AlteringPlan.Facilities.Select(x => x.Replace(" 시설", "")))
-            {
-                if (await FindAsync(frame, Header, name, ct) is null) continue;
-                // The supplied facility view has a back arrow at the top left.
-                _input.ClickClientPoint(_hwnd, new(33, 55));
-                await Task.Delay(500, ct);
-                break;
-            }
-        }
-        bool atHub;
-        using (var frame = Capture(ct)) atHub = await FindAsync(frame, Header, "가공", ct) is not null;
-        // K opens the known production menu; select the supplied bottom '가공' tab.
-        if (!atHub)
-        {
-            using (var frame = Capture(ct)) _input.TapScanCode(0x25);
-            await Task.Delay(700, ct);
-        }
-        using (var frame = Capture(ct))
-            if (await FindAsync(frame, Header, plan.ScreenTitle, ct) is not null) return;
-        using (var frame = Capture(ct))
-        {
-            if (await FindAsync(frame, Header, "가공", ct) is null)
-                if (!await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
-                    Fail(frame, "K키 후 가공 탭을 확인하지 못했습니다.");
-        }
-        if (!await ClickLabelAsync(plan.ScreenTitle, AlteringFacilityLayout.TitleArea(plan.ScreenTitle), "가공", ct, facilityTitle: true))
-        {
-            using var frame = Capture(ct);
-            Fail(frame, "가공 시설 선택 화면을 확인하지 못했습니다.");
-        }
-        using var facility = Capture(ct);
-        if (await FindAsync(facility, Header, plan.ScreenTitle, ct) is null)
-            Fail(facility, "선택한 가공 시설 화면으로 전환되지 않았습니다.");
+
+        using var failed = Capture(ct);
+        Fail(failed, "선택한 가공 시설 화면을 3회 확인하지 못했습니다.");
     }
 
     private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
@@ -119,14 +171,14 @@ internal sealed class AlteringScreen : IAlteringScreen
         for (int i = 0; i < 5; i++)
         {
             using var frame = Capture(ct);
-            if (await FindAsync(frame, Header, plan.ScreenTitle, ct) is null) Fail(frame, "가공 목록이 사라졌습니다.");
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null) Fail(frame, "가공 목록이 사라졌습니다.");
             _input.DragClientPoint(_hwnd, new(735, 415), new(735, 895), 350);
             await Task.Delay(180, ct);
         }
         for (int page = 0; page < 16; page++)
         {
             using var frame = Capture(ct);
-            if (await FindAsync(frame, Header, plan.ScreenTitle, ct) is null) Fail(frame, "가공 목록이 사라졌습니다.");
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null) Fail(frame, "가공 목록이 사라졌습니다.");
             var labels = await _ocr.FindAlteringLabelsAsync(frame, Cards, plan.DisplayName, ct, cardCandidate: true);
             if (labels.Count == plan.RecipeCount && labels.Count >= plan.RecipeOrdinal)
             {
@@ -178,7 +230,7 @@ internal sealed class AlteringScreen : IAlteringScreen
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
-            if (await FindAsync(frame, Header, plan.ScreenTitle, ct) is null ||
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null ||
                 await FindAsync(frame, new(0, 260, 170, 110), "Space", ct) is null)
                 Fail(frame, "완료 작업 수령 단축키 Space를 확인하지 못했습니다.");
             if (pass == 0) { await Task.Delay(180, ct); continue; }
