@@ -53,7 +53,7 @@ internal sealed class OcrRecognizer
         // Windows OCR occasionally misreads one Hangul syllable on the dark facility
         // header. A one-edit fallback is safe here because the ROI contains only the
         // already-selected facility title and no paid action is taken from this result.
-        var fuzzy = await FindTextAsync(frame, roi, title, 1, retry2x: true, ct);
+        var fuzzy = await FindTextAsync(frame, roi, title, 1, retry2x: true, ct: ct);
         return fuzzy.Found ? fuzzy : null;
     }
 
