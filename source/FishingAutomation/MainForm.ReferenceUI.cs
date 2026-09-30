@@ -10,7 +10,7 @@ public sealed partial class MainForm
 
     private void BuildLayout()
     {
-        _mode.Items.AddRange(new object[] { "낚시", "던전", "어비스", "페카 심층", "가공" });
+        _mode.Items.AddRange(new object[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집" });
         _mode.SelectedIndex = 0;
         _dungeonDestination.Items.AddRange(new object[] { "현재 위치" });
         _dungeonDestination.SelectedIndex = 0;
@@ -212,6 +212,7 @@ public sealed partial class MainForm
             AddButton("에러 전송", new(18, 441, 170, 59), owner.ShowErrorUploadSettings, "send", "nav");
             AddButton("인식", new(18, 511, 170, 59), owner.ShowVisualRecognitionTest, "image", "nav");
             AddButton("자동 가공", new(18, 581, 170, 59), () => SelectMode(4), "game", "nav");
+            AddButton("자동채집",new(18,651,170,59),()=>SelectMode(5),"game","nav");
             AddButton("미니 모드", new(18, 991, 170, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
@@ -282,7 +283,7 @@ public sealed partial class MainForm
         private void ShowModeMenu()
         {
             if (_owner.AnyRunning || _owner._activeMode is not null) return;
-            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "가공" }, SelectMode, 418, 312);
+            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집" }, SelectMode, 418, 312);
         }
 
         private void ShowDungeonMenu()

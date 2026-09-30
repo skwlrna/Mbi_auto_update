@@ -23,6 +23,8 @@ catch(InvalidDataException) { Check(true,"unavailable bag capacity never treated
 try { GatheringQueries.ParseActivity(MabinogiMobileCli.Parse("get_activity",new(0,"{}",""))); throw new Exception("missing activity accepted"); }
 catch(KeyNotFoundException) { Check(true,"missing activity cannot authorize screen input"); }
 var plan=new GatheringPlan("철 광석",5);
+try { (plan with {SourceRecipe=new AlteringPlan("금속 가공 시설","철괴(철 광석)",1,3,true)}).Validate(); throw new Exception("paid source accepted"); }
+catch(InvalidDataException){Check(true,"source recipe cannot enable paid altering button");}
 var success=new FakeWorld();
 await new GatheringAutomation(success,success,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(success.Starts==1 && success.Stops==1 && success.Owned==106,"target counts new inventory only and stops after target");

@@ -171,6 +171,15 @@ internal sealed class AlteringScreen : IAlteringScreen
         }
     }
 
+    // Free navigation only, for opening an ingredient's obtain-method route.
+    // This entry point cannot reach QueueAsync or any paid button.
+    internal async Task OpenRecipeAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        if(plan.AllowPaidButton) throw new InvalidOperationException("채집 경로는 가공 비용 버튼을 사용할 수 없습니다.");
+        await EnterFacilityAsync(plan, ct);
+        await SelectRecipeAsync(plan, ct);
+    }
+
     public async Task CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         await EnterFacilityAsync(plan, ct);

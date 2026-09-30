@@ -5,7 +5,39 @@ try
 {
 if (args.Length != 5) { Console.WriteLine("Usage: image clientX clientY text roiKind"); return; }
 using var original = new Bitmap(args[0]);
-using var frame = original.Clone(new Rectangle(int.Parse(args[1]), int.Parse(args[2]), 800, 1000), PixelFormat.Format24bppRgb);
+using var frame = args[4].StartsWith("gather-") ? new Bitmap(800,1000,PixelFormat.Format24bppRgb) : original.Clone(new Rectangle(int.Parse(args[1]), int.Parse(args[2]), 800, 1000), PixelFormat.Format24bppRgb);
+if(args[4].StartsWith("gather-"))
+{
+    using(var g=Graphics.FromImage(frame)){g.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;g.DrawImage(original,new Rectangle(0,0,800,1000));}
+    var vision = new GatheringVision();
+    if(args[4]=="gather-first")
+    {
+        var place=await vision.FirstPlaceAsync(frame,default);
+        if(place is null) throw new Exception("First place row not recognized");
+        Console.WriteLine("PASS first place: "+place.Value.Text+" "+place.Value.Bounds);
+        var title=await vision.FindMaterialAsync(frame,args[3],default);
+        if(title is null) throw new Exception("Selected resource title not recognized");
+        Console.WriteLine("PASS resource: "+title.Value.ReadText);
+    }
+    else if(args[4]=="gather-negative")
+    {
+        if(GatheringVision.HasStopButton(frame)) throw new Exception("Non-gathering screen accepted as stop control");
+        if(await vision.FirstPlaceAsync(frame,default) is not null) throw new Exception("Obtain link accepted as place list heading");
+        Console.WriteLine("PASS non-list/non-stop screen rejected");
+    }
+    else if(args[4]=="gather-stop")
+    {
+        if(!GatheringVision.HasStopButton(frame)) throw new Exception("Guarded green stop control not recognized");
+        Console.WriteLine("PASS green stop control");
+    }
+    else
+    {
+        var result=await vision.FindExactAsync(frame,args[4]=="gather-stop"?GatheringVision.StopKey:GatheringVision.MethodLink,args[4]=="gather-stop"?"Space":"구하는 방법",default);
+        if(result is null) { foreach(var line in await new OcrRecognizer().ReadLinesAsync(frame,GatheringVision.StopKey,3,default)) Console.WriteLine("STOP RAW "+line.ReadText+" "+line.Bounds); throw new Exception("Expected gathering control not recognized"); }
+        Console.WriteLine("PASS "+result.Value.ReadText+" "+result.Value.Bounds);
+    }
+    return;
+}
 var ocr = new OcrRecognizer();
 if (args[4] == "facilities")
 {

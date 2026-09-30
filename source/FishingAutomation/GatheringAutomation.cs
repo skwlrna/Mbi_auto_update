@@ -2,10 +2,16 @@ namespace FishingAutomation;
 
 internal sealed record GatheringPlan(string DisplayName, int TargetQuantity)
 {
+    internal AlteringPlan? SourceRecipe { get; init; }
     internal void Validate()
     {
         if (string.IsNullOrWhiteSpace(DisplayName) || TargetQuantity is < 1 or > 1000000)
             throw new InvalidDataException("채집 품목과 추가 수량을 확인하세요.");
+        if(SourceRecipe is not null)
+        {
+            SourceRecipe.Validate();
+            if(SourceRecipe.AllowPaidButton) throw new InvalidDataException("채집 경로에서 가공 비용 버튼을 사용할 수 없습니다.");
+        }
     }
 }
 
@@ -56,6 +62,7 @@ internal sealed class GatheringAutomation
             started = true;
             await _screen.StartAsync(plan, ct);
             int idlePolls = 0;
+            int travelPolls = 0;
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
@@ -68,7 +75,9 @@ internal sealed class GatheringAutomation
                 if (count < baseline) throw new InvalidOperationException("채집 중 대상 재료의 보유 수량이 감소해 수량을 확정할 수 없습니다.");
                 long gained = count - baseline;
                 if (gained < Gained) throw new InvalidOperationException("채집 중 재료가 소비되어 추가 수량 확인을 중단합니다.");
-                idlePolls = gained > Gained ? 0 : idlePolls + 1;
+                travelPolls = activity.IsAutoTraveling ? travelPolls + 1 : 0;
+                if(travelPolls >= 900) throw new InvalidOperationException("이동이 장시간 끝나지 않아 정지합니다.");
+                idlePolls = activity.IsAutoTraveling || gained > Gained ? 0 : idlePolls + 1;
                 Gained = gained;
                 Log?.Invoke($"[자동채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개");
                 if (Gained >= plan.TargetQuantity) break;
@@ -108,6 +117,9 @@ internal sealed class GatheringAutomation
                 }
             }
         }
+        long finalCount=await _data.ItemCountAsync(plan.DisplayName,ct);
+        if(finalCount-baseline<Gained) throw new InvalidOperationException("정지 후 재료 수량이 감소해 완료 수량을 확정할 수 없습니다.");
+        Gained=finalCount-baseline;
         Log?.Invoke($"[자동채집] 완료 · {plan.DisplayName} +{Gained}개 · 정령의 날개 사용 0개");
     }
 

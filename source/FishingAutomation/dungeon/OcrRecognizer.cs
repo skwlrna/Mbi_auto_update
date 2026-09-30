@@ -43,11 +43,13 @@ internal sealed class OcrRecognizer
     }
 
     // Exact recipe matching must retain '+' and ingredient suffixes.
-    internal async Task<IReadOnlyList<DetectionResult>> FindAlteringLabelsAsync(Bitmap frame, Rectangle roi, string wanted, CancellationToken ct, bool cardCandidate = false, Rectangle? acceptedBounds = null)
+    internal async Task<IReadOnlyList<DetectionResult>> FindAlteringLabelsAsync(Bitmap frame, Rectangle roi, string wanted, CancellationToken ct, bool cardCandidate = false, Rectangle? acceptedBounds = null, bool dimText = false)
     {
         roi = Rectangle.Intersect(new Rectangle(Point.Empty, frame.Size), roi);
         var found = new List<DetectionResult>();
-        foreach (var mode in new[] { (Scale: 2, Threshold: 70), (Scale: 3, Threshold: 70), (Scale: 3, Threshold: 80), (Scale: 3, Threshold: 90), (Scale: 3, Threshold: 100), (Scale: 3, Threshold: 0) })
+        var modes = new[] { (Scale: 2, Threshold: 70), (Scale: 3, Threshold: 70), (Scale: 3, Threshold: 80), (Scale: 3, Threshold: 90), (Scale: 3, Threshold: 100), (Scale: 3, Threshold: 0) };
+        if(dimText) modes = modes.Concat(new[]{(Scale:3, Threshold:30),(Scale:3, Threshold:40),(Scale:3, Threshold:50)}).ToArray();
+        foreach (var mode in modes)
         {
             int scale = mode.Scale;
             ct.ThrowIfCancellationRequested();

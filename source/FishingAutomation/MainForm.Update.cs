@@ -7,6 +7,12 @@ public sealed partial class MainForm
 
     private async Task CheckForUpdatesAsync(bool userInitiated)
     {
+#if GATHERING_LOCAL_PREVIEW
+        await Task.CompletedTask;
+        _log.Write("[로컬 채집 검사본] 자동 업데이트를 적용하지 않습니다.");
+        Ui(() => { _updateStatusValue.Text="채집 로컬 검사본"; _updateButton.Enabled=false; });
+        return;
+#else
         if (_updateCheckRunning || IsDisposed) return;
         _updateCheckRunning = true;
         try
@@ -59,6 +65,7 @@ public sealed partial class MainForm
             _updateCheckRunning = false;
             Ui(() => { if (_updateButton is not null) _updateButton.Enabled = true; });
         }
+#endif
     }
 
     private async Task InstallPendingUpdateAsync(bool askConfirmation = true)

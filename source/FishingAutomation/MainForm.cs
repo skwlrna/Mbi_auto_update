@@ -290,6 +290,7 @@ public sealed partial class MainForm : Form
         else if (SelectedMode == "던전") _ = StartScenarioAsync("던전", "dungeon");
         else if (SelectedMode == "페카 심층") _ = StartScenarioAsync("페카 심층", "dungeon");
         else if (SelectedMode == "가공") _ = StartAlteringAsync();
+        else if (SelectedMode == "채집") _ = StartGatheringAsync();
         else _ = StartScenarioAsync("어비스", "abyss");
     }
 

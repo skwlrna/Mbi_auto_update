@@ -17,6 +17,9 @@
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(GatheringLocalPreview)' == 'true'">
+    <DefineConstants>$(DefineConstants);GATHERING_LOCAL_PREVIEW</DefineConstants>
+  </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="ui\reference.png" LogicalName="FishingAutomation.ReferenceArtwork.png" Condition="Exists('ui\reference.png')" />
