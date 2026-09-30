@@ -9,3 +9,5 @@ Example: `dotnet run --project tests/altering-visual/Regression.csproj -c Releas
 Live recipe/queue reads: `dotnet run --project tests/cli-readonly/Regression.csproj -c Release -- --live`. These six reads never launch a CLI action.
 
 Live end-to-end queueing and collection have not been validated. All six facilities use the user-confirmed common screen layout; recipes or duplicate variants that cannot be verified stop without a paid click.
+
+Use visual harness ROI kind `facilities` with a hub screenshot to verify all six large card titles resolve uniquely. It uses the same production recognizer and excludes repeated facility/level badges. The photos remain outside this repository.

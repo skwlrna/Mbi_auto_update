@@ -34,8 +34,16 @@ internal sealed class OcrRecognizer
         return DetectionResult.NotFound;
     }
 
+    internal async Task<IReadOnlyList<DetectionResult>> FindAlteringFacilityTitlesAsync(Bitmap frame, string title, CancellationToken ct)
+    {
+        // Keep surrounding context for Korean OCR, but accept only the large title
+        // inside the selected card. Repeated level-badge text is never clickable.
+        var area = FishingAutomation.AlteringFacilityLayout.TitleArea(title);
+        return await FindAlteringLabelsAsync(frame, new(20, 140, 760, 660), title, ct, acceptedBounds: area);
+    }
+
     // Exact recipe matching must retain '+' and ingredient suffixes.
-    internal async Task<IReadOnlyList<DetectionResult>> FindAlteringLabelsAsync(Bitmap frame, Rectangle roi, string wanted, CancellationToken ct, bool cardCandidate = false)
+    internal async Task<IReadOnlyList<DetectionResult>> FindAlteringLabelsAsync(Bitmap frame, Rectangle roi, string wanted, CancellationToken ct, bool cardCandidate = false, Rectangle? acceptedBounds = null)
     {
         roi = Rectangle.Intersect(new Rectangle(Point.Empty, frame.Size), roi);
         var found = new List<DetectionResult>();
@@ -71,8 +79,12 @@ internal sealed class OcrRecognizer
                     roi.Y + (int)(words.Min(w => w.BoundingRect.Y) / scale),
                     roi.X + (int)(words.Max(w => w.BoundingRect.Right) / scale),
                     roi.Y + (int)(words.Max(w => w.BoundingRect.Bottom) / scale));
+                if (acceptedBounds is Rectangle allowed && !allowed.Contains(bounds)) continue;
                 if (!found.Any(x => x.Bounds.IntersectsWith(bounds))) found.Add(new(true, bounds, 1, text));
             }
+            // A facility has one known title region; stop on its unique exact title
+            // so input does not rely on a frame aged by unnecessary OCR retries.
+            if (acceptedBounds.HasValue && found.Count == 1) return found.ToArray();
         }
         return found.OrderBy(x => x.Bounds.Top).ThenBy(x => x.Bounds.Left).ToArray();
     }

@@ -6,6 +6,20 @@ try
 if (args.Length != 5) { Console.WriteLine("Usage: image clientX clientY text roiKind"); return; }
 using var original = new Bitmap(args[0]);
 using var frame = original.Clone(new Rectangle(int.Parse(args[1]), int.Parse(args[2]), 800, 1000), PixelFormat.Format24bppRgb);
+var ocr = new OcrRecognizer();
+if (args[4] == "facilities")
+{
+    foreach (string facility in FishingAutomation.AlteringPlan.Facilities)
+    {
+        string title = facility.Replace(" 시설", "");
+        var area = FishingAutomation.AlteringFacilityLayout.TitleArea(title);
+        var labels = await ocr.FindAlteringFacilityTitlesAsync(frame, title, default);
+        if (labels.Count != 1 || !area.Contains(labels[0].Bounds))
+            throw new Exception($"Facility title is missing or ambiguous: {title} ({labels.Count})");
+        Console.WriteLine($"PASS {title}: one title {labels[0].Bounds}");
+    }
+    return;
+}
 var roi = args[4] switch
 {
     "header" => new Rectangle(0, 15, 450, 110),
@@ -15,7 +29,6 @@ var roi = args[4] switch
     "collect" => new Rectangle(0, 260, 170, 110),
     _ => new Rectangle(0, 0, 800, 1000)
 };
-var ocr = new OcrRecognizer();
 var results = await ocr.FindAlteringLabelsAsync(frame, roi, args[3], default, cardCandidate: args[4] == "cards");
 if (results.Count == 0 && args[4] == "popup" && FishingAutomation.AlteringText.UniqueOcrAlias(args[3], new[]{args[3]}) is string alias)
     results = await ocr.FindAlteringLabelsAsync(frame, roi, alias, default);

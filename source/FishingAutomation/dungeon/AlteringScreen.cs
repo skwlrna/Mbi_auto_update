@@ -33,9 +33,10 @@ internal sealed class AlteringScreen : IAlteringScreen
         catch { frame.Dispose(); throw; }
     }
 
-    private async Task<DetectionResult?> FindAsync(Bitmap frame, Rectangle roi, string text, CancellationToken ct)
+    private async Task<DetectionResult?> FindAsync(Bitmap frame, Rectangle roi, string text, CancellationToken ct, bool facilityTitle = false)
     {
-        var found = await _ocr.FindAlteringLabelsAsync(frame, roi, text, ct);
+        var found = facilityTitle ? await _ocr.FindAlteringFacilityTitlesAsync(frame, text, ct) :
+            await _ocr.FindAlteringLabelsAsync(frame, roi, text, ct);
         return found.Count == 1 ? found[0] : null;
     }
 
@@ -45,18 +46,18 @@ internal sealed class AlteringScreen : IAlteringScreen
         if (exact is not null || plan.VerifiedOcrAlias is null) return exact;
         return await FindAsync(frame, Popup, plan.VerifiedOcrAlias, ct);
     }
-    private async Task<bool> ClickLabelAsync(string text, Rectangle roi, string? header, CancellationToken ct)
+    private async Task<bool> ClickLabelAsync(string text, Rectangle roi, string? header, CancellationToken ct, bool facilityTitle = false)
     {
         // Two observations; the second one alone supplies the input coordinates.
         using (var first = Capture(ct))
         {
             if (header is not null && await FindAsync(first, Header, header, ct) is null) return false;
-            if (await FindAsync(first, roi, text, ct) is null) return false;
+            if (await FindAsync(first, roi, text, ct, facilityTitle) is null) return false;
         }
         await Task.Delay(180, ct);
         using var second = Capture(ct);
         if (header is not null && await FindAsync(second, Header, header, ct) is null) return false;
-        var found = await FindAsync(second, roi, text, ct);
+        var found = await FindAsync(second, roi, text, ct, facilityTitle);
         if (found is null) return false;
         _input.ClickClientPoint(_hwnd, found.Value.Center);
         await Task.Delay(550, ct);
@@ -102,7 +103,7 @@ internal sealed class AlteringScreen : IAlteringScreen
                 if (!await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
                     Fail(frame, "K키 후 가공 탭을 확인하지 못했습니다.");
         }
-        if (!await ClickLabelAsync(plan.ScreenTitle, new(20, 140, 760, 660), "가공", ct))
+        if (!await ClickLabelAsync(plan.ScreenTitle, AlteringFacilityLayout.TitleArea(plan.ScreenTitle), "가공", ct, facilityTitle: true))
         {
             using var frame = Capture(ct);
             Fail(frame, "가공 시설 선택 화면을 확인하지 못했습니다.");
