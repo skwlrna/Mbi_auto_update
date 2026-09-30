@@ -57,6 +57,11 @@ internal interface IAlteringScreen : IDisposable
     Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct);
 }
 
+internal interface IDirectCliAlteringScreen
+{
+    Task CompleteAsync(string displayName, CancellationToken ct);
+}
+
 internal interface IAlteringData
 {
     Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct);
@@ -185,6 +190,16 @@ internal sealed class AlteringAutomation
         if (count == 0) return false;
         int totalBefore = works.Count(x => x.FacilityName == plan.FacilityName);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 {count}건 수령 시작");
+
+        if (_screen is IDirectCliAlteringScreen direct)
+        {
+            var completed = works.First(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
+            await direct.CompleteAsync(completed.DisplayName, ct);
+            await VerifyAsync(async token => (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
+                "CLI 완료 작업 수령 후 대기열 감소를 확인하지 못했습니다. 중복 실행 없이 정지합니다.", ct);
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · CLI · {completed.DisplayName}");
+            return true;
+        }
 
         // In the live client the first '모두 받기' can start automatic travel to the
         // processing bench instead of collecting immediately. Press once, then prove

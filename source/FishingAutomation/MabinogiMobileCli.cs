@@ -15,10 +15,16 @@ public sealed class MabinogiMobileCli
     public const string DefaultPath = @"C:\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe";
     private readonly AppLog _log;
     private readonly Func<string, CancellationToken, Task<CliProcessOutput>> _run;
+    private readonly Func<IReadOnlyList<string>, CancellationToken, Task<CliProcessOutput>> _runArguments;
     public bool ZeroWingMode { get; }
 
     public MabinogiMobileCli(AppLog log, bool zeroWingMode = true)
-        : this(log, zeroWingMode, RunProcessAsync) { }
+    {
+        _log = log;
+        ZeroWingMode = zeroWingMode;
+        _run = RunProcessAsync;
+        _runArguments = RunActionProcessAsync;
+    }
 
     internal MabinogiMobileCli(AppLog log, bool zeroWingMode,
         Func<string, CancellationToken, Task<CliProcessOutput>> run)
@@ -26,6 +32,21 @@ public sealed class MabinogiMobileCli
         _log = log;
         ZeroWingMode = zeroWingMode;
         _run = run;
+        _runArguments = (args, token) =>
+        {
+            if (args.Count != 1) throw new InvalidOperationException("action_runner_not_configured");
+            return run(args[0], token);
+        };
+    }
+
+    internal MabinogiMobileCli(AppLog log, bool zeroWingMode,
+        Func<string, CancellationToken, Task<CliProcessOutput>> run,
+        Func<IReadOnlyList<string>, CancellationToken, Task<CliProcessOutput>> runArguments)
+    {
+        _log = log;
+        ZeroWingMode = zeroWingMode;
+        _run = run;
+        _runArguments = runArguments;
     }
 
     public Task<MabinogiCliResult> StatusAsync(CancellationToken token = default) => QueryAsync("status", token);
@@ -36,6 +57,54 @@ public sealed class MabinogiMobileCli
     public Task<MabinogiCliResult> GetAlteringWorksAsync(CancellationToken token = default) => QueryAsync("get_altering_works", token);
     public Task<MabinogiCliResult> GetGatherableItemsAsync(CancellationToken token = default) => QueryAsync("get_gatherable_items", token);
     public Task<MabinogiCliResult> GetInventoryAsync(CancellationToken token = default) => QueryAsync("get_inventory", token);
+    public Task<MabinogiCliResult> ExecuteGatheringAsync(string displayName, CancellationToken token = default)
+        => ActionAsync("execute_gathering", displayName, token);
+    public Task<MabinogiCliResult> ExecuteAlteringAsync(string displayName, CancellationToken token = default)
+        => ActionAsync("execute_altering", displayName, token);
+    public Task<MabinogiCliResult> CompleteAlteringWorkAsync(string displayName, CancellationToken token = default)
+        => ActionAsync("complete_altering_work", displayName, token);
+    public Task<MabinogiCliResult> StopActionAsync(CancellationToken token = default)
+        => ActionAsync("stop_action", null, token);
+
+    private async Task<MabinogiCliResult> ActionAsync(string command, string? displayName, CancellationToken token)
+    {
+        if (!IsAllowedAction(command))
+            return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
+        if (command == "stop_action" ? displayName is not null :
+            string.IsNullOrWhiteSpace(displayName) || displayName.Length > 256)
+            return Finish(new(command, false, "blocked", null, null, "invalid_body"));
+
+        token.ThrowIfCancellationRequested();
+        try
+        {
+            var output = await _runArguments(BuildActionArguments(command, displayName), token).ConfigureAwait(false);
+            return Finish(Parse(command, output));
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException)
+        {
+            return Finish(new(command, false, "disconnected", null, null, "timeout"));
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return Finish(new(command, false, "disconnected", null, null, "cli_unavailable"));
+        }
+    }
+
+    internal static IReadOnlyList<string> BuildActionArguments(string command, string? displayName)
+    {
+        if (!IsAllowedAction(command)) throw new InvalidOperationException("command_not_allowed");
+        if (command == "stop_action")
+        {
+            if (displayName is not null) throw new InvalidOperationException("invalid_body");
+            return new[] { command };
+        }
+        if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 256)
+            throw new InvalidOperationException("invalid_body");
+        string json = JsonSerializer.Serialize(new { displayName });
+        string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        return new[] { command, "base64:" + encoded };
+    }
 
     public async Task<MabinogiCliResult> QueryAsync(string command, CancellationToken token = default)
     {
@@ -124,20 +193,38 @@ public sealed class MabinogiMobileCli
         return p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() : p.Value.GetRawText();
     }
 
-    private static async Task<CliProcessOutput> RunProcessAsync(string command, CancellationToken token)
+    private static Task<CliProcessOutput> RunProcessAsync(string command, CancellationToken token)
     {
-        // Defense at the actual launch boundary as well as the public API.
         if (!IsAllowedQuery(command))
             throw new InvalidOperationException("command_not_allowed");
+        return RunProcessArgumentsAsync(new[] { command }, token, TimeSpan.FromSeconds(15));
+    }
+
+    private static Task<CliProcessOutput> RunActionProcessAsync(IReadOnlyList<string> args, CancellationToken token)
+    {
+        if (args.Count == 0 || !IsAllowedAction(args[0]))
+            throw new InvalidOperationException("command_not_allowed");
+        bool shapeOk = args[0] == "stop_action"
+            ? args.Count == 1
+            : args.Count == 2 && args[1].StartsWith("base64:", StringComparison.Ordinal);
+        if (!shapeOk) throw new InvalidOperationException("invalid_body");
+        // Action commands can legitimately wait for the game. Match mobi-Support:
+        // cancellation is user-controlled, but there is no arbitrary process timeout.
+        return RunProcessArgumentsAsync(args, token, null);
+    }
+
+    private static async Task<CliProcessOutput> RunProcessArgumentsAsync(
+        IReadOnlyList<string> args, CancellationToken token, TimeSpan? timeoutValue)
+    {
         var start = new ProcessStartInfo(DefaultPath)
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
-        start.ArgumentList.Add(command);
+        foreach (string arg in args) start.ArgumentList.Add(arg);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        if (timeoutValue is TimeSpan limit) timeout.CancelAfter(limit);
         using var process = new Process { StartInfo = start };
         if (!process.Start()) throw new IOException("cli_unavailable");
         Task<string> stdout = process.StandardOutput.ReadToEndAsync();
@@ -161,4 +248,7 @@ public sealed class MabinogiMobileCli
     private static bool IsAllowedQuery(string command)
         => command is "status" or "get_items" or "get_activity" or "get_current_environment"
             or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
+
+    private static bool IsAllowedAction(string command)
+        => command is "execute_gathering" or "execute_altering" or "complete_altering_work" or "stop_action";
 }
