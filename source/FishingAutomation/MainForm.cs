@@ -367,7 +367,7 @@ public sealed partial class MainForm : Form
 
             IScenarioRunner engine = modeName == "페카 심층"
                 ? new PeacaRouteEngine(window.Handle, settings, targets, baseDir, _selectedPeacaRoute)
-                : new ScenarioEngine(window.Handle, settings, scenario, targets, baseDir);
+                : new ScenarioEngine(window.Handle, settings, scenario, targets, baseDir, _cli);
             if (modeName == "던전")
                 _log.Write("[던전] 현재 위치에서 시작");
             _dungeonInputName = engine.InputMode;

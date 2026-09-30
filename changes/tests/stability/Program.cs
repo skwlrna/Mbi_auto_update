@@ -16,6 +16,7 @@ class Input {public int Clicks,Keys;public Action? AfterClick; public void Click
 class Capture {public Bitmap CaptureClient(nint h)=>new(1,1);}
 internal sealed partial class ScenarioEngine
 {
+ void InvalidateInventoryLootRound(){_abyssLootCountedForCurrentResult=false;}
  nint _hwnd; readonly Settings _settings=new();readonly Detector _detector=new();readonly Input _input=new();readonly Capture _capture=new();
  public event Action<string>? Log; bool IsAbyss=>true;int _resumeStepIndex;int _abyssClearTitleFallbackConsecutive;bool AbyssClearTitleFallbackPending=>false;
  bool _abyssLootCountedForCurrentResult;int AbyssCombatStepIndex=>4;int clearCalls;bool outside;bool result; int captures;

@@ -60,19 +60,30 @@ public static class LootStats
     public static string GetDisplayName(string key)
         => DisplayNames.TryGetValue(key, out var name) ? name : key;
 
+    internal static IReadOnlyDictionary<string, string> TrackedItemNames { get; }
+        = new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(DisplayNames);
+
     public static void RecordRound(IEnumerable<string> foundKeys)
+        => RecordAmounts(foundKeys.Distinct(StringComparer.Ordinal).ToDictionary(k => k, _ => 1));
+
+    public static void RecordAmounts(IReadOnlyDictionary<string, int> amounts)
     {
         lock (Gate)
         {
             bool changed = EnsureToday();
-            foreach (string key in foundKeys.Distinct(StringComparer.Ordinal))
+            var valid = amounts.Where(x => DisplayNames.ContainsKey(x.Key) && x.Value > 0).ToArray();
+            // Check every increment before changing any counters.
+            foreach (var item in valid)
             {
-                if (!DisplayNames.ContainsKey(key))
-                    continue;
-
-                Session[key] = Session.GetValueOrDefault(key) + 1;
-                Data.Today[key] = Data.Today.GetValueOrDefault(key) + 1;
-                Data.Lifetime[key] = Data.Lifetime.GetValueOrDefault(key) + 1;
+                _ = checked(Session.GetValueOrDefault(item.Key) + item.Value);
+                _ = checked(Data.Today.GetValueOrDefault(item.Key) + item.Value);
+                _ = checked(Data.Lifetime.GetValueOrDefault(item.Key) + item.Value);
+            }
+            foreach (var item in valid)
+            {
+                Session[item.Key] = Session.GetValueOrDefault(item.Key) + item.Value;
+                Data.Today[item.Key] = Data.Today.GetValueOrDefault(item.Key) + item.Value;
+                Data.Lifetime[item.Key] = Data.Lifetime.GetValueOrDefault(item.Key) + item.Value;
                 changed = true;
             }
 

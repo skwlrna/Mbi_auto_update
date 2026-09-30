@@ -62,7 +62,10 @@ internal sealed partial class ScenarioEngine
         if (_networkReturnedOutside) _abyssCombatStartedAt = null;
         lock (_abyssFlowStateLock) _abyssFlowState = AbyssFlowState.Unknown;
         // Result counting remains latched if reconnect returned to the same result screen.
-        if (_networkReturnedOutside) _abyssLootCountedForCurrentResult = false;
+        if (_networkReturnedOutside)
+        {
+            InvalidateInventoryLootRound();
+        }
         Log?.Invoke($"[네트워크 복구] {context} -> 화면 확인 후 {_resumeStepIndex + 1}단계 재개, 기존 판 타이머 보존={_abyssCombatStartedAt.HasValue}");
     }
 

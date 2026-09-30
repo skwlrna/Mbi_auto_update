@@ -321,19 +321,7 @@ internal sealed partial class ScenarioEngine
                 {
                     try
                     {
-                        var foundLoot = await DetectAbyssLootAsync(frame, ct);
-                        FishingAutomation.LootStats.RecordRound(foundLoot);
-                        _abyssLootCountedForCurrentResult = true;
-
-                        if (foundLoot.Count == 0)
-                        {
-                            Log?.Invoke("[어비스 전리품] 추적 대상 없음 -> 카운트 +0");
-                        }
-                        else
-                        {
-                            string names = string.Join(", ", foundLoot.Select(FishingAutomation.LootStats.GetDisplayName));
-                            Log?.Invoke($"[어비스 전리품] 이번 판 획득 카운트: {names}");
-                        }
+                        await CountInventoryLootAsync(ct);
                     }
                     catch (RestartCycleException) { throw; }
                     catch (OperationCanceledException)
@@ -348,10 +336,12 @@ internal sealed partial class ScenarioEngine
                     }
                 }
 
+                await PrepareInventoryLootRetryAsync(ct);
+
                 Log?.Invoke("[어비스] 다시 하기 인식 -> 1초 대기 후 버튼 재확인");
                 await RetryClickDelay.WaitAsync(ct);
 
-                // OCR/template counting can take seconds. Revalidate before sending input.
+                // Inventory queries can take time. Revalidate before sending input.
                 using var fresh = await CaptureGameWindowAsync(ct);
                 var freshRetry = await DetectAbyssResultRetryAsync(fresh, ct);
                 if (!freshRetry.Found || !freshRetry.Bounds.IntersectsWith(retry.Bounds))
@@ -362,6 +352,7 @@ internal sealed partial class ScenarioEngine
                 Log?.Invoke($"[어비스] 아래 중앙 다시 하기 2회 연속 확인 -> 다시 하기만 클릭 @ {retry.Center} source={retry.ReadText} safe={AbyssRetrySafeRoi}");
                 DiagnosticObserveClick("abyss_result_retry", retry.Center);
                 _input.ClickClientPoint(_hwnd, retry.Center);
+                _inventoryNextRoundClicked = true;
                 AbyssTransitionTo(AbyssFlowState.RetryClicked, "가운데 다시 하기 클릭 완료");
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
                 AbyssTransitionTo(AbyssFlowState.Reentering, "다시 하기 클릭 후 결과 화면 이탈 대기");
@@ -404,6 +395,7 @@ internal sealed partial class ScenarioEngine
                     AbyssTransitionTo(
                         AbyssFlowState.CombatClearWait,
                         "결과 화면 3회 연속 이탈 + 입장/필드 화면 아님");
+                    CommitInventoryLootRetry();
                     _abyssLootCountedForCurrentResult = false;
                     Log?.Invoke("[어비스] 다시 하기 결과 화면 이탈 확인 -> 선택 화면 없이 전투 대기로 복귀");
                     return;

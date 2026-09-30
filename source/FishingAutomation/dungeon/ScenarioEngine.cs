@@ -33,12 +33,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     public event Action<string>? Log;
     public string InputMode => _input.ModeName;
 
-    public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir)
+    public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir, FishingAutomation.MabinogiMobileCli? cli = null)
     {
         _hwnd = hwnd;
         _settings = settings;
         _scenario = scenario;
         _baseDir = baseDir;
+        if (cli is not null)
+            _inventoryLoot = new FishingAutomation.InventoryLootTracker(cli.GetItemsAsync, FishingAutomation.LootStats.TrackedItemNames);
         _detector = new TargetDetector(targets.Where(t => !t.Id.StartsWith("route_")), baseDir);
         _input = new GuardedInputController(CreateInput(settings));
     }
@@ -104,7 +106,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             _resumeStepIndex = 0;
 
             if (IsAbyss && startStep == 0)
+            {
                 AbyssResetFlowState(resuming ? "전체 사이클 복구 재시작" : "새 어비스 사이클");
+                InvalidateInventoryLootRound();
+            }
 
             _cycle++;
             if (resuming)
@@ -824,6 +829,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         {
             AbyssEnterCombatClearWait("5단계 전투 종료/클리어 화면 대기 시작");
             await StartAbyssCombatClockAsync(ct);
+            CommitInventoryLootRetry();
         }
 
         if (IsAbyss && step.Target == "abyss_result_retry")
@@ -991,6 +997,16 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                         }
                         else
                         {
+                            if (IsAbyss && step.Target.Equals("abyss_enter", StringComparison.OrdinalIgnoreCase))
+                            {
+                                await BeginInventoryLootRoundAsync(ct);
+                                // Inventory reads can take time. Revalidate the entry before input.
+                                using var entryFrame = await CaptureGameWindowAsync(ct);
+                                found = await _detector.DetectAsync(step.Target, entryFrame, ct);
+                                if (!found.Found) continue;
+                                _hwnd = await ResolveRequiredGameWindowAsync(ct);
+                                NativeMethods.SetForegroundWindow(_hwnd);
+                            }
                             _input.ClickClientPoint(_hwnd, found.Center);
                             await Task.Delay(_settings.ClickSettleMs, ct);
                         }
