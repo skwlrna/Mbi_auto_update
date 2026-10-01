@@ -170,6 +170,12 @@ jobs:
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
           if ($screen -notmatch '무료 현장 가공하기') { throw 'free processing confirmation log missing' }
           if ($screen -notmatch '원격 가공하러 가기 감지') { throw 'remote paid button must be observation-only' }
+          if ($screen -notmatch 'IsRecipeDetailAsync') { throw 'structural recipe detail fallback missing' }
+          if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
+          $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
+          if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
+          $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if ($wingGuard -notmatch '시작 실패 후 날개 검사') { throw 'failed gathering start wing log label missing' }
 
 
       - name: Automatic gathering regression tests
