@@ -56,6 +56,8 @@ public sealed class MabinogiMobileCli
     public Task<MabinogiCliResult> GetAlterableItemsAsync(CancellationToken token = default) => QueryAsync("get_alterable_items", token);
     public Task<MabinogiCliResult> GetAlteringWorksAsync(CancellationToken token = default) => QueryAsync("get_altering_works", token);
     public Task<MabinogiCliResult> GetGatherableItemsAsync(CancellationToken token = default) => QueryAsync("get_gatherable_items", token);
+    public Task<MabinogiCliResult> GetGatherableItemsAsync(string filterName, CancellationToken token = default)
+        => FilteredQueryAsync("get_gatherable_items", filterName, token);
     public Task<MabinogiCliResult> GetInventoryAsync(CancellationToken token = default) => QueryAsync("get_inventory", token);
     public Task<MabinogiCliResult> CapabilitiesAsync(CancellationToken token = default) => QueryAsync("capabilities", token);
     public Task<MabinogiCliResult> GetMyInfoAsync(CancellationToken token = default) => QueryAsync("get_my_info", token);
@@ -107,6 +109,42 @@ public sealed class MabinogiMobileCli
         string json = JsonSerializer.Serialize(new { displayName });
         string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
         return new[] { command, "base64:" + encoded };
+    }
+
+    internal static IReadOnlyList<string> BuildFilteredQueryArguments(string command, string filterName)
+    {
+        if (command != "get_gatherable_items") throw new InvalidOperationException("command_not_allowed");
+        string filter = filterName?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(filter) || filter.Length > 256 || filter.Any(char.IsControl))
+            throw new InvalidOperationException("invalid_body");
+        string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(filter));
+        return new[] { command, "base64:" + encoded };
+    }
+
+    private async Task<MabinogiCliResult> FilteredQueryAsync(
+        string command, string filterName, CancellationToken token)
+    {
+        if (command != "get_gatherable_items")
+            return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
+        if (string.IsNullOrWhiteSpace(filterName) || filterName.Length > 256 || filterName.Any(char.IsControl))
+            return Finish(new(command, false, "blocked", null, null, "invalid_body"));
+
+        token.ThrowIfCancellationRequested();
+        try
+        {
+            var output = await RunProcessArgumentsAsync(
+                BuildFilteredQueryArguments(command, filterName), token, TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            return Finish(Parse(command, output));
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException)
+        {
+            return Finish(new(command, false, "disconnected", null, null, "timeout"));
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return Finish(new(command, false, "disconnected", null, null, "cli_unavailable"));
+        }
     }
 
     public async Task<MabinogiCliResult> QueryAsync(string command, CancellationToken token = default)
