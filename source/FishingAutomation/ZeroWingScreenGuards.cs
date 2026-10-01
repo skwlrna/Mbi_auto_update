@@ -75,9 +75,9 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen
             // Verification must still run after input failure or user cancellation.
             // A separate bounded token prevents a cancelled action token from skipping
             // the only check that can detect an unexpected wing spend.
-            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await _identity.VerifyAsync(verifyCts.Token).ConfigureAwait(false);
-            var after = await CliAutomationGuards.CurrencySnapshotAsync(_cli, verifyCts.Token).ConfigureAwait(false);
+            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await _identity.VerifyWithLoadingRetryAsync(verifyCts.Token).ConfigureAwait(false);
+            var after = await CliAutomationGuards.CurrencySnapshotWithLoadingRetryAsync(_cli, verifyCts.Token).ConfigureAwait(false);
             decimal wingsAfter = SpiritWingSafety.Read(after);
             SpiritWingSafety.EnsureNotSpent(wingsBefore, wingsAfter, action);
 
@@ -179,9 +179,9 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen
     {
         try
         {
-            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await _identity.VerifyAsync(verifyCts.Token).ConfigureAwait(false);
-            var current = await CliAutomationGuards.CurrencySnapshotAsync(_cli, verifyCts.Token).ConfigureAwait(false);
+            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await _identity.VerifyWithLoadingRetryAsync(verifyCts.Token).ConfigureAwait(false);
+            var current = await CliAutomationGuards.CurrencySnapshotWithLoadingRetryAsync(_cli, verifyCts.Token).ConfigureAwait(false);
             decimal wings = SpiritWingSafety.Read(current);
             SpiritWingSafety.EnsureNotSpent(baseline, wings, action);
             Log?.Invoke($"{action} · 정령의 날개 변화 없음 ({wings})");
@@ -194,7 +194,7 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen
     }
 
     private async Task<decimal> CurrentWingsAsync(CancellationToken ct)
-        => SpiritWingSafety.Read(await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false));
+        => SpiritWingSafety.Read(await CliAutomationGuards.CurrencySnapshotWithLoadingRetryAsync(_cli, ct).ConfigureAwait(false));
 
     public void Dispose() => _inner.Dispose();
 }
