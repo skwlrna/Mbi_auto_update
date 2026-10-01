@@ -99,6 +99,20 @@ jobs:
           if($g -notmatch 'EnsureCapabilitiesAsync' -or $a -notmatch 'EnsureCapabilitiesAsync'){throw 'mode capability preflight wiring missing'}
           if($g -notmatch 'CliIdentityGuard.CaptureAsync' -or $a -notmatch 'CliIdentityGuard.CaptureAsync'){throw 'mode identity capture wiring missing'}
 
+      - name: Zero Spirit Wings safety checks
+        shell: pwsh
+        run: |
+          $plan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          if($plan -notmatch 'MaximumWings => 0'){throw 'zero-wing invariant missing from AlteringPlan'}
+          if($plan -notmatch 'if \(AllowPaidButton\)'){throw 'paid altering plan rejection missing'}
+          $screens = Get-Content source/FishingAutomation/CliActionScreens.cs -Raw
+          if($screens -notmatch 'wingsBefore != 0'){throw 'pre-action Spirit Wings guard missing'}
+          if($screens -notmatch '정령의 날개 0개 사용 원칙'){throw 'zero-wing CLI refusal missing'}
+          $settings = Get-Content source/FishingAutomation/AlteringSettingsDialog.cs -Raw
+          if($settings -match 'Checked = true' -and $settings -match '정령의 날개'){throw 'paid Spirit Wings option remains enabled'}
+          $production = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          if($production -match 'ProducedPerWork, true'){throw 'production UI still authorizes paid altering'}
+
       - name: Unified production UI checks
         shell: pwsh
         run: |
