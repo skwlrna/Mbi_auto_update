@@ -572,7 +572,7 @@ public sealed partial class MainForm
     {
         if (_referenceDashboard is null) return;
         _referenceDashboard.SetLogExpanded(_logExpanded);
-        _logToggle.Text = _logExpanded ? "로그 접기" : "로그 보기 (최근 기록)";
+        _logToggle.Text = _logExpanded ? "상세 로그 접기" : "상세 로그 펼치기";
     }
 
     private void ToggleMini(bool enabled)

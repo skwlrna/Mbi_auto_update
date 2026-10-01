@@ -96,8 +96,7 @@ public sealed partial class MainForm
         private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";
         private bool ShouldShowAbyssDungeonPicker =>
             string.Equals(EffectiveMode, "어비스", StringComparison.Ordinal);
-        private bool ShouldShowProductionPage =>
-            EffectiveMode is "가공" or "채집";
+        private bool ShouldShowProductionPage => _owner._productionPageMode is "가공" or "채집";
 
         public ReferenceDashboard(MainForm owner)
         {
@@ -207,15 +206,24 @@ public sealed partial class MainForm
                 owner.WindowState = owner.WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
             }, "max", "chrome");
             AddButton("닫기", new(1377, 8, 64, 48), owner.Close, "close", "chrome");
-            AddButton("홈", new(18, 91, 170, 59), () => { owner._logExpanded = false; owner.ApplyLogVisibility(); }, "home", "nav-selected");
+            AddButton("홈", new(18, 91, 170, 59), () =>
+            {
+                owner._productionPageMode = null;
+                owner._logExpanded = false; owner.ApplyLogVisibility();
+                UpdateAbyssDungeonPickerVisibility();
+            }, "home", "nav-selected");
             AddButton("낚시", new(18, 161, 170, 59), () => SelectMode(0), "fish", "nav");
             AddButton("던전", new(18, 231, 170, 59), () => SelectMode(1), "swords", "nav");
             AddButton("어비스", new(18, 301, 170, 59), () => SelectMode(2), "abyss", "nav");
-            AddButton("텔레그램", new(18, 371, 170, 59), owner.ShowTelegramSettings, "bell", "nav");
-            AddButton("에러 전송", new(18, 441, 170, 59), owner.ShowErrorUploadSettings, "send", "nav");
-            AddButton("인식", new(18, 511, 170, 59), owner.ShowVisualRecognitionTest, "image", "nav");
-            AddButton("자동 가공", new(18, 581, 170, 59), () => SelectMode(4), "game", "nav");
-            AddButton("자동 채집", new(18, 651, 170, 59), () => SelectMode(5), "leaf", "nav");
+            AddButton("자동 가공", new(18, 371, 170, 59), () => SelectMode(4), "game", "nav");
+            AddButton("자동 채집", new(18, 441, 170, 59), () => SelectMode(5), "leaf", "nav");
+            AddButton("설정", new(18, 511, 170, 59), () => ShowMenu(
+                new[] { "텔레그램", "에러 전송", "인식" }, i =>
+                {
+                    if (i == 0) owner.ShowTelegramSettings();
+                    else if (i == 1) owner.ShowErrorUploadSettings();
+                    else owner.ShowVisualRecognitionTest();
+                }, 195, 511), "list", "nav");
             AddButton("미니 모드", new(18, 991, 170, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
@@ -230,7 +238,7 @@ public sealed partial class MainForm
                 _gallery.Add(choose);
                 owner._dungeonButtons.Add(choose);
             }
-            owner._logToggle = AddButton("로그 보기 (최근 기록)", new(219, 962, 888, 75), () =>
+            owner._logToggle = AddButton("상세 로그", new(219, 962, 888, 75), () =>
             {
                 owner._logExpanded = !owner._logExpanded;
                 owner.ApplyLogVisibility();
@@ -244,6 +252,15 @@ public sealed partial class MainForm
             owner._logView.Visible = false;
             Controls.Add(owner._logView);
             _positions.Add((owner._logView, new(220, 634, 1210, 305)));
+            owner._alteringPage = new ProductionPage(owner, true);
+            owner._gatheringPage = new ProductionPage(owner, false);
+            foreach (var page in new[] { owner._alteringPage, owner._gatheringPage })
+            {
+                Controls.Add(page);
+                var bounds = new RectangleF(219, 81, 1212, 858);
+                _positions.Add((page, bounds));
+                page.Bounds = Rectangle.Round(new RectangleF(bounds.X * ScaleX, bounds.Y * ScaleY, bounds.Width * ScaleX, bounds.Height * ScaleY));
+            }
             UpdateAbyssDungeonPickerVisibility();
             AccessibleName = "Mabi Auto 대시보드";
         }
@@ -254,7 +271,11 @@ public sealed partial class MainForm
             {
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
+                _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : null;
                 _owner._mode.SelectedIndex = mode;
+                UpdateAbyssDungeonPickerVisibility();
+                if (_owner._productionPageMode is not null)
+                    _ = (mode == 4 ? _owner._alteringPage : _owner._gatheringPage).LoadCatalogAsync();
                 _owner.UpdateDashboard();
             });
         }
@@ -369,6 +390,18 @@ public sealed partial class MainForm
         {
             bool showButtons = ShouldShowAbyssDungeonPicker && !_owner._logExpanded;
             foreach (var button in _gallery) button.Visible = showButtons;
+            if (_owner._alteringPage is not null)
+            {
+                bool production = ShouldShowProductionPage;
+                _owner._alteringPage.Visible = production && _owner._productionPageMode == "가공";
+                _owner._gatheringPage.Visible = production && _owner._productionPageMode == "채집";
+                foreach (var (control, bounds) in _positions)
+                {
+                    if (control is ProductionPage || control == _owner._logView || control == _owner._logToggle || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
+                    if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !production;
+                }
+                if (_owner._logExpanded) _owner._logView.BringToFront();
+            }
             Invalidate();
         }
 
@@ -517,6 +550,8 @@ public sealed partial class MainForm
             
             TextAt(g, ready ? "시스템 준비됨" : "확인 필요", new(1087, 20, 137, 29), 15, true, readyColor);
 
+            if (ShouldShowProductionPage) return;
+
             Card(g, new(219, 81, 1212, 146));
             var saved = g.Save();
             using (var clip = Round(new(221, 83, 1208, 142), 6)) g.SetClip(clip);
@@ -588,41 +623,6 @@ public sealed partial class MainForm
                 TextAt(g, status[i].Value.Text, new(1315, y, 95, 37), 14, true, c, StringAlignment.Far);
             }
             TextAt(g, _owner._updateStatusValue.Text, new(1153, 582, 98, 34), 14, false, _owner._updateStatusValue.ForeColor);
-
-            if (ShouldShowProductionPage)
-            {
-                Card(g, new(219, 634, 1212, 305));
-                string modeTitle = EffectiveMode == "가공" ? "자동 가공" : "자동 채집";
-                Icon(g, EffectiveMode == "가공" ? "game" : "leaf", new(240, 650, 29, 29), _cyan);
-                TextAt(g, modeTitle + " 설정 / 상태", new(286, 644, 1089, 39), 21, true, Color.White);
-
-                Card(g, new(239, 694, 563, 218));
-                TextAt(g, "선택 작업", new(260, 708, 130, 31), 16, false, _text);
-                TextAt(g, _owner._productionDisplayName, new(395, 708, 376, 31), 18, true, Color.White);
-                using (var pen = new Pen(Color.FromArgb(11, 53, 81))) g.DrawLine(pen, 260, 747, 780, 747);
-                TextAt(g, "목표 수량", new(260, 756, 130, 31), 16, false, _text);
-                TextAt(g, _owner._productionTargetQuantity > 0 ? _owner._productionTargetQuantity + "개" : "시작 시 설정",
-                    new(395, 756, 376, 31), 18, true, Color.White);
-                using (var pen = new Pen(Color.FromArgb(11, 53, 81))) g.DrawLine(pen, 260, 795, 780, 795);
-                TextAt(g, EffectiveMode == "가공" ? "가공 위치" : "실행 방식", new(260, 804, 130, 31), 16, false, _text);
-                TextAt(g, EffectiveMode == "가공"
-                        ? (_owner._productionFacilityName == "—" ? "시작 시 설정" : _owner._productionFacilityName)
-                        : "CLI 상태 확인 후 자동 진행",
-                    new(395, 804, 376, 31), 17, true, Color.White);
-                TextAt(g, "F9 시작 · F10 정지 · 시작 시 품목과 수량을 설정합니다.",
-                    new(260, 858, 500, 33), 15, false, _text);
-
-                Card(g, new(814, 694, 596, 218));
-                TextAt(g, "실행 정보", new(838, 708, 180, 31), 18, true, Color.White);
-                TextAt(g, "CLI 직접 실행", new(838, 754, 190, 30), 16, false, _text);
-                Dot(g, 1072, 769, 4, _green);
-                TextAt(g, "활성", new(1090, 754, 100, 30), 16, true, _green);
-                TextAt(g, "캐릭터 문맥 확인", new(838, 795, 190, 30), 16, false, _text);
-                Dot(g, 1072, 810, 4, _green);
-                TextAt(g, "실행 전·후 확인", new(1090, 795, 180, 30), 16, true, _green);
-                TextAt(g, "재화 변화", new(838, 836, 190, 30), 16, false, _text);
-                TextAt(g, "상세 로그에서 확인", new(1090, 836, 205, 30), 16, true, _cyan);
-            }
 
             if (ShouldShowAbyssDungeonPicker)
             {
@@ -769,8 +769,13 @@ public sealed partial class MainForm
                 bool selected = _kind == "choose" && Tag is int index && index == _ui._owner._abyssDungeon.SelectedIndex;
                 bool action = _kind == "action";
                 bool nav = _kind.StartsWith("nav");
-                bool strong = action || selected || _kind == "nav-selected";
-                bool bare = _kind is "chrome" or "nav";
+                bool navSelected = nav && (Text == "홈" ? _ui._owner._productionPageMode is null && _ui.EffectiveMode is not ("던전" or "어비스")
+                    : Text == "자동 가공" ? _ui._owner._productionPageMode == "가공"
+                    : Text == "자동 채집" ? _ui._owner._productionPageMode == "채집"
+                    : Text == "어비스" ? _ui.EffectiveMode == "어비스"
+                    : Text == "던전" && _ui.EffectiveMode == "던전");
+                bool strong = action || selected || navSelected;
+                bool bare = _kind == "chrome" || nav && !navSelected;
                 Color top = strong ? Color.FromArgb(0, 136, 255) : Color.FromArgb(3, 31, 54);
                 Color bottom = strong ? Color.FromArgb(0, 68, 207) : Color.FromArgb(1, 20, 37);
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }

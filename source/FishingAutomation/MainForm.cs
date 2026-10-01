@@ -62,13 +62,15 @@ public sealed partial class MainForm : Form
     private static readonly Color Blue = Color.FromArgb(20, 132, 255);
     private static readonly Color Green = Color.FromArgb(56, 232, 145);
 
-    public MainForm()
+    public MainForm() : this(null) { }
+
+    internal MainForm(Func<AppLog, MabinogiMobileCli>? cliFactory)
     {
         string baseDir = AppContext.BaseDirectory;
         AutomationConfig cfg = AutomationConfig.Load(Path.Combine(baseDir, "config.json"));
         string runtimeLogPath = Path.Combine(baseDir, cfg.LogFile);
         _log = new AppLog(runtimeLogPath, cfg.LogMaxBytes);
-        _cli = new MabinogiMobileCli(_log, cfg.ZeroWingMode);
+        _cli = cliFactory?.Invoke(_log) ?? new MabinogiMobileCli(_log, cfg.ZeroWingMode);
         _notifier = new TelegramNotifier(Path.Combine(baseDir, "notification.json"), _log);
         _errorUploader = new RuntimeErrorUploader(_log, runtimeLogPath);
         _watchdog = new WatchdogClient(baseDir);
@@ -94,6 +96,8 @@ public sealed partial class MainForm : Form
 
         Shown += async (_, _) =>
         {
+            // UI regression harness supplies an isolated CLI; never contact services.
+            if (cliFactory is not null) return;
             await Task.Delay(1200);
             if (IsDisposed) return;
 

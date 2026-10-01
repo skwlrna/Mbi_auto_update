@@ -11,6 +11,8 @@ public sealed partial class MainForm
         _starting = true; _cancelStart = false;
         try
         {
+            var plan = SelectedAlteringPlan();
+            plan.Validate();
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_alterable_items", "get_altering_works",
@@ -20,24 +22,21 @@ public sealed partial class MainForm
             var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
             _log.Write("[자동 가공] CLI capabilities 확인 완료 · 필수 명령 " + requiredCommands.Length + "개");
             if (confirmCommands.Length > 0)
-                _log.Write("[자동 가공] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 설정창 시작 확인을 사용자 승인으로 사용합니다.");
+                _log.Write("[자동 가공] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
 
-            var data = new AlteringCliData(_cli);
-            var recipes = await data.RecipesAsync(CancellationToken.None);
-            // execute_altering resolves duplicate display names to the first CLI row.
-            // Only expose that exact row in direct-CLI mode so a later duplicate cannot be selected accidentally.
-            var cliRecipes = recipes.GroupBy(x => x.DisplayName, StringComparer.Ordinal).Select(g => g.First()).ToArray();
+            _productionBaseline = null;
+            var data = new ProductionAlteringData(new AlteringCliData(_cli), value => Ui(() => _productionBaseline = value));
             if (_cancelStart || IsDisposed) return;
-            using var dialog = new AlteringSettingsDialog(cliRecipes);
-            if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not AlteringPlan plan || _cancelStart) return;
-            if (_cancelStart || IsDisposed) return;
+            _productionLastMode = "가공";
             _productionDisplayName = plan.DisplayName;
             _productionTargetQuantity = plan.TargetQuantity;
             _productionCurrentQuantity = 0;
             _productionFacilityName = plan.ScreenTitle;
             RefreshProductionDashboard();
             var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
+            if (_cancelStart || IsDisposed) return;
             _log.Write("[자동 가공] 캐릭터 문맥 저장 · " + identity.Description);
+            _alteringPage.CharacterStatus = "확인됨";
             var screen = new AlteringCliScreen(_cli, identity);
             var automation = new AlteringAutomation(data, screen);
             screen.Log += text => Ui(() => _log.Write(text));
@@ -53,8 +52,7 @@ public sealed partial class MainForm
             {
                 _log.Write(text);
                 _dungeonCycles = automation.QueuedWorks;
-                _productionCurrentQuantity = Math.Min((long)plan.TargetQuantity,
-                    (long)automation.QueuedWorks * plan.ProducedPerWork);
+                // Quantity comes from inventory receipts, never queued jobs.
                 SetStatus(text.Replace("[자동 가공] ", ""), Blue);
                 UpdateStats();
                 RefreshProductionDashboard();
@@ -70,7 +68,7 @@ public sealed partial class MainForm
                         Ui(() =>
                         {
                             _dungeonCompleted = automation.QueuedWorks;
-                            _productionCurrentQuantity = plan.TargetQuantity;
+                            _productionCurrentQuantity = data.Gained;
                             _log.Write("[자동 가공] 목표 작업 완료");
                             RefreshProductionDashboard();
                         });

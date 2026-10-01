@@ -11,6 +11,8 @@ public sealed partial class MainForm
         _starting = true; _cancelStart = false;
         try
         {
+            var plan = SelectedGatheringPlan();
+            plan.Validate();
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",
@@ -20,22 +22,20 @@ public sealed partial class MainForm
             var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
             _log.Write("[자동 채집] CLI capabilities 확인 완료 · 필수 명령 " + requiredCommands.Length + "개");
             if (confirmCommands.Length > 0)
-                _log.Write("[자동 채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 설정창 시작 확인을 사용자 승인으로 사용합니다.");
+                _log.Write("[자동 채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
 
             var data = new GatheringCliData(_cli);
-            var catalog=await data.CatalogAsync(CancellationToken.None);
-            var recipes=AlteringQueries.ParseRecipes(await _cli.GetAlterableItemsAsync());
             if (_cancelStart || IsDisposed) return;
-            using var dialog = new GatheringSettingsDialog(catalog,recipes);
-            if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Plan is not GatheringPlan plan || _cancelStart) return;
-            if (_cancelStart || IsDisposed) return;
+            _productionLastMode = "채집";
             _productionDisplayName = plan.DisplayName;
             _productionTargetQuantity = plan.TargetQuantity;
             _productionCurrentQuantity = 0;
             _productionFacilityName = "자동 채집 경로";
             RefreshProductionDashboard();
             var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
+            if (_cancelStart || IsDisposed) return;
             _log.Write("[자동 채집] 캐릭터 문맥 저장 · " + identity.Description);
+            _gatheringPage.CharacterStatus = "확인됨";
             var screen = new GatheringCliScreen(_cli, identity);
             var automation = new GatheringAutomation(data, screen);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();

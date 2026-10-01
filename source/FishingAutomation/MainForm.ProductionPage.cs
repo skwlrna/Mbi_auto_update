@@ -1,0 +1,473 @@
+using System.Drawing.Drawing2D;
+
+namespace FishingAutomation;
+
+public sealed partial class MainForm
+{
+    private ProductionPage _gatheringPage = null!, _alteringPage = null!;
+    private string? _productionPageMode;
+    private bool _productionPolling;
+    private DateTime _productionNextPoll;
+    private long? _productionBaseline;
+
+    private GatheringPlan SelectedGatheringPlan()
+    {
+        if (_gatheringPage.Items.SelectedItem is not GatheringChoice choice)
+            throw new InvalidOperationException("채집 품목 목록을 불러온 뒤 품목을 선택하세요.");
+        if (!choice.Item.ToolOk) throw new InvalidOperationException("채집 도구 상태를 확인하세요.");
+        return new(choice.Item.DisplayName, (int)_gatheringPage.Quantity.Value);
+    }
+
+    private AlteringPlan SelectedAlteringPlan()
+    {
+        if (_alteringPage.Items.SelectedItem is not RecipeChoice choice)
+            throw new InvalidOperationException("가공 제법 목록을 불러온 뒤 제법을 선택하세요.");
+        if (!choice.Recipe.Alterable) throw new InvalidOperationException("선택한 제법의 가공 조건을 확인하세요.");
+        // Preserve the existing direct-CLI first-row semantics and execution guards.
+        return new(_alteringPage.Facility.SelectedItem!.ToString()!, choice.Recipe.DisplayName,
+            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, true);
+    }
+
+    private async Task RefreshProductionStateAsync(ProductionPage page)
+    {
+        if (_productionPolling) return;
+        _productionPolling = true;
+        string? selected = page.SelectedName;
+        string? facility = page.Facility.SelectedItem?.ToString();
+        try
+        {
+            if (selected is null) return;
+            long count = page.IsAltering
+                ? await new AlteringCliData(_cli).ItemCountAsync(page.OutputName!, CancellationToken.None)
+                : await new GatheringCliData(_cli).ItemCountAsync(selected, CancellationToken.None);
+            var identity = CliAutomationGuards.ParseIdentity(await _cli.GetMyInfoAsync());
+            int? completed = null;
+            if (page.IsAltering)
+                completed = (await new AlteringCliData(_cli).WorksAsync(CancellationToken.None))
+                    .Count(x => x.IsCompleted && x.FacilityName == facility);
+            if (IsDisposed || page.SelectedName != selected || page.Facility.SelectedItem?.ToString() != facility) return;
+            page.Owned.Text = $"현재 보유량  {count:N0}개";
+            page.CliStatus = "정상";
+            page.CharacterStatus = identity.ComparableFields > 0 ? "확인됨" : "확인 필요";
+            if (_activeMode == (page.IsAltering ? "가공" : "채집"))
+            {
+                if (page.IsAltering && _productionBaseline.HasValue)
+                    _productionCurrentQuantity = Math.Max(0, count - _productionBaseline.Value);
+            }
+            page.CompletedWorks = completed;
+        }
+        catch (Exception)
+        {
+            if (!IsDisposed)
+            {
+                page.Owned.Text = "조회 실패";
+                page.CliStatus = "연결 확인 필요"; page.CharacterStatus = "확인 필요";
+                page.CompletedWorks = null;
+            }
+        }
+        finally
+        {
+            _productionPolling = false;
+            _productionNextPoll = DateTime.UtcNow.AddSeconds(5);
+            if (!IsDisposed) page.UpdateExecution();
+        }
+    }
+
+    private sealed record GatheringChoice(GatherableItem Item)
+    { public override string ToString() => Item.DisplayName; }
+    private sealed record RecipeChoice(AlteringRecipe Recipe)
+    { public override string ToString() => Recipe.DisplayName; }
+
+    // Native controls in the existing central content region, sharing its palette.
+    // Independent pages retain their own selections and never appear together.
+    private sealed class ProductionPage : Panel
+    {
+        private readonly MainForm _owner;
+        internal bool IsAltering { get; }
+        internal readonly ComboBox Items = new LauncherCombo(), Facility = new LauncherCombo();
+        internal readonly NumericUpDown Quantity = new() { Minimum = 1, Maximum = 1000000, Value = 100 };
+        internal readonly Label Owned = new();
+        private readonly TextBox _search = new();
+        private readonly Label _condition = new(), _materials = new(), _progressText = new(), _elapsed = new(),
+            _state = new(), _cli = new(), _character = new(), _collection = new();
+        private readonly Label _selectedName = new(), _percentage = new();
+        private readonly Panel _itemIcon = new(), _toolIcon = new();
+        private readonly Panel _progress = new();
+        private int _percent;
+        private readonly Button _start, _stop, _reload;
+        private object[] _choices = Array.Empty<object>();
+        private bool _loading, _loaded;
+        internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
+        internal int? CompletedWorks;
+        internal string? SelectedName => Items.SelectedItem switch
+        { GatheringChoice g => g.Item.DisplayName, RecipeChoice r => r.Recipe.DisplayName, _ => null };
+        internal string? OutputName => Items.SelectedItem is RecipeChoice r
+            ? new AlteringPlan(AlteringPlan.Facilities[0], r.Recipe.DisplayName, 1, r.Recipe.ProducedPerWork, true).OutputName : SelectedName;
+
+        internal ProductionPage(MainForm owner, bool altering)
+        {
+            _owner = owner; IsAltering = altering;
+            Name = altering ? "AlteringPage" : "GatheringPage";
+            AccessibleName = altering ? "자동 가공" : "자동 채집";
+            BackColor = WindowBg; ForeColor = TitleText; Visible = false;
+            Font = new Font("맑은 고딕", 12f);
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(14, 6, 14, 10), Margin = Padding.Empty };
+            root.RowStyles.Add(new(SizeType.Absolute, 82));
+            root.RowStyles.Add(new(SizeType.Percent, 51)); root.RowStyles.Add(new(SizeType.Percent, 49));
+            var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty };
+            header.RowStyles.Add(new(SizeType.Percent, 58)); header.RowStyles.Add(new(SizeType.Percent, 42));
+            header.Controls.Add(owner.SectionTitle(AccessibleName, 26));
+            header.Controls.Add(new Label { Text = altering ? "보유 재료로 원하는 아이템을 자동 가공합니다." : "채집 재료를 자동으로 수집합니다.", Dock = DockStyle.Fill, ForeColor = Muted });
+            root.Controls.Add(header, 0, 0);
+
+            var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10) };
+            settings.ColumnStyles.Add(new(SizeType.Percent, 62)); settings.ColumnStyles.Add(new(SizeType.Percent, 38));
+            var card = new LauncherCard { Padding = new Padding(16, 9, 16, 9), Margin = new Padding(0, 0, 9, 0) };
+            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = altering ? 5 : 4, BackColor = Color.Transparent };
+            form.ColumnStyles.Add(new(SizeType.Absolute, 112)); form.ColumnStyles.Add(new(SizeType.Percent, 100));
+            form.RowStyles.Add(new(SizeType.Absolute, 32));
+            for (int i = 1; i < form.RowCount; i++) form.RowStyles.Add(new(SizeType.Percent, 100f / (form.RowCount-1)));
+            var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+            settingsHeading.Controls.Add(new Label { Text = altering ? "가공 설정" : "채집 설정", Dock = DockStyle.Fill, ForeColor = TitleText, Font = new Font("맑은 고딕", 15f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft });
+            form.Controls.Add(settingsHeading, 0, 0); form.SetColumnSpan(settingsHeading, 2);
+            _reload = PageButton("목록 새로고침", () => _ = LoadCatalogAsync(true));
+            _reload.Font = new Font("맑은 고딕", 8.5f); _reload.Dock = DockStyle.Right; _reload.Width = 110; settingsHeading.Controls.Add(_reload);
+            _search.PlaceholderText = "품목을 검색하세요"; StyleField(_search); AddRow(form, 1, "품목 검색", _search);
+            Items.DropDownStyle = ComboBoxStyle.DropDownList; StyleField(Items); StyleCombo(Items);
+            Items.AccessibleName = altering ? "가공 제법" : "채집 품목"; AddRow(form, 2, Items.AccessibleName, Items);
+            Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity); AddRow(form, 3, "목표 수량", Quantity);
+            StyleField(Facility); Facility.DropDownStyle = ComboBoxStyle.DropDownList; StyleCombo(Facility);
+            Facility.Items.AddRange(AlteringPlan.Facilities); Facility.SelectedIndex = 0;
+            if (altering) { Facility.AccessibleName = "가공 시설"; AddRow(form, 4, "가공 시설", Facility); }
+            card.Controls.Add(form); settings.Controls.Add(card, 0, 0);
+            var summaries = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
+            summaries.RowStyles.Add(new(SizeType.Percent, 52)); summaries.RowStyles.Add(new(SizeType.Percent, 48));
+            summaries.Controls.Add(BuildSummaryCard(altering ? "선택한 가공 제법" : "선택한 채집 품목", false), 0, 0);
+            summaries.Controls.Add(BuildSummaryCard(altering ? "가공 가능 여부" : "도구 상태", true), 0, 1);
+            settings.Controls.Add(summaries, 1, 0); root.Controls.Add(settings, 0, 1);
+
+            var execution = new LauncherCard { Padding = new Padding(16, 8, 16, 9), Margin = Padding.Empty };
+            var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = Color.Transparent };
+            status.RowStyles.Add(new(SizeType.Absolute, 34)); status.RowStyles.Add(new(SizeType.Absolute, 59));
+            status.RowStyles.Add(new(SizeType.Percent, 56)); status.RowStyles.Add(new(SizeType.Percent, 44)); status.RowStyles.Add(new(SizeType.Absolute, 23));
+            status.Controls.Add(owner.SectionTitle("▶  실행 상태", 15), 0, 0);
+            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+            actions.ColumnStyles.Add(new(SizeType.Percent, 72)); actions.ColumnStyles.Add(new(SizeType.Percent, 28));
+            _start = PageButton("▶   " + AccessibleName + " 시작", owner.StartSelected); _start.BackColor = Accent;
+            _start.AccessibleName = AccessibleName + " 시작";
+            _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
+            actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); status.Controls.Add(actions, 0, 1);
+            var progressCard = new LauncherCard { Padding = new Padding(12, 6, 12, 6), Margin = new Padding(2, 7, 2, 7) };
+            var progressLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 2, BackColor = Color.Transparent };
+            progressLayout.ColumnStyles.Add(new(SizeType.Percent, 50)); progressLayout.ColumnStyles.Add(new(SizeType.Percent, 50));
+            progressLayout.RowStyles.Add(new(SizeType.Absolute, 17)); progressLayout.RowStyles.Add(new(SizeType.Percent, 74)); progressLayout.RowStyles.Add(new(SizeType.Percent, 26));
+            progressLayout.Controls.Add(new Label { Text = "진행 수량", ForeColor = Muted, Dock = DockStyle.Fill, Font = new Font("맑은 고딕", 10f) }, 0, 0);
+            progressLayout.Controls.Add(new Label { Text = "진행률", ForeColor = Muted, Dock = DockStyle.Fill, Font = new Font("맑은 고딕", 10f) }, 1, 0);
+            _progressText.Font = new Font("맑은 고딕", 22f, FontStyle.Bold); _progressText.ForeColor = Color.FromArgb(36, 195, 255);
+            _percentage.Font = new Font("맑은 고딕", 22f, FontStyle.Bold); _percentage.ForeColor = _progressText.ForeColor;
+            _percentage.Dock = DockStyle.Fill; _percentage.TextAlign = ContentAlignment.MiddleLeft;
+            progressLayout.Controls.Add(_progressText, 0, 1); progressLayout.Controls.Add(_percentage, 1, 1);
+            _progress.Dock = DockStyle.Fill; _progress.Margin = new Padding(1, 2, 1, 1);
+            _progress.Paint += (_, e) => DrawProgress(e.Graphics);
+            progressLayout.Controls.Add(_progress, 0, 2); progressLayout.SetColumnSpan(_progress, 2); progressCard.Controls.Add(progressLayout); status.Controls.Add(progressCard, 0, 2);
+            var chips = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 4, Margin = Padding.Empty };
+            foreach (var label in new[] { _elapsed, _state, _cli, _character })
+            {
+                chips.ColumnStyles.Add(new(SizeType.Percent, 25));
+                var chip = new LauncherCard { Padding = new Padding(9, 4, 6, 4), Margin = new Padding(2, 0, 2, 2) };
+                chip.Controls.Add(label); chips.Controls.Add(chip);
+            }
+            status.Controls.Add(chips, 0, 3); status.Controls.Add(_collection, 0, 4);
+            foreach (var label in new[] { Owned, _condition, _materials, _selectedName, _progressText, _elapsed, _state, _cli, _character, _collection })
+            { label.Dock = DockStyle.Fill; label.TextAlign = ContentAlignment.MiddleLeft; label.AutoEllipsis = true; label.BackColor = Color.Transparent; }
+            _selectedName.Font = new Font("맑은 고딕", 17f, FontStyle.Bold);
+            Owned.Font = new Font("맑은 고딕", 13f, FontStyle.Bold); Owned.ForeColor = TitleText;
+            _condition.Font = new Font("맑은 고딕", 17f, FontStyle.Bold);
+            _materials.Font = new Font("맑은 고딕", 11f); _materials.ForeColor = Muted;
+            _collection.Font = new Font("맑은 고딕", 8.5f); _collection.ForeColor = Muted;
+            _elapsed.Font = _state.Font = _cli.Font = _character.Font = new Font("맑은 고딕", 10.5f);
+            execution.Controls.Add(status); root.Controls.Add(execution, 0, 2); Controls.Add(root);
+            _search.TextChanged += (_, _) => Filter();
+            Items.SelectedIndexChanged += (_, _) => SelectionChanged();
+            Quantity.ValueChanged += (_, _) => UpdateExecution();
+            Facility.SelectedIndexChanged += (_, _) => SelectionChanged();
+            _condition.Text = "목록 확인 전"; Owned.Text = "—"; UpdateExecution();
+        }
+
+        private static void StyleField(Control control)
+        {
+            control.Dock = DockStyle.Fill; control.BackColor = CardBg2; control.ForeColor = TitleText;
+            control.Margin = new Padding(3, 5, 3, 5);
+            control.Font = new Font("맑은 고딕", 13f);
+            if (control is TextBox text) text.BorderStyle = BorderStyle.None;
+            if (control is NumericUpDown number) number.BorderStyle = BorderStyle.None;
+        }
+
+        private Control BuildSummaryCard(string caption, bool condition)
+        {
+            var card = new LauncherCard { Padding = new Padding(12, 6, 12, 7), Margin = new Padding(0, condition ? 4 : 0, 0, condition ? 0 : 4) };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, BackColor = Color.Transparent };
+            layout.ColumnStyles.Add(new(SizeType.Absolute, 0)); layout.ColumnStyles.Add(new(SizeType.Percent, 100));
+            layout.RowStyles.Add(new(SizeType.Absolute, 24)); layout.RowStyles.Add(new(SizeType.Percent, 50)); layout.RowStyles.Add(new(SizeType.Percent, 50));
+            var heading = new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = TitleText, Font = new Font("맑은 고딕", 13f, FontStyle.Bold), BackColor = Color.Transparent };
+            layout.Controls.Add(heading, 0, 0); layout.SetColumnSpan(heading, 2);
+            var icon = condition ? _toolIcon : _itemIcon;
+            icon.Dock = DockStyle.Fill; icon.BackColor = Color.Transparent; icon.Margin = new Padding(0, 1, 6, 0);
+            icon.Paint += (_, e) => DrawResourceIcon(e.Graphics, icon.ClientRectangle, condition);
+            // Keep the summary text-only; no material or tool artwork.
+            layout.Controls.Add(condition ? _condition : _selectedName, 1, 1);
+            layout.Controls.Add(condition ? _materials : Owned, 1, 2);
+            card.Controls.Add(layout); return card;
+        }
+
+        private static GraphicsPath Rounded(RectangleF bounds, float radius)
+        {
+            var path = new GraphicsPath(); float d = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+            path.AddArc(bounds.X, bounds.Y, d, d, 180, 90); path.AddArc(bounds.Right-d, bounds.Y, d, d, 270, 90);
+            path.AddArc(bounds.Right-d, bounds.Bottom-d, d, d, 0, 90); path.AddArc(bounds.X, bounds.Bottom-d, d, d, 90, 90);
+            path.CloseFigure(); return path;
+        }
+
+        private sealed class LauncherCard : Panel
+        {
+            internal LauncherCard()
+            {
+                Dock = DockStyle.Fill; BackColor = CardBg;
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (Width < 3 || Height < 3) return;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.Clear(SurfaceColor(Parent));
+                var bounds = new RectangleF(1, 1, Width-2, Height-2);
+                using var shape = Rounded(bounds, 12);
+                using var fill = new LinearGradientBrush(bounds, Color.FromArgb(7, 35, 61), CardBg2, 60f);
+                using var border = new Pen(Color.FromArgb(21, 77, 116));
+                e.Graphics.FillPath(fill, shape); e.Graphics.DrawPath(border, shape);
+            }
+        }
+
+        private void DrawProgress(Graphics graphics)
+        {
+            if (_progress.Width < 2 || _progress.Height < 2) return;
+            graphics.Clear(CardBg); graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = new RectangleF(0, 0, _progress.Width-1, _progress.Height-1);
+            using var path = Rounded(bounds, 7); using var track = new SolidBrush(Line);
+            graphics.FillPath(track, path);
+            if (_percent > 0)
+            {
+                using var filled = Rounded(new RectangleF(0, 0, Math.Max(8, bounds.Width*_percent/100f), bounds.Height), 7);
+                using var fill = new LinearGradientBrush(bounds, Color.FromArgb(25, 209, 255), Accent, 90f);
+                graphics.FillPath(fill, filled);
+            }
+        }
+
+        private void DrawResourceIcon(Graphics graphics, Rectangle bounds, bool tool)
+        {
+            if (bounds.Width < 2 || bounds.Height < 2) return;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var saved = graphics.Save();
+            float size = Math.Min(bounds.Width, bounds.Height);
+            graphics.TranslateTransform((bounds.Width-size)/2, (bounds.Height-size)/2); graphics.ScaleTransform(size/64, size/64);
+            if (tool)
+            {
+                // Decorative tool symbol, not a claim about the exact equipped tool.
+                using var handle = new Pen(Color.FromArgb(153, 102, 60), 7) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                graphics.DrawLine(handle, 14, 54, 45, 16);
+                using var steel = new Pen(Color.FromArgb(190, 216, 242), 7) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                graphics.DrawLine(steel, 21, 14, 49, 29);
+            }
+            else
+            {
+                // Neutral material artwork: CLI selection text remains authoritative.
+                PointF[] top = IsAltering ? new[] {new PointF(8,28),new PointF(39,10),new PointF(58,22),new PointF(27,40)}
+                    : new[] {new PointF(12,24),new PointF(27,10),new PointF(47,18),new PointF(54,40),new PointF(29,50),new PointF(8,40)};
+                using var ore = new LinearGradientBrush(new Rectangle(5,5,55,50), Color.FromArgb(226, 233, 245), Color.FromArgb(110, 133, 165), 50f);
+                graphics.FillPolygon(ore, top);
+                using var facet = new SolidBrush(Color.FromArgb(91, 116, 148));
+                graphics.FillPolygon(facet, IsAltering ? new[] {new PointF(27,40),new PointF(58,22),new PointF(55,38),new PointF(25,56)}
+                    : new[] {new PointF(27,28),new PointF(47,18),new PointF(54,40),new PointF(29,50)});
+                using var edge = new Pen(Color.FromArgb(220, 234, 250), 1);
+                graphics.DrawPolygon(edge, top);
+            }
+            graphics.Restore(saved);
+        }
+        private sealed class LauncherCombo : ComboBox
+        {
+            internal LauncherCombo() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                e.Graphics.Clear(CardBg2);
+                TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(4, 0, Math.Max(1, Width - 32), Height), Enabled ? TitleText : Muted,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(e.Graphics, "⌄", Font, new Rectangle(Width - 28, 0, 24, Height), Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -2, -2));
+            }
+            protected override void OnSelectedIndexChanged(EventArgs e) { base.OnSelectedIndexChanged(e); Invalidate(); }
+        }
+        private static void StyleCombo(ComboBox combo)
+        {
+            combo.FlatStyle = FlatStyle.Flat;
+            combo.DrawMode = DrawMode.OwnerDrawFixed;
+            combo.DrawItem += (_, e) =>
+            {
+                using var background = new SolidBrush((e.State & DrawItemState.Selected) != 0 ? AccentSoft : CardBg2);
+                e.Graphics.FillRectangle(background, e.Bounds);
+                string text = e.Index >= 0 ? combo.Items[e.Index]?.ToString() ?? "" : "품목을 선택하세요";
+                TextRenderer.DrawText(e.Graphics, text, combo.Font, Rectangle.Inflate(e.Bounds, -5, 0),
+                    combo.Enabled ? TitleText : Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
+        }
+        private static Button PageButton(string caption, Action action)
+        {
+            var button = new ProductionButton { Text = caption, Dock = DockStyle.Fill, BackColor = CardBg2, ForeColor = TitleText,
+                Font = new Font("맑은 고딕", 15f, FontStyle.Bold), Margin = new Padding(3), Cursor = Cursors.Hand };
+            button.Click += (_, _) => action(); return button;
+        }
+        private sealed class ProductionButton : Button
+        {
+            internal ProductionButton() { SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true); }
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (Width < 3 || Height < 3) return;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.Clear(SurfaceColor(Parent));
+                var bounds = new RectangleF(1, 1, Width-2, Height-2);
+                using var shape = Rounded(bounds, 10);
+                bool primary = Enabled && BackColor == Accent;
+                using var fill = new LinearGradientBrush(bounds, primary ? Color.FromArgb(4, 165, 255) : CardBg,
+                    primary ? Color.FromArgb(0, 86, 226) : CardBg2, 90f);
+                using var border = new Pen(primary ? Color.FromArgb(0, 207, 255) : Line, primary ? 1.8f : 1f);
+                e.Graphics.FillPath(fill, shape); e.Graphics.DrawPath(border, shape);
+                TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Enabled ? ForeColor : Muted,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -4, -4));
+            }
+        }
+        private static void AddRow(TableLayoutPanel form, int row, string caption, Control control)
+        {
+            form.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
+            var field = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(3, 5, 3, 5) };
+            var surface = new LauncherCard { Dock = DockStyle.None, BackColor = CardBg2 };
+            control.Dock = DockStyle.None;
+            void AlignField() {
+                surface.Bounds = new Rectangle(0, Math.Max(0, (field.Height - 44) / 2), field.Width, Math.Min(44, field.Height));
+                control.Width = Math.Max(1, surface.Width - 22); control.Location = new Point(11, Math.Max(0, (surface.Height - control.Height) / 2));
+            }
+            surface.Controls.Add(control); field.Controls.Add(surface);
+            field.Resize += (_, _) => AlignField();
+            form.Controls.Add(field, 1, row); AlignField();
+        }
+
+        private static Color SurfaceColor(Control? control)
+        {
+            while (control != null)
+            {
+                if (control.BackColor.A == 255) return control.BackColor;
+                control = control.Parent;
+            }
+            return WindowBg;
+        }
+
+        internal async Task LoadCatalogAsync(bool force = false)
+        {
+            if (_loading || (_loaded && !force) || _owner.AnyRunning) return;
+            _loading = true; UpdateExecution();
+            try
+            {
+                _choices = IsAltering
+                    ? (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
+                        .GroupBy(x => x.DisplayName, StringComparer.Ordinal).Select(g => (object)new RecipeChoice(g.First())).ToArray()
+                    : (await new GatheringCliData(_owner._cli).CatalogAsync(CancellationToken.None))
+                        .Select(x => (object)new GatheringChoice(x)).ToArray();
+                _loaded = true;
+                if (IsDisposed) return;
+                Filter(); CliStatus = "정상";
+                await _owner.RefreshProductionStateAsync(this);
+            }
+            catch (Exception ex)
+            {
+                if (IsDisposed) return;
+                _loaded = false; _choices = Array.Empty<object>(); Items.Items.Clear();
+                _condition.Text = "목록 조회 실패 · 새로고침하세요"; Owned.Text = "조회 실패";
+                CliStatus = "연결 확인 필요";
+                _owner._log.Write($"[{AccessibleName}] 목록 조회 실패: {ex.Message}");
+            }
+            finally { _loading = false; if (!IsDisposed) UpdateExecution(); }
+        }
+
+        private void Filter()
+        {
+            string? previous = SelectedName;
+            Items.BeginUpdate(); Items.Items.Clear();
+            Items.Items.AddRange(_choices.Where(x => x.ToString()!.Contains(_search.Text.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray());
+            int index = Items.Items.Cast<object>().ToList().FindIndex(x => x.ToString() == previous);
+            if (Items.Items.Count > 0) Items.SelectedIndex = Math.Max(0, index);
+            Items.EndUpdate(); SelectionChanged();
+        }
+
+        private void SelectionChanged()
+        {
+            Owned.Text = "확인 중"; _owner._productionNextPoll = DateTime.MinValue;
+            _selectedName.Text = SelectedName ?? "품목을 선택하세요";
+            _itemIcon.Invalidate();
+            if (Items.SelectedItem is GatheringChoice g)
+            { _condition.Text = g.Item.ToolOk ? "사용 가능" : "확인 필요"; _condition.ForeColor = g.Item.ToolOk ? Green : Color.Orange; _materials.Text = g.Item.ToolOk ? "선택 품목의 도구 사용 가능" : "채집 도구를 확인하세요"; }
+            else if (Items.SelectedItem is RecipeChoice r)
+            {
+                _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.Reason == "not_enough_ingredient" ? "재료 부족" : "확인 필요";
+                _condition.ForeColor = r.Recipe.Alterable ? Green : Color.Orange;
+                // MissingIngredients is not a complete bill of materials; never invent it.
+                _materials.Text = (r.Recipe.MissingIngredients.Count > 0
+                    ? string.Join(" / ", r.Recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Required}개 · 보유 {x.Owned}개"))
+                    : "재료 상세 정보 확인 필요") + $" · 1회 {r.Recipe.ProducedPerWork}개";
+            }
+            else { _condition.Text = "품목을 선택하세요"; _materials.Text = "—"; Owned.Text = "—"; }
+            UpdateExecution();
+        }
+
+        internal void UpdateExecution()
+        {
+            bool running = _owner.AnyRunning;
+            bool available = Items.SelectedItem is GatheringChoice { Item.ToolOk: true } or RecipeChoice { Recipe.Alterable: true };
+            foreach (var field in new Control[] { Items, Quantity, Facility, _search, _reload }) field.Enabled = !running && !_loading;
+            _start.Enabled = !running && !_loading && available; _stop.Enabled = running;
+            bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
+            bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
+            long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
+            int target = ownRun ? _owner._productionTargetQuantity : (int)Quantity.Value;
+            int percent = target > 0 ? (int)Math.Clamp(current * 100 / target, 0, 100) : 0;
+            _progressText.Text = $"{current:N0} / {target:N0}"; _percentage.Text = $"{percent}%"; _percent = percent; _progress.Invalidate();
+            _progressText.AccessibleName = $"진행 수량 {current} / {target}, 진행률 {percent}%";
+            var startedAt = _owner._dungeonStartedAt;
+            var stoppedAt = _owner._dungeonStoppedAt;
+            var elapsed = ownRun && startedAt.HasValue ? DateTime.Now - startedAt.Value
+                : ownResult && stoppedAt.HasValue && startedAt.HasValue ? stoppedAt.Value - startedAt.Value : TimeSpan.Zero;
+            _elapsed.Text = $"진행 시간\n{elapsed:hh\\:mm\\:ss}";
+            _state.Text = "현재 상태\n" + (ownRun ? _owner._statusValue.Text : _loading ? "CLI 목록 조회 중" : ownResult && _owner._runError is not null ? _owner._runError : "대기 중");
+            _cli.Text = "CLI 상태\n" + CliStatus; _character.Text = "캐릭터\n" + CharacterStatus;
+            _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
+            _character.ForeColor = CharacterStatus == "확인됨" ? Green : Muted;
+            _collection.Text = IsAltering ? $"완료 대기 작업 수  {CompletedWorks?.ToString() ?? "—"}   ·   완료품 자동 수령  {(ownRun ? "작동 중" : "대기")}" : "목표 수량은 현재 보유량에서 추가로 수집할 수량입니다.";
+        }
+    }
+    private string? _productionLastMode;
+
+    // Observe the core's post-existing-work baseline without changing its workflow.
+    private sealed class ProductionAlteringData(IAlteringData inner, Action<long> baseline) : IAlteringData
+    {
+        private bool _captured;
+        private long _baseline;
+        internal long Gained { get; private set; }
+        public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct) => inner.RecipesAsync(ct);
+        public Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct) => inner.WorksAsync(ct);
+        public async Task<long> ItemCountAsync(string name, CancellationToken ct)
+        {
+            long value = await inner.ItemCountAsync(name, ct);
+            if (!_captured) { _captured = true; _baseline = value; baseline(value); }
+            Gained = Math.Max(0, value - _baseline);
+            return value;
+        }
+    }
+}

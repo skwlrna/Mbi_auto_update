@@ -19,5 +19,9 @@ public sealed partial class MainForm
     {
         UpdateDashboard();
         _referenceDashboard?.Invalidate();
+        if (_gatheringPage is null || _alteringPage is null) return;
+        _gatheringPage.UpdateExecution(); _alteringPage.UpdateExecution();
+        if (_productionPageMode is not null && !_productionPolling && DateTime.UtcNow >= _productionNextPoll)
+            _ = RefreshProductionStateAsync(_productionPageMode == "가공" ? _alteringPage : _gatheringPage);
     }
 }

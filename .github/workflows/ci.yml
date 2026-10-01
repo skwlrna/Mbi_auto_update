@@ -1,4 +1,4 @@
-name: Check V0.1.94 Unified UI
+name: Check V0.1.95 Inline Production Controls
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.94"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.95"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.94</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.95</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -143,3 +143,9 @@ jobs:
         run: |
           dotnet run --project tests/gathering/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Gathering regressions failed' }
+
+      - name: Inline production UI regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/production-ui/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Production UI regressions failed' }
