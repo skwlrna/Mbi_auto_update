@@ -7,6 +7,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
     private readonly IAlteringScreen _alteringScreen;
     private readonly IGatheringScreen _gatheringScreen;
     private readonly int _maxDepth;
+    private readonly Func<TimeSpan, CancellationToken, Task>? _delay;
+    private readonly int _verificationAttempts;
     private readonly HashSet<string> _active = new(StringComparer.Ordinal);
 
     internal event Action<string>? Log;
@@ -16,13 +18,17 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         IGatheringData gathering,
         IAlteringScreen alteringScreen,
         IGatheringScreen gatheringScreen,
-        int maxDepth = 8)
+        int maxDepth = 8,
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        int verificationAttempts = 120)
     {
         _altering = altering;
         _gathering = gathering;
         _alteringScreen = alteringScreen;
         _gatheringScreen = gatheringScreen;
         _maxDepth = Math.Clamp(maxDepth, 1, 16);
+        _delay = delay;
+        _verificationAttempts = Math.Clamp(verificationAttempts, 1, 120);
     }
 
     public async Task ResolveAsync(
@@ -78,7 +84,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 {
                     SourceRecipe = sourceRecipe with { AllowPaidButton = false }
                 };
-                var gathering = new GatheringAutomation(_gathering, _gatheringScreen);
+                var gathering = new GatheringAutomation(_gathering, _gatheringScreen, _delay, _verificationAttempts);
                 gathering.Log += text => Log?.Invoke(text);
                 Log?.Invoke($"[재료 해결] {itemName} 자동 채집 시작 · 추가 {quantity}개");
                 await gathering.RunAsync(gatherPlan, ct);
@@ -146,7 +152,9 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             var nested = new AlteringAutomation(
                 _altering,
                 _alteringScreen,
-                supplyResolver: this);
+                _delay,
+                _verificationAttempts,
+                this);
             nested.Log += text => Log?.Invoke(text);
             await nested.RunAsync(subPlan, ct);
             long outputAfter = await _altering.ItemCountAsync(subPlan.OutputName, ct);
