@@ -17,7 +17,6 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
-    private static readonly Rectangle FacilityTravelConfirmButton = new(390, 850, 235, 120);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     internal string InputMode => _input.ModeName;
     internal event Action<string>? Log;
@@ -308,40 +307,16 @@ internal sealed class AlteringScreen : IAlteringScreen
     }
 
 
-    private async Task<bool> ConfirmFacilityTravelPopupAsync(CancellationToken ct)
+    private async Task ConfirmFacilityTravelAsync(CancellationToken ct)
     {
-        // After "설비로 이동", the game may show a bottom confirmation modal.
-        // The user rule is intentionally simple: if the lower-right "확인" control
-        // appears, press Space once. Do not inspect destination text, question text,
-        // or the cancel button.
-        for (int wait = 0; wait < 20; wait++)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            using var frame = Capture(ct);
-            bool confirm = await HasDialogButtonAsync(frame, FacilityTravelConfirmButton, "확인", ct);
-            if (!confirm)
-            {
-                await Task.Delay(200, ct);
-                continue;
-            }
-
-            Log?.Invoke("[자동 가공] 하단 확인창 감지 · Space 입력");
-            _input.TapScanCode(0x39);
-            await Task.Delay(900, ct);
-            return true;
-        }
-
-        return false;
-    }
-
-    private async Task<bool> HasDialogButtonAsync(Bitmap frame, Rectangle roi, string text, CancellationToken ct)
-    {
-        if (await FindAsync(frame, roi, text, ct) is not null)
-            return true;
-
-        var compact = await _ocr.FindCompactLabelAsync(frame, roi, text, ct);
-        return compact.Found;
+        // "설비로 이동" is the already-verified free navigation action.
+        // The game then opens its travel confirmation modal. Do not OCR the modal:
+        // wait for it to render and press Space exactly once.
+        ct.ThrowIfCancellationRequested();
+        await Task.Delay(800, ct);
+        Log?.Invoke("[자동 가공] 설비로 이동 후 확인 팝업 대기 완료 · Space 입력");
+        _input.TapScanCode(0x39);
+        await Task.Delay(900, ct);
     }
 
     private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
@@ -362,11 +337,8 @@ internal sealed class AlteringScreen : IAlteringScreen
             _input.ClickClientPoint(_hwnd, move.Value.Center);
         }
 
-        bool popupConfirmed = await ConfirmFacilityTravelPopupAsync(ct);
-        if (popupConfirmed)
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 이동 확인 완료 · 실제 이동 대기");
-        else
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 이동 확인 팝업 없음 · 직접 이동 시작 여부 확인");
+        await ConfirmFacilityTravelAsync(ct);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 이동 확인 Space 입력 완료 · 실제 이동 대기");
 
         bool sawDeparture = false;
         bool sawTravel = false;
