@@ -44,6 +44,8 @@ internal sealed class CliIdentityGuard
         _baseline = baseline;
     }
 
+    internal CliIdentityContext Baseline => _baseline;
+
     internal string Description =>
         $"get_my_info 기준 {_baseline.ComparableFields}개 필드 · 강도={_baseline.Strength}";
 
