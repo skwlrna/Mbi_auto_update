@@ -324,27 +324,43 @@ internal sealed class AlteringScreen : IAlteringScreen
             _input.ClickClientPoint(_hwnd, move.Value.Center);
         }
 
+        bool sawDeparture = false;
         bool sawTravel = false;
         for (int attempt = 0; attempt < 120; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(500, ct);
+
             var activity = GatheringQueries.ParseActivity(await _cli.GetActivityAsync(ct));
             if (!activity.IsSafeField)
                 throw new InvalidOperationException("설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+
             if (activity.IsAutoTraveling)
             {
                 sawTravel = true;
-                continue;
+                sawDeparture = true;
             }
-            if (sawTravel || attempt >= 6)
+
+            using var frame = Capture(ct);
+            bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+
+            // The facility screen is open before the click, so it cannot count as
+            // arrival until we have first observed travel or the facility screen
+            // disappearing. This prevents the old false-positive "3 seconds = arrived".
+            if (!facilityVisible)
+                sawDeparture = true;
+
+            if (sawDeparture && !activity.IsAutoTraveling && facilityVisible)
             {
-                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 일반 이동 종료 확인");
+                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · 가공창 재등장");
                 return;
             }
+
+            if (attempt > 0 && attempt % 10 == 0)
+                Log?.Invoke($"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · 화면이탈={sawDeparture} · 가공창={facilityVisible}");
         }
 
-        throw new InvalidOperationException("설비로 이동이 제한 시간 안에 끝나지 않아 정지합니다.");
+        throw new InvalidOperationException("설비로 이동 후 가공창 재등장을 제한 시간 안에 확인하지 못해 정지합니다.");
     }
 
     // Free navigation only, for opening an ingredient's obtain-method route.
