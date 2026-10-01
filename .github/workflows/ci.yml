@@ -1,4 +1,4 @@
-name: Check V0.1.97 Gatherable CLI Probe
+name: Check V0.1.98 Diagnostic-only CLI Test
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.97"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V0\.1\.98"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.97</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>0\.1\.98</Version>') { throw 'project version mismatch' }
 
       - name: Loot and retry regression tests
         shell: pwsh
@@ -137,6 +137,12 @@ jobs:
           if ($screen -notmatch '"모두 받기"') { throw 'collect button OCR gate missing' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
 
+
+      - name: Diagnostic-only regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/gathering-diagnostic/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic regressions failed' }
 
       - name: Automatic gathering regression tests
         shell: pwsh

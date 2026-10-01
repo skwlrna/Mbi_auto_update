@@ -17,6 +17,8 @@ public sealed class MabinogiMobileCli
     private readonly Func<string, CancellationToken, Task<CliProcessOutput>> _run;
     private readonly Func<IReadOnlyList<string>, CancellationToken, Task<CliProcessOutput>> _runArguments;
     public bool ZeroWingMode { get; }
+    internal Func<IReadOnlyList<string>, CancellationToken, Task<CliProcessOutput>> RunFilteredQuery { get; set; } =
+        (args, ct) => RunProcessArgumentsAsync(args, ct, TimeSpan.FromSeconds(15));
 
     public MabinogiMobileCli(AppLog log, bool zeroWingMode = true)
     {
@@ -132,8 +134,8 @@ public sealed class MabinogiMobileCli
         token.ThrowIfCancellationRequested();
         try
         {
-            var output = await RunProcessArgumentsAsync(
-                BuildFilteredQueryArguments(command, filterName), token, TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            var output = await RunFilteredQuery(
+                BuildFilteredQueryArguments(command, filterName), token).ConfigureAwait(false);
             return Finish(Parse(command, output));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
