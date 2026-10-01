@@ -43,7 +43,7 @@ var loadedSession = sessionStore.Load();
 Check(loadedSession is not null && loadedSession.MatchesPlan(plan) &&
       loadedSession.MatchesIdentity(testIdentity) &&
       loadedSession.QueuedWorks == 5 && loadedSession.BaselineQuantity == 123 &&
-      loadedSession.Stage.Contains("철괴"),
+      loadedSession.LastObservedOutputQuantity == 123 && loadedSession.Stage.Contains("철괴"),
     "altering session persists plan, identity, baseline, progress, and recursive stage");
 sessionStore.Delete();
 Check(!File.Exists(sessionPath), "completed session cleanup removes persisted resume state");
@@ -129,6 +129,53 @@ await resumeAuto.RunAsync(resumePlan, default);
 Check(resumeAuto.QueuedWorks == 1 && resumeWorld.QueueCalls == 0 && resumeWorld.Owned == 3,
     "resume reconciles an interrupted confirmed registration without duplicate clicking");
 Check(!File.Exists(resumePath), "successful resumed production deletes the session checkpoint");
+
+var extraQueuePlan = plan with { TargetQuantity = 3 };
+var extraQueueWorld = new FakeWorld(extraQueuePlan);
+extraQueueWorld.AddPending();
+string extraQueuePath = Path.Combine(Path.GetTempPath(), "mabi-altering-extra-" + Guid.NewGuid().ToString("N") + ".json");
+var extraQueueStore = new AlteringSessionStore(extraQueuePath);
+var extraQueueSession = AlteringSessionState.Create(extraQueuePlan, testIdentity, 0, 0);
+extraQueueStore.Save(extraQueueSession);
+try
+{
+    await new AlteringAutomation(
+        extraQueueWorld, extraQueueWorld,
+        (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+        4, sessionStore: extraQueueStore, session: extraQueueSession)
+        .RunAsync(extraQueuePlan, default);
+    throw new Exception("unknown extra queue work accepted during resume");
+}
+catch (InvalidOperationException)
+{
+    Check(extraQueueWorld.QueueCalls == 0,
+        "resume stops before input when live same-item queue exceeds saved maximum");
+}
+extraQueueStore.Delete();
+
+var decreasedOutputWorld = new FakeWorld(extraQueuePlan);
+string decreasedPath = Path.Combine(Path.GetTempPath(), "mabi-altering-decrease-" + Guid.NewGuid().ToString("N") + ".json");
+var decreasedStore = new AlteringSessionStore(decreasedPath);
+var decreasedSession = AlteringSessionState.Create(extraQueuePlan, testIdentity, 0, 0) with
+{
+    LastObservedOutputQuantity = 5
+};
+decreasedStore.Save(decreasedSession);
+try
+{
+    await new AlteringAutomation(
+        decreasedOutputWorld, decreasedOutputWorld,
+        (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+        4, sessionStore: decreasedStore, session: decreasedSession)
+        .RunAsync(extraQueuePlan, default);
+    throw new Exception("decreased output inventory accepted during resume");
+}
+catch (InvalidOperationException)
+{
+    Check(decreasedOutputWorld.QueueCalls == 0,
+        "resume stops before registration when observed output inventory decreased");
+}
+decreasedStore.Delete();
 
 var failed = new FakeWorld(plan) { Register = false };
 var failedAuto = new AlteringAutomation(failed, failed, (_, _) => Task.CompletedTask, 2);
