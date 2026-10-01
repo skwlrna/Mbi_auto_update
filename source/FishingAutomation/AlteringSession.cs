@@ -13,6 +13,7 @@ internal sealed record AlteringSessionState
     public int RequiredWorks { get; init; }
     public int QueuedWorks { get; init; }
     public long BaselineQuantity { get; init; }
+    public long LastObservedOutputQuantity { get; init; }
     public int InitialExistingWorks { get; init; }
     public bool PendingRegistration { get; init; }
     public int PendingBeforeMatchingCount { get; init; }
@@ -56,6 +57,7 @@ internal sealed record AlteringSessionState
         RequiredWorks = plan.RequiredWorks,
         QueuedWorks = 0,
         BaselineQuantity = baseline,
+        LastObservedOutputQuantity = baseline,
         InitialExistingWorks = initialExistingWorks,
         CharacterId = identity.CharacterId,
         CharacterName = identity.CharacterName,
@@ -92,6 +94,7 @@ internal sealed class AlteringSessionStore
                 string.IsNullOrWhiteSpace(state.DisplayName) || state.TargetQuantity <= 0 ||
                 state.ProducedPerWork <= 0 || state.RequiredWorks <= 0 ||
                 state.QueuedWorks < 0 || state.QueuedWorks > state.RequiredWorks ||
+                state.BaselineQuantity < 0 || state.LastObservedOutputQuantity < state.BaselineQuantity ||
                 state.InitialExistingWorks < 0 || state.PendingBeforeMatchingCount < 0)
                 throw new InvalidDataException("자동 가공 이어하기 파일의 값이 올바르지 않습니다.");
             return state;
