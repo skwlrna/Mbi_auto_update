@@ -11,7 +11,7 @@ internal sealed record GatheringActivity(bool IsDead, bool IsReviving, bool IsIn
 {
     internal bool IsGathering => MainButtonState == "Stop" && LastRunningInteractionType == "Gathering" && !IsAutoTraveling;
     internal bool IsFishing => MainButtonState is "Fishing" or "FishingPull";
-    internal bool IsSafeField => !IsDead && !IsReviving && !IsInCombat && !IsAutoPlaying &&
+    internal bool IsSafeField => !IsDead && !IsReviving && !IsInCombat &&
         !IsDialoguePlaying && !IsWaitingForSelection && DungeonState == "NotInDungeon" &&
         !IsInBattlefield && !IsPlayingTutorial && !IsInScenario && !IsPlayingPerformance &&
         !IsPlayingMiniGame && !IsHousingEditMode;
