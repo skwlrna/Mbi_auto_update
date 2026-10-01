@@ -6,6 +6,17 @@ int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
 Check(AlteringText.UniqueOcrAlias("강철괴", new[]{"강철괴", "합금강괴"}) == "강철과", "specific OCR alias is catalog checked");
 Check(AlteringText.UniqueOcrAlias("강철괴", new[]{"강철괴", "강철과"}) is null && AlteringText.UniqueOcrAlias("목재+", new[]{"목재+"}) is null, "ambiguous and unsupported OCR aliases blocked");
+Check(AlteringDetailPolicy.IsConfirmed(true, false, false, false),
+    "detail accepts an exact title match");
+Check(AlteringDetailPolicy.IsConfirmed(false, true, true, false),
+    "detail accepts materials plus free action when title OCR misses");
+Check(AlteringDetailPolicy.IsConfirmed(false, true, false, true),
+    "detail accepts materials plus remote paid action when title OCR misses");
+Check(!AlteringDetailPolicy.IsConfirmed(false, true, false, false),
+    "materials alone do not confirm a recipe detail screen");
+Check(!AlteringDetailPolicy.IsConfirmed(false, false, true, false),
+    "action alone does not confirm a recipe detail screen");
+
 var plan = new AlteringPlan("금속 가공 시설", "강철괴", 100, 3, false);
 Check(plan.RequiredWorks == 34 && plan.ExpectedQuantity == 102 && plan.MaximumWings == 0, "target rounding with zero-wing invariant");
 Check(AlteringText.Normalize("목재 +") != AlteringText.Normalize("목재"), "plus variants stay distinct");
