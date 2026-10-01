@@ -16,7 +16,8 @@ public sealed partial class MainForm
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_alterable_items", "get_altering_works",
-                "get_items", "execute_altering", "complete_altering_work"
+                "get_items", "execute_altering", "complete_altering_work",
+                "get_gatherable_items", "get_activity", "get_inventory", "execute_gathering", "stop_action"
             };
             var capabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(_cli, requiredCommands, CancellationToken.None);
             var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
@@ -25,7 +26,9 @@ public sealed partial class MainForm
                 _log.Write("[자동 가공] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
 
             _productionBaseline = null;
-            var data = new ProductionAlteringData(new AlteringCliData(_cli), value => Ui(() => _productionBaseline = value));
+            var rawAlteringData = new AlteringCliData(_cli);
+            var data = new ProductionAlteringData(rawAlteringData, value => Ui(() => _productionBaseline = value));
+            var gatheringData = new GatheringCliData(_cli);
             if (_cancelStart || IsDisposed) return;
             _productionLastMode = "가공";
             _productionDisplayName = plan.DisplayName;
@@ -38,8 +41,17 @@ public sealed partial class MainForm
             _log.Write("[자동 가공] 캐릭터 문맥 저장 · " + identity.Description);
             _alteringPage.CharacterStatus = "확인됨";
             var screen = new AlteringCliScreen(_cli, identity);
-            var automation = new AlteringAutomation(data, screen);
+            var gatheringScreen = new GatheringCliScreen(_cli, identity);
+            var resolver = new RecursiveAlteringSupplyResolver(rawAlteringData, gatheringData, screen, gatheringScreen);
+            var automation = new AlteringAutomation(data, screen, supplyResolver: resolver);
             screen.Log += text => Ui(() => _log.Write(text));
+            gatheringScreen.Log += text => Ui(() => _log.Write(text));
+            resolver.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                SetStatus(text.Replace("[재료 해결] ", ""), Blue);
+                RefreshProductionDashboard();
+            });
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
             _activeMode = "가공"; _mode.Enabled = false;
@@ -61,6 +73,7 @@ public sealed partial class MainForm
             _dungeonTask = Task.Run(async () =>
             {
                 using (screen)
+                using (gatheringScreen)
                 {
                     try
                     {
