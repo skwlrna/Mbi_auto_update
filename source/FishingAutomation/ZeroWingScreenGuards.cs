@@ -40,12 +40,9 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen
             return true;
         }, ct);
 
-    public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
-        => GuardAsync("[자동 가공] 완료품 수령", async () =>
-        {
-            await _inner.CollectAsync(plan, ct).ConfigureAwait(false);
-            return true;
-        }, ct);
+    public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
+        => GuardAsync("[자동 가공] 완료품 수령",
+            () => _inner.CollectAsync(plan, ct), ct);
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
         => GuardAsync("[자동 가공] 설비 이동 후 완료품 수령",
