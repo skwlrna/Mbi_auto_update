@@ -19,6 +19,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
+    private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
     internal string InputMode => _input.ModeName;
     internal event Action<string>? Log;
 
@@ -165,12 +166,64 @@ internal sealed class AlteringScreen : IAlteringScreen
         bool materialsVisible = await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null;
         bool freeVisible = await FindAsync(frame, RecipeActionButton, "가공하기", ct) is not null;
         bool paidVisible = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct) is not null;
+        bool visualAction = TryFindFreeProcessButtonVisual(frame, out _);
 
-        bool confirmed = AlteringDetailPolicy.IsConfirmed(titleMatched, materialsVisible, freeVisible, paidVisible);
+        bool confirmed = AlteringDetailPolicy.IsConfirmed(titleMatched, materialsVisible, freeVisible, paidVisible) ||
+            (materialsVisible && visualAction);
         if (confirmed)
-            Log?.Invoke($"[자동 가공] 상세 제목 OCR 보조 판정 · 필요한 재료 + {(freeVisible ? "가공하기" : "가공하러 가기")} 확인");
+        {
+            string action = freeVisible ? "가공하기 OCR" :
+                paidVisible ? "가공하러 가기 OCR" :
+                "하단 실행 버튼 화면";
+            Log?.Invoke($"[자동 가공] 상세 제목 OCR 보조 판정 · 필요한 재료 + {action} 확인");
+        }
 
         return confirmed;
+    }
+
+    private static bool TryFindFreeProcessButtonVisual(Bitmap frame, out Point center)
+    {
+        center = Point.Empty;
+        var roi = Rectangle.Intersect(FreeProcessVisualButton,
+            new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width < 300 || roi.Height < 50)
+            return false;
+
+        int sampled = 0;
+        int actionPixels = 0;
+        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
+
+        for (int y = roi.Top; y < roi.Bottom; y += 2)
+        for (int x = roi.Left; x < roi.Right; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+
+            // The live on-site action is a wide cyan-to-green capsule. Ignore all
+            // text, icons and numeric values inside it; only the stable button body
+            // participates in this detector.
+            bool action = p.G >= 105 && p.B >= 70 && p.R <= 145 &&
+                p.G >= p.R + 25 && p.B >= p.R + 5;
+            if (!action)
+                continue;
+
+            actionPixels++;
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        if (sampled == 0 || actionPixels * 100 < sampled * 8)
+            return false;
+
+        int width = maxX - minX;
+        int height = maxY - minY;
+        if (width < 300 || height < 28)
+            return false;
+
+        center = new Point((minX + maxX) / 2, (minY + maxY) / 2);
+        return true;
     }
     private async Task<bool> ClickLabelAsync(string text, Rectangle roi, string? header, CancellationToken ct, bool facilityTitle = false)
     {
@@ -348,18 +401,24 @@ internal sealed class AlteringScreen : IAlteringScreen
         await SelectRecipeAsync(plan, ct);
 
         // Two fresh observations are required immediately before the only registration
-        // click. At the physical facility the free "가공하기" label must be present,
-        // and the remote "가공하러 가기" label must be absent.
+        // click. Do not depend on OCR of "가공하기": the live button can contain an
+        // unrelated number/icon before the label. The travel step above has already
+        // proven the on-site state; here we additionally veto any visible remote
+        // "설비로 이동"/"가공하러 가기" state and require the wide green action shape.
+        Point visualActionCenter = Point.Empty;
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
             if (!await IsRecipeDetailAsync(frame, plan, ct))
                 Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
 
-            var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
+            var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
             var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-            if (free is null || paid is not null)
-                Fail(frame, "설비 도착 후 무료 가공하기 버튼을 안전하게 확인하지 못했습니다.");
+            if (move is not null || paid is not null)
+                Fail(frame, "원격 가공 상태가 감지되어 현장 가공 입력을 차단했습니다.");
+
+            if (!TryFindFreeProcessButtonVisual(frame, out visualActionCenter))
+                Fail(frame, "설비 도착 후 하단 현장 가공 실행 버튼을 화면에서 확인하지 못했습니다.");
 
             if (pass == 0)
             {
@@ -367,8 +426,8 @@ internal sealed class AlteringScreen : IAlteringScreen
                 continue;
             }
 
-            Log?.Invoke("[자동 가공] 설비 도착 후 무료 가공하기 확인 · 정령의 날개 버튼 입력 없음");
-            _input.ClickClientPoint(_hwnd, free.Value.Center);
+            Log?.Invoke("[자동 가공] 설비 도착 후 현장 가공 버튼 화면 확인 · 숫자/아이콘 무시 · 정령의 날개 버튼 입력 없음");
+            _input.ClickClientPoint(_hwnd, visualActionCenter);
         }
     }
 
