@@ -184,6 +184,9 @@ jobs:
           $selectRecipe = [regex]::Match($screen, 'private async Task SelectRecipeAsync[\s\S]*?(?=\r?\n    public async Task QueueAsync)').Value
           if ($selectRecipe -match 'DragClientPoint') { throw 'altering recipe selection must not drag the fixed UI' }
           if ($selectRecipe -notmatch 'attempt <= 4') { throw 'fixed-position recipe OCR retry missing' }
+          if ($selectRecipe -notmatch 'RecipeCacheKey' -or $selectRecipe -notmatch '_cachedRecipeCenter') { throw 'confirmed recipe-coordinate reuse missing' }
+          if ($selectRecipe -notmatch '고정 품목 좌표 재사용' -or $selectRecipe -notmatch '고정 품목 좌표 저장') { throw 'recipe coordinate cache diagnostics missing' }
+          if ($selectRecipe -match 'DragClientPoint') { throw 'cached recipe path must never drag the UI' }
           $travelConfirm = [regex]::Match($screen, 'private async Task<bool> ConfirmFacilityTravelAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
           if ($travelConfirm -notmatch 'attempt < 10' -or $travelConfirm -match 'attempt < 40') { throw 'facility confirmation no-popup wait must be about two seconds' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
@@ -195,6 +198,14 @@ jobs:
           if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
           if ($queue -notmatch '"설비로 이동"' -or $queue -notmatch '"가공하러 가기"') { throw 'remote-state veto missing before visual process click' }
           if ($queue -notmatch 'visualActionCenter') { throw 'visual action coordinates must drive the on-site click' }
+          if ($queue -notmatch 'TryReuseOnsiteFacilityAsync') { throw 'consecutive on-site facility reuse missing' }
+          if ($screen -notmatch '_confirmedOnsiteFacility' -or $screen -notmatch '연속 등록 · 현장 상태 유지 확인') { throw 'stable on-site facility cache missing' }
+          if ($screen -notmatch 'string\.Equals\(_confirmedOnsiteFacility, plan\.FacilityName') { throw 'on-site cache must be scoped by facility' }
+          if ($screen -notmatch 'RecipeCacheKey\(AlteringPlan plan\)' -or $screen -notmatch 'plan\.FacilityName' -or $screen -notmatch 'plan\.DisplayName' -or $screen -notmatch 'plan\.RecipeOrdinal') { throw 'recipe cache must be scoped by facility/name/ordinal' }
+          $planText = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          foreach($facility in @('금속 가공 시설','목재 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
+            if($planText -notmatch [regex]::Escape($facility)){throw "facility missing from common altering path: $facility"}
+          }
           if ($screen -notmatch '설비로 이동 버튼 없음 · 이미 현장 가공창') { throw 'already-on-site facility state missing' }
           if ($screen -notmatch 'facilityVisible && !moveVisible' -or $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must use facility visible + move button absent' }
           if ($screen -notmatch '설비 도착 확인 · 설비로 이동 버튼 없음') { throw 'on-site arrival confirmation log missing' }
