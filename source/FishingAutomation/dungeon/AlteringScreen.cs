@@ -17,7 +17,6 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
-    private static readonly Rectangle FacilityTravelCancelButton = new(185, 850, 190, 120);
     private static readonly Rectangle FacilityTravelConfirmButton = new(390, 850, 235, 120);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     internal string InputMode => _input.ModeName;
@@ -311,33 +310,23 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private async Task<bool> ConfirmFacilityTravelPopupAsync(CancellationToken ct)
     {
-        // Destination names vary. The stable part of this modal is the pair of
-        // bottom controls: left "취소" and right "확인". The sentence above them is
-        // informational only because OCR can split or alter the destination text.
-        // Require both controls on two fresh frames, then press Space exactly once.
-        for (int wait = 0; wait < 16; wait++)
+        // After "설비로 이동", the game may show a bottom confirmation modal.
+        // The user rule is intentionally simple: if the lower-right "확인" control
+        // appears, press Space once. Do not inspect destination text, question text,
+        // or the cancel button.
+        for (int wait = 0; wait < 20; wait++)
         {
             ct.ThrowIfCancellationRequested();
 
-            using var first = Capture(ct);
-            bool confirm1 = await HasDialogButtonAsync(first, FacilityTravelConfirmButton, "확인", ct);
-            bool cancel1 = await HasDialogButtonAsync(first, FacilityTravelCancelButton, "취소", ct);
-
-            if (!confirm1 || !cancel1)
+            using var frame = Capture(ct);
+            bool confirm = await HasDialogButtonAsync(frame, FacilityTravelConfirmButton, "확인", ct);
+            if (!confirm)
             {
-                await Task.Delay(250, ct);
+                await Task.Delay(200, ct);
                 continue;
             }
 
-            await Task.Delay(180, ct);
-            using var second = Capture(ct);
-            bool confirm2 = await HasDialogButtonAsync(second, FacilityTravelConfirmButton, "확인", ct);
-            bool cancel2 = await HasDialogButtonAsync(second, FacilityTravelCancelButton, "취소", ct);
-
-            if (!confirm2 || !cancel2)
-                continue;
-
-            Log?.Invoke("[자동 가공] 설비 이동 확인 팝업 · 취소/확인 2프레임 확인 · Space 입력");
+            Log?.Invoke("[자동 가공] 하단 확인창 감지 · Space 입력");
             _input.TapScanCode(0x39);
             await Task.Delay(900, ct);
             return true;
