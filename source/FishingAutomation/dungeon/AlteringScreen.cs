@@ -884,7 +884,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                     return;
                 }
 
-                Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={plan.ScreenTitle} + 하단 팝업 · 임의 확인 입력 없이 시설창 재확인");
+                Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={plan.ScreenTitle} + 하단 확인 팝업 · 확인하지 않고 Esc로 닫기");
+                _input.TapScanCode(0x01);
+                await Task.Delay(400, ct);
             }
             else
             {
