@@ -49,8 +49,9 @@ internal sealed class GatheringAutomation
         plan.Validate(); Gained = 0;
         await CheckToolAsync(plan, ct);
         var initial = await _data.ActivityAsync(ct);
+        Log?.Invoke("[자동 채집] 시작 전 상태 · " + DescribeActivity(initial));
         if (!initial.IsSafeField || initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling || initial.MainButtonState == "Stop")
-            throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동 채집을 시작하세요.");
+            throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동 채집을 시작하세요. 상태: " + DescribeActivity(initial));
         await CheckWeightAsync(ct);
         long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
         bool started = false;
@@ -70,7 +71,7 @@ internal sealed class GatheringAutomation
                 if (activity.IsFishing)
                     throw new InvalidOperationException("선택 품목이 낚시로 연결되었습니다. 현재 자동 채집에서는 낚시를 지원하지 않아 정지합니다.");
                 if (!activity.IsSafeField)
-                    throw new InvalidOperationException("전투·사망·대화 등 채집을 계속할 수 없는 상태가 확인되어 정지합니다.");
+                    throw new InvalidOperationException("전투·사망·대화 등 채집을 계속할 수 없는 상태가 확인되어 정지합니다. 상태: " + DescribeActivity(activity));
                 long count = await _data.ItemCountAsync(plan.DisplayName, ct);
                 if (count < baseline) throw new InvalidOperationException("채집 중 대상 재료의 보유 수량이 감소해 수량을 확정할 수 없습니다.");
                 long gained = count - baseline;
@@ -122,6 +123,14 @@ internal sealed class GatheringAutomation
         Gained=finalCount-baseline;
         Log?.Invoke($"[자동 채집] 완료 · {plan.DisplayName} +{Gained}개 · CLI 수량 검증 완료");
     }
+
+    private static string DescribeActivity(GatheringActivity a)
+        => $"Dead={a.IsDead}, Reviving={a.IsReviving}, Combat={a.IsInCombat}, AutoPlaying={a.IsAutoPlaying}, " +
+           $"AutoTraveling={a.IsAutoTraveling}, Dialogue={a.IsDialoguePlaying}, Waiting={a.IsWaitingForSelection}, " +
+           $"Dungeon={a.DungeonState}, Battlefield={a.IsInBattlefield}, Tutorial={a.IsPlayingTutorial}, " +
+           $"Scenario={a.IsInScenario}, Performance={a.IsPlayingPerformance}, MiniGame={a.IsPlayingMiniGame}, " +
+           $"Housing={a.IsHousingEditMode}, MainButton={a.MainButtonState}, HasTarget={a.HasTarget}, " +
+           $"Available={a.AvailableInteractionType}, Last={a.LastRunningInteractionType}";
 
     private async Task CheckToolAsync(GatheringPlan plan, CancellationToken ct)
     {
