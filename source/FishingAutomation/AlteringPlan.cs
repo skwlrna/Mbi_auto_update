@@ -147,6 +147,14 @@ internal sealed class AlteringAutomation
             baseline = _session.BaselineQuantity;
             initialExistingCount = _session.InitialExistingWorks;
 
+            int currentKnownWorks = Matching(works, plan).Count();
+            int maximumKnownWorks = checked(
+                _session.InitialExistingWorks + _session.QueuedWorks + (_session.PendingRegistration ? 1 : 0));
+            if (currentKnownWorks > maximumKnownWorks)
+                throw new InvalidOperationException(
+                    $"이어하기 대기열에 저장 기록보다 많은 동일 품목 작업이 있습니다: 저장 기준 최대 {maximumKnownWorks}건 / 현재 {currentKnownWorks}건. " +
+                    "외부에서 추가 등록된 작업과 목표 작업을 구분할 수 없어 정지합니다.");
+
             if (_session.PendingRegistration)
             {
                 int current = Matching(works, plan).Count();
@@ -385,6 +393,8 @@ internal sealed class AlteringAutomation
         }
     }
 
+    internal void NoteStage(string stage) => SaveStage(stage);
+
     private void SaveStage(string stage)
     {
         if (_session is null || _sessionStore is null) return;
@@ -433,6 +443,16 @@ internal sealed class AlteringAutomation
         if (Progress is null) return;
 
         long current = await _data.ItemCountAsync(plan.OutputName, ct);
+        if (_session is not null)
+        {
+            if (current < _session.LastObservedOutputQuantity)
+                throw new InvalidOperationException(
+                    $"{plan.OutputName} 보유량이 자동 가공 중 감소했습니다: 이전 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {current:N0}. " +
+                    "완성품 소비로 목표 추적이 모호해져 중복 생산 없이 정지합니다.");
+            if (current != _session.LastObservedOutputQuantity)
+                SaveSession(_session with { LastObservedOutputQuantity = current });
+        }
+
         long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
         long confirmed = Math.Max(0, current - baseline - oldMinimum);
         confirmed = Math.Min(plan.TargetQuantity, confirmed);
