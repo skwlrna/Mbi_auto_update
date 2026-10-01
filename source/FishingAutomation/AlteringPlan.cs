@@ -135,7 +135,7 @@ internal sealed class AlteringAutomation
         }
         await CollectIfReadyAsync(plan, works, ct);
         long baseline = await _data.ItemCountAsync(plan.OutputName, ct);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 목표 {plan.TargetQuantity}개 · {plan.RequiredWorks}회 / 최소 {plan.ExpectedQuantity}개 · 버튼 비용 상한 {plan.MaximumWings}개");
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 목표 {plan.TargetQuantity}개 · {plan.RequiredWorks}회 / 최소 {plan.ExpectedQuantity}개 · 정령의 날개 0개 고정");
 
         while (true)
         {
@@ -190,7 +190,7 @@ internal sealed class AlteringAutomation
                 {
                     ct.ThrowIfCancellationRequested();
                     if (reserved || !plan.AllowPaidButton || ReservedWings + 5 > plan.MaximumWings)
-                        throw new InvalidOperationException("가공 버튼 비용 사용 한도를 초과합니다.");
+                        throw new InvalidOperationException("정령의 날개 사용 시도가 0개 사용 원칙에 의해 차단되었습니다.");
                     reserved = true; ReservedWings += 5;
                 }, ct);
                 // A paid click is never retried if registration is uncertain.
