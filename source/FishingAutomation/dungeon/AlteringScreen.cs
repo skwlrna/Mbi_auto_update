@@ -342,39 +342,48 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
     {
-        // First scroll to the top. Each drag is guarded by a fresh facility observation.
-        for (int i = 0; i < 5; i++)
+        // The current game layout is fixed. Do not drag the processing list during
+        // normal automation: repeated scrolling was both slow and visually disruptive.
+        // Observe the same fixed card area a few times for OCR stability; if the card
+        // is not where expected, stop instead of moving the UI to an unknown state.
+        for (int attempt = 1; attempt <= 4; attempt++)
         {
             using var frame = Capture(ct);
-            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null) Fail(frame, "가공 목록이 사라졌습니다.");
-            _input.DragClientPoint(_hwnd, new(735, 415), new(735, 895), 350);
-            await Task.Delay(180, ct);
-        }
-        for (int page = 0; page < 16; page++)
-        {
-            using var frame = Capture(ct);
-            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null) Fail(frame, "가공 목록이 사라졌습니다.");
-            var labels = await _ocr.FindAlteringLabelsAsync(frame, Cards, plan.DisplayName, ct, cardCandidate: true);
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                Fail(frame, "가공 목록이 사라졌습니다.");
+
+            var labels = await _ocr.FindAlteringLabelsAsync(
+                frame, Cards, plan.DisplayName, ct, cardCandidate: true);
             if (labels.Count == plan.RecipeCount && labels.Count >= plan.RecipeOrdinal)
             {
                 var candidate = labels[plan.RecipeOrdinal - 1];
-                await Task.Delay(180, ct);
+
+                await Task.Delay(120, ct);
                 using var fresh = Capture(ct);
-                var confirmed = await _ocr.FindAlteringLabelsAsync(fresh, Cards, plan.DisplayName, ct, cardCandidate: true);
-                if (confirmed.Count != plan.RecipeCount || confirmed.Count < plan.RecipeOrdinal || !confirmed[plan.RecipeOrdinal - 1].Bounds.IntersectsWith(candidate.Bounds))
+                var confirmed = await _ocr.FindAlteringLabelsAsync(
+                    fresh, Cards, plan.DisplayName, ct, cardCandidate: true);
+
+                if (confirmed.Count != plan.RecipeCount ||
+                    confirmed.Count < plan.RecipeOrdinal ||
+                    !confirmed[plan.RecipeOrdinal - 1].Bounds.IntersectsWith(candidate.Bounds))
+                {
+                    await Task.Delay(100, ct);
                     continue;
+                }
+
                 _input.ClickClientPoint(_hwnd, confirmed[plan.RecipeOrdinal - 1].Center);
-                await Task.Delay(400, ct);
+                await Task.Delay(350, ct);
                 using var popup = Capture(ct);
                 if (!await IsRecipeDetailAsync(popup, plan, ct))
                     Fail(popup, "선택한 품목의 상세 화면을 확인하지 못했습니다.");
                 return;
             }
-            _input.DragClientPoint(_hwnd, new(735, 895), new(735, 415), 350);
-            await Task.Delay(250, ct);
+
+            await Task.Delay(150, ct);
         }
+
         using var missing = Capture(ct);
-        Fail(missing, "시설 목록에서 선택 품목/제법을 정확히 확인하지 못했습니다. 가공 시설과 품목을 확인하세요.");
+        Fail(missing, "고정된 가공 목록 위치에서 선택 품목/제법을 확인하지 못했습니다. 화면을 드래그하지 않고 정지합니다.");
     }
 
     public async Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
@@ -437,7 +446,7 @@ internal sealed class AlteringScreen : IAlteringScreen
         // Do not OCR this modal. Its stable visual signal is the large green
         // confirmation button in the lower-right area of the 800x1000 client.
         // Press Space only after that button is actually visible.
-        for (int attempt = 0; attempt < 40; attempt++)
+        for (int attempt = 0; attempt < 10; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(200, ct);
