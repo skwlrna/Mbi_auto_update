@@ -506,7 +506,12 @@ public sealed partial class MainForm
         internal void UpdateExecution()
         {
             bool running = _owner.AnyRunning;
-            bool available = Items.SelectedItem is GatheringChoice { Item.ToolOk: true } or RecipeChoice { Recipe.Alterable: true };
+            bool available = Items.SelectedItem switch
+            {
+                GatheringChoice { Item.ToolOk: true } => true,
+                RecipeChoice r => r.Recipe.Alterable || r.Recipe.Reason == "not_enough_ingredient",
+                _ => false
+            };
             foreach (var field in new Control[] { Items, Quantity, Facility, _search, _reload }) field.Enabled = !running && !_loading;
             _start.Enabled = !running && !_loading && available; _stop.Enabled = running;
             bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
