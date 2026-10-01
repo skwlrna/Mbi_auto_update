@@ -58,11 +58,19 @@ internal static class Program
             Menu("자동 채집"); Exclusive(false);
             Check(gi.SelectedIndex == 1 && gq.Value == 5, "switching preserves each page's independent settings");
             gs.PerformClick();
-            PumpUntil(() => fake.Actions.Any(x => x.Command == "execute_gathering"));
-            Check(fake.Actions.Last(x => x.Command == "execute_gathering").Name == "상급 통나무+" && Field<int>(form, "_productionTargetQuantity") == 5, "main selection and numeric quantity reach StartGatheringAsync");
-            PumpUntil(() => fake.Actions.Any(x => x.Command == "stop_action"));
-            PumpUntil(() => Field<string?>(form, "_activeMode") is null);
-            Check(Application.OpenForms.Count == 1, "gathering starts without a settings dialog");
+            Pump();
+            Check(fake.Actions.Count == 0 && Field<string?>(form, "_activeMode") is null, "free gathering blocks execute_gathering and stop_action");
+            typeof(MainForm).GetMethod("StartSelected", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, null);
+            Pump();
+            Check(fake.Actions.Count == 0, "F9 cannot bypass free gathering cost guard");
+            var identity = CliIdentityGuard.CaptureAsync(connector!, default).GetAwaiter().GetResult();
+            using (var screen = new GatheringCliScreen(connector!, identity))
+            {
+                bool blocked = false;
+                try { screen.StartAsync(new GatheringPlan("상급 통나무+", 5), default).GetAwaiter().GetResult(); }
+                catch (InvalidOperationException ex) { blocked = ex.Message.Contains("5개"); }
+                Check(blocked && fake.Actions.Count == 0, "execution adapter also blocks five-wing gathering");
+            }
             Menu("자동 가공");
             All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").PerformClick();
             PumpUntil(() => fake.Actions.Count(x => x.Command == "execute_altering") == 2);
@@ -71,15 +79,6 @@ internal static class Program
             Check(fake.Actions.Count(x => x.Command == "complete_altering_work") == 2, "existing CLI collection preserved");
             Check(Field<long>(form, "_productionCurrentQuantity") >= 5, "completion quantity is shown");
             Check(Application.OpenForms.Count == 1, "altering starts without a settings dialog");
-            Menu("자동 채집"); fake.Gain = false; gq.Value = 100;
-            gs.PerformClick(); PumpUntil(() => Field<string?>(form, "_activeMode") == "채집");
-            Check(!gi.Enabled && !gq.Enabled, "run locks settings");
-            int stops = fake.Actions.Count(x => x.Command == "stop_action");
-            All(gathering).OfType<Button>().Single(x => x.AccessibleName == "정지").PerformClick();
-            PumpUntil(() => fake.Actions.Count(x => x.Command == "stop_action") > stops);
-            PumpUntil(() => Field<string?>(form, "_activeMode") is null);
-            PumpUntil(() => gi.Enabled && gq.Enabled);
-            Check(gi.Enabled && gq.Enabled, "stop uses existing cancellation and unlocks settings");
             foreach (string mode in new[] { "낚시", "던전", "어비스" })
             { Menu(mode); Check(!altering.Visible && !gathering.Visible, "legacy page preserved: " + mode); }
             fake.Fail = true; Menu("자동 채집");

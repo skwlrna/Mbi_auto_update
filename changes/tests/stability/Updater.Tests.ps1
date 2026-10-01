@@ -13,13 +13,15 @@ function global:Start-Process {
     }
 }
 function global:Copy-Item {
-    param($Path,$LiteralPath,$Destination,[switch]$Recurse,[switch]$Force,$ErrorAction)
+    param($Path,$Destination,$LiteralPath,[switch]$Recurse,[switch]$Force,$ErrorAction)
     $src=if($LiteralPath){$LiteralPath}else{$Path}
     if ($global:failCopyTest -and $Destination -eq $global:failCopyTest) {
         $global:failCopyTest=$null
         throw 'Injected copy failure'
     }
-    Microsoft.PowerShell.Management\Copy-Item -Path $src -Destination $Destination -Recurse:$Recurse -Force:$Force -ErrorAction Stop
+    # Preserve the production caller's error policy for optional settings files.
+    $copyErrorAction = if ($ErrorAction) { $ErrorAction } else { 'Stop' }
+    Microsoft.PowerShell.Management\Copy-Item -Path $src -Destination $Destination -Recurse:$Recurse -Force:$Force -ErrorAction $copyErrorAction
 }
 try {
     foreach($case in @('success','copy-failure','health-failure','backup-failure')) {

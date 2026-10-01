@@ -87,6 +87,10 @@ internal sealed class GatheringCliScreen : IGatheringScreen
     public async Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        // Fail before identity/currency queries or any stop cleanup can run.
+        // CLI gathering costs five wings; there is no verified free CLI start command.
+        if (_cli.ZeroWingMode)
+            throw new InvalidOperationException("execute_gathering은 정령의 날개 5개를 소모하므로 무료 자동 채집에서 차단합니다. CLI 검사는 사용할 수 있습니다.");
         await _identity.VerifyAsync(ct).ConfigureAwait(false);
         var currenciesBefore = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
 

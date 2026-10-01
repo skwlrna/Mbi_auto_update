@@ -13,6 +13,9 @@ public sealed partial class MainForm
         {
             var plan = SelectedGatheringPlan();
             plan.Validate();
+            // Never treat F9, ToolOk or requiresConfirm as authorization to spend wings.
+            if (_cli.ZeroWingMode)
+                throw new InvalidOperationException("자동 채집 시작 차단: execute_gathering은 정령의 날개 5개를 소모합니다. 무료 시작 경로가 검증될 때까지 CLI 검사만 사용할 수 있습니다.");
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",
