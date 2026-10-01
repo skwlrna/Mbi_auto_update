@@ -332,6 +332,11 @@ jobs:
           if ($screen -notmatch 'first\.Value\.Bounds\.Left\+first\.Value\.Bounds\.Width/2') { throw 'fresh second-frame row click missing' }
           if ($screen -notmatch 'beforeCount=await _data\.ItemCountAsync' -or $screen -notmatch 'gained>=plan\.TargetQuantity') { throw 'inventory-based gathering success evidence missing' }
           if ($screen -notmatch 'activity 상태와 무관하게 성공 처리') { throw 'inventory-authoritative completion log missing' }
+          $ingredientClick = [regex]::Match($screen, 'private async Task ClickIngredientAsync[\s\S]*?(?=\r?\n    private async Task ClickMethodAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($ingredientClick)) { throw 'gathering ingredient selection method missing' }
+          if ($ingredientClick -notmatch 'dim:true') { throw 'gathering ingredient names must use dim-text OCR' }
+          if ($ingredientClick -notmatch '필요한 재료' -or $ingredientClick -notmatch '어두운 재료명 OCR 2프레임 확인') { throw 'dim ingredient structural/two-frame confirmation missing' }
+          if ($ingredientClick -match 'DragClientPoint') { throw 'gathering ingredient selection must not drag the recipe UI' }
           $vision = Get-Content source/FishingAutomation/dungeon/GatheringVision.cs -Raw
           if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
           $queries = Get-Content source/FishingAutomation/GatheringQueries.cs -Raw
