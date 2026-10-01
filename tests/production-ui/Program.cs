@@ -38,7 +38,7 @@ internal static class Program
             var ai = All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 제법");
             var aq = All(altering).OfType<NumericUpDown>().Single();
             Check(ai.Items.Count == 3, "recipe dropdown exposes first CLI row for duplicate display names");
-            ai.SelectedIndex = 2; Check(!All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled, "unavailable recipe disables start");
+            ai.SelectedIndex = 2; Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled, "missing-material recipe remains startable for recursive resolution");
             ai.SelectedIndex = 1; aq.Value = 5;
             All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 시설").SelectedIndex = 1;
             Menu("자동 채집"); Exclusive(false);
@@ -152,7 +152,7 @@ internal sealed class FakeCli
             "status" => new {pipe="connected"},
             "capabilities" => new { commands = new[]{"get_my_info","get_currencies","get_gatherable_items","get_activity","get_inventory","get_items","execute_gathering","stop_action","get_alterable_items","get_altering_works","execute_altering","complete_altering_work"}.Select(x=>new{Command=x,Metadata=new{requiresConfirm=true}}).ToArray() },
             "get_my_info" => new {CharacterId="ui-test",CharacterName="테스트",RealmName="테스트 서버"},
-            "get_currencies" => new[]{new{DisplayName="골드",Amount=5000}},
+            "get_currencies" => new[]{new{DisplayName="정령의 날개",Amount=0},new{DisplayName="골드",Amount=5000}},
             "get_gatherable_items" => new {items=new[]{new{DisplayName="철 광석",ToolOk=true},new{DisplayName="상급 통나무+",ToolOk=true},new{DisplayName="가죽",ToolOk=false}}},
             "get_alterable_items" => new {items=new[]{new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null},new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null},new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"not_enough_ingredient"},new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"not_enough_ingredient"}}},
             "get_items" => new[]{new{DisplayName="철 광석",Count=184L,Location="inventory"},new{DisplayName="상급 통나무+",Count=_logs,Location="inventory"},new{DisplayName="철괴",Count=_ingots,Location="inventory"},new{DisplayName="목재+",Count=_wood,Location="inventory"}},
