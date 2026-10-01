@@ -10,6 +10,12 @@ internal sealed record AlteringWork(string DisplayName, string FacilityName, str
 
 internal static class AlteringFacilityResolver
 {
+    private static readonly string[] KnownFacilities =
+    {
+        "금속 가공 시설", "목재 가공 시설", "가죽 가공 시설",
+        "옷감 가공 시설", "약품 가공 시설", "식재료 가공 시설"
+    };
+
     private static readonly HashSet<string> FoodRecipes = new(StringComparer.Ordinal)
     {
         "마요네즈", "버터", "밀가루", "치즈", "면", "생크림", "물에 불린 콩", "두부", "두유",
@@ -91,7 +97,7 @@ internal static class AlteringFacilityResolver
     private static string? NormalizeFacility(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        foreach (string facility in AlteringPlan.Facilities)
+        foreach (string facility in KnownFacilities)
         {
             string title = facility.Replace(" 시설", "");
             if (value.Equals(facility, StringComparison.Ordinal) ||
