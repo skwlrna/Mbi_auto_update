@@ -64,6 +64,11 @@ internal interface IDirectCliAlteringScreen
     Task CompleteAsync(string displayName, CancellationToken ct);
 }
 
+internal interface IAlteringRecoveryScreen
+{
+    Task RecoverStallAsync(AlteringPlan plan, int attempt, string reason, CancellationToken ct);
+}
+
 internal interface IAlteringData
 {
     Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct);
@@ -83,6 +88,8 @@ internal sealed class AlteringAutomation
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _verificationAttempts;
     private readonly IAlteringSupplyResolver? _supplyResolver;
+    private static readonly TimeSpan StallThreshold = TimeSpan.FromSeconds(60);
+    private const int MaxStallRecoveries = 3;
     internal event Action<string>? Log;
     internal int QueuedWorks { get; private set; }
     internal long ReservedWings { get; private set; }
@@ -121,11 +128,45 @@ internal sealed class AlteringAutomation
         long baseline = await _data.ItemCountAsync(plan.OutputName, ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 목표 {plan.TargetQuantity}개 · {plan.RequiredWorks}회 / 최소 {plan.ExpectedQuantity}개 · 정령의 날개 0개 고정");
 
+        string? lastProgressSignature = null;
+        DateTime lastProgressAt = DateTime.UtcNow;
+        int stallRecoveries = 0;
+
         while (true)
         {
             ct.ThrowIfCancellationRequested();
             works = await _data.WorksAsync(ct);
             if (await CollectIfReadyAsync(plan, works, ct)) works = await _data.WorksAsync(ct);
+
+            string progressSignature = ProgressSignature(works, plan, QueuedWorks);
+            if (!string.Equals(progressSignature, lastProgressSignature, StringComparison.Ordinal))
+            {
+                lastProgressSignature = progressSignature;
+                lastProgressAt = DateTime.UtcNow;
+                stallRecoveries = 0;
+            }
+            else if (DateTime.UtcNow - lastProgressAt >= StallThreshold)
+            {
+                stallRecoveries++;
+                string reason = $"대기열/남은시간 변화 없음 {StallThreshold.TotalSeconds:0}초 · 등록 {QueuedWorks}/{plan.RequiredWorks}";
+                Log?.Invoke($"[자동 가공] 정체 감지 {stallRecoveries}/{MaxStallRecoveries} · {reason}");
+
+                if (_screen is IAlteringRecoveryScreen recovery)
+                {
+                    await recovery.RecoverStallAsync(plan, stallRecoveries, reason, ct);
+                    lastProgressAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"가공 진행이 {StallThreshold.TotalSeconds:0}초 동안 변하지 않았고 화면 복구 기능을 사용할 수 없어 정지합니다.");
+                }
+
+                if (stallRecoveries >= MaxStallRecoveries)
+                    throw new InvalidOperationException(
+                        $"가공 진행 정체가 {MaxStallRecoveries}회 연속 감지되었습니다. 자동 화면 재판정 후에도 진행 변화가 없어 정지합니다.");
+            }
+
             var outstanding = Matching(works, plan).ToArray();
             if (QueuedWorks == plan.RequiredWorks && outstanding.Length == 0)
             {
@@ -259,6 +300,19 @@ internal sealed class AlteringAutomation
             Log?.Invoke($"[자동 가공] 완료 대기 · 등록 {QueuedWorks}/{plan.RequiredWorks} · 남은 시간 {remaining}초");
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
         }
+    }
+
+    private static string ProgressSignature(
+        IReadOnlyList<AlteringWork> works, AlteringPlan plan, int queuedWorks)
+    {
+        string queue = string.Join("|", works
+            .Where(x => x.FacilityName == plan.FacilityName)
+            .OrderBy(x => x.DisplayName, StringComparer.Ordinal)
+            .ThenBy(x => x.State, StringComparer.Ordinal)
+            .ThenBy(x => x.IsCompleted)
+            .ThenBy(x => x.RemainingSeconds)
+            .Select(x => $"{x.DisplayName}:{x.State}:{x.IsCompleted}:{x.RemainingSeconds}"));
+        return $"{queuedWorks}#{queue}";
     }
 
     private static IEnumerable<AlteringWork> Matching(IEnumerable<AlteringWork> works, AlteringPlan plan)
