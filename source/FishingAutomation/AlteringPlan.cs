@@ -88,45 +88,110 @@ internal sealed class AlteringAutomation
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _verificationAttempts;
     private readonly IAlteringSupplyResolver? _supplyResolver;
+    private readonly AlteringSessionStore? _sessionStore;
+    private AlteringSessionState? _session;
     private static readonly TimeSpan StallThreshold = TimeSpan.FromSeconds(60);
     private const int MaxStallRecoveries = 3;
+
     internal event Action<string>? Log;
+    internal event Action<AlteringProgress>? Progress;
     internal int QueuedWorks { get; private set; }
     internal long ReservedWings { get; private set; }
 
     internal AlteringAutomation(IAlteringData data, IAlteringScreen screen,
         Func<TimeSpan, CancellationToken, Task>? delay = null, int verificationAttempts = 120,
-        IAlteringSupplyResolver? supplyResolver = null)
+        IAlteringSupplyResolver? supplyResolver = null,
+        AlteringSessionStore? sessionStore = null,
+        AlteringSessionState? session = null)
     {
+        if ((sessionStore is null) != (session is null))
+            throw new ArgumentException("이어하기 저장소와 세션 상태는 함께 제공해야 합니다.");
+
         _data = data;
         _screen = screen;
         _delay = delay ?? Task.Delay;
         _verificationAttempts = verificationAttempts;
         _supplyResolver = supplyResolver;
+        _sessionStore = sessionStore;
+        _session = session;
     }
 
     internal async Task RunAsync(AlteringPlan plan, CancellationToken ct)
     {
         plan.Validate();
-        QueuedWorks = 0; ReservedWings = 0;
+        QueuedWorks = 0;
+        ReservedWings = 0;
+
         var recipes = await _data.RecipesAsync(ct);
         var selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
-        if (selected.Length < plan.RecipeOrdinal || selected[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
+        if (selected.Length < plan.RecipeOrdinal ||
+            selected[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
             throw new InvalidOperationException("선택 품목의 조회 결과가 바뀌었습니다. 목록을 다시 불러오세요.");
-        plan = plan with { RecipeCount = selected.Length, VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName)) };
-        var works = await _data.WorksAsync(ct);
-        int initialExistingCount = Matching(works, plan).Count();
 
-        // Do not drain pre-existing work before starting the new target. Those jobs are
-        // already occupying real facility slots, so keep them in place. Whenever one
-        // completes, CollectIfReadyAsync receives it and the normal free-slot logic below
-        // immediately appends a new target job. QueuedWorks counts only jobs registered
-        // by this run, so old jobs never count toward the requested target.
+        plan = plan with
+        {
+            RecipeCount = selected.Length,
+            VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName))
+        };
+
+        var works = await _data.WorksAsync(ct);
+        long baseline;
+        int initialExistingCount;
+
+        if (_session is not null)
+        {
+            if (!_session.MatchesPlan(plan))
+                throw new InvalidOperationException("저장된 자동 가공 작업과 현재 선택한 작업이 달라 이어서 실행하지 않습니다.");
+
+            QueuedWorks = _session.QueuedWorks;
+            baseline = _session.BaselineQuantity;
+            initialExistingCount = _session.InitialExistingWorks;
+
+            if (_session.PendingRegistration)
+            {
+                int current = Matching(works, plan).Count();
+                int before = _session.PendingBeforeMatchingCount;
+                if (current == before + 1)
+                {
+                    QueuedWorks++;
+                    Log?.Invoke($"[자동 가공] 이어하기 등록 복구 · 중단 직전 1작업이 실제 등록된 것으로 확인 · 전체 {QueuedWorks}/{plan.RequiredWorks}");
+                }
+                else if (current == before)
+                {
+                    Log?.Invoke("[자동 가공] 이어하기 등록 복구 · 중단 직전 작업은 등록되지 않은 것으로 확인 · 재클릭 없이 정상 진행");
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"이어하기 등록 상태를 안전하게 확정할 수 없습니다. 저장 전 {before}건 / 현재 {current}건. 중복 등록 방지를 위해 정지합니다.");
+                }
+
+                SaveSession(_session with
+                {
+                    QueuedWorks = QueuedWorks,
+                    PendingRegistration = false,
+                    PendingBeforeMatchingCount = 0,
+                    Stage = "가공 이어하기"
+                });
+            }
+
+            if (QueuedWorks > plan.RequiredWorks)
+                throw new InvalidOperationException("저장된 등록 횟수가 현재 목표 작업 수를 초과해 이어서 실행하지 않습니다.");
+
+            Log?.Invoke(
+                $"[자동 가공] 이어하기 · 저장 등록 {QueuedWorks}/{plan.RequiredWorks} · 기준 보유 {baseline:N0}개 · 기존 작업 {initialExistingCount}건 · 저장 단계={_session.Stage}");
+        }
+        else
+        {
+            initialExistingCount = Matching(works, plan).Count();
+            baseline = await _data.ItemCountAsync(plan.OutputName, ct);
+        }
+
         if (initialExistingCount > 0)
             Log?.Invoke($"[자동 가공] 기존 {plan.DisplayName} 작업 {initialExistingCount}건 유지 · 완료되는 즉시 수령하고 빈 슬롯에 새 목표 작업을 채웁니다.");
 
-        long baseline = await _data.ItemCountAsync(plan.OutputName, ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 목표 {plan.TargetQuantity}개 · {plan.RequiredWorks}회 / 최소 {plan.ExpectedQuantity}개 · 정령의 날개 0개 고정");
+        SaveStage("가공 진행");
 
         string? lastProgressSignature = null;
         DateTime lastProgressAt = DateTime.UtcNow;
@@ -136,7 +201,14 @@ internal sealed class AlteringAutomation
         {
             ct.ThrowIfCancellationRequested();
             works = await _data.WorksAsync(ct);
-            if (await CollectIfReadyAsync(plan, works, ct)) works = await _data.WorksAsync(ct);
+
+            if (works.Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted))
+                SaveStage("완료품 수령");
+            if (await CollectIfReadyAsync(plan, works, ct))
+            {
+                works = await _data.WorksAsync(ct);
+                SaveStage("가공 진행");
+            }
 
             string progressSignature = ProgressSignature(works, plan, QueuedWorks);
             if (!string.Equals(progressSignature, lastProgressSignature, StringComparison.Ordinal))
@@ -154,12 +226,11 @@ internal sealed class AlteringAutomation
                 stallRecoveries++;
                 string reason = $"대기열/남은시간 변화 없음 {StallThreshold.TotalSeconds:0}초 · 등록 {QueuedWorks}/{plan.RequiredWorks}";
                 Log?.Invoke($"[자동 가공] 정체 감지 {stallRecoveries}/{MaxStallRecoveries} · {reason}");
+                SaveStage($"정체 복구 {stallRecoveries}/{MaxStallRecoveries}");
 
                 if (_screen is IAlteringRecoveryScreen recovery)
                 {
                     await recovery.RecoverStallAsync(plan, stallRecoveries, reason, ct);
-                    // Each safe recovery gets a full grace window to prove that queue
-                    // progress resumed before another recovery or final stop.
                     lastProgressAt = DateTime.UtcNow;
                 }
                 else
@@ -169,18 +240,28 @@ internal sealed class AlteringAutomation
                 }
             }
 
+            await ReportProgressAsync(works, plan, baseline, initialExistingCount, "재료 정상", ct);
+
             var outstanding = Matching(works, plan).ToArray();
             if (QueuedWorks == plan.RequiredWorks && outstanding.Length == 0)
             {
-                long gained = await _data.ItemCountAsync(plan.OutputName, ct) - baseline;
-                if (gained < plan.ExpectedQuantity)
-                    throw new InvalidOperationException($"작업은 종료됐지만 수령 수량 확인이 부족합니다: +{gained} / 최소 {plan.ExpectedQuantity}. 중복 시작 없이 정지합니다.");
-                Log?.Invoke($"[자동 가공] 완료 · {plan.DisplayName} +{gained}개 · 등록 {QueuedWorks}회 · 버튼 비용 예약 {ReservedWings}개");
+                long grossGained = await _data.ItemCountAsync(plan.OutputName, ct) - baseline;
+                long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
+                long targetGained = Math.Max(0, grossGained - oldMinimum);
+                if (targetGained < plan.ExpectedQuantity)
+                    throw new InvalidOperationException(
+                        $"작업은 종료됐지만 새 목표 수령 수량 확인이 부족합니다: +{targetGained} / 최소 {plan.ExpectedQuantity}. " +
+                        $"총 인벤토리 변화 +{grossGained}, 기존 작업 최소 생산량 {oldMinimum} 제외. 중복 시작 없이 정지합니다.");
+
+                Log?.Invoke(
+                    $"[자동 가공] 완료 · {plan.DisplayName} 새 목표 +{targetGained}개 · 등록 {QueuedWorks}회 · 기존 작업 최소 {oldMinimum}개 제외 · 버튼 비용 예약 {ReservedWings}개");
+                _sessionStore?.Delete();
+                Progress?.Invoke(new(
+                    plan.TargetQuantity, plan.TargetQuantity, QueuedWorks, plan.RequiredWorks,
+                    0, null, "완료"));
                 return;
             }
-            // The facility has seven work slots. Fill every currently free slot
-            // before entering the completion-wait path. Each slot is still verified
-            // through the read-only CLI before the next registration.
+
             int facilityCount = works.Count(x => x.FacilityName == plan.FacilityName);
             int freeSlots = Math.Max(0, 7 - facilityCount);
             if (QueuedWorks < plan.RequiredWorks && freeSlots > 0)
@@ -193,9 +274,6 @@ internal sealed class AlteringAutomation
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    // Re-read availability before every slot. This keeps recursive
-                    // material resolution correct even when the current stock can only
-                    // support part of a seven-slot batch.
                     recipes = await _data.RecipesAsync(ct);
                     selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
                     if (selected.Length != plan.RecipeCount ||
@@ -220,19 +298,21 @@ internal sealed class AlteringAutomation
                             string missingText = string.Join(", ",
                                 recipe.MissingIngredients.Select(x =>
                                     $"{x.DisplayName} {x.Owned}/{x.Required}"));
+
+                            SaveStage("재료 해결 · " + string.Join(", ", recipe.MissingIngredients.Select(x => x.DisplayName)));
+                            await ReportProgressAsync(works, plan, baseline, initialExistingCount, "재료 확보 중", ct);
                             Log?.Invoke(
                                 $"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
 
-                            await _supplyResolver.ResolveAsync(
-                                plan, recipe, remainingWorks, ct);
+                            await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
 
                             recipes = await _data.RecipesAsync(ct);
                             selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
                             var refreshed = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
                             if (refreshed is not null && refreshed.Alterable)
                             {
-                                Log?.Invoke(
-                                    $"[자동 가공] 재료 재확인 완료 · {plan.DisplayName} 가공을 이어갑니다.");
+                                SaveStage("가공 재개");
+                                Log?.Invoke($"[자동 가공] 재료 재확인 완료 · {plan.DisplayName} 가공을 이어갑니다.");
                                 continue;
                             }
                         }
@@ -246,15 +326,14 @@ internal sealed class AlteringAutomation
                             $"가공 불가: {reason} {missing}. 등록된 작업은 게임에 남습니다.");
                     }
 
-                    // Another process/user may have changed the queue while material
-                    // resolution was running. Re-check real free capacity immediately
-                    // before each registration.
                     works = await _data.WorksAsync(ct);
                     int currentFacilityCount = works.Count(x => x.FacilityName == plan.FacilityName);
                     if (currentFacilityCount >= 7)
                         break;
 
                     int previous = Matching(works, plan).Count();
+                    SavePendingRegistration(previous);
+
                     bool reserved = false;
                     await _screen.QueueAsync(plan, () =>
                     {
@@ -267,8 +346,6 @@ internal sealed class AlteringAutomation
                         ReservedWings += 5;
                     }, ct);
 
-                    // Verify exactly one new work before sending the next free-screen
-                    // registration. No unverified multi-click burst is allowed.
                     await VerifyAsync(async token =>
                     {
                         int count = Matching(await _data.WorksAsync(token), plan).Count();
@@ -281,27 +358,99 @@ internal sealed class AlteringAutomation
 
                     QueuedWorks++;
                     queuedThisBatch++;
+                    SaveConfirmedRegistration();
                     Log?.Invoke(
                         $"[자동 가공] 일괄 등록 진행 {queuedThisBatch}/{batchGoal} · 전체 {QueuedWorks}/{plan.RequiredWorks} · {plan.DisplayName}");
+
+                    works = await _data.WorksAsync(ct);
+                    await ReportProgressAsync(works, plan, baseline, initialExistingCount, "재료 정상", ct);
                 }
 
                 if (queuedThisBatch > 0)
                     Log?.Invoke(
                         $"[자동 가공] 일괄 등록 완료 · {queuedThisBatch}작업 / {queuedThisBatch * plan.ProducedPerWork}개 생산 예약");
 
-                // Re-read queue state on the next outer turn. If slots remain, another
-                // batch starts immediately; otherwise completion waiting begins.
                 continue;
             }
 
             bool full = facilityCount >= 7;
             if (full && !works.Any(x => x.FacilityName == plan.FacilityName && x.State == "InProgress"))
                 throw new InvalidOperationException("가공 대기열이 가득 찼지만 진행 중인 작업이 없습니다. 게임에서 작업 상태를 확인하세요.");
+
             var remaining = works.Where(x => x.FacilityName == plan.FacilityName && x.State == "InProgress")
                 .Select(x => x.RemainingSeconds).DefaultIfEmpty(10).Min();
+            SaveStage("완료 대기");
             Log?.Invoke($"[자동 가공] 완료 대기 · 등록 {QueuedWorks}/{plan.RequiredWorks} · 남은 시간 {remaining}초");
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
         }
+    }
+
+    private void SaveStage(string stage)
+    {
+        if (_session is null || _sessionStore is null) return;
+        SaveSession(_session with { Stage = stage });
+    }
+
+    private void SavePendingRegistration(int beforeMatchingCount)
+    {
+        if (_session is null || _sessionStore is null) return;
+        SaveSession(_session with
+        {
+            QueuedWorks = QueuedWorks,
+            PendingRegistration = true,
+            PendingBeforeMatchingCount = beforeMatchingCount,
+            Stage = "작업 등록 확인"
+        });
+    }
+
+    private void SaveConfirmedRegistration()
+    {
+        if (_session is null || _sessionStore is null) return;
+        SaveSession(_session with
+        {
+            QueuedWorks = QueuedWorks,
+            PendingRegistration = false,
+            PendingBeforeMatchingCount = 0,
+            Stage = "가공 진행"
+        });
+    }
+
+    private void SaveSession(AlteringSessionState state)
+    {
+        if (_sessionStore is null) return;
+        _session = state with { UpdatedAt = DateTimeOffset.Now };
+        _sessionStore.Save(_session);
+    }
+
+    private async Task ReportProgressAsync(
+        IReadOnlyList<AlteringWork> works,
+        AlteringPlan plan,
+        long baseline,
+        int initialExistingCount,
+        string materialState,
+        CancellationToken ct)
+    {
+        if (Progress is null) return;
+
+        long current = await _data.ItemCountAsync(plan.OutputName, ct);
+        long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
+        long confirmed = Math.Max(0, current - baseline - oldMinimum);
+        confirmed = Math.Min(plan.TargetQuantity, confirmed);
+
+        long? next = works
+            .Where(x => x.FacilityName == plan.FacilityName && x.State == "InProgress")
+            .Select(x => (long?)x.RemainingSeconds)
+            .DefaultIfEmpty(null)
+            .Min();
+
+        Progress.Invoke(new(
+            confirmed,
+            plan.TargetQuantity,
+            QueuedWorks,
+            plan.RequiredWorks,
+            works.Count(x => x.FacilityName == plan.FacilityName),
+            next,
+            materialState));
     }
 
     private static string ProgressSignature(
@@ -318,9 +467,11 @@ internal sealed class AlteringAutomation
     }
 
     private static IEnumerable<AlteringWork> Matching(IEnumerable<AlteringWork> works, AlteringPlan plan)
-        => works.Where(x => (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName) && x.FacilityName == plan.FacilityName);
+        => works.Where(x => (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName) &&
+            x.FacilityName == plan.FacilityName);
 
-    private async Task<bool> CollectIfReadyAsync(AlteringPlan plan, IReadOnlyList<AlteringWork> works, CancellationToken ct)
+    private async Task<bool> CollectIfReadyAsync(
+        AlteringPlan plan, IReadOnlyList<AlteringWork> works, CancellationToken ct)
     {
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
@@ -331,16 +482,13 @@ internal sealed class AlteringAutomation
         {
             var completed = works.First(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
             await direct.CompleteAsync(completed.DisplayName, ct);
-            await VerifyAsync(async token => (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
+            await VerifyAsync(async token =>
+                (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
                 "CLI 완료 작업 수령 후 대기열 감소를 확인하지 못했습니다. 중복 실행 없이 정지합니다.", ct);
             Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · CLI · {completed.DisplayName}");
             return true;
         }
 
-        // In the live client the first '모두 받기' can start automatic travel to the
-        // processing bench instead of collecting immediately. Press once, then prove
-        // through the read-only CLI whether the queue actually shrank before allowing
-        // a second input.
         bool firstCollected = await _screen.CollectAsync(plan, ct);
         if (firstCollected)
         {
@@ -352,15 +500,12 @@ internal sealed class AlteringAutomation
             return true;
         }
 
-        // The screen layer already distinguished "no completion result" from a real
-        // receipt, so do not spend another 8 seconds polling an unchanged queue.
         Log?.Invoke($"[자동 가공] 1차 모두 받기 = 설비 이동 · 즉시 가공대 수령 화면 대기");
         if (!await _screen.CollectAfterTravelAsync(plan, ct))
             throw new InvalidOperationException("가공대 도착 후 2차 모두 받기 화면을 확인하지 못했습니다. 추가 입력 없이 정지합니다.");
 
-        // Another queued work may finish during collection. Total queue shrinkage is
-        // the receipt signal; completedCount alone can stay unchanged or increase.
-        await VerifyAsync(async token => (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
+        await VerifyAsync(async token =>
+            (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
             "2차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 클릭 없이 정지합니다.", ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 2차 모두 받기");
         return true;
