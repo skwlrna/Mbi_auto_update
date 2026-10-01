@@ -249,7 +249,8 @@ internal sealed class AlteringAutomation
                             throw new InvalidOperationException(
                                 "동시에 다른 가공 작업이 등록되어 수량을 확정할 수 없습니다.");
                         return count == previous + 1;
-                    }, "작업 등록을 확인하지 못했습니다. 재화 중복 사용을 막기 위해 재클릭하지 않고 정지합니다.", ct);
+                    }, "작업 등록을 확인하지 못했습니다. 재화 중복 사용을 막기 위해 재클릭하지 않고 정지합니다.",
+                    ct, TimeSpan.FromSeconds(1));
 
                     QueuedWorks++;
                     queuedThisBatch++;
@@ -325,13 +326,18 @@ internal sealed class AlteringAutomation
         return true;
     }
 
-    private async Task VerifyAsync(Func<CancellationToken, Task<bool>> condition, string failure, CancellationToken ct)
+    private async Task VerifyAsync(
+        Func<CancellationToken, Task<bool>> condition,
+        string failure,
+        CancellationToken ct,
+        TimeSpan? pollDelay = null)
     {
+        TimeSpan delay = pollDelay ?? TimeSpan.FromSeconds(5);
         for (int i = 0; i < _verificationAttempts; i++)
         {
             ct.ThrowIfCancellationRequested();
             if (await condition(ct)) return;
-            await _delay(TimeSpan.FromSeconds(5), ct);
+            await _delay(delay, ct);
         }
         throw new InvalidOperationException(failure);
     }
