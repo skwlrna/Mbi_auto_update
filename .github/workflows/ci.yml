@@ -187,6 +187,8 @@ jobs:
           if ($screen -match 'Normalize\(name') { throw 'first-place OCR string equality check returned' }
           if ($screen -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow') { throw 'first-place geometry stability gate missing' }
           if ($screen -notmatch 'first\.Value\.Bounds\.Left\+first\.Value\.Bounds\.Width/2') { throw 'fresh second-frame row click missing' }
+          if ($screen -notmatch 'beforeCount=await _data\.ItemCountAsync' -or $screen -notmatch 'gained>=plan\.TargetQuantity') { throw 'inventory-based gathering success evidence missing' }
+          if ($screen -notmatch 'activity 상태와 무관하게 성공 처리') { throw 'inventory-authoritative completion log missing' }
           $vision = Get-Content source/FishingAutomation/dungeon/GatheringVision.cs -Raw
           if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
           $queries = Get-Content source/FishingAutomation/GatheringQueries.cs -Raw
