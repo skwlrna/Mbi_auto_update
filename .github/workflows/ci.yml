@@ -168,9 +168,15 @@ jobs:
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
           if ($screen -notmatch '"모두 받기"') { throw 'collect button OCR gate missing' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
-          if ($screen -notmatch '무료 현장 가공하기') { throw 'free processing confirmation log missing' }
-          if ($screen -notmatch '원격 가공하러 가기 감지') { throw 'remote paid button must be observation-only' }
+          if ($screen -notmatch '설비 도착 후 무료 가공하기 확인') { throw 'on-site free processing confirmation log missing' }
           if ($screen -notmatch 'IsRecipeDetailAsync') { throw 'structural recipe detail fallback missing' }
+          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
+          $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
+          $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
+          if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'recipe must be selected only after facility travel' }
+          if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
+          if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
+          if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
