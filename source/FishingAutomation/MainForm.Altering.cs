@@ -16,8 +16,7 @@ public sealed partial class MainForm
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_alterable_items", "get_altering_works",
-                "get_items", "execute_altering", "complete_altering_work",
-                "get_gatherable_items", "get_activity", "get_inventory", "execute_gathering", "stop_action"
+                "get_items", "get_gatherable_items", "get_activity", "get_inventory"
             };
             var capabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(_cli, requiredCommands, CancellationToken.None);
             var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
@@ -40,10 +39,26 @@ public sealed partial class MainForm
             if (_cancelStart || IsDisposed) return;
             _log.Write("[자동 가공] 캐릭터 문맥 저장 · " + identity.Description);
             _alteringPage.CharacterStatus = "확인됨";
-            var screen = new AlteringCliScreen(_cli, identity);
-            var gatheringScreen = new GatheringCliScreen(_cli, identity);
+
+            var windows = WindowTools.EnumerateVisibleWindows();
+            if (windows.Count != 1)
+                throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
+            var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
+            WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
+            await Task.Delay(500);
+            if (_cancelStart || IsDisposed) return;
+
+            var visualAltering = new AlteringScreen(
+                windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "altering"), _cli);
+            var visualGathering = new GatheringScreen(
+                windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, gatheringData);
+            var screen = new ZeroWingAlteringScreen(visualAltering, _cli, identity);
+            var gatheringScreen = new ZeroWingGatheringScreen(visualGathering, _cli, identity);
             var resolver = new RecursiveAlteringSupplyResolver(rawAlteringData, gatheringData, screen, gatheringScreen);
             var automation = new AlteringAutomation(data, screen, supplyResolver: resolver);
+
+            visualAltering.Log += text => Ui(() => _log.Write(text));
+            visualGathering.Log += text => Ui(() => _log.Write(text));
             screen.Log += text => Ui(() => _log.Write(text));
             gatheringScreen.Log += text => Ui(() => _log.Write(text));
             resolver.Log += text => Ui(() =>
@@ -58,7 +73,7 @@ public sealed partial class MainForm
             _alteringDisplay = $"{plan.ScreenTitle} · {plan.DisplayName} {plan.TargetQuantity}개";
             _dungeonStartedAt = DateTime.Now; _dungeonStoppedAt = null;
             _dungeonCycles = _dungeonCompleted = 0; _runError = null;
-            _inputValue.Text = _dungeonInputName = screen.InputMode;
+            _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
             SetStatus("가공 시작 준비", Blue);
             automation.Log += text => Ui(() =>
             {
@@ -69,7 +84,7 @@ public sealed partial class MainForm
                 UpdateStats();
                 RefreshProductionDashboard();
             });
-            _log.Write("[자동 가공] 시작(F9) · " + _alteringDisplay);
+            _log.Write("[자동 가공] 시작(F9) · " + _alteringDisplay + " · CLI 조회 전용 / 무료 화면 경로");
             _dungeonTask = Task.Run(async () =>
             {
                 using (screen)
