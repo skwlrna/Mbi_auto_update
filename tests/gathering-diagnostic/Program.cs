@@ -55,6 +55,11 @@ var cancelled = new CancellationToken(true);
         Check(json.RootElement.GetProperty("Metadata").GetProperty("requiresConfirm").GetString() == "true", "confirmation metadata preserved");
     }
     Check(lines.Count(l => l.Contains("[품목 ")) == 12, "all items beyond structure limit logged");
+    foreach (var entry in lines.Where(l => l.Contains("[품목 ")).Select((line, index) => (line, index))) {
+        using var json = JsonDocument.Parse(entry.line[entry.line.IndexOf("{", StringComparison.Ordinal)..]);
+        Check(json.RootElement.GetProperty("DisplayName").GetString() == (entry.index == 0 ? "달걀" : $"달걀 {entry.index}"), "each item name preserved");
+        Check(json.RootElement.GetProperty("ToolOk").GetBoolean() == (entry.index % 2 == 0), "each tool state preserved");
+    }
     Check(lines.Any(l => l.Contains("items=12") && l.Contains("exact=1")), "summary retained");
     Check(lines.Last().Contains("종료"), "ends immediately after reads");
 }
