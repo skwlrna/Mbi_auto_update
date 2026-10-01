@@ -90,6 +90,10 @@ internal sealed class AlteringSessionStore
         {
             var state = JsonSerializer.Deserialize<AlteringSessionState>(File.ReadAllText(_path), JsonOptions)
                 ?? throw new InvalidDataException("자동 가공 이어하기 파일이 비어 있습니다.");
+            // Upgrade checkpoints written by the first resume build, before
+            // LastObservedOutputQuantity was added.
+            if (state.LastObservedOutputQuantity == 0 && state.BaselineQuantity > 0)
+                state = state with { LastObservedOutputQuantity = state.BaselineQuantity };
             if (state.Version != 1 || string.IsNullOrWhiteSpace(state.FacilityName) ||
                 string.IsNullOrWhiteSpace(state.DisplayName) || state.TargetQuantity <= 0 ||
                 state.ProducedPerWork <= 0 || state.RequiredWorks <= 0 ||
