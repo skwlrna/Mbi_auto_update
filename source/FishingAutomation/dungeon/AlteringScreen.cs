@@ -368,18 +368,61 @@ internal sealed class AlteringScreen : IAlteringScreen
         if (_cli is null)
             throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
 
-        for (int pass = 0; pass < 2; pass++)
+        // The same facility window has two real states:
+        //   remote: "설비로 이동" is visible
+        //   on-site: the facility list is visible but "설비로 이동" is gone
+        // Require two stable frames before deciding which state we are in.
+        DetectionResult? moveToClick = null;
+        int moveFrames = 0;
+        int onsiteFrames = 0;
+        for (int attempt = 0; attempt < 8; attempt++)
         {
+            ct.ThrowIfCancellationRequested();
             using var frame = Capture(ct);
+
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
-            var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
-            if (move is null)
-                Fail(frame, "무료 설비로 이동 버튼을 확인하지 못했습니다.");
-            if (pass == 0) { await Task.Delay(180, ct); continue; }
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭");
-            _input.ClickClientPoint(_hwnd, move.Value.Center);
+
+            bool popupVisible = HasBottomConfirmationModal(frame);
+            var move = popupVisible
+                ? null
+                : await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
+
+            if (!popupVisible && move is null)
+            {
+                onsiteFrames++;
+                moveFrames = 0;
+                if (onsiteFrames >= 2)
+                {
+                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 버튼 없음 · 이미 현장 가공창");
+                    return;
+                }
+            }
+            else if (!popupVisible && move is not null)
+            {
+                moveFrames++;
+                onsiteFrames = 0;
+                moveToClick = move;
+                if (moveFrames >= 2)
+                    break;
+            }
+            else
+            {
+                moveFrames = 0;
+                onsiteFrames = 0;
+            }
+
+            await Task.Delay(180, ct);
         }
+
+        if (moveToClick is null || moveFrames < 2)
+        {
+            using var failed = Capture(ct);
+            Fail(failed, "설비 이동 상태를 안정적으로 확인하지 못했습니다.");
+        }
+
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭");
+        _input.ClickClientPoint(_hwnd, moveToClick.Value.Center);
 
         bool confirmationPressed = await ConfirmFacilityTravelAsync(ct);
         Log?.Invoke(confirmationPressed
@@ -389,6 +432,8 @@ internal sealed class AlteringScreen : IAlteringScreen
         bool sawDeparture = false;
         bool sawTravel = false;
         int loadingCliRejects = 0;
+        int onsiteStableFrames = 0;
+
         for (int attempt = 0; attempt < 120; attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -416,32 +461,50 @@ internal sealed class AlteringScreen : IAlteringScreen
             }
             else
             {
-                _ = GatheringQueries.ParseActivity(activityResponse); // preserve the existing hard failure
+                _ = GatheringQueries.ParseActivity(activityResponse);
             }
 
             using var frame = Capture(ct);
-            bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool popupVisible = HasBottomConfirmationModal(frame);
+            if (popupVisible)
+            {
+                Log?.Invoke("[자동 가공] 늦게 표시된 하단 확인 팝업 감지 · Space 입력");
+                _input.TapScanCode(0x39);
+                await Task.Delay(900, ct);
+                onsiteStableFrames = 0;
+                continue;
+            }
 
-            // The facility screen is open before the click, so it cannot count as
-            // arrival until we have first observed travel or the facility screen
-            // disappearing. This prevents the old false-positive "3 seconds = arrived".
+            bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool moveVisible = false;
+            if (facilityVisible)
+                moveVisible = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null;
+
             if (!facilityVisible)
                 sawDeparture = true;
 
-            // The processing window itself is authoritative arrival evidence.
-            // During map loading get_activity can be temporarily rejected, so do not
-            // require a successful CLI sample on the exact arrival frame.
-            if (sawDeparture && facilityVisible && activity?.IsAutoTraveling != true)
+            // On-site state is authoritative: facility window + no "설비로 이동".
+            // This also covers the game's direct transition where there is no loading
+            // screen and the remote button simply disappears.
+            if (facilityVisible && !moveVisible && activity?.IsAutoTraveling != true)
             {
-                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · 가공창 재등장");
-                return;
+                onsiteStableFrames++;
+                if (onsiteStableFrames >= 2)
+                {
+                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · 설비로 이동 버튼 없음");
+                    return;
+                }
+            }
+            else
+            {
+                onsiteStableFrames = 0;
             }
 
             if (attempt > 0 && attempt % 10 == 0)
-                Log?.Invoke($"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · 화면이탈={sawDeparture} · 가공창={facilityVisible} · CLI로딩거부={loadingCliRejects}");
+                Log?.Invoke($"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · 화면이탈={sawDeparture} · 가공창={facilityVisible} · 이동버튼={moveVisible} · CLI로딩거부={loadingCliRejects}");
         }
 
-        throw new InvalidOperationException("설비로 이동 후 가공창 재등장을 제한 시간 안에 확인하지 못해 정지합니다.");
+        throw new InvalidOperationException("설비로 이동 후 현장 가공창을 제한 시간 안에 확인하지 못해 정지합니다.");
     }
 
     // Free navigation only, for opening an ingredient's obtain-method route.
