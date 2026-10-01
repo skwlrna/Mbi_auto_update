@@ -45,6 +45,11 @@ var autoPlayingField = new FakeWorld { State = FakeWorld.Idle with { IsAutoPlayi
 await new GatheringAutomation(autoPlayingField,autoPlayingField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(autoPlayingField.Starts==1 && autoPlayingField.Owned>=105,
     "IsAutoPlaying alone is allowed in safe field gathering state");
+
+var battlefieldFlagField = new FakeWorld { State = FakeWorld.Idle with { IsInBattlefield = true } };
+await new GatheringAutomation(battlefieldFlagField,battlefieldFlagField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(battlefieldFlagField.Starts==1 && battlefieldFlagField.Owned>=105,
+    "Battlefield flag alone is allowed when all real hazard flags are clear");
 foreach(var world in new[]{new FakeWorld {Tool=false},new FakeWorld{Full=true},new FakeWorld{State=FakeWorld.Idle with {IsInCombat=true}},new FakeWorld{State=FakeWorld.Idle with {IsDialoguePlaying=true}},new FakeWorld{State=FakeWorld.Idle with {IsAutoTraveling=true}}})
 {
     try{await new GatheringAutomation(world,world).RunAsync(plan,default);throw new Exception("unsafe start accepted");}
