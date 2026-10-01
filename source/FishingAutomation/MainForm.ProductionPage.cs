@@ -22,8 +22,21 @@ public sealed partial class MainForm
     {
         if (_alteringPage.Items.SelectedItem is not RecipeChoice choice)
             throw new InvalidOperationException("가공 제법 목록을 불러온 뒤 제법을 선택하세요.");
-        if (!choice.Recipe.Alterable && choice.Recipe.Reason != "not_enough_ingredient")
-            throw new InvalidOperationException("선택한 제법의 가공 조건을 확인하세요.");
+
+        if (!choice.Recipe.Alterable)
+        {
+            string reason = choice.Recipe.Reason ?? "unknown";
+            string missing = choice.Recipe.MissingIngredients.Count == 0
+                ? "없음"
+                : string.Join(", ", choice.Recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}"));
+            _log.Write($"[자동 가공] 선택 제법 상태 · {choice.Recipe.DisplayName} · Alterable=false · Reason={reason} · Missing={missing}");
+
+            // MissingIngredients is stronger evidence than a localized/changed Reason string.
+            // If concrete deficits are present, let the recursive resolver handle them.
+            if (choice.Recipe.MissingIngredients.Count == 0)
+                throw new InvalidOperationException($"선택한 제법의 가공 조건을 확인하세요. Reason={reason} · Missing={missing}");
+        }
+
         // Missing ingredients are resolved recursively. Spirit Wings are never authorized.
         return new(_alteringPage.Facility.SelectedItem!.ToString()!, choice.Recipe.DisplayName,
             (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, false);
@@ -492,7 +505,7 @@ public sealed partial class MainForm
             { _condition.Text = g.Item.ToolOk ? "사용 가능" : "확인 필요"; _condition.ForeColor = g.Item.ToolOk ? Green : Color.Orange; _materials.Text = g.Item.ToolOk ? "선택 품목의 도구 사용 가능" : "채집 도구를 확인하세요"; }
             else if (Items.SelectedItem is RecipeChoice r)
             {
-                _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.Reason == "not_enough_ingredient" ? "재료 부족" : "확인 필요";
+                _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.MissingIngredients.Count > 0 ? "재료 부족" : "확인 필요";
                 _condition.ForeColor = r.Recipe.Alterable ? Green : Color.Orange;
                 // MissingIngredients is not a complete bill of materials; never invent it.
                 _materials.Text = (r.Recipe.MissingIngredients.Count > 0
@@ -509,7 +522,7 @@ public sealed partial class MainForm
             bool available = Items.SelectedItem switch
             {
                 GatheringChoice { Item.ToolOk: true } => true,
-                RecipeChoice r => r.Recipe.Alterable || r.Recipe.Reason == "not_enough_ingredient",
+                RecipeChoice r => r.Recipe.Alterable || r.Recipe.MissingIngredients.Count > 0,
                 _ => false
             };
             foreach (var field in new Control[] { Items, Quantity, Facility, _search, _reload }) field.Enabled = !running && !_loading;
