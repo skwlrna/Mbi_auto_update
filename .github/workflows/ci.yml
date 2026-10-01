@@ -1,4 +1,4 @@
-name: Check V0.1.99 Diagnostic-only CLI Test
+name: Check V2.0.1 Production Release
 
 on:
   push:
@@ -37,10 +37,14 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V0\.1\.99"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V2\.0\.1"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>0\.1\.99</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>2\.0\.1</Version>') { throw 'project version mismatch' }
+
+      - name: Updater rollback regression tests
+        shell: pwsh
+        run: ./changes/tests/stability/Updater.Tests.ps1 -Updater ./source/tools/ApplyUpdate.ps1
 
       - name: Loot and retry regression tests
         shell: pwsh

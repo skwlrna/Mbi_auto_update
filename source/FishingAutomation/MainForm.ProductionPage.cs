@@ -119,7 +119,7 @@ public sealed partial class MainForm
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty };
             header.RowStyles.Add(new(SizeType.Percent, 58)); header.RowStyles.Add(new(SizeType.Percent, 42));
             header.Controls.Add(owner.SectionTitle(AccessibleName, 26));
-            header.Controls.Add(new Label { Text = altering ? "보유 재료로 원하는 아이템을 자동 가공합니다." : "채집 재료를 자동으로 수집합니다.", Dock = DockStyle.Fill, ForeColor = Muted });
+            header.Controls.Add(new Label { Text = altering ? "보유 재료로 원하는 아이템을 자동 가공합니다." : "CLI 조회·검사 가능 · 날개 5개 소모 시작은 무료 모드에서 차단됩니다.", Dock = DockStyle.Fill, ForeColor = Muted });
             root.Controls.Add(header, 0, 0);
 
             var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10) };

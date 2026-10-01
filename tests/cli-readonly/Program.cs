@@ -24,8 +24,20 @@ foreach (bool zeroWing in new[] { true, false })
 }
 Check(launches == 0, "blocked commands launched a process");
 
+int freeActions = 0;
+var freeCli = new MabinogiMobileCli(log, true,
+    (_, _) => Task.FromResult(new CliProcessOutput(0, "{}", "")),
+    (_, _) => { freeActions++; return Task.FromResult(new CliProcessOutput(0, "{}", "")); });
+foreach (string name in new[] { "철 광석", "상급 통나무+", "", "get_items;execute_gathering" })
+{
+    var blocked = await freeCli.ExecuteGatheringAsync(name);
+    Check(blocked.State == "blocked" && blocked.Error == "gathering_requires_five_wings",
+        "zero-wing typed gathering must fail before process launch");
+}
+Check(freeActions == 0, "free gathering spent wings at process boundary");
+
 var actionCalls = new List<string[]>();
-var actionCli = new MabinogiMobileCli(log, true,
+var actionCli = new MabinogiMobileCli(log, false,
     (_, _) => Task.FromResult(new CliProcessOutput(0, "{}", "")),
     (arguments, _) =>
     {

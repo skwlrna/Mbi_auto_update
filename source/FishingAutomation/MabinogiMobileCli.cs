@@ -9,7 +9,7 @@ public sealed record MabinogiCliResult(string Command, bool Success, string Stat
 
 internal sealed record CliProcessOutput(int ExitCode, string Stdout, string Stderr);
 
-/// <summary>Read-only CLI connector. No action commands can reach the process boundary.</summary>
+/// <summary>Allowlisted CLI connector with a process-boundary guard for paid gathering.</summary>
 public sealed class MabinogiMobileCli
 {
     public const string DefaultPath = @"C:\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe";
@@ -75,6 +75,10 @@ public sealed class MabinogiMobileCli
 
     private async Task<MabinogiCliResult> ActionAsync(string command, string? displayName, CancellationToken token)
     {
+        // execute_gathering consumes FIVE spirit wings, even when requiresConfirm is false.
+        // Free gathering and diagnostics must never reach the action process boundary.
+        if (command == "execute_gathering" && ZeroWingMode)
+            return Finish(new(command, false, "blocked", null, null, "gathering_requires_five_wings"));
         if (!IsAllowedAction(command))
             return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
         if (command == "stop_action" ? displayName is not null :
