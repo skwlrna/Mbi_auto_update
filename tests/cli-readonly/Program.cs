@@ -51,6 +51,19 @@ int beforeInvalid = actionCalls.Count;
 Check((await actionCli.ExecuteGatheringAsync("")).State == "blocked", "empty gathering name was accepted");
 Check(actionCalls.Count == beforeInvalid, "invalid typed action reached process runner");
 
+var filteredArgs = MabinogiMobileCli.BuildFilteredQueryArguments("get_gatherable_items", "달걀");
+Check(filteredArgs.Count == 2 && filteredArgs[0] == "get_gatherable_items" &&
+      filteredArgs[1].StartsWith("base64:", StringComparison.Ordinal),
+    "filtered gatherable query argument shape changed");
+string filteredText = Encoding.UTF8.GetString(Convert.FromBase64String(filteredArgs[1]["base64:".Length..]));
+Check(filteredText == "달걀", "filtered gatherable query body encoding changed");
+try
+{
+    MabinogiMobileCli.BuildFilteredQueryArguments("status", "달걀");
+    throw new Exception("non-gather filtered query accepted");
+}
+catch (InvalidOperationException) { checks++; }
+
 var wrappedStatus = MabinogiMobileCli.Parse("status", new(0,
     "{\"status\":\"accepted\",\"body\":\"{\\\"pipe\\\":\\\"connected\\\"}\"}", ""));
 Check(wrappedStatus.Success && wrappedStatus.Data!.Value.GetProperty("pipe").GetString() == "connected",
@@ -154,6 +167,15 @@ if (args.Contains("--live"))
         if (command == "get_currencies") { CliAutomationGuards.ParseCurrencies(result); checks++; }
         if (command == "get_alterable_items") Check(AlteringQueries.ParseRecipes(result).Count > 0, "live recipe parsing failed");
         if (command == "get_altering_works") { AlteringQueries.ParseWorks(result); checks++; }
+    }
+
+    foreach (string filterName in new[] { "달걀", "밀", "우유" })
+    {
+        var filtered = await defaults.GetGatherableItemsAsync(filterName);
+        Console.WriteLine($"LIVE get_gatherable_items filter={filterName}: success={filtered.Success} state={filtered.State} exit={filtered.ExitCode}");
+        if (filtered.Data is JsonElement data)
+            Console.WriteLine(data.GetRawText());
+        Check(filtered.Success && filtered.Data is not null, $"Live filtered gatherable query failed: {filterName} {filtered.State}/{filtered.Error}");
     }
 }
 Console.WriteLine($"PASS {checks} checks");
