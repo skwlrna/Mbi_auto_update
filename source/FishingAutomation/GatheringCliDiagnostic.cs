@@ -31,6 +31,15 @@ internal static class GatheringCliDiagnostic
                         else if (row.TryGetProperty("command", out var lower)) command = lower;
                     }
                     log("[CLI 검사][전체 명령] " + command.GetRawText());
+                    if (command.ValueKind == JsonValueKind.String &&
+                        command.GetString() is "get_gatherable_items" or "execute_gathering" &&
+                        row.ValueKind == JsonValueKind.Object)
+                    {
+                        var details = new Dictionary<string, JsonElement?>();
+                        foreach (var field in new[] { "Description", "BodyExample", "OutputExample", "Note", "Metadata" })
+                            details[field] = row.TryGetProperty(field, out var value) ? value : null;
+                        log("[CLI 검사][명령 상세][" + command.GetString() + "] " + JsonSerializer.Serialize(details));
+                    }
                 }
             }
             var result = await gatherable(name, token);
@@ -42,8 +51,14 @@ internal static class GatheringCliDiagnostic
                 root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
             {
                 count = items.GetArrayLength();
+                int index = 0;
                 foreach (var row in items.EnumerateArray())
                 {
+                    index++;
+                    var item = new Dictionary<string, JsonElement?>();
+                    foreach (var field in new[] { "DisplayName", "ToolOk" })
+                        item[field] = row.ValueKind == JsonValueKind.Object && row.TryGetProperty(field, out var value) ? value : null;
+                    log($"[CLI 검사][품목 {index}] " + JsonSerializer.Serialize(item));
                     if (row.ValueKind != JsonValueKind.Object) continue;
                     foreach (var p in row.EnumerateObject()) fields.Add(p.Name);
                     if (row.TryGetProperty("DisplayName", out var display) &&
