@@ -147,6 +147,10 @@ internal sealed class AlteringAutomation
             }
             else if (DateTime.UtcNow - lastProgressAt >= StallThreshold)
             {
+                if (stallRecoveries >= MaxStallRecoveries)
+                    throw new InvalidOperationException(
+                        $"가공 진행 정체가 {MaxStallRecoveries}회 복구 후에도 계속되었습니다. 마지막 진단 화면을 저장한 상태로 정지합니다.");
+
                 stallRecoveries++;
                 string reason = $"대기열/남은시간 변화 없음 {StallThreshold.TotalSeconds:0}초 · 등록 {QueuedWorks}/{plan.RequiredWorks}";
                 Log?.Invoke($"[자동 가공] 정체 감지 {stallRecoveries}/{MaxStallRecoveries} · {reason}");
@@ -154,6 +158,8 @@ internal sealed class AlteringAutomation
                 if (_screen is IAlteringRecoveryScreen recovery)
                 {
                     await recovery.RecoverStallAsync(plan, stallRecoveries, reason, ct);
+                    // Each safe recovery gets a full grace window to prove that queue
+                    // progress resumed before another recovery or final stop.
                     lastProgressAt = DateTime.UtcNow;
                 }
                 else
@@ -161,10 +167,6 @@ internal sealed class AlteringAutomation
                     throw new InvalidOperationException(
                         $"가공 진행이 {StallThreshold.TotalSeconds:0}초 동안 변하지 않았고 화면 복구 기능을 사용할 수 없어 정지합니다.");
                 }
-
-                if (stallRecoveries >= MaxStallRecoveries)
-                    throw new InvalidOperationException(
-                        $"가공 진행 정체가 {MaxStallRecoveries}회 연속 감지되었습니다. 자동 화면 재판정 후에도 진행 변화가 없어 정지합니다.");
             }
 
             var outstanding = Matching(works, plan).ToArray();
