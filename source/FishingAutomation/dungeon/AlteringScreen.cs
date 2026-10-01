@@ -263,61 +263,48 @@ internal sealed class AlteringScreen : IAlteringScreen
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
-        // First inspect the selected recipe. If the character is already beside the
-        // facility, the detail card exposes the free "가공하기" button. When away from
-        // the facility, the card exposes "가공하러 가기". Its displayed wing cost is
-        // intentionally ignored because the amount can change; the paid label itself
-        // is sufficient to classify this as a forbidden remote action.
+        // Correct free processing flow:
+        // 1) enter the facility category (e.g. 금속 가공)
+        // 2) DO NOT open the recipe yet
+        // 3) click "설비로 이동"
+        // 4) wait until travel is complete and the facility screen is back
+        // 5) only then select the recipe and press on-site "가공하기"
         await EnterFacilityAsync(plan, ct);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동합니다.");
+        await TravelToFacilityAsync(plan, ct);
+
+        // The facility window is expected to reopen on arrival. EnterFacilityAsync is
+        // intentionally idempotent here: it accepts the already-open facility screen
+        // and only navigates if the screen did not reappear yet.
+        await EnterFacilityAsync(plan, ct);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
         await SelectRecipeAsync(plan, ct);
 
-        if (!await HasFreeProcessButtonAsync(plan, ct))
-        {
-            using (var remote = Capture(ct))
-            {
-                if (!await IsRecipeDetailAsync(remote, plan, ct))
-                    Fail(remote, "품목 상세 화면이 바뀌었습니다.");
-                var paid = await FindAsync(remote, RecipeActionButton, "가공하러 가기", ct);
-                if (paid is null)
-                    Fail(remote, "무료 가공하기 버튼도 원격 가공하러 가기 버튼도 확인하지 못했습니다.");
-                Log?.Invoke("[자동 가공] 원격 가공하러 가기 감지 · 비용 숫자와 관계없이 클릭 금지 · 설비로 일반 이동합니다.");
-            }
-
-            _input.TapScanCode(0x01);
-            await Task.Delay(500, ct);
-            await EnterFacilityAsync(plan, ct);
-            await TravelToFacilityAsync(plan, ct);
-            await EnterFacilityAsync(plan, ct);
-            await SelectRecipeAsync(plan, ct);
-        }
-
         // Two fresh observations are required immediately before the only registration
-        // click. The free label must be exact and the remote paid label must be absent.
-        // No fixed wing-cost number is used as a safety signal.
+        // click. At the physical facility the free "가공하기" label must be present,
+        // and the remote "가공하러 가기" label must be absent.
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
             if (!await IsRecipeDetailAsync(frame, plan, ct))
-                Fail(frame, "품목 상세 화면이 바뀌었습니다.");
+                Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
+
             var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
             var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
             if (free is null || paid is not null)
-                Fail(frame, "무료 현장 가공하기 버튼을 안전하게 확인하지 못했습니다.");
-            if (pass == 0) { await Task.Delay(200, ct); continue; }
+                Fail(frame, "설비 도착 후 무료 가공하기 버튼을 안전하게 확인하지 못했습니다.");
 
-            Log?.Invoke("[자동 가공] 무료 현장 가공하기 확인 · 정령의 날개 버튼 입력 없음");
+            if (pass == 0)
+            {
+                await Task.Delay(200, ct);
+                continue;
+            }
+
+            Log?.Invoke("[자동 가공] 설비 도착 후 무료 가공하기 확인 · 정령의 날개 버튼 입력 없음");
             _input.ClickClientPoint(_hwnd, free.Value.Center);
         }
     }
 
-    private async Task<bool> HasFreeProcessButtonAsync(AlteringPlan plan, CancellationToken ct)
-    {
-        using var frame = Capture(ct);
-        if (!await IsRecipeDetailAsync(frame, plan, ct)) return false;
-        var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
-        var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-        return free is not null && paid is null;
-    }
 
     private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
     {
