@@ -183,6 +183,10 @@ jobs:
           if ($screen -notmatch 'first\.Value\.Bounds\.Left\+first\.Value\.Bounds\.Width/2') { throw 'fresh second-frame row click missing' }
           $vision = Get-Content source/FishingAutomation/dungeon/GatheringVision.cs -Raw
           if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
+          $queries = Get-Content source/FishingAutomation/GatheringQueries.cs -Raw
+          if ($queries -match 'IsSafeField[^\r\n]*IsAutoPlaying' -or $queries -match '!IsAutoPlaying') { throw 'IsAutoPlaying must not be an unsafe-field gate' }
+          $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
+          if ($automation -notmatch 'AutoPlaying=') { throw 'gathering activity diagnostics missing' }
 
       - name: Inline production UI regression tests
         shell: pwsh
