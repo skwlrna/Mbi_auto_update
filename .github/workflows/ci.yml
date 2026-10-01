@@ -261,6 +261,13 @@ jobs:
           if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -notmatch '이어하기 대기') { throw 'saved altering session is not restored into the production page' }
           if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
           if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
+          if ($productionPage -match '품목 검색' -or $productionPage -match '_search') { throw 'production item search UI must remain removed' }
+          if ($productionPage -notmatch 'FacilityUiOrder' -or $productionPage -notmatch 'BuildFacilityTabs' -or $productionPage -notmatch 'RecipeFacility') { throw 'facility-tab recipe filtering UI missing' }
+          foreach($facilityTab in @('목재 가공 시설','금속 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
+            if($productionPage -notmatch [regex]::Escape($facilityTab)){throw "facility tab missing: $facilityTab"}
+          }
+          if ($productionPage -notmatch 'ArrowlessNumericUpDown' -or $productionPage -notmatch 'UpDownButtons' -or $productionPage -notmatch 'child\.Visible = false') { throw 'arrowless target quantity input missing' }
+          if ($productionPage -match 'AddRow\(form, 4, "가공 시설", Facility\)') { throw 'old altering facility dropdown returned to visible UI' }
           if ($altering -notmatch 'int freeSlots = Math\.Max\(0, 7 - facilityCount\)') { throw 'seven-slot free-capacity calculation missing' }
           if ($altering -notmatch 'int batchGoal = Math\.Min\(freeSlots, plan\.RequiredWorks - QueuedWorks\)') { throw 'batch size must be capped by free slots and remaining works' }
           if ($altering -notmatch 'while \(queuedThisBatch < batchGoal') { throw 'verified batch registration loop missing' }
