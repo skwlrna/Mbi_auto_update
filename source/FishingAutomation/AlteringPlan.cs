@@ -163,12 +163,11 @@ internal sealed class AlteringAutomation
                 if (selected.Length < plan.RecipeOrdinal || !selected[plan.RecipeOrdinal - 1].Alterable)
                 {
                     var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
-                    if (recipe is not null && recipe.Reason == "not_enough_ingredient" &&
-                        recipe.MissingIngredients.Count > 0 && _supplyResolver is not null)
+                    if (recipe is not null && recipe.MissingIngredients.Count > 0 && _supplyResolver is not null)
                     {
                         int remainingWorks = plan.RequiredWorks - QueuedWorks;
                         string missingText = string.Join(", ", recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}"));
-                        Log?.Invoke($"[자동 가공] 재료 부족 감지 · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
+                        Log?.Invoke($"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
                         await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
                         recipes = await _data.RecipesAsync(ct);
                         selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
