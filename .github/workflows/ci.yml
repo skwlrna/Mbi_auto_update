@@ -178,6 +178,7 @@ jobs:
           if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
           if ($screen -notmatch 'ConfirmFacilityTravelPopupAsync') { throw 'facility travel popup confirmation missing' }
+          if ($screen -notmatch 'HasFacilityTravelQuestionAsync' -or $screen -notmatch 'ReadLinesAsync' -or $screen -notmatch 'Contains\(wanted') { throw 'travel question must be matched inside the full dialog sentence' }
           if ($screen -notmatch '"이동할까요"' -or $screen -notmatch '"확인"' -or $screen -notmatch '"취소"') { throw 'generic facility travel dialog gates missing' }
           if ($screen -match '"반호르"') { throw 'facility travel confirmation must not depend on a destination name' }
           if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
