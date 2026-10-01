@@ -89,6 +89,22 @@ internal sealed class AlteringScreen : IAlteringScreen
 
         return null;
     }
+
+    private async Task<bool> IsRecipeDetailAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
+    {
+        bool titleMatched = await FindRecipeAsync(frame, plan, ct) is not null;
+        if (titleMatched) return true;
+
+        bool materialsVisible = await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null;
+        bool freeVisible = await FindAsync(frame, RecipeActionButton, "가공하기", ct) is not null;
+        bool paidVisible = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct) is not null;
+
+        bool confirmed = AlteringDetailPolicy.IsConfirmed(titleMatched, materialsVisible, freeVisible, paidVisible);
+        if (confirmed)
+            Log?.Invoke($"[자동 가공] 상세 제목 OCR 보조 판정 · 필요한 재료 + {(freeVisible ? "가공하기" : "가공하러 가기")} 확인");
+
+        return confirmed;
+    }
     private async Task<bool> ClickLabelAsync(string text, Rectangle roi, string? header, CancellationToken ct, bool facilityTitle = false)
     {
         // Two observations; the second one alone supplies the input coordinates.
@@ -230,7 +246,7 @@ internal sealed class AlteringScreen : IAlteringScreen
                 _input.ClickClientPoint(_hwnd, confirmed[plan.RecipeOrdinal - 1].Center);
                 await Task.Delay(400, ct);
                 using var popup = Capture(ct);
-                if (await FindRecipeAsync(popup, plan, ct) is null)
+                if (!await IsRecipeDetailAsync(popup, plan, ct))
                     Fail(popup, "선택한 품목의 상세 화면을 확인하지 못했습니다.");
                 return;
             }
@@ -259,7 +275,7 @@ internal sealed class AlteringScreen : IAlteringScreen
         {
             using (var remote = Capture(ct))
             {
-                if (await FindRecipeAsync(remote, plan, ct) is null)
+                if (!await IsRecipeDetailAsync(remote, plan, ct))
                     Fail(remote, "품목 상세 화면이 바뀌었습니다.");
                 var paid = await FindAsync(remote, RecipeActionButton, "가공하러 가기", ct);
                 if (paid is null)
@@ -281,7 +297,7 @@ internal sealed class AlteringScreen : IAlteringScreen
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
-            if (await FindRecipeAsync(frame, plan, ct) is null)
+            if (!await IsRecipeDetailAsync(frame, plan, ct))
                 Fail(frame, "품목 상세 화면이 바뀌었습니다.");
             var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
             var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
@@ -297,7 +313,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private async Task<bool> HasFreeProcessButtonAsync(AlteringPlan plan, CancellationToken ct)
     {
         using var frame = Capture(ct);
-        if (await FindRecipeAsync(frame, plan, ct) is null) return false;
+        if (!await IsRecipeDetailAsync(frame, plan, ct)) return false;
         var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
         var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
         return free is not null && paid is null;
