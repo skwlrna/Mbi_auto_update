@@ -185,8 +185,9 @@ jobs:
           if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
           $queries = Get-Content source/FishingAutomation/GatheringQueries.cs -Raw
           if ($queries -match 'IsSafeField[^\r\n]*IsAutoPlaying' -or $queries -match '!IsAutoPlaying') { throw 'IsAutoPlaying must not be an unsafe-field gate' }
+          if ($queries -match 'IsSafeField[\s\S]{0,300}!IsInBattlefield') { throw 'Battlefield flag must not be an unsafe-field gate' }
           $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
-          if ($automation -notmatch 'AutoPlaying=') { throw 'gathering activity diagnostics missing' }
+          if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
 
       - name: Inline production UI regression tests
         shell: pwsh
