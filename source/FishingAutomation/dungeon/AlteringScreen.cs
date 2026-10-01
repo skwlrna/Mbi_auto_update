@@ -10,6 +10,10 @@ internal sealed class AlteringScreen : IAlteringScreen
     private readonly string _debugDir;
     private readonly MabinogiMobileCli? _cli;
     private nint _hwnd;
+    private string? _confirmedOnsiteFacility;
+    private string? _cachedRecipeKey;
+    private Point _cachedRecipeCenter;
+    private bool _hasCachedRecipeCenter;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
@@ -340,12 +344,69 @@ internal sealed class AlteringScreen : IAlteringScreen
         Fail(failed, "선택한 가공 시설 화면을 3회 확인하지 못했습니다.");
     }
 
+    private static string RecipeCacheKey(AlteringPlan plan)
+        => $"{plan.FacilityName}\u001f{plan.DisplayName}\u001f{plan.RecipeOrdinal}";
+
+    private async Task<bool> TryReuseOnsiteFacilityAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        if (!string.Equals(_confirmedOnsiteFacility, plan.FacilityName, StringComparison.Ordinal))
+            return false;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool popupVisible = HasBottomConfirmationModal(frame);
+            bool moveVisible = facilityVisible && !popupVisible &&
+                await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null;
+
+            if (!facilityVisible || popupVisible || moveVisible)
+            {
+                _confirmedOnsiteFacility = null;
+                return false;
+            }
+
+            if (pass == 0)
+                await Task.Delay(100, ct);
+        }
+
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 연속 등록 · 현장 상태 유지 확인 · 설비 이동 재검사 생략");
+        return true;
+    }
+
     private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
     {
-        // The current game layout is fixed. Do not drag the processing list during
-        // normal automation: repeated scrolling was both slow and visually disruptive.
-        // Observe the same fixed card area a few times for OCR stability; if the card
-        // is not where expected, stop instead of moving the UI to an unknown state.
+        string cacheKey = RecipeCacheKey(plan);
+
+        // The live UI positions are stable until a game patch. After the first exact
+        // OCR selection, reuse that confirmed card coordinate for the same facility,
+        // recipe and ordinal. Never drag or search through other pages.
+        if (_hasCachedRecipeCenter &&
+            string.Equals(_cachedRecipeKey, cacheKey, StringComparison.Ordinal))
+        {
+            using (var frame = Capture(ct))
+            {
+                if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                    Fail(frame, "연속 등록 전 가공 시설 화면을 확인하지 못했습니다.");
+
+                var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
+                if (move is not null)
+                    Fail(frame, "연속 등록 중 원격 가공 화면이 감지되어 고정 품목 좌표 입력을 차단했습니다.");
+            }
+
+            _input.ClickClientPoint(_hwnd, _cachedRecipeCenter);
+            await Task.Delay(250, ct);
+
+            using var popup = Capture(ct);
+            if (!await IsRecipeDetailAsync(popup, plan, ct))
+                Fail(popup, "저장된 고정 품목 좌표에서 선택한 품목 상세 화면을 확인하지 못했습니다.");
+
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 고정 품목 좌표 재사용");
+            return;
+        }
+
+        // First observation for this recipe: discover the fixed card location by OCR,
+        // confirm it on a fresh frame, then remember its center for later registrations.
         for (int attempt = 1; attempt <= 4; attempt++)
         {
             using var frame = Capture(ct);
@@ -371,11 +432,18 @@ internal sealed class AlteringScreen : IAlteringScreen
                     continue;
                 }
 
-                _input.ClickClientPoint(_hwnd, confirmed[plan.RecipeOrdinal - 1].Center);
+                var selected = confirmed[plan.RecipeOrdinal - 1];
+                _cachedRecipeKey = cacheKey;
+                _cachedRecipeCenter = selected.Center;
+                _hasCachedRecipeCenter = true;
+
+                _input.ClickClientPoint(_hwnd, selected.Center);
                 await Task.Delay(350, ct);
                 using var popup = Capture(ct);
                 if (!await IsRecipeDetailAsync(popup, plan, ct))
                     Fail(popup, "선택한 품목의 상세 화면을 확인하지 못했습니다.");
+
+                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 고정 품목 좌표 저장");
                 return;
             }
 
@@ -392,21 +460,23 @@ internal sealed class AlteringScreen : IAlteringScreen
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
-        // Correct free processing flow:
-        // 1) enter the facility category (e.g. 금속 가공)
-        // 2) DO NOT open the recipe yet
-        // 3) click "설비로 이동"
-        // 4) wait until travel is complete and the facility screen is back
-        // 5) only then select the recipe and press on-site "가공하기"
-        await EnterFacilityAsync(plan, ct);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동합니다.");
-        await TravelToFacilityAsync(plan, ct);
+        // First registration for a facility uses the full safe navigation path.
+        // Consecutive registrations in the same facility reuse the already-proven
+        // on-site state after two fresh frames. This is generic for every processing
+        // facility in AlteringPlan.Facilities.
+        bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
+        if (!reusedOnsite)
+        {
+            _confirmedOnsiteFacility = null;
+            await EnterFacilityAsync(plan, ct);
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동합니다.");
+            await TravelToFacilityAsync(plan, ct);
 
-        // The facility window is expected to reopen on arrival. EnterFacilityAsync is
-        // intentionally idempotent here: it accepts the already-open facility screen
-        // and only navigates if the screen did not reappear yet.
-        await EnterFacilityAsync(plan, ct);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
+            await EnterFacilityAsync(plan, ct);
+            _confirmedOnsiteFacility = plan.FacilityName;
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
+        }
+
         await SelectRecipeAsync(plan, ct);
 
         // Two fresh observations are required immediately before the only registration
@@ -690,6 +760,7 @@ internal sealed class AlteringScreen : IAlteringScreen
                         facilityFrames++;
                         if (facilityFrames >= 2)
                         {
+                            _confirmedOnsiteFacility = plan.FacilityName;
                             Log?.Invoke($"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 확인");
                             return true;
                         }
