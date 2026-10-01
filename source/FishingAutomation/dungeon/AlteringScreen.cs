@@ -650,14 +650,15 @@ internal sealed class AlteringScreen : IAlteringScreen
         await SelectRecipeAsync(plan, ct);
     }
 
-    private async Task<bool> ConfirmCompletionResultAsync(AlteringPlan plan, CancellationToken ct)
+    private async Task<bool> ConfirmCompletionResultAsync(
+        AlteringPlan plan, CancellationToken ct, int resultAttempts = 24)
     {
         // Successful receipt replaces the facility UI with the full-screen
         // "가공 완료" result. Detect the large green bottom confirmation shape,
         // while requiring the facility title to be absent so this cannot be confused
         // with the facility-travel confirmation popup.
         int stableFrames = 0;
-        for (int attempt = 0; attempt < 24; attempt++)
+        for (int attempt = 0; attempt < resultAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(200, ct);
@@ -711,7 +712,7 @@ internal sealed class AlteringScreen : IAlteringScreen
         return false;
     }
 
-    public async Task CollectAsync(AlteringPlan plan, CancellationToken ct)
+    public async Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         await EnterFacilityAsync(plan, ct);
 
@@ -726,12 +727,16 @@ internal sealed class AlteringScreen : IAlteringScreen
 
         Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 1차 Space");
         _input.TapScanCode(0x39);
-        await Task.Delay(700, ct);
+        await Task.Delay(450, ct);
 
         // If the first Space actually collected the jobs, close the result screen and
-        // prove that the facility window returned. If it only started travel, there is
-        // no completion-result signature and no extra input is sent here.
-        await ConfirmCompletionResultAsync(plan, ct);
+        // prove that the facility window returned. Otherwise it started facility travel.
+        // Keep this distinction short so the caller can immediately switch to the
+        // second-stage receive path instead of waiting on unchanged CLI queue data.
+        bool collected = await ConfirmCompletionResultAsync(plan, ct, resultAttempts: 8);
+        if (!collected)
+            Log?.Invoke("[자동 가공] 1차 Space 후 가공 완료 결과창 없음 · 설비 이동으로 판정");
+        return collected;
     }
 
     public async Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
