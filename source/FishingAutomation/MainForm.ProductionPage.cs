@@ -321,7 +321,16 @@ public sealed partial class MainForm
             foreach (string facility in FacilityUiOrder)
             {
                 tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / FacilityUiOrder.Length));
-                string title = facility.Replace(" 시설", "");
+                string title = facility switch
+                {
+                    "목재 가공 시설" => "목재",
+                    "금속 가공 시설" => "금속",
+                    "가죽 가공 시설" => "가죽",
+                    "옷감 가공 시설" => "옷감",
+                    "약품 가공 시설" => "약품",
+                    "식재료 가공 시설" => "식재료",
+                    _ => facility.Replace(" 시설", "")
+                };
                 var button = PageButton(title, () =>
                 {
                     if (Facility.Items.Contains(facility))
@@ -329,7 +338,7 @@ public sealed partial class MainForm
                 });
                 button.AccessibleName = "가공 시설 " + title;
                 button.Margin = new Padding(2);
-                button.Font = new Font("맑은 고딕", 11f, FontStyle.Bold);
+                button.Font = new Font("맑은 고딕", 10.5f, FontStyle.Bold);
                 _facilityTabButtons[facility] = button;
                 tabs.Controls.Add(button);
             }
@@ -350,42 +359,7 @@ public sealed partial class MainForm
         }
 
         private static string? RecipeFacility(AlteringRecipe recipe)
-        {
-            if (!string.IsNullOrWhiteSpace(recipe.FacilityName) &&
-                AlteringPlan.Facilities.Contains(recipe.FacilityName))
-                return recipe.FacilityName;
-
-            // Older CLI builds may omit FacilityName. Keep the fallback deliberately
-            // conservative; exact CLI FacilityName remains authoritative.
-            string output = new AlteringPlan(
-                AlteringPlan.Facilities[0], recipe.DisplayName, 1, recipe.ProducedPerWork, false).OutputName;
-
-            if (output.Contains("목재", StringComparison.Ordinal) ||
-                output.Contains("원목", StringComparison.Ordinal) ||
-                output.Contains("통나무", StringComparison.Ordinal))
-                return "목재 가공 시설";
-            if (output.Contains("괴", StringComparison.Ordinal) ||
-                output.Contains("철", StringComparison.Ordinal) ||
-                output.Contains("금속", StringComparison.Ordinal))
-                return "금속 가공 시설";
-            if (output.Contains("가죽", StringComparison.Ordinal) ||
-                output.Contains("피혁", StringComparison.Ordinal))
-                return "가죽 가공 시설";
-            if (output.Contains("옷감", StringComparison.Ordinal) ||
-                output.Contains("실크", StringComparison.Ordinal) ||
-                output.Contains("천", StringComparison.Ordinal))
-                return "옷감 가공 시설";
-            if (output.Contains("물약", StringComparison.Ordinal) ||
-                output.Contains("비약", StringComparison.Ordinal) ||
-                output.Contains("항마석", StringComparison.Ordinal))
-                return "약품 가공 시설";
-            if (output.Contains("식재료", StringComparison.Ordinal) ||
-                output.Contains("요리", StringComparison.Ordinal) ||
-                output.Contains("밀가루", StringComparison.Ordinal))
-                return "식재료 가공 시설";
-
-            return null;
-        }
+            => AlteringFacilityResolver.Resolve(recipe);
 
         private sealed class ArrowlessNumericUpDown : NumericUpDown
         {
