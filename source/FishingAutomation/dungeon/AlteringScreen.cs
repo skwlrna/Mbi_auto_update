@@ -15,7 +15,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
-    private static readonly Rectangle CollectVisualButton = new(15, 280, 105, 60);
+    private static readonly Rectangle CollectVisualButton = new(10, 270, 110, 85);
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
@@ -76,26 +76,57 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private static bool HasCollectButtonVisual(Bitmap frame)
     {
-        // Live completion screen: the active "모두 받기" control is a solid cyan/blue
-        // button at the far-left, while the same area is dark when nothing is ready.
-        // Keep the ROI left of the first circular work slot so its cyan 100% ring cannot
-        // be mistaken for the receive button.
+        // Live completion screen: the active receive control is a broad cyan/blue
+        // capsule at the far-left. Use a deliberately tolerant colour gate because
+        // capture brightness changes between field/bench states. The ROI ends before
+        // the first 100% work circle, so completed-slot rings cannot satisfy this gate.
         var roi = Rectangle.Intersect(CollectVisualButton, new Rectangle(Point.Empty, frame.Size));
-        if (roi.Width < 70 || roi.Height < 35)
+        if (roi.Width < 70 || roi.Height < 45)
             return false;
 
         int sampled = 0;
         int blue = 0;
-        for (int y = roi.Top; y < roi.Bottom; y += 3)
-        for (int x = roi.Left; x < roi.Right; x += 3)
+        for (int y = roi.Top; y < roi.Bottom; y += 2)
+        for (int x = roi.Left; x < roi.Right; x += 2)
         {
             Color p = frame.GetPixel(x, y);
             sampled++;
-            if (p.B >= 120 && p.G >= 90 && p.B >= p.R + 50 && p.G >= p.R + 35)
+            if (p.B >= 95 && p.G >= 75 && p.R <= 150 &&
+                p.B >= p.R + 20 && p.G >= p.R + 15)
                 blue++;
         }
 
-        return sampled > 0 && blue * 100 >= sampled * 8;
+        // The real button occupies a large part of this ROI. A 2% floor is still
+        // enough to reject the dark inactive area while tolerating dim captures.
+        return sampled > 0 && blue * 100 >= sampled * 2;
+    }
+
+    private async Task<bool> WaitForCollectPromptAsync(
+        AlteringPlan plan, int attempts, int delayMs, CancellationToken ct)
+    {
+        int stableFrames = 0;
+        for (int attempt = 1; attempt <= attempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+            if (await HasCollectPromptAsync(frame, plan, ct))
+            {
+                stableFrames++;
+                if (stableFrames >= 2)
+                    return true;
+            }
+            else
+            {
+                stableFrames = 0;
+            }
+
+            if (attempt % 8 == 0)
+                Log?.Invoke($"[자동 가공] 완료품 수령 버튼 대기 · {attempt}/{attempts}");
+
+            await Task.Delay(delayMs, ct);
+        }
+
+        return false;
     }
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
@@ -555,46 +586,34 @@ internal sealed class AlteringScreen : IAlteringScreen
     {
         await EnterFacilityAsync(plan, ct);
 
-        // Confirm the stable large facility title plus the visible "모두 받기" button.
-        // Do not gate collection on the tiny Space badge; it is only a keyboard hint
-        // and proved unreliable in the live V0.1.88 failure screenshot.
-        for (int pass = 0; pass < 2; pass++)
+        // The facility can take a moment to paint the completed-work controls after
+        // entering. Wait up to five seconds and require two consecutive confirmations:
+        // facility header + completed CLI work + cyan receive button.
+        if (!await WaitForCollectPromptAsync(plan, attempts: 20, delayMs: 250, ct))
         {
-            using var frame = Capture(ct);
-            if (!await HasCollectPromptAsync(frame, plan, ct))
-                Fail(frame, "완료 작업 수령 화면(시설 제목 + 모두 받기)을 확인하지 못했습니다.");
-            if (pass == 0) { await Task.Delay(180, ct); continue; }
-
-            Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + 모두 받기 · 1차 입력");
-            _input.TapScanCode(0x39);
+            using var failed = Capture(ct);
+            Fail(failed, "완료 작업은 확인됐지만 왼쪽 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
         }
-        await Task.Delay(550, ct);
+
+        Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 1차 Space");
+        _input.TapScanCode(0x39);
+        await Task.Delay(700, ct);
     }
 
     public async Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
     {
-        // First input may only start automatic travel. Do not navigate or press K while
-        // the character is moving. Wait passively for the same facility title plus
-        // "모두 받기" button to reappear, verify both on a fresh frame, then press Space once.
-        for (int i = 1; i <= 45; i++)
+        // First Space can start travel instead of collecting. Wait passively for the
+        // same visual/CLI receipt evidence to become stable at the processing bench.
+        if (!await WaitForCollectPromptAsync(plan, attempts: 90, delayMs: 500, ct))
         {
-            ct.ThrowIfCancellationRequested();
-            await Task.Delay(500, ct);
-            using var frame = Capture(ct);
-            if (!await HasCollectPromptAsync(frame, plan, ct)) continue;
-
-            await Task.Delay(180, ct);
-            using var fresh = Capture(ct);
-            if (!await HasCollectPromptAsync(fresh, plan, ct)) continue;
-
-            Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + 모두 받기 · 2차 입력");
-            _input.TapScanCode(0x39);
-            await Task.Delay(700, ct);
-            return true;
+            Log?.Invoke("[자동 가공] 가공대 도착 후 CLI 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
+            return false;
         }
 
-        Log?.Invoke("[자동 가공] 가공대 도착 후 시설 제목 + 모두 받기 화면을 제한 시간 안에 확인하지 못했습니다.");
-        return false;
+        Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space");
+        _input.TapScanCode(0x39);
+        await Task.Delay(700, ct);
+        return true;
     }
     private void Fail(Bitmap frame, string message)
     {
