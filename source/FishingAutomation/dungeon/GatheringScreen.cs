@@ -96,17 +96,38 @@ internal sealed class GatheringScreen : IGatheringScreen
     }
     private async Task ClickFirstPlaceAsync(GatheringPlan plan,CancellationToken ct)
     {
-        string? name=null;
+        Rectangle? firstBounds=null;
+        string? firstText=null;
+
         for(int pass=0;pass<2;pass++)
         {
             using var frame=Capture(ct);
-            if(await _vision.FindMaterialAsync(frame,plan.DisplayName,ct) is null) Fail(frame,"장소 목록의 대상 재료가 바뀌었습니다.");
+            if(await _vision.FindMaterialAsync(frame,plan.DisplayName,ct) is null)
+                Fail(frame,"장소 목록의 대상 재료가 바뀌었습니다.");
+
             var first=await _vision.FirstPlaceAsync(frame,ct);
-            if(first is null) Fail(frame,"장소 목록의 맨 위 항목을 확인하지 못했습니다.");
-            if(pass==0){name=first!.Value.Text;await Task.Delay(180,ct);continue;}
-            if(AlteringText.Normalize(name!)!=AlteringText.Normalize(first!.Value.Text)) Fail(frame,"첫 번째 장소가 변경되어 입력을 정지합니다.");
-            Log?.Invoke("[자동채집] 첫 번째 장소 선택: "+name+" · 일반 이동");
-            _input.ClickClientPoint(_hwnd,new(first.Value.Bounds.Left+first.Value.Bounds.Width/2,first.Value.Bounds.Top+first.Value.Bounds.Height/2));
+            if(first is null)
+                Fail(frame,"장소 목록의 맨 위 항목을 확인하지 못했습니다.");
+
+            if(pass==0)
+            {
+                firstBounds=first.Value.Bounds;
+                firstText=first.Value.Text;
+                await Task.Delay(180,ct);
+                continue;
+            }
+
+            if(firstBounds is null || !GatheringNavigationPolicy.IsStableFirstRow(firstBounds.Value,first.Value.Bounds))
+                Fail(frame,"첫 번째 장소 행 위치가 변경되어 입력을 정지합니다.");
+
+            string display = string.IsNullOrWhiteSpace(first.Value.Text) ? firstText ?? "첫 번째 장소" : first.Value.Text;
+            Log?.Invoke("[자동채집] 첫 번째 장소 선택: "+display+" · 위치 재확인 완료 · 일반 이동");
+
+            // Always click the second, freshest frame. The recommendation badge,
+            // place-name OCR string and displayed distance do not affect selection.
+            _input.ClickClientPoint(_hwnd,new(
+                first.Value.Bounds.Left+first.Value.Bounds.Width/2,
+                first.Value.Bounds.Top+first.Value.Bounds.Height/2));
         }
     }
     public async Task StopAsync(CancellationToken ct)
