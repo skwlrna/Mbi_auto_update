@@ -268,7 +268,9 @@ jobs:
             if($alteringQueries -notmatch [regex]::Escape($medicineName)){throw "medicine recipe classification missing: $medicineName"}
           }
           if ($alteringQueries -notmatch 'MissingIngredients' -or $alteringQueries -notmatch 'continue;') { throw 'facility metadata scan must skip ingredient payloads' }
-          if ($productionPage -notmatch '"목재"[sS]*?"금속"[sS]*?"가죽"[sS]*?"옷감"[sS]*?"약품"[sS]*?"식재료"') { throw 'short facility tab labels missing' }
+          foreach($tabLabel in @('"목재"','"금속"','"가죽"','"옷감"','"약품"','"식재료"')){
+            if($productionPage -notmatch [regex]::Escape($tabLabel)){throw "short facility tab label missing: $tabLabel"}
+          }
           if ($productionPage -notmatch 'AlteringFacilityResolver\.Resolve') { throw 'production tabs are not using shared facility resolver' }
           if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
           if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
