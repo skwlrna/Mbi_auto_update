@@ -56,8 +56,11 @@ internal sealed class AlteringCliScreen : IAlteringScreen, IDirectCliAlteringScr
         return amount;
     }
 
-    public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
-        => CompleteAsync(plan.DisplayName, ct);
+    public async Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        await CompleteAsync(plan.DisplayName, ct).ConfigureAwait(false);
+        return true;
+    }
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
         => Task.FromResult(false);
