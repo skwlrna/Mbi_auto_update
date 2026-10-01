@@ -55,7 +55,7 @@ internal static class AlteringText
 internal interface IAlteringScreen : IDisposable
 {
     Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct);
-    Task CollectAsync(AlteringPlan plan, CancellationToken ct);
+    Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct);
     Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct);
 }
 
@@ -108,32 +108,16 @@ internal sealed class AlteringAutomation
             throw new InvalidOperationException("선택 품목의 조회 결과가 바뀌었습니다. 목록을 다시 불러오세요.");
         plan = plan with { RecipeCount = selected.Length, VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName)) };
         var works = await _data.WorksAsync(ct);
-        // No work IDs or actual critical yields exist in the CLI schema. Drain existing
-        // same-output jobs before taking the baseline, then produce the requested extra
-        // quantity. This permits continuation without counting old rewards as new ones.
-        int existingCount = Matching(works, plan).Count();
-        if (existingCount > 0)
-        {
-            Log?.Invoke($"[자동 가공] 기존 {plan.DisplayName} 작업 {existingCount}건을 먼저 완료·수령합니다. 이후 추가 {plan.TargetQuantity}개를 가공합니다.");
-            int idlePolls = 0;
-            while (Matching(works, plan).Any())
-            {
-                ct.ThrowIfCancellationRequested();
-                if (await CollectIfReadyAsync(plan, works, ct)) works = await _data.WorksAsync(ct);
-                if (!Matching(works, plan).Any()) break;
-                bool progressing = works.Any(x => x.FacilityName == plan.FacilityName && x.State == "InProgress");
-                idlePolls = progressing ? 0 : idlePolls + 1;
-                if (idlePolls >= _verificationAttempts)
-                    throw new InvalidOperationException("기존 가공 작업이 진행되지 않아 정지합니다. 게임에서 대기열 상태를 확인하세요.");
-                long remaining = works.Where(x => x.FacilityName == plan.FacilityName && x.State == "InProgress")
-                    .Select(x => x.RemainingSeconds).DefaultIfEmpty(5).Min();
-                Log?.Invoke($"[자동 가공] 기존 작업 완료 대기 · 남은 {Matching(works, plan).Count()}건 · 진행 작업 {remaining}초 · 새 작업 등록 0회");
-                await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
-                works = await _data.WorksAsync(ct);
-            }
-            Log?.Invoke("[자동 가공] 기존 동일 품목 작업 수령 완료 · 새 목표 수량의 기준을 설정합니다.");
-        }
-        await CollectIfReadyAsync(plan, works, ct);
+        int initialExistingCount = Matching(works, plan).Count();
+
+        // Do not drain pre-existing work before starting the new target. Those jobs are
+        // already occupying real facility slots, so keep them in place. Whenever one
+        // completes, CollectIfReadyAsync receives it and the normal free-slot logic below
+        // immediately appends a new target job. QueuedWorks counts only jobs registered
+        // by this run, so old jobs never count toward the requested target.
+        if (initialExistingCount > 0)
+            Log?.Invoke($"[자동 가공] 기존 {plan.DisplayName} 작업 {initialExistingCount}건 유지 · 완료되는 즉시 수령하고 빈 슬롯에 새 목표 작업을 채웁니다.");
+
         long baseline = await _data.ItemCountAsync(plan.OutputName, ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 목표 {plan.TargetQuantity}개 · {plan.RequiredWorks}회 / 최소 {plan.ExpectedQuantity}개 · 정령의 날개 0개 고정");
 
@@ -301,20 +285,20 @@ internal sealed class AlteringAutomation
         // processing bench instead of collecting immediately. Press once, then prove
         // through the read-only CLI whether the queue actually shrank before allowing
         // a second input.
-        await _screen.CollectAsync(plan, ct);
-        for (int i = 0; i < 4; i++)
+        bool firstCollected = await _screen.CollectAsync(plan, ct);
+        if (firstCollected)
         {
-            ct.ThrowIfCancellationRequested();
-            int current = (await _data.WorksAsync(ct)).Count(x => x.FacilityName == plan.FacilityName);
-            if (current < totalBefore)
-            {
-                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 1차 모두 받기");
-                return true;
-            }
-            await _delay(TimeSpan.FromSeconds(2), ct);
+            await VerifyAsync(async token =>
+                (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
+                "1차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 입력 없이 정지합니다.",
+                ct, TimeSpan.FromSeconds(1));
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 1차 모두 받기");
+            return true;
         }
 
-        Log?.Invoke($"[자동 가공] 1차 모두 받기는 이동으로 확인됨 · 가공대 도착 후 2차 모두 받기 대기");
+        // The screen layer already distinguished "no completion result" from a real
+        // receipt, so do not spend another 8 seconds polling an unchanged queue.
+        Log?.Invoke($"[자동 가공] 1차 모두 받기 = 설비 이동 · 즉시 가공대 수령 화면 대기");
         if (!await _screen.CollectAfterTravelAsync(plan, ct))
             throw new InvalidOperationException("가공대 도착 후 2차 모두 받기 화면을 확인하지 못했습니다. 추가 입력 없이 정지합니다.");
 
