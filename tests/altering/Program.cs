@@ -78,6 +78,25 @@ using (var cts = new CancellationTokenSource())
 }
 success = await Run(plan with { TargetQuantity = 1, RecipeOrdinal = 2 }, w => w.Duplicate = true);
 Check(success.World.QueueCalls == 1, "duplicate recipe variant remains selectable");
+
+var recursiveWorld = new RecursiveProductionWorld();
+var recursiveResolver = new RecursiveAlteringSupplyResolver(
+    recursiveWorld, recursiveWorld, recursiveWorld, recursiveWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var steelPlan = new AlteringPlan("금속 가공 시설", "강철괴", 3, 3, false);
+var steelAuto = new AlteringAutomation(
+    recursiveWorld, recursiveWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, recursiveResolver);
+await steelAuto.RunAsync(steelPlan, default);
+Check(recursiveWorld.Count("강철괴") == 3 &&
+      recursiveWorld.GatherStarts == 1 &&
+      recursiveWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)", "강철괴" }),
+    "steel recursively gathers iron ore, produces iron ingot, then resumes steel");
+Check(steelAuto.ReservedWings == 0 && recursiveWorld.ReserveCallbackCalls == 0,
+    "recursive steel production never reserves Spirit Wings");
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
@@ -162,4 +181,126 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
         world.Available = true;
         return Task.CompletedTask;
     }
+}
+
+
+internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IGatheringData, IGatheringScreen
+{
+    private static readonly GatheringActivity Idle =
+        new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
+
+    private readonly Dictionary<string,long> _items = new(StringComparer.Ordinal)
+    {
+        ["석탄"] = 4
+    };
+    private readonly List<AlteringWork> _works = new();
+    private string? _gathering;
+    internal readonly List<string> Queued = new();
+    internal int GatherStarts, ReserveCallbackCalls;
+
+    internal long Count(string name) => _items.GetValueOrDefault(name);
+
+    public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<AlteringRecipe>>(new[]
+        {
+            MakeRecipe("강철괴", 3, "금속 가공 시설",
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 }),
+            MakeRecipe("철괴(철 광석)", 3, "금속 가공 시설",
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 2 })
+        });
+    }
+
+    private AlteringRecipe MakeRecipe(string display, int produced, string facility, IReadOnlyDictionary<string,long> ingredients)
+    {
+        var missing = ingredients
+            .Where(x => Count(x.Key) < x.Value)
+            .Select(x => new AlteringIngredient(x.Key, x.Value, Count(x.Key)))
+            .ToArray();
+        return new(display, missing.Length == 0, produced,
+            missing.Length == 0 ? null : "not_enough_ingredient", missing, facility);
+    }
+
+    public Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<AlteringWork>>(_works.ToArray());
+    }
+
+    public Task<long> ItemCountAsync(string name, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (_gathering == name)
+            _items[name] = Count(name) + 2;
+        return Task.FromResult(Count(name));
+    }
+
+    public async Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var recipe = (await RecipesAsync(ct)).Single(x => x.DisplayName == plan.DisplayName);
+        if (!recipe.Alterable) throw new InvalidOperationException("test tried to queue unavailable recipe");
+        IReadOnlyDictionary<string,long> ingredients = plan.DisplayName switch
+        {
+            "강철괴" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 },
+            "철괴(철 광석)" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 2 },
+            _ => throw new InvalidOperationException("unexpected recipe")
+        };
+        foreach (var ingredient in ingredients)
+            _items[ingredient.Key] = Count(ingredient.Key) - ingredient.Value;
+        Queued.Add(plan.DisplayName);
+        _works.Add(new(plan.OutputName, plan.FacilityName, "Completed", true, 0));
+    }
+
+    public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        int completed = _works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
+        if (completed > 0)
+            _items[plan.OutputName] = Count(plan.OutputName) + (long)completed * plan.ProducedPerWork;
+        _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
+        => Task.FromResult(false);
+
+    public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<GatherableItem>>(new[] { new GatherableItem("철 광석", true) });
+    }
+
+    public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(_gathering is null
+            ? Idle
+            : Idle with { MainButtonState = "Stop", HasTarget = true,
+                AvailableInteractionType = "Gathering", LastRunningInteractionType = "Gathering" });
+    }
+
+    public Task<(decimal Current, decimal Maximum)> WeightAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult((1m, 100m));
+    }
+
+    public Task StartAsync(GatheringPlan plan, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        GatherStarts++;
+        _gathering = plan.DisplayName;
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        _gathering = null;
+        return Task.CompletedTask;
+    }
+
+    public void Dispose() { }
 }
