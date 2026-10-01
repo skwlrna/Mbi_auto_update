@@ -169,7 +169,7 @@ jobs:
           if ($screen -notmatch '"모두 받기"') { throw 'collect button OCR gate missing' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
           if ($screen -notmatch '무료 현장 가공하기') { throw 'free processing confirmation log missing' }
-          if ($screen -notmatch '원격 가공 버튼 감지') { throw 'remote paid button must be observation-only' }
+          if ($screen -notmatch '원격 가공하러 가기 감지') { throw 'remote paid button must be observation-only' }
 
 
       - name: Automatic gathering regression tests
