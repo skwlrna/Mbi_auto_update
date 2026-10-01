@@ -22,6 +22,18 @@ try { GatheringQueries.ParseWeight(MabinogiMobileCli.Parse("get_inventory",new(0
 catch(InvalidDataException) { Check(true,"unavailable bag capacity never treated as empty bag"); }
 try { GatheringQueries.ParseActivity(MabinogiMobileCli.Parse("get_activity",new(0,"{}",""))); throw new Exception("missing activity accepted"); }
 catch(KeyNotFoundException) { Check(true,"missing activity cannot authorize screen input"); }
+Check(GatheringNavigationPolicy.IsStableFirstRow(
+        new System.Drawing.Rectangle(176,620,465,66),
+        new System.Drawing.Rectangle(181,624,465,66)),
+    "first gathering row tolerates normal OCR/header jitter");
+Check(!GatheringNavigationPolicy.IsStableFirstRow(
+        new System.Drawing.Rectangle(176,620,465,66),
+        new System.Drawing.Rectangle(176,700,465,66)),
+    "first gathering row rejects a different vertical row");
+Check(!GatheringNavigationPolicy.IsStableFirstRow(
+        new System.Drawing.Rectangle(176,620,465,66),
+        new System.Drawing.Rectangle(310,620,300,66)),
+    "first gathering row rejects a large horizontal/layout change");
 var plan=new GatheringPlan("철 광석",5);
 try { (plan with {SourceRecipe=new AlteringPlan("금속 가공 시설","철괴(철 광석)",1,3,true)}).Validate(); throw new Exception("paid source accepted"); }
 catch(InvalidDataException){Check(true,"source recipe cannot enable paid altering button");}
