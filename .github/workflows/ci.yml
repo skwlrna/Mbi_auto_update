@@ -259,6 +259,17 @@ jobs:
 
           $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
           if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -notmatch '이어하기 대기') { throw 'saved altering session is not restored into the production page' }
+          $alteringQueries = Get-Content source/FishingAutomation/AlteringQueries.cs -Raw
+          if ($alteringQueries -notmatch 'AlteringFacilityResolver' -or $alteringQueries -notmatch 'FoodRecipes' -or $alteringQueries -notmatch 'MedicineRecipes') { throw 'shared facility resolver for food/medicine missing' }
+          foreach($foodName in @('마요네즈','밀가루','치즈','면','생크림')){
+            if($alteringQueries -notmatch [regex]::Escape($foodName)){throw "food recipe classification missing: $foodName"}
+          }
+          foreach($medicineName in @('새록 버섯 진액','튼튼 버섯 가루','불꽃의 결정')){
+            if($alteringQueries -notmatch [regex]::Escape($medicineName)){throw "medicine recipe classification missing: $medicineName"}
+          }
+          if ($alteringQueries -notmatch 'MissingIngredients' -or $alteringQueries -notmatch 'continue;') { throw 'facility metadata scan must skip ingredient payloads' }
+          if ($productionPage -notmatch '"목재"[sS]*?"금속"[sS]*?"가죽"[sS]*?"옷감"[sS]*?"약품"[sS]*?"식재료"') { throw 'short facility tab labels missing' }
+          if ($productionPage -notmatch 'AlteringFacilityResolver\.Resolve') { throw 'production tabs are not using shared facility resolver' }
           if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
           if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
           if ($productionPage -notmatch 'if \(!altering\)[\s\S]*?AddRow\(form, 1, "품목 검색", _search\)') { throw 'gathering-only item search wiring missing' }
