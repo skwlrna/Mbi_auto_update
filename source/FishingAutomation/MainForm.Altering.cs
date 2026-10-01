@@ -94,9 +94,9 @@ public sealed partial class MainForm
 
             long adjustedBaseline = checked(session.BaselineQuantity + session.InitialExistingMinimum);
             long currentOutput = await rawAlteringData.ItemCountAsync(plan.OutputName, CancellationToken.None);
-            if (resuming && currentOutput < session.BaselineQuantity)
+            if (resuming && currentOutput < session.LastObservedOutputQuantity)
                 throw new InvalidOperationException(
-                    $"이어하기 기준 보유량보다 현재 {plan.OutputName} 수량이 적습니다: 기준 {session.BaselineQuantity:N0} / 현재 {currentOutput:N0}. " +
+                    $"이어하기 마지막 확인 수량보다 현재 {plan.OutputName} 수량이 적습니다: 마지막 확인 {session.LastObservedOutputQuantity:N0} / 현재 {currentOutput:N0}. " +
                     "중간에 완성품이 소비된 것으로 볼 수 있어 목표 수량을 안전하게 계산할 수 없습니다.");
 
             _productionBaseline = adjustedBaseline;
@@ -139,12 +139,16 @@ public sealed partial class MainForm
             visualGathering.Log += text => Ui(() => _log.Write(text));
             screen.Log += text => Ui(() => _log.Write(text));
             gatheringScreen.Log += text => Ui(() => _log.Write(text));
-            resolver.Log += text => Ui(() =>
+            resolver.Log += text =>
             {
-                _log.Write(text);
-                SetStatus(text.Replace("[재료 해결] ", ""), Blue);
-                RefreshProductionDashboard();
-            });
+                automation.NoteStage(text.Replace("[재료 해결] ", "재료 해결 · "));
+                Ui(() =>
+                {
+                    _log.Write(text);
+                    SetStatus(text.Replace("[재료 해결] ", ""), Blue);
+                    RefreshProductionDashboard();
+                });
+            };
 
             _dungeonCts?.Dispose();
             _dungeonCts = new CancellationTokenSource();
