@@ -114,6 +114,8 @@ jobs:
           $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if($wingGuard -notmatch 'after < before'){throw 'Spirit Wings decrease guard missing'}
           if($wingGuard -notmatch 'actionFailure' -or $wingGuard -notmatch 'verificationFailure'){throw 'post-failure Spirit Wings verification missing'}
+          if($wingGuard -notmatch 'VerifyWithLoadingRetryAsync' -or $wingGuard -notmatch 'CurrencySnapshotWithLoadingRetryAsync'){throw 'post-loading wing verification retry missing'}
+          if($wingGuard -notmatch 'TimeSpan.FromSeconds\(20\)'){throw 'post-loading wing verification retry window missing'}
           if($wingGuard -notmatch 'ZeroWingAlteringScreen' -or $wingGuard -notmatch 'ZeroWingGatheringScreen'){throw 'screen wing guards missing'}
           $settings = Get-Content source/FishingAutomation/AlteringSettingsDialog.cs -Raw
           if($settings -match 'Checked = true' -and $settings -match '정령의 날개'){throw 'paid Spirit Wings option remains enabled'}
@@ -176,6 +178,8 @@ jobs:
           if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'recipe must be selected only after facility travel' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
           if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
+          if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
+          if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
           if ($screen -notmatch 'ConfirmFacilityTravelAsync') { throw 'facility travel confirmation flow missing' }
           if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'visual popup detector missing' }
@@ -185,6 +189,8 @@ jobs:
           if ($screen -notmatch '하단 확인 팝업 없음 · Space 입력 생략') { throw 'no-popup path must skip Space' }
           if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
+          $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
+          if ($guards -notmatch 'IsTransientLoadingRejection' -or $guards -notmatch 'VerifyWithLoadingRetryAsync' -or $guards -notmatch 'CurrencySnapshotWithLoadingRetryAsync') { throw 'bounded loading retry helpers missing' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
           $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
