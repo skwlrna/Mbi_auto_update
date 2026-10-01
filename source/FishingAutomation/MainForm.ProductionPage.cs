@@ -589,12 +589,25 @@ public sealed partial class MainForm
             _loading = true; UpdateExecution();
             try
             {
-                _choices = IsAltering
-                    ? (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
+                if (IsAltering)
+                {
+                    _choices = (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
                         .GroupBy(x => (Facility: RecipeFacility(x), x.DisplayName))
-                        .Select(g => (object)new RecipeChoice(g.First())).ToArray()
-                    : (await new GatheringCliData(_owner._cli).CatalogAsync(CancellationToken.None))
+                        .Select(g => (object)new RecipeChoice(g.First())).ToArray();
+                }
+                else
+                {
+                    string? selectedBeforeRefresh = SelectedName;
+                    var raw = await _owner._cli.GetGatherableItemsAsync(CancellationToken.None);
+                    if (!raw.Success)
+                        throw new InvalidDataException("채집 목록 원본 조회에 실패했습니다.");
+
+                    _owner._log.Write("[자동 채집][CLI 구조] " +
+                        GatheringQueries.DescribeCatalogSchema(raw, selectedBeforeRefresh));
+
+                    _choices = GatheringQueries.ParseCatalog(raw)
                         .Select(x => (object)new GatheringChoice(x)).ToArray();
+                }
                 _loaded = true;
                 if (IsDisposed) return;
                 if (IsAltering) ApplySavedAlteringSessionSelection();
