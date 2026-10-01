@@ -64,9 +64,30 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
+        // CLI recipe names can include an ingredient qualifier such as
+        // "철괴(철 광석)", while the in-game detail sheet shows only "철괴".
+        // The specific recipe card is selected and re-confirmed immediately before
+        // opening this sheet, so the base output title is a valid detail-screen check.
         var exact = await FindAsync(frame, Popup, plan.DisplayName, ct);
-        if (exact is not null || plan.VerifiedOcrAlias is null) return exact;
-        return await FindAsync(frame, Popup, plan.VerifiedOcrAlias, ct);
+        if (exact is not null) return exact;
+
+        if (!plan.OutputName.Equals(plan.DisplayName, StringComparison.Ordinal))
+        {
+            var output = await FindAsync(frame, Popup, plan.OutputName, ct);
+            if (output is not null)
+            {
+                var materials = await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct);
+                if (materials is not null) return output;
+            }
+        }
+
+        if (plan.VerifiedOcrAlias is not null)
+        {
+            var alias = await FindAsync(frame, Popup, plan.VerifiedOcrAlias, ct);
+            if (alias is not null) return alias;
+        }
+
+        return null;
     }
     private async Task<bool> ClickLabelAsync(string text, Rectangle roi, string? header, CancellationToken ct, bool facilityTitle = false)
     {
@@ -228,8 +249,9 @@ internal sealed class AlteringScreen : IAlteringScreen
 
         // First inspect the selected recipe. If the character is already beside the
         // facility, the detail card exposes the free "가공하기" button. When away from
-        // the facility, the same card exposes "가공하러 가기" with a 5-wing cost.
-        // The latter is observation-only and is never clicked.
+        // the facility, the card exposes "가공하러 가기". Its displayed wing cost is
+        // intentionally ignored because the amount can change; the paid label itself
+        // is sufficient to classify this as a forbidden remote action.
         await EnterFacilityAsync(plan, ct);
         await SelectRecipeAsync(plan, ct);
 
@@ -242,10 +264,7 @@ internal sealed class AlteringScreen : IAlteringScreen
                 var paid = await FindAsync(remote, RecipeActionButton, "가공하러 가기", ct);
                 if (paid is null)
                     Fail(remote, "무료 가공하기 버튼도 원격 가공하러 가기 버튼도 확인하지 못했습니다.");
-                var cost = await FindAsync(remote, RecipeActionButton, "5", ct);
-                if (cost is null)
-                    Fail(remote, "원격 가공 버튼의 정령의 날개 5개 표시를 확인하지 못했습니다.");
-                Log?.Invoke("[자동 가공] 원격 가공 버튼 감지 · 클릭하지 않고 설비로 일반 이동합니다.");
+                Log?.Invoke("[자동 가공] 원격 가공하러 가기 감지 · 비용 숫자와 관계없이 클릭 금지 · 설비로 일반 이동합니다.");
             }
 
             _input.TapScanCode(0x01);
@@ -257,8 +276,8 @@ internal sealed class AlteringScreen : IAlteringScreen
         }
 
         // Two fresh observations are required immediately before the only registration
-        // click. The free label must be exact, and any paid label / wing-5 marker in the
-        // action area blocks input.
+        // click. The free label must be exact and the remote paid label must be absent.
+        // No fixed wing-cost number is used as a safety signal.
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
@@ -266,8 +285,7 @@ internal sealed class AlteringScreen : IAlteringScreen
                 Fail(frame, "품목 상세 화면이 바뀌었습니다.");
             var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
             var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-            var cost = await FindAsync(frame, RecipeActionButton, "5", ct);
-            if (free is null || paid is not null || cost is not null)
+            if (free is null || paid is not null)
                 Fail(frame, "무료 현장 가공하기 버튼을 안전하게 확인하지 못했습니다.");
             if (pass == 0) { await Task.Delay(200, ct); continue; }
 
@@ -282,8 +300,7 @@ internal sealed class AlteringScreen : IAlteringScreen
         if (await FindRecipeAsync(frame, plan, ct) is null) return false;
         var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
         var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-        var cost = await FindAsync(frame, RecipeActionButton, "5", ct);
-        return free is not null && paid is null && cost is null;
+        return free is not null && paid is null;
     }
 
     private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
