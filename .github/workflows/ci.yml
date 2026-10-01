@@ -261,7 +261,8 @@ jobs:
           if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -notmatch '이어하기 대기') { throw 'saved altering session is not restored into the production page' }
           if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
           if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
-          if ($productionPage -match '품목 검색' -or $productionPage -match '_search') { throw 'production item search UI must remain removed' }
+          if ($productionPage -notmatch 'if \(!altering\)[\s\S]*?AddRow\(form, 1, "품목 검색", _search\)') { throw 'gathering-only item search wiring missing' }
+          if ($productionPage -match 'if \(altering\)[\s\S]{0,500}품목 검색') { throw 'automatic altering must not render an item search field' }
           if ($productionPage -notmatch 'FacilityUiOrder' -or $productionPage -notmatch 'BuildFacilityTabs' -or $productionPage -notmatch 'RecipeFacility') { throw 'facility-tab recipe filtering UI missing' }
           foreach($facilityTab in @('목재 가공 시설','금속 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
             if($productionPage -notmatch [regex]::Escape($facilityTab)){throw "facility tab missing: $facilityTab"}
