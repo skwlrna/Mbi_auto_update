@@ -104,14 +104,31 @@ internal sealed class GatheringScreen : IGatheringScreen
     }
     private async Task ClickIngredientAsync(GatheringPlan plan,CancellationToken ct)
     {
+        // Ingredient names in the live processing detail sheet are rendered in a dim
+        // gray style. Use the same high-contrast OCR path that material-detail titles
+        // use instead of requiring bright recipe-card text.
+        var ingredientArea = new Rectangle(120, 690, 560, 200);
+        var materialsHeaderArea = new Rectangle(100, 680, 600, 210);
+
         for(int pass=0;pass<2;pass++)
         {
             using var frame=Capture(ct);
-            var label=await _vision.FindExactAsync(frame,new(150,700,510,170),plan.DisplayName,ct);
-            if(label is null || await _vision.FindExactAsync(frame,new(100,690,580,200),"필요한 재료",ct) is null)
-                Fail(frame,"가공 품목에서 선택한 채집 재료를 확인하지 못했습니다.");
-            if(pass==0){await Task.Delay(180,ct);continue;}
-            _input.ClickClientPoint(_hwnd,label!.Value.Center);
+            var materialsHeader = await _vision.FindExactAsync(
+                frame, materialsHeaderArea, "필요한 재료", ct, dim:true);
+            var label = await _vision.FindExactAsync(
+                frame, ingredientArea, plan.DisplayName, ct, dim:true);
+
+            if(materialsHeader is null || label is null)
+                Fail(frame,$"가공 품목의 필요한 재료에서 {plan.DisplayName}을 확인하지 못했습니다.");
+
+            if(pass==0)
+            {
+                await Task.Delay(180,ct);
+                continue;
+            }
+
+            Log?.Invoke($"[자동채집] 필요한 재료 확인 · {plan.DisplayName} · 어두운 재료명 OCR 2프레임 확인");
+            _input.ClickClientPoint(_hwnd,label.Value.Center);
         }
         await Task.Delay(350,ct);
     }
