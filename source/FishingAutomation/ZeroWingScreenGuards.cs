@@ -137,8 +137,11 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen
             actionFailure = ex;
         }
 
+        string verificationAction = actionFailure is null
+            ? "[자동 채집] 일반 이동 시작"
+            : "[자동 채집] 시작 실패 후 날개 검사";
         Exception? verificationFailure = await VerifyAfterActionAsync(
-            "[자동 채집] 일반 이동 시작", wingsBefore).ConfigureAwait(false);
+            verificationAction, wingsBefore).ConfigureAwait(false);
         if (verificationFailure is not null)
         {
             if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
