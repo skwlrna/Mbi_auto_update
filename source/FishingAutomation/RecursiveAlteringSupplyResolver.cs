@@ -38,8 +38,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         CancellationToken ct)
     {
         if (remainingWorks <= 0) return;
-        if (blockedRecipe.Reason != "not_enough_ingredient" || blockedRecipe.MissingIngredients.Count == 0)
-            throw new InvalidOperationException("재료 부족이 아닌 조건은 자동으로 해결하지 않습니다.");
+        if (blockedRecipe.MissingIngredients.Count == 0)
+            throw new InvalidOperationException($"부족 재료 목록이 없어 자동으로 해결하지 않습니다: {blockedRecipe.Reason ?? "unknown"}");
 
         foreach (var missing in blockedRecipe.MissingIngredients)
         {
@@ -126,7 +126,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 
             if (!producer.Alterable)
             {
-                if (producer.Reason != "not_enough_ingredient" || producer.MissingIngredients.Count == 0)
+                if (producer.MissingIngredients.Count == 0)
                     throw new InvalidOperationException(
                         $"{producer.DisplayName} 가공 조건을 자동으로 해결할 수 없습니다: {producer.Reason ?? "unknown"}");
 
