@@ -177,6 +177,12 @@ jobs:
         run: |
           dotnet run --project tests/gathering/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Gathering regressions failed' }
+          $screen = Get-Content source/FishingAutomation/dungeon/GatheringScreen.cs -Raw
+          if ($screen -match 'Normalize\(name') { throw 'first-place OCR string equality check returned' }
+          if ($screen -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow') { throw 'first-place geometry stability gate missing' }
+          if ($screen -notmatch 'first\.Value\.Bounds\.Left\+first\.Value\.Bounds\.Width/2') { throw 'fresh second-frame row click missing' }
+          $vision = Get-Content source/FishingAutomation/dungeon/GatheringVision.cs -Raw
+          if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
 
       - name: Inline production UI regression tests
         shell: pwsh
