@@ -69,19 +69,32 @@ internal interface IAlteringData
     Task<long> ItemCountAsync(string name, CancellationToken ct);
 }
 
+internal interface IAlteringSupplyResolver
+{
+    Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct);
+}
+
 internal sealed class AlteringAutomation
 {
     private readonly IAlteringData _data;
     private readonly IAlteringScreen _screen;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _verificationAttempts;
+    private readonly IAlteringSupplyResolver? _supplyResolver;
     internal event Action<string>? Log;
     internal int QueuedWorks { get; private set; }
     internal long ReservedWings { get; private set; }
 
     internal AlteringAutomation(IAlteringData data, IAlteringScreen screen,
-        Func<TimeSpan, CancellationToken, Task>? delay = null, int verificationAttempts = 120)
-    { _data = data; _screen = screen; _delay = delay ?? Task.Delay; _verificationAttempts = verificationAttempts; }
+        Func<TimeSpan, CancellationToken, Task>? delay = null, int verificationAttempts = 120,
+        IAlteringSupplyResolver? supplyResolver = null)
+    {
+        _data = data;
+        _screen = screen;
+        _delay = delay ?? Task.Delay;
+        _verificationAttempts = verificationAttempts;
+        _supplyResolver = supplyResolver;
+    }
 
     internal async Task RunAsync(AlteringPlan plan, CancellationToken ct)
     {
@@ -148,6 +161,23 @@ internal sealed class AlteringAutomation
                 if (selected.Length < plan.RecipeOrdinal || !selected[plan.RecipeOrdinal - 1].Alterable)
                 {
                     var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                    if (recipe is not null && recipe.Reason == "not_enough_ingredient" &&
+                        recipe.MissingIngredients.Count > 0 && _supplyResolver is not null)
+                    {
+                        int remainingWorks = plan.RequiredWorks - QueuedWorks;
+                        string missingText = string.Join(", ", recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}"));
+                        Log?.Invoke($"[자동 가공] 재료 부족 감지 · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
+                        await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
+                        recipes = await _data.RecipesAsync(ct);
+                        selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
+                        var refreshed = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                        if (refreshed is not null && refreshed.Alterable)
+                        {
+                            Log?.Invoke($"[자동 가공] 재료 재확인 완료 · {plan.DisplayName} 가공을 이어갑니다.");
+                            continue;
+                        }
+                    }
+
                     string reason = recipe?.Reason ?? "not_found";
                     string missing = string.Join(", ", recipe?.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}") ?? Array.Empty<string>());
                     throw new InvalidOperationException($"가공 불가: {reason} {missing}. 등록된 작업은 게임에 남습니다.");
