@@ -12,9 +12,9 @@ internal static class AlteringFacilityResolver
 {
     private static readonly HashSet<string> FoodRecipes = new(StringComparer.Ordinal)
     {
-        "마요네즈", "밀가루", "치즈", "면", "생크림", "물에 불린 콩", "두부", "두유",
+        "마요네즈", "버터", "밀가루", "치즈", "면", "생크림", "물에 불린 콩", "두부", "두유",
         "숙성된 커다란 고기", "물에 불린 쌀", "밥", "말린 찻잎", "발효된 찻잎",
-        "헤이즐넛 오일", "오트밀"
+        "헤이즐넛 오일", "오트밀", "식용유"
     };
 
     private static readonly HashSet<string> MedicineRecipes = new(StringComparer.Ordinal)
@@ -110,7 +110,11 @@ internal static class AlteringFacilityResolver
 
         // Exact food names are checked before generic "가루/결정/포자" medicine
         // patterns so names such as 밀가루 never fall into the medicine facility.
-        if (FoodRecipes.Contains(output))
+        if (FoodRecipes.Contains(output) ||
+            output.StartsWith("물에 불린 ", StringComparison.Ordinal) ||
+            output.StartsWith("숙성된 ", StringComparison.Ordinal) ||
+            output.Contains("찻잎", StringComparison.Ordinal) ||
+            output.EndsWith(" 오일", StringComparison.Ordinal))
             return "식재료 가공 시설";
         if (MedicineRecipes.Contains(displayName) || MedicineRecipes.Contains(output))
             return "약품 가공 시설";
@@ -138,7 +142,7 @@ internal static class AlteringFacilityResolver
             output.Contains("진액", StringComparison.Ordinal) ||
             output.Contains("기폭제", StringComparison.Ordinal) ||
             output.Contains("봉인된 ", StringComparison.Ordinal) ||
-            output.EndsWith("꽃 가루", StringComparison.Ordinal) ||
+            output.EndsWith("가루", StringComparison.Ordinal) ||
             output.Equals("아교", StringComparison.Ordinal) ||
             output.Equals("환영 가루", StringComparison.Ordinal))
             return "약품 가공 시설";
