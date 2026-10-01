@@ -23,6 +23,29 @@ Check(AlteringText.Normalize("목재 +") != AlteringText.Normalize("목재"), "p
 Check(AlteringText.IsCardCandidate("강철과", "강철괴"), "faint card is only a candidate for detail verification");
 Check(!AlteringText.IsCardCandidate("상급 목재", "상급 목재+") && !AlteringText.IsCardCandidate("철괴(광석)","철괴(철 광석)"), "candidate matching preserves recipe qualifiers");
 Check(new AlteringPlan(plan.FacilityName, "철괴(철 광석)", 1, 3, false).OutputName == "철괴", "ingredient-qualified recipe maps to output item");
+Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("새록 버섯 진액", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
+      AlteringFacilityResolver.Resolve(new AlteringRecipe("튼튼 버섯 가루", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
+      AlteringFacilityResolver.Resolve(new AlteringRecipe("불꽃의 결정(석양 나비)", true, 3, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설",
+    "medicine recipes resolve to medicine facility without FacilityName");
+Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("마요네즈", true, 3, null, Array.Empty<AlteringIngredient>())) == "식재료 가공 시설" &&
+      AlteringFacilityResolver.Resolve(new AlteringRecipe("밀가루", true, 3, null, Array.Empty<AlteringIngredient>())) == "식재료 가공 시설" &&
+      AlteringFacilityResolver.Resolve(new AlteringRecipe("치즈", true, 3, null, Array.Empty<AlteringIngredient>())) == "식재료 가공 시설" &&
+      AlteringFacilityResolver.Resolve(new AlteringRecipe("면", true, 3, null, Array.Empty<AlteringIngredient>())) == "식재료 가공 시설" &&
+      AlteringFacilityResolver.Resolve(new AlteringRecipe("생크림", true, 3, null, Array.Empty<AlteringIngredient>())) == "식재료 가공 시설",
+    "food recipes resolve to food facility instead of showing only flour");
+
+using (var metadataDoc = System.Text.Json.JsonDocument.Parse(
+    """{"DisplayName":"미지 제법","Alterable":true,"ProducedPerWork":1,"Reason":null,"MissingIngredients":[{"DisplayName":"철괴","Required":1,"Owned":0}],"CategoryName":"약품 가공"}"""))
+{
+    Check(AlteringFacilityResolver.FromJson(metadataDoc.RootElement, "미지 제법") == "약품 가공 시설",
+        "facility metadata is detected even when CLI key is not FacilityName");
+}
+using (var ingredientOnlyDoc = System.Text.Json.JsonDocument.Parse(
+    """{"DisplayName":"미지 제법","Alterable":true,"ProducedPerWork":1,"Reason":null,"MissingIngredients":[{"DisplayName":"철괴","Required":1,"Owned":0}]}"""))
+{
+    Check(AlteringFacilityResolver.FromJson(ingredientOnlyDoc.RootElement, "미지 제법") is null,
+        "ingredient names never misclassify an unknown recipe facility");
+}
 var estimatePlan = plan with { TargetQuantity = 10 };
 var estimateRecipe = new AlteringRecipe("강철괴", false, 3, "not_enough_ingredient",
     new[] { new AlteringIngredient("철괴", 2, 3) }, plan.FacilityName);
