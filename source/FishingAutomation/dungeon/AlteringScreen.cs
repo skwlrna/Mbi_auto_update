@@ -309,19 +309,20 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private async Task<bool> ConfirmFacilityTravelPopupAsync(CancellationToken ct)
     {
-        // The destination varies by facility/current location, so never match a place
-        // name such as "반호르". Only the generic travel question + confirm/cancel
-        // controls authorize the single Space confirmation.
+        // Destination text varies. The question is usually a full sentence ending in
+        // "... 이동할까요?", so exact-label matching cannot be used here.
+        // Authorize Space only when the dialog sentence contains the generic travel
+        // question and both confirm/cancel controls are present on two fresh frames.
         for (int wait = 0; wait < 8; wait++)
         {
             ct.ThrowIfCancellationRequested();
 
             using var first = Capture(ct);
-            var question1 = await FindAsync(first, FacilityTravelDialog, "이동할까요", ct);
-            var confirm1 = await FindAsync(first, FacilityTravelDialog, "확인", ct);
-            var cancel1 = await FindAsync(first, FacilityTravelDialog, "취소", ct);
+            bool question1 = await HasFacilityTravelQuestionAsync(first, ct);
+            bool confirm1 = await HasDialogButtonAsync(first, "확인", ct);
+            bool cancel1 = await HasDialogButtonAsync(first, "취소", ct);
 
-            if (question1 is null || confirm1 is null || cancel1 is null)
+            if (!question1 || !confirm1 || !cancel1)
             {
                 await Task.Delay(250, ct);
                 continue;
@@ -329,11 +330,11 @@ internal sealed class AlteringScreen : IAlteringScreen
 
             await Task.Delay(180, ct);
             using var second = Capture(ct);
-            var question2 = await FindAsync(second, FacilityTravelDialog, "이동할까요", ct);
-            var confirm2 = await FindAsync(second, FacilityTravelDialog, "확인", ct);
-            var cancel2 = await FindAsync(second, FacilityTravelDialog, "취소", ct);
+            bool question2 = await HasFacilityTravelQuestionAsync(second, ct);
+            bool confirm2 = await HasDialogButtonAsync(second, "확인", ct);
+            bool cancel2 = await HasDialogButtonAsync(second, "취소", ct);
 
-            if (question2 is null || confirm2 is null || cancel2 is null)
+            if (!question2 || !confirm2 || !cancel2)
                 continue;
 
             Log?.Invoke("[자동 가공] 설비 이동 확인 팝업 · 목적지명 무관 · Space로 확인");
@@ -343,6 +344,27 @@ internal sealed class AlteringScreen : IAlteringScreen
         }
 
         return false;
+    }
+
+    private async Task<bool> HasFacilityTravelQuestionAsync(Bitmap frame, CancellationToken ct)
+    {
+        string wanted = AlteringText.Normalize("이동할까요");
+        foreach (int scale in new[] { 2, 3 })
+        {
+            var lines = await _ocr.ReadLinesAsync(frame, FacilityTravelDialog, scale, ct);
+            if (lines.Any(x => AlteringText.Normalize(x.ReadText ?? "").Contains(wanted, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
+    }
+
+    private async Task<bool> HasDialogButtonAsync(Bitmap frame, string text, CancellationToken ct)
+    {
+        if (await FindAsync(frame, FacilityTravelDialog, text, ct) is not null)
+            return true;
+
+        var compact = await _ocr.FindCompactLabelAsync(frame, FacilityTravelDialog, text, ct);
+        return compact.Found;
     }
 
     private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
