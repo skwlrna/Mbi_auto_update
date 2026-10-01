@@ -73,30 +73,29 @@ jobs:
           dotnet run --project tests/cli-readonly/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'CLI regressions failed' }
 
-      - name: Direct CLI action wiring checks
+      - name: Read-only CLI and free screen wiring checks
         shell: pwsh
         run: |
           $cli = Get-Content source/FishingAutomation/MabinogiMobileCli.cs -Raw
-          foreach($command in @('execute_gathering','execute_altering','complete_altering_work','stop_action')){
-            if($cli -notmatch $command){throw "missing CLI action: $command"}
+          if($cli -notmatch 'private static bool IsAllowedAction\(string command\)[\s\S]*?=> false;'){throw 'CLI actions are not fully blocked'}
+          foreach($command in @('capabilities','get_my_info','get_currencies','get_items','get_activity','get_alterable_items','get_altering_works','get_gatherable_items','get_inventory')){
+            if($cli -notmatch $command){throw "missing CLI read-only query: $command"}
           }
-          if($cli -notmatch '"base64:"'){throw 'base64 CLI action body missing'}
           $g = Get-Content source/FishingAutomation/MainForm.Gathering.cs -Raw
-          if($g -notmatch 'new GatheringCliScreen\(_cli, identity\)'){throw 'gathering is not wired to CLI screen'}
+          if($g -notmatch 'new GatheringScreen\('){throw 'gathering is not wired to free screen navigation'}
+          if($g -match 'new GatheringCliScreen\('){throw 'gathering still wires paid CLI action screen'}
           $a = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
-          if($a -notmatch 'new AlteringCliScreen\(_cli, identity\)'){throw 'altering is not wired to CLI screen'}
-          if($g -match 'new GatheringScreen\('){throw 'gathering still instantiates OCR screen'}
-          if($a -match 'new AlteringScreen\('){throw 'altering still instantiates OCR screen'}
-          $gs = Get-Content source/FishingAutomation/GatheringSettingsDialog.cs -Raw
-          if($gs -match '날개 사용 0개'){throw 'obsolete zero-wing guarantee remains in gathering UI'}
-          foreach($command in @('capabilities','get_my_info','get_currencies')){
-            if($cli -notmatch $command){throw "missing CLI guard query: $command"}
+          if($a -notmatch 'new AlteringScreen\('){throw 'altering is not wired to free screen navigation'}
+          if($a -match 'new AlteringCliScreen\('){throw 'altering still wires paid CLI action screen'}
+          foreach($file in @($g,$a)){
+            if($file -match '"execute_gathering"' -or $file -match '"execute_altering"' -or $file -match '"complete_altering_work"' -or $file -match '"stop_action"'){
+              throw 'production main flow still requires CLI action commands'
+            }
           }
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
           if($guards -notmatch 'EnsureCapabilitiesAsync'){throw 'capability preflight missing'}
           if($guards -notmatch 'CliIdentityGuard'){throw 'identity guard missing'}
           if($guards -notmatch 'CurrencyChanges'){throw 'currency delta tracking missing'}
-          if($g -notmatch 'EnsureCapabilitiesAsync' -or $a -notmatch 'EnsureCapabilitiesAsync'){throw 'mode capability preflight wiring missing'}
           if($g -notmatch 'CliIdentityGuard.CaptureAsync' -or $a -notmatch 'CliIdentityGuard.CaptureAsync'){throw 'mode identity capture wiring missing'}
 
       - name: Zero Spirit Wings safety checks
@@ -105,9 +104,14 @@ jobs:
           $plan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
           if($plan -notmatch 'MaximumWings => 0'){throw 'zero-wing invariant missing from AlteringPlan'}
           if($plan -notmatch 'if \(AllowPaidButton\)'){throw 'paid altering plan rejection missing'}
-          $screens = Get-Content source/FishingAutomation/CliActionScreens.cs -Raw
-          if($screens -notmatch 'wingsBefore != 0'){throw 'pre-action Spirit Wings guard missing'}
-          if($screens -notmatch '정령의 날개 0개 사용 원칙'){throw 'zero-wing CLI refusal missing'}
+          $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          if($screen -notmatch '"가공하기"'){throw 'free on-site process button missing'}
+          if($screen -notmatch '"가공하러 가기"'){throw 'remote paid button observation gate missing'}
+          if($screen -notmatch '"설비로 이동"'){throw 'free facility travel path missing'}
+          if($screen -match 'reserveFiveWings\(\)'){throw 'screen still reserves Spirit Wings'}
+          $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if($wingGuard -notmatch 'after < before'){throw 'Spirit Wings decrease guard missing'}
+          if($wingGuard -notmatch 'ZeroWingAlteringScreen' -or $wingGuard -notmatch 'ZeroWingGatheringScreen'){throw 'screen wing guards missing'}
           $settings = Get-Content source/FishingAutomation/AlteringSettingsDialog.cs -Raw
           if($settings -match 'Checked = true' -and $settings -match '정령의 날개'){throw 'paid Spirit Wings option remains enabled'}
           $production = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
@@ -150,6 +154,8 @@ jobs:
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
           if ($screen -notmatch '"모두 받기"') { throw 'collect button OCR gate missing' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
+          if ($screen -notmatch '무료 현장 가공하기') { throw 'free processing confirmation log missing' }
+          if ($screen -notmatch '원격 가공 버튼 감지') { throw 'remote paid button must be observation-only' }
 
 
       - name: Automatic gathering regression tests
