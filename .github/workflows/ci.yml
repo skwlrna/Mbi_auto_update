@@ -204,6 +204,12 @@ jobs:
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
           if ($guards -notmatch 'IsTransientLoadingRejection' -or $guards -notmatch 'VerifyWithLoadingRetryAsync' -or $guards -notmatch 'CurrencySnapshotWithLoadingRetryAsync') { throw 'bounded loading retry helpers missing' }
+          $altering = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          if ($altering -notmatch 'int freeSlots = Math\.Max\(0, 7 - facilityCount\)') { throw 'seven-slot free-capacity calculation missing' }
+          if ($altering -notmatch 'int batchGoal = Math\.Min\(freeSlots, plan\.RequiredWorks - QueuedWorks\)') { throw 'batch size must be capped by free slots and remaining works' }
+          if ($altering -notmatch 'while \(queuedThisBatch < batchGoal') { throw 'verified batch registration loop missing' }
+          if ($altering -notmatch '일괄 등록 시작' -or $altering -notmatch '일괄 등록 완료') { throw 'batch registration diagnostics missing' }
+          if ($altering -notmatch 'count > previous \+ 1' -or $altering -notmatch 'count == previous \+ 1') { throw 'each batched slot must still be CLI-verified exactly once' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
           $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
