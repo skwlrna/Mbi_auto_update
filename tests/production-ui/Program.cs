@@ -52,13 +52,26 @@ internal static class Program
 
             Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "목재+",
                 "default wood facility tab shows only wood recipes");
-            facilityTabs.Single(x => x.Text == "금속 가공").PerformClick(); Pump();
+            facilityTabs.Single(x => x.Text == "금속").PerformClick(); Pump();
             Check(ai.Items.Count == 2 && ai.Items.Cast<object>().All(x => x.ToString() is "철괴" or "강철괴"),
                 "metal facility tab filters recipe dropdown to metal recipes");
             ai.SelectedIndex = 1;
             Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
                 "missing-material recipe remains startable for recursive resolution");
-            facilityTabs.Single(x => x.Text == "목재 가공").PerformClick(); Pump();
+
+            facilityTabs.Single(x => x.Text == "약품").PerformClick(); Pump();
+            Check(ai.Items.Count == 3 &&
+                  ai.Items.Cast<object>().Select(x => x.ToString()).SequenceEqual(
+                      new[] { "새록 버섯 진액", "튼튼 버섯 가루", "불꽃의 결정(석양 나비)" }),
+                "medicine facility tab shows medicine processing recipes");
+
+            facilityTabs.Single(x => x.Text == "식재료").PerformClick(); Pump();
+            Check(ai.Items.Count == 5 &&
+                  ai.Items.Cast<object>().Select(x => x.ToString()).SequenceEqual(
+                      new[] { "마요네즈", "밀가루", "치즈", "면", "생크림" }),
+                "food facility tab shows multiple food-processing recipes, not only flour");
+
+            facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump();
             ai.SelectedIndex = 0; aq.Value = 5;
             Menu("자동 채집"); Exclusive(false);
             Check(gi.SelectedIndex == 1 && gq.Value == 5, "switching preserves each page's independent settings");
@@ -111,7 +124,7 @@ internal static class Program
                 Directory.CreateDirectory(args[0]); form.ClientSize = new Size(1200, 900);
                 gi.SelectedIndex = 0; gq.Value = 100; Menu("자동 채집");
                 InvokeTask(form, "RefreshProductionStateAsync", gathering); Pump(); Save(form, Path.Combine(args[0], "automatic-gathering.png"));
-                Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재 가공").PerformClick(); Pump(); ai.SelectedIndex = 0; aq.Value = 50;
+                Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump(); ai.SelectedIndex = 0; aq.Value = 50;
                 InvokeTask(form, "RefreshProductionStateAsync", altering); Pump(); Save(form, Path.Combine(args[0], "automatic-altering.png"));
                 Menu("홈"); Pump(); Save(form, Path.Combine(args[0], "home.png"));
             }
@@ -166,7 +179,15 @@ internal sealed class FakeCli
                 new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="금속 가공 시설"},
                 new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="목재 가공 시설"},
                 new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철 광석",Required=10L,Owned=0L}},FacilityName="금속 가공 시설"},
-                new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철괴",Required=3L,Owned=0L}},FacilityName="금속 가공 시설"}
+                new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철괴",Required=3L,Owned=0L}},FacilityName="금속 가공 시설"},
+                new{DisplayName="새록 버섯 진액",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="튼튼 버섯 가루",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="불꽃의 결정(석양 나비)",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="마요네즈",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="밀가루",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="치즈",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="면",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="생크림",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()}
             }},
             "get_items" => new[]{new{DisplayName="철 광석",Count=184L,Location="inventory"},new{DisplayName="상급 통나무+",Count=_logs,Location="inventory"},new{DisplayName="철괴",Count=_ingots,Location="inventory"},new{DisplayName="목재+",Count=_wood,Location="inventory"}},
             "get_altering_works" => new{completedCount=_work is null?0:1,works=_work is null?Array.Empty<object>():new object[]{new{DisplayName=_work,FacilityName="목재 가공 시설",State="Completed",IsCompleted=true,RemainingSeconds=0}}},
