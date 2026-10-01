@@ -62,6 +62,18 @@ var resolvedAuto = new AlteringAutomation(resolvedWorld, resolvedWorld, (_, _) =
 await resolvedAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.ReservedWings == 0,
     "missing materials are resolved inside the same zero-wing altering session");
+
+var changedReasonWorld = new FakeWorld(plan with { TargetQuantity = 3 })
+{
+    Available = false,
+    MissingReason = "material_shortage_changed"
+};
+var changedReasonResolver = new FakeResolver(changedReasonWorld);
+var changedReasonAuto = new AlteringAutomation(
+    changedReasonWorld, changedReasonWorld, (_, _) => Task.CompletedTask, 4, changedReasonResolver);
+await changedReasonAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
+Check(changedReasonResolver.Calls == 1 && changedReasonWorld.QueueCalls == 1,
+    "concrete MissingIngredients resolve even when CLI reason text changes");
 var failed = new FakeWorld(plan) { Register = false };
 var failedAuto = new AlteringAutomation(failed, failed, (_, _) => Task.CompletedTask, 2);
 try { await failedAuto.RunAsync(plan, default); throw new Exception("unregistered click accepted"); }
@@ -110,13 +122,14 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls;
     internal long Owned;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
+    internal string MissingReason = "not_enough_ingredient";
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         bool available = Available || (UnlockAfterExisting && ExistingRemaining == 0);
         var missing = available ? Array.Empty<AlteringIngredient>() : new[] { new AlteringIngredient("철 광석", 3, 0) };
-        var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : "not_enough_ingredient", missing, _plan.FacilityName);
+        var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : MissingReason, missing, _plan.FacilityName);
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
     public Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct)
