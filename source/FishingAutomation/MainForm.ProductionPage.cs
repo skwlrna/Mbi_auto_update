@@ -129,9 +129,12 @@ public sealed partial class MainForm
         internal ProductionPage(MainForm owner, bool altering)
         {
             _owner = owner; IsAltering = altering;
-            Quantity = altering
-                ? new ArrowlessNumericUpDown { Minimum = 1, Maximum = 1000000, Value = 100 }
-                : new NumericUpDown { Minimum = 1, Maximum = 1000000, Value = 100 };
+            Quantity = new ArrowlessNumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 1000000,
+                Value = 100
+            };
             Name = altering ? "AlteringPage" : "GatheringPage";
             AccessibleName = altering ? "자동 가공" : "자동 채집";
             BackColor = WindowBg; ForeColor = TitleText; Visible = false;
