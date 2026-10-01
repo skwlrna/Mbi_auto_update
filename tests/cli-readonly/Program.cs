@@ -32,24 +32,15 @@ var actionCli = new MabinogiMobileCli(log, true,
         actionCalls.Add(arguments.ToArray());
         return Task.FromResult(new CliProcessOutput(0, "{\"result\":\"accepted\"}", ""));
     });
-Check((await actionCli.ExecuteGatheringAsync("철 광석")).Success, "execute_gathering typed action rejected");
-Check((await actionCli.ExecuteAlteringAsync("강철괴")).Success, "execute_altering typed action rejected");
-Check((await actionCli.CompleteAlteringWorkAsync("강철괴")).Success, "complete_altering_work typed action rejected");
-Check((await actionCli.StopActionAsync()).Success, "stop_action typed action rejected");
-Check(actionCalls.Count == 4, "typed action launch count mismatch");
-Check(actionCalls[0][0] == "execute_gathering" && actionCalls[1][0] == "execute_altering" &&
-      actionCalls[2][0] == "complete_altering_work" && actionCalls[3].SequenceEqual(new[] { "stop_action" }),
-    "typed action command names or stop_action shape changed");
-foreach (var call in actionCalls.Take(3))
+foreach (var result in new[]
 {
-    Check(call.Length == 2 && call[1].StartsWith("base64:", StringComparison.Ordinal), "action body is not a single base64 argument");
-    string json = Encoding.UTF8.GetString(Convert.FromBase64String(call[1]["base64:".Length..]));
-    using var body = JsonDocument.Parse(json);
-    Check(!string.IsNullOrWhiteSpace(body.RootElement.GetProperty("displayName").GetString()), "action displayName missing from body");
-}
-int beforeInvalid = actionCalls.Count;
-Check((await actionCli.ExecuteGatheringAsync("")).State == "blocked", "empty gathering name was accepted");
-Check(actionCalls.Count == beforeInvalid, "invalid typed action reached process runner");
+    await actionCli.ExecuteGatheringAsync("철 광석"),
+    await actionCli.ExecuteAlteringAsync("강철괴"),
+    await actionCli.CompleteAlteringWorkAsync("강철괴"),
+    await actionCli.StopActionAsync()
+})
+    Check(result.State == "blocked", "typed CLI action was not blocked");
+Check(actionCalls.Count == 0, "blocked typed CLI action reached process runner");
 
 var wrappedStatus = MabinogiMobileCli.Parse("status", new(0,
     "{\"status\":\"accepted\",\"body\":\"{\\\"pipe\\\":\\\"connected\\\"}\"}", ""));
