@@ -45,25 +45,25 @@ Check(success.World.Owned == 3, "qualified recipe work and inventory verificatio
 success = await Run(plan with { TargetQuantity = 4 }, w => w.Bonus = 2);
 Check(success.World.Owned == 10, "critical rewards can exceed minimum target");
 success = await Run(plan with { TargetQuantity = 4 }, w => w.AddCompleted(3));
-Check(success.World.Owned == 9 && success.World.SecondStageCalls == 0, "existing completed work collected before baseline");
+Check(success.World.Owned == 9 && success.World.SecondStageCalls == 0, "existing completed work is received without counting as a queued target work");
 success = await Run(plan with { TargetQuantity = 4 }, w => { w.AddCompleted(3); w.TwoStageCollect = true; });
 Check(success.World.Owned == 9 && success.World.SecondStageCalls > 0, "travel-first collect waits for second confirmed Space without duplicate receipt");
 success = await Run(plan with { TargetQuantity = 10 }, w => { for(int i=0;i<7;i++) w.AddPending(waitingOnly:i>0); });
-Check(success.World.QueueCalls == 4 && success.World.Owned == 33 && success.Automation.ReservedWings == 0, "full existing queue drained then extra target registered without counting old rewards or wings");
+Check(success.World.QueueCalls == 4 && success.World.Owned == 33 && success.World.QueuedWhileExisting && success.Automation.ReservedWings == 0, "new target work fills a freed slot while older jobs still remain");
 success = await Run(plan with { TargetQuantity = 4 }, w => { w.AddPending(); w.AddCompleted(3); w.Bonus=2; });
 Check(success.World.QueueCalls == 2 && success.World.Owned == 20, "mixed completed and pending jobs with critical rewards excluded from new target");
-success = await Run(plan with { TargetQuantity = 1 }, w => { w.AddPending(); w.Available=false; w.UnlockAfterExisting=true; });
-Check(success.World.QueueCalls == 1 && success.World.Owned == 6, "recipe availability refreshed after existing rewards received");
-var waiting = new FakeWorld(plan) { Freeze = true }; waiting.AddPending();
+var waiting = new FakeWorld(plan) { Freeze = true };
+for (int i = 0; i < 7; i++) waiting.AddPending(waitingOnly: i > 0);
 using(var cts = new CancellationTokenSource())
 {
     var waitingAuto = new AlteringAutomation(waiting, waiting, (_, token) => { cts.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; }, 2);
-    try { await waitingAuto.RunAsync(plan, cts.Token); throw new Exception("existing wait ignored cancellation"); }
-    catch(OperationCanceledException) { Check(waiting.QueueCalls == 0 && waitingAuto.ReservedWings == 0, "stop during existing-work wait never spends currency"); }
+    try { await waitingAuto.RunAsync(plan, cts.Token); throw new Exception("full existing queue wait ignored cancellation"); }
+    catch(OperationCanceledException) { Check(waiting.QueueCalls == 0 && waitingAuto.ReservedWings == 0, "stop during full existing-work wait never spends currency"); }
 }
-var stalled = new FakeWorld(plan) { Freeze = true }; stalled.AddPending(waitingOnly:true);
-try { await new AlteringAutomation(stalled, stalled, (_,_) => Task.CompletedTask, 2).RunAsync(plan, default); throw new Exception("stalled existing queue ignored"); }
-catch(InvalidOperationException) { Check(stalled.QueueCalls == 0, "stalled existing queue stops without paid input"); }
+var stalled = new FakeWorld(plan) { Freeze = true };
+for (int i = 0; i < 7; i++) stalled.AddPending(waitingOnly:true);
+try { await new AlteringAutomation(stalled, stalled, (_,_) => Task.CompletedTask, 2).RunAsync(plan, default); throw new Exception("stalled full existing queue ignored"); }
+catch(InvalidOperationException) { Check(stalled.QueueCalls == 0, "stalled full existing queue stops without paid input"); }
 var missing = new FakeWorld(plan) { Available = false };
 try { await new AlteringAutomation(missing, missing).RunAsync(plan, default); throw new Exception("missing materials accepted without resolver"); }
 catch (InvalidOperationException) { Check(missing.QueueCalls == 0, "missing materials without resolver stop before any registration"); }
@@ -132,6 +132,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     private int _polls;
     internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls;
     internal long Owned;
+    internal bool QueuedWhileExisting;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
     internal string MissingReason = "not_enough_ingredient";
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
@@ -163,17 +164,18 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     public Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if(ExistingRemaining > 0) throw new Exception("new work queued before existing jobs were drained");
+        if (ExistingRemaining > 0) QueuedWhileExisting = true;
         QueueCalls++;
         if (Register) _works.Add(new(plan.OutputName, plan.FacilityName, "InProgress", false, 5));
         MaxQueue = Math.Max(MaxQueue, _works.Count);
         return Task.CompletedTask;
     }
-    public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
+    public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!TwoStageCollect) ApplyCollection(plan);
-        return Task.CompletedTask;
+        if (TwoStageCollect) return Task.FromResult(false);
+        ApplyCollection(plan);
+        return Task.FromResult(true);
     }
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
     {
@@ -277,14 +279,14 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         _works.Add(new(plan.OutputName, plan.FacilityName, "Completed", true, 0));
     }
 
-    public Task CollectAsync(AlteringPlan plan, CancellationToken ct)
+    public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         int completed = _works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (completed > 0)
             _items[plan.OutputName] = Count(plan.OutputName) + (long)completed * plan.ProducedPerWork;
         _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
