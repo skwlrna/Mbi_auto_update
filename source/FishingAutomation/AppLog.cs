@@ -13,7 +13,13 @@ public sealed class AppLog
         _maxBytes = maxBytes;
     }
 
-    public void Write(string text)
+    public void Write(string text) => WriteCore(text, publishToScreen: true);
+
+    // Routine polling can remain available in the file for diagnostics without
+    // flooding the on-screen log that the user watches during automation.
+    public void WriteBackground(string text) => WriteCore(text, publishToScreen: false);
+
+    private void WriteCore(string text, bool publishToScreen)
     {
         string line = $"[{DateTime.Now:HH:mm:ss.fff}] {text}";
         lock (_gate)
@@ -27,6 +33,7 @@ public sealed class AppLog
             }
             catch { }
         }
-        Line?.Invoke(line);
+        if (publishToScreen)
+            Line?.Invoke(line);
     }
 }
