@@ -177,6 +177,10 @@ jobs:
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
           if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
+          if ($screen -notmatch 'ConfirmFacilityTravelPopupAsync') { throw 'facility travel popup confirmation missing' }
+          if ($screen -notmatch '"이동할까요"' -or $screen -notmatch '"확인"' -or $screen -notmatch '"취소"') { throw 'generic facility travel dialog gates missing' }
+          if ($screen -match '"반호르"') { throw 'facility travel confirmation must not depend on a destination name' }
+          if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
