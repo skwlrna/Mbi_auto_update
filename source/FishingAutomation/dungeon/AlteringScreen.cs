@@ -15,6 +15,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
+    private static readonly Rectangle CollectVisualButton = new(15, 280, 105, 60);
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
@@ -54,13 +55,47 @@ internal sealed class AlteringScreen : IAlteringScreen
         if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
             return false;
 
-        if (await FindAsync(frame, CollectButton, "모두 받기", ct) is not null)
-            return true;
+        if (_cli is null)
+            return false;
 
-        // The button label is much larger and more stable than the tiny Space badge,
-        // but keep the compact OCR path as a fallback for anti-aliased UI text.
-        var compact = await _ocr.FindCompactLabelAsync(frame, CollectButton, "모두 받기", ct);
-        return compact.Found;
+        var worksResponse = await _cli.GetAlteringWorksAsync(ct);
+        if (!worksResponse.Success)
+        {
+            if (CliAutomationGuards.IsTransientLoadingRejection(worksResponse))
+                return false;
+            _ = AlteringQueries.ParseWorks(worksResponse); // preserve existing hard failure diagnostics
+        }
+
+        bool hasCompleted = AlteringQueries.ParseWorks(worksResponse)
+            .Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
+        if (!hasCompleted)
+            return false;
+
+        return HasCollectButtonVisual(frame);
+    }
+
+    private static bool HasCollectButtonVisual(Bitmap frame)
+    {
+        // Live completion screen: the active "모두 받기" control is a solid cyan/blue
+        // button at the far-left, while the same area is dark when nothing is ready.
+        // Keep the ROI left of the first circular work slot so its cyan 100% ring cannot
+        // be mistaken for the receive button.
+        var roi = Rectangle.Intersect(CollectVisualButton, new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width < 70 || roi.Height < 35)
+            return false;
+
+        int sampled = 0;
+        int blue = 0;
+        for (int y = roi.Top; y < roi.Bottom; y += 3)
+        for (int x = roi.Left; x < roi.Right; x += 3)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            if (p.B >= 120 && p.G >= 90 && p.B >= p.R + 50 && p.G >= p.R + 35)
+                blue++;
+        }
+
+        return sampled > 0 && blue * 100 >= sampled * 8;
     }
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
