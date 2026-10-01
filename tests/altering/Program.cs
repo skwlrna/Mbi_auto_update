@@ -23,6 +23,30 @@ Check(AlteringText.Normalize("목재 +") != AlteringText.Normalize("목재"), "p
 Check(AlteringText.IsCardCandidate("강철과", "강철괴"), "faint card is only a candidate for detail verification");
 Check(!AlteringText.IsCardCandidate("상급 목재", "상급 목재+") && !AlteringText.IsCardCandidate("철괴(광석)","철괴(철 광석)"), "candidate matching preserves recipe qualifiers");
 Check(new AlteringPlan(plan.FacilityName, "철괴(철 광석)", 1, 3, false).OutputName == "철괴", "ingredient-qualified recipe maps to output item");
+var estimatePlan = plan with { TargetQuantity = 10 };
+var estimateRecipe = new AlteringRecipe("강철괴", false, 3, "not_enough_ingredient",
+    new[] { new AlteringIngredient("철괴", 2, 3) }, plan.FacilityName);
+string estimate = AlteringMaterialEstimate.Describe(estimatePlan, estimateRecipe);
+Check(estimate.Contains("철괴 예상 8") && estimate.Contains("부족 약 5"),
+    "material preview projects remaining-work ingredient shortage without inventing hidden materials");
+
+string sessionPath = Path.Combine(Path.GetTempPath(), "mabi-altering-" + Guid.NewGuid().ToString("N") + ".json");
+var sessionStore = new AlteringSessionStore(sessionPath);
+var testIdentity = new CliIdentityContext("char-1", "테스트", "account-1", "서버A");
+var persisted = AlteringSessionState.Create(plan, testIdentity, 123, 2) with
+{
+    QueuedWorks = 5,
+    Stage = "재료 해결 · 철괴"
+};
+sessionStore.Save(persisted);
+var loadedSession = sessionStore.Load();
+Check(loadedSession is not null && loadedSession.MatchesPlan(plan) &&
+      loadedSession.MatchesIdentity(testIdentity) &&
+      loadedSession.QueuedWorks == 5 && loadedSession.BaselineQuantity == 123 &&
+      loadedSession.Stage.Contains("철괴"),
+    "altering session persists plan, identity, baseline, progress, and recursive stage");
+sessionStore.Delete();
+Check(!File.Exists(sessionPath), "completed session cleanup removes persisted resume state");
 try { (plan with { AllowPaidButton = true }).Validate(); throw new Exception("paid altering plan accepted"); }
 catch (InvalidDataException) { Check(true, "paid altering plans are rejected before execution"); }
 foreach (var bad in new[] { plan with { TargetQuantity = 0 }, plan with { ProducedPerWork = 0 }, plan with { FacilityName = "none" } })
@@ -85,6 +109,27 @@ var changedReasonAuto = new AlteringAutomation(
 await changedReasonAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(changedReasonResolver.Calls == 1 && changedReasonWorld.QueueCalls == 1,
     "concrete MissingIngredients resolve even when CLI reason text changes");
+var resumePlan = plan with { TargetQuantity = 3 };
+var resumeWorld = new FakeWorld(resumePlan);
+resumeWorld.AddPending();
+string resumePath = Path.Combine(Path.GetTempPath(), "mabi-altering-resume-" + Guid.NewGuid().ToString("N") + ".json");
+var resumeStore = new AlteringSessionStore(resumePath);
+var resumeSession = AlteringSessionState.Create(resumePlan, testIdentity, 0, 0) with
+{
+    PendingRegistration = true,
+    PendingBeforeMatchingCount = 0,
+    Stage = "작업 등록 확인"
+};
+resumeStore.Save(resumeSession);
+var resumeAuto = new AlteringAutomation(
+    resumeWorld, resumeWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, sessionStore: resumeStore, session: resumeSession);
+await resumeAuto.RunAsync(resumePlan, default);
+Check(resumeAuto.QueuedWorks == 1 && resumeWorld.QueueCalls == 0 && resumeWorld.Owned == 3,
+    "resume reconciles an interrupted confirmed registration without duplicate clicking");
+Check(!File.Exists(resumePath), "successful resumed production deletes the session checkpoint");
+
 var failed = new FakeWorld(plan) { Register = false };
 var failedAuto = new AlteringAutomation(failed, failed, (_, _) => Task.CompletedTask, 2);
 try { await failedAuto.RunAsync(plan, default); throw new Exception("unregistered click accepted"); }
