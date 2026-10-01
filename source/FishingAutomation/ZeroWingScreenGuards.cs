@@ -58,17 +58,46 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen
         var before = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
         decimal wingsBefore = SpiritWingSafety.Read(before);
 
-        T result = await run().ConfigureAwait(false);
+        T result = default!;
+        Exception? actionFailure = null;
+        try
+        {
+            result = await run().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            actionFailure = ex;
+        }
 
-        await _identity.VerifyAsync(ct).ConfigureAwait(false);
-        var after = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
-        decimal wingsAfter = SpiritWingSafety.Read(after);
-        SpiritWingSafety.EnsureNotSpent(wingsBefore, wingsAfter, action);
+        Exception? verificationFailure = null;
+        try
+        {
+            // Verification must still run after input failure or user cancellation.
+            // A separate bounded token prevents a cancelled action token from skipping
+            // the only check that can detect an unexpected wing spend.
+            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _identity.VerifyAsync(verifyCts.Token).ConfigureAwait(false);
+            var after = await CliAutomationGuards.CurrencySnapshotAsync(_cli, verifyCts.Token).ConfigureAwait(false);
+            decimal wingsAfter = SpiritWingSafety.Read(after);
+            SpiritWingSafety.EnsureNotSpent(wingsBefore, wingsAfter, action);
 
-        string[] changes = CliAutomationGuards.CurrencyChanges(before, after);
-        Log?.Invoke(changes.Length == 0
-            ? $"{action} · 정령의 날개 변화 없음 ({wingsAfter})"
-            : $"{action} · " + string.Join(" · ", changes));
+            string[] changes = CliAutomationGuards.CurrencyChanges(before, after);
+            Log?.Invoke(changes.Length == 0
+                ? $"{action} · 정령의 날개 변화 없음 ({wingsAfter})"
+                : $"{action} · " + string.Join(" · ", changes));
+        }
+        catch (Exception ex)
+        {
+            verificationFailure = ex;
+        }
+
+        if (verificationFailure is not null)
+        {
+            if (actionFailure is not null)
+                throw new AggregateException(actionFailure, verificationFailure);
+            throw verificationFailure;
+        }
+        if (actionFailure is not null) throw actionFailure;
         return result;
     }
 
@@ -98,27 +127,67 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen
         decimal wingsBefore = SpiritWingSafety.Read(before);
         _sessionWings = wingsBefore;
 
-        await _inner.StartAsync(plan, ct).ConfigureAwait(false);
+        Exception? actionFailure = null;
+        try
+        {
+            await _inner.StartAsync(plan, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            actionFailure = ex;
+        }
 
-        await VerifyAsync("[자동 채집] 일반 이동 시작", wingsBefore, ct).ConfigureAwait(false);
+        Exception? verificationFailure = await VerifyAfterActionAsync(
+            "[자동 채집] 일반 이동 시작", wingsBefore).ConfigureAwait(false);
+        if (verificationFailure is not null)
+        {
+            if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
+            throw verificationFailure;
+        }
+        if (actionFailure is not null) throw actionFailure;
     }
 
     public async Task StopAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         decimal before = _sessionWings ?? await CurrentWingsAsync(ct).ConfigureAwait(false);
-        await _inner.StopAsync(ct).ConfigureAwait(false);
-        await VerifyAsync("[자동 채집] 정지", before, ct).ConfigureAwait(false);
+
+        Exception? actionFailure = null;
+        try
+        {
+            await _inner.StopAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            actionFailure = ex;
+        }
+
+        Exception? verificationFailure = await VerifyAfterActionAsync("[자동 채집] 정지", before).ConfigureAwait(false);
         _sessionWings = null;
+        if (verificationFailure is not null)
+        {
+            if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
+            throw verificationFailure;
+        }
+        if (actionFailure is not null) throw actionFailure;
     }
 
-    private async Task VerifyAsync(string action, decimal baseline, CancellationToken ct)
+    private async Task<Exception?> VerifyAfterActionAsync(string action, decimal baseline)
     {
-        await _identity.VerifyAsync(ct).ConfigureAwait(false);
-        var current = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
-        decimal wings = SpiritWingSafety.Read(current);
-        SpiritWingSafety.EnsureNotSpent(baseline, wings, action);
-        Log?.Invoke($"{action} · 정령의 날개 변화 없음 ({wings})");
+        try
+        {
+            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _identity.VerifyAsync(verifyCts.Token).ConfigureAwait(false);
+            var current = await CliAutomationGuards.CurrencySnapshotAsync(_cli, verifyCts.Token).ConfigureAwait(false);
+            decimal wings = SpiritWingSafety.Read(current);
+            SpiritWingSafety.EnsureNotSpent(baseline, wings, action);
+            Log?.Invoke($"{action} · 정령의 날개 변화 없음 ({wings})");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
     }
 
     private async Task<decimal> CurrentWingsAsync(CancellationToken ct)
