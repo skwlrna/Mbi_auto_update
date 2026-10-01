@@ -94,6 +94,11 @@ public sealed partial class MainForm
 
             long adjustedBaseline = checked(session.BaselineQuantity + session.InitialExistingMinimum);
             long currentOutput = await rawAlteringData.ItemCountAsync(plan.OutputName, CancellationToken.None);
+            if (resuming && currentOutput < session.BaselineQuantity)
+                throw new InvalidOperationException(
+                    $"이어하기 기준 보유량보다 현재 {plan.OutputName} 수량이 적습니다: 기준 {session.BaselineQuantity:N0} / 현재 {currentOutput:N0}. " +
+                    "중간에 완성품이 소비된 것으로 볼 수 있어 목표 수량을 안전하게 계산할 수 없습니다.");
+
             _productionBaseline = adjustedBaseline;
             _productionLastMode = "가공";
             _productionDisplayName = plan.DisplayName;
