@@ -17,7 +17,7 @@ internal static class SpiritWingSafety
     }
 }
 
-internal sealed class ZeroWingAlteringScreen : IAlteringScreen
+internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
 {
     private readonly IAlteringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -47,6 +47,17 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
         => GuardAsync("[자동 가공] 설비 이동 후 완료품 수령",
             () => _inner.CollectAfterTravelAsync(plan, ct), ct);
+
+    public Task RecoverStallAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+        => GuardAsync("[자동 가공] 정체 화면 재판정", async () =>
+        {
+            if (_inner is not IAlteringRecoveryScreen recovery)
+                throw new InvalidOperationException("현재 가공 화면은 정체 복구를 지원하지 않습니다.");
+            await recovery.RecoverStallAsync(plan, attempt, reason, ct).ConfigureAwait(false);
+            return true;
+        }, ct);
+
 
     private async Task<T> GuardAsync<T>(string action, Func<Task<T>> run, CancellationToken ct)
     {
