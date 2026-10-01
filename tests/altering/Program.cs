@@ -208,7 +208,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             MakeRecipe("강철괴", 3, "금속 가공 시설",
                 new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 }),
             MakeRecipe("철괴(철 광석)", 3, "금속 가공 시설",
-                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 2 })
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 })
         });
     }
 
@@ -244,7 +244,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         IReadOnlyDictionary<string,long> ingredients = plan.DisplayName switch
         {
             "강철괴" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 },
-            "철괴(철 광석)" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 2 },
+            "철괴(철 광석)" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 },
             _ => throw new InvalidOperationException("unexpected recipe")
         };
         foreach (var ingredient in ingredients)
