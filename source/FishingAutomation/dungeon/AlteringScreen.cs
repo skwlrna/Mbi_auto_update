@@ -307,16 +307,60 @@ internal sealed class AlteringScreen : IAlteringScreen
     }
 
 
-    private async Task ConfirmFacilityTravelAsync(CancellationToken ct)
+    private async Task<bool> ConfirmFacilityTravelAsync(CancellationToken ct)
     {
-        // "설비로 이동" is the already-verified free navigation action.
-        // The game then opens its travel confirmation modal. Do not OCR the modal:
-        // wait for it to render and press Space exactly once.
-        ct.ThrowIfCancellationRequested();
-        await Task.Delay(800, ct);
-        Log?.Invoke("[자동 가공] 설비로 이동 후 확인 팝업 대기 완료 · Space 입력");
-        _input.TapScanCode(0x39);
-        await Task.Delay(900, ct);
+        // Do not OCR this modal. Its stable visual signal is the large green
+        // confirmation button in the lower-right area of the 800x1000 client.
+        // Press Space only after that button is actually visible.
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(200, ct);
+
+            using var frame = Capture(ct);
+            if (!HasBottomConfirmationModal(frame))
+                continue;
+
+            // One fresh frame prevents acting on a single capture artifact.
+            await Task.Delay(120, ct);
+            using var fresh = Capture(ct);
+            if (!HasBottomConfirmationModal(fresh))
+                continue;
+
+            Log?.Invoke("[자동 가공] 하단 확인 팝업 화면 감지 · Space 입력");
+            _input.TapScanCode(0x39);
+            await Task.Delay(900, ct);
+            return true;
+        }
+
+        Log?.Invoke("[자동 가공] 하단 확인 팝업 없음 · Space 입력 생략");
+        return false;
+    }
+
+    private static bool HasBottomConfirmationModal(Bitmap frame)
+    {
+        // Screenshot evidence: the modal's confirm control is a broad saturated-green
+        // button around the lower-right quarter. Sample sparsely so detection is fast.
+        var roi = Rectangle.Intersect(new Rectangle(370, 840, 270, 140),
+            new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width < 120 || roi.Height < 60)
+            return false;
+
+        int sampled = 0;
+        int green = 0;
+        for (int y = roi.Top; y < roi.Bottom; y += 4)
+        for (int x = roi.Left; x < roi.Right; x += 4)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            if (p.G >= 90 && p.G >= p.R + 45 && p.G >= p.B + 20)
+                green++;
+        }
+
+        // The real confirmation button covers roughly a quarter of this ROI.
+        // Eight percent leaves ample room for dimming/anti-aliasing while ordinary
+        // facility screens stay far below the threshold.
+        return sampled > 0 && green * 100 >= sampled * 8;
     }
 
     private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
@@ -337,8 +381,10 @@ internal sealed class AlteringScreen : IAlteringScreen
             _input.ClickClientPoint(_hwnd, move.Value.Center);
         }
 
-        await ConfirmFacilityTravelAsync(ct);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 이동 확인 Space 입력 완료 · 실제 이동 대기");
+        bool confirmationPressed = await ConfirmFacilityTravelAsync(ct);
+        Log?.Invoke(confirmationPressed
+            ? $"[자동 가공] {plan.ScreenTitle} · 이동 확인 Space 입력 완료 · 실제 이동 대기"
+            : $"[자동 가공] {plan.ScreenTitle} · 확인 팝업 없음 · 직접 이동 여부 확인");
 
         bool sawDeparture = false;
         bool sawTravel = false;
