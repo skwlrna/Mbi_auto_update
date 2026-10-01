@@ -9,6 +9,7 @@ public sealed partial class MainForm
     private bool _productionPolling;
     private DateTime _productionNextPoll;
     private long? _productionBaseline;
+    private string _productionProgressSummary = "";
 
     private GatheringPlan SelectedGatheringPlan()
     {
@@ -265,7 +266,7 @@ public sealed partial class MainForm
             Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
             _search.TextChanged += (_, _) => Filter();
             Items.SelectedIndexChanged += (_, _) => SelectionChanged();
-            Quantity.ValueChanged += (_, _) => UpdateExecution();
+            Quantity.ValueChanged += (_, _) => SelectionChanged();
             Facility.SelectedIndexChanged += (_, _) => SelectionChanged();
             _condition.Text = "목록 확인 전"; Owned.Text = "—"; UpdateExecution();
         }
@@ -472,7 +473,9 @@ public sealed partial class MainForm
                         .Select(x => (object)new GatheringChoice(x)).ToArray();
                 _loaded = true;
                 if (IsDisposed) return;
-                Filter(); CliStatus = "정상";
+                Filter();
+                ApplySavedAlteringSessionSelection();
+                CliStatus = "정상";
                 await _owner.RefreshProductionStateAsync(this);
             }
             catch (Exception ex)
@@ -484,6 +487,33 @@ public sealed partial class MainForm
                 _owner._log.Write($"[{AccessibleName}] 목록 조회 실패: {ex.Message}");
             }
             finally { _loading = false; if (!IsDisposed) UpdateExecution(); }
+        }
+
+        private void ApplySavedAlteringSessionSelection()
+        {
+            if (!IsAltering) return;
+            try
+            {
+                var saved = new AlteringSessionStore().Load();
+                if (saved is null) return;
+
+                int recipeIndex = Items.Items.Cast<object>().ToList().FindIndex(x =>
+                    x is RecipeChoice r && r.Recipe.DisplayName == saved.DisplayName);
+                if (recipeIndex < 0) return;
+
+                Items.SelectedIndex = recipeIndex;
+                if (Facility.Items.Contains(saved.FacilityName))
+                    Facility.SelectedItem = saved.FacilityName;
+                Quantity.Value = Math.Clamp(saved.TargetQuantity, (int)Quantity.Minimum, (int)Quantity.Maximum);
+                _owner._productionProgressSummary =
+                    $"이어하기 대기 · {saved.DisplayName} · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 마지막 단계 {saved.Stage}";
+                _owner._log.Write(
+                    $"[자동 가공] 이어하기 기록 발견 · {saved.DisplayName} {saved.TargetQuantity}개 · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 단계={saved.Stage}");
+            }
+            catch (Exception ex)
+            {
+                _owner._log.Write("[자동 가공] 이어하기 기록 확인 실패: " + ex.Message);
+            }
         }
 
         private void Filter()
@@ -507,10 +537,11 @@ public sealed partial class MainForm
             {
                 _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.MissingIngredients.Count > 0 ? "재료 부족" : "확인 필요";
                 _condition.ForeColor = r.Recipe.Alterable ? Green : Color.Orange;
-                // MissingIngredients is not a complete bill of materials; never invent it.
-                _materials.Text = (r.Recipe.MissingIngredients.Count > 0
-                    ? string.Join(" / ", r.Recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Required}개 · 보유 {x.Owned}개"))
-                    : "재료 상세 정보 확인 필요") + $" · 1회 {r.Recipe.ProducedPerWork}개";
+                string facility = Facility.SelectedItem?.ToString() ?? AlteringPlan.Facilities[0];
+                var previewPlan = new AlteringPlan(
+                    facility, r.Recipe.DisplayName, (int)Quantity.Value, r.Recipe.ProducedPerWork, false);
+                _materials.Text = AlteringMaterialEstimate.Describe(previewPlan, r.Recipe) +
+                    $" · 1회 {r.Recipe.ProducedPerWork}개";
             }
             else { _condition.Text = "품목을 선택하세요"; _materials.Text = "—"; Owned.Text = "—"; }
             UpdateExecution();
@@ -543,7 +574,14 @@ public sealed partial class MainForm
             _cli.Text = "CLI 상태\n" + CliStatus; _character.Text = "캐릭터\n" + CharacterStatus;
             _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
             _character.ForeColor = CharacterStatus == "확인됨" ? Green : Muted;
-            _collection.Text = IsAltering ? $"완료 대기 작업 수  {CompletedWorks?.ToString() ?? "—"}   ·   완료품 자동 수령  {(ownRun ? "작동 중" : "대기")}" : "목표 수량은 현재 보유량에서 추가로 수집할 수량입니다.";
+            _collection.Text = IsAltering
+                ? ownRun && !string.IsNullOrWhiteSpace(_owner._productionProgressSummary)
+                    ? _owner._productionProgressSummary
+                    : !ownRun && !string.IsNullOrWhiteSpace(_owner._productionProgressSummary) &&
+                      _owner._productionProgressSummary.StartsWith("이어하기 대기", StringComparison.Ordinal)
+                        ? _owner._productionProgressSummary
+                        : $"완료 대기 작업 수  {CompletedWorks?.ToString() ?? "—"}   ·   완료품 자동 수령  {(ownRun ? "작동 중" : "대기")}"
+                : "목표 수량은 현재 보유량에서 추가로 수집할 수량입니다.";
         }
     }
     private string? _productionLastMode;
