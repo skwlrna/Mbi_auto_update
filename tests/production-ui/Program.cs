@@ -29,6 +29,9 @@ internal static class Program
             Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ComboBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
             var gi = All(gathering).OfType<ComboBox>().Single();
             var gq = All(gathering).OfType<NumericUpDown>().Single();
+            Check(!gq.Controls.Cast<Control>().Any(x =>
+                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
+                "gathering target quantity hides numeric up/down arrow buttons");
             Check(gi.Items.Count == 3 && gi.Items[1]!.ToString() == "상급 통나무+", "gathering dropdown uses actual CLI catalog including plus name");
             gi.SelectedIndex = 2; Pump();
             var gs = All(gathering).OfType<Button>().Single(x => x.AccessibleName == "자동 채집 시작");
