@@ -17,6 +17,8 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
+    private static readonly Rectangle FacilityTravelCancelButton = new(185, 850, 190, 120);
+    private static readonly Rectangle FacilityTravelConfirmButton = new(390, 850, 235, 120);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     internal string InputMode => _input.ModeName;
     internal event Action<string>? Log;
@@ -309,20 +311,19 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     private async Task<bool> ConfirmFacilityTravelPopupAsync(CancellationToken ct)
     {
-        // Destination text varies. The question is usually a full sentence ending in
-        // "... 이동할까요?", so exact-label matching cannot be used here.
-        // Authorize Space only when the dialog sentence contains the generic travel
-        // question and both confirm/cancel controls are present on two fresh frames.
-        for (int wait = 0; wait < 8; wait++)
+        // Destination names vary. The stable part of this modal is the pair of
+        // bottom controls: left "취소" and right "확인". The sentence above them is
+        // informational only because OCR can split or alter the destination text.
+        // Require both controls on two fresh frames, then press Space exactly once.
+        for (int wait = 0; wait < 16; wait++)
         {
             ct.ThrowIfCancellationRequested();
 
             using var first = Capture(ct);
-            bool question1 = await HasFacilityTravelQuestionAsync(first, ct);
-            bool confirm1 = await HasDialogButtonAsync(first, "확인", ct);
-            bool cancel1 = await HasDialogButtonAsync(first, "취소", ct);
+            bool confirm1 = await HasDialogButtonAsync(first, FacilityTravelConfirmButton, "확인", ct);
+            bool cancel1 = await HasDialogButtonAsync(first, FacilityTravelCancelButton, "취소", ct);
 
-            if (!question1 || !confirm1 || !cancel1)
+            if (!confirm1 || !cancel1)
             {
                 await Task.Delay(250, ct);
                 continue;
@@ -330,40 +331,27 @@ internal sealed class AlteringScreen : IAlteringScreen
 
             await Task.Delay(180, ct);
             using var second = Capture(ct);
-            bool question2 = await HasFacilityTravelQuestionAsync(second, ct);
-            bool confirm2 = await HasDialogButtonAsync(second, "확인", ct);
-            bool cancel2 = await HasDialogButtonAsync(second, "취소", ct);
+            bool confirm2 = await HasDialogButtonAsync(second, FacilityTravelConfirmButton, "확인", ct);
+            bool cancel2 = await HasDialogButtonAsync(second, FacilityTravelCancelButton, "취소", ct);
 
-            if (!question2 || !confirm2 || !cancel2)
+            if (!confirm2 || !cancel2)
                 continue;
 
-            Log?.Invoke("[자동 가공] 설비 이동 확인 팝업 · 목적지명 무관 · Space로 확인");
+            Log?.Invoke("[자동 가공] 설비 이동 확인 팝업 · 취소/확인 2프레임 확인 · Space 입력");
             _input.TapScanCode(0x39);
-            await Task.Delay(700, ct);
+            await Task.Delay(900, ct);
             return true;
         }
 
         return false;
     }
 
-    private async Task<bool> HasFacilityTravelQuestionAsync(Bitmap frame, CancellationToken ct)
+    private async Task<bool> HasDialogButtonAsync(Bitmap frame, Rectangle roi, string text, CancellationToken ct)
     {
-        string wanted = AlteringText.Normalize("이동할까요");
-        foreach (int scale in new[] { 2, 3 })
-        {
-            var lines = await _ocr.ReadLinesAsync(frame, FacilityTravelDialog, scale, ct);
-            if (lines.Any(x => AlteringText.Normalize(x.ReadText ?? "").Contains(wanted, StringComparison.OrdinalIgnoreCase)))
-                return true;
-        }
-        return false;
-    }
-
-    private async Task<bool> HasDialogButtonAsync(Bitmap frame, string text, CancellationToken ct)
-    {
-        if (await FindAsync(frame, FacilityTravelDialog, text, ct) is not null)
+        if (await FindAsync(frame, roi, text, ct) is not null)
             return true;
 
-        var compact = await _ocr.FindCompactLabelAsync(frame, FacilityTravelDialog, text, ct);
+        var compact = await _ocr.FindCompactLabelAsync(frame, roi, text, ct);
         return compact.Found;
     }
 
