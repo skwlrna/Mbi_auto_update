@@ -341,6 +341,11 @@ jobs:
           if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
           $queries = Get-Content source/FishingAutomation/GatheringQueries.cs -Raw
           if ($queries -match 'IsSafeField[^\r\n]*IsAutoPlaying' -or $queries -match '!IsAutoPlaying') { throw 'IsAutoPlaying must not be an unsafe-field gate' }
+          if ($queries -notmatch 'DescribeCatalogSchema') { throw 'read-only gatherable schema diagnostics missing' }
+          $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          $catalogLoader = [regex]::Match($productionPage, 'internal async Task LoadCatalogAsync[\s\S]*?(?=\r?\n        private void ApplySavedAlteringSessionSelection)').Value
+          if ($catalogLoader -notmatch 'GetGatherableItemsAsync' -or $catalogLoader -notmatch 'DescribeCatalogSchema') { throw 'gatherable schema probe is not wired to catalog refresh' }
+          if ($catalogLoader -match 'ExecuteGatheringAsync|ExecuteAlteringAsync|StopActionAsync|CompleteAlteringWorkAsync') { throw 'catalog schema probe must remain read-only' }
           if ($queries -match 'IsSafeField[\s\S]{0,300}!IsInBattlefield') { throw 'Battlefield flag must not be an unsafe-field gate' }
           $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
           if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
