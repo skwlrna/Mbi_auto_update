@@ -22,10 +22,11 @@ public sealed partial class MainForm
     {
         if (_alteringPage.Items.SelectedItem is not RecipeChoice choice)
             throw new InvalidOperationException("가공 제법 목록을 불러온 뒤 제법을 선택하세요.");
-        if (!choice.Recipe.Alterable) throw new InvalidOperationException("선택한 제법의 가공 조건을 확인하세요.");
-        // Preserve the existing direct-CLI first-row semantics and execution guards.
+        if (!choice.Recipe.Alterable && choice.Recipe.Reason != "not_enough_ingredient")
+            throw new InvalidOperationException("선택한 제법의 가공 조건을 확인하세요.");
+        // Missing ingredients are resolved recursively. Spirit Wings are never authorized.
         return new(_alteringPage.Facility.SelectedItem!.ToString()!, choice.Recipe.DisplayName,
-            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, true);
+            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, false);
     }
 
     private async Task RefreshProductionStateAsync(ProductionPage page)
@@ -103,7 +104,7 @@ public sealed partial class MainForm
         internal string? SelectedName => Items.SelectedItem switch
         { GatheringChoice g => g.Item.DisplayName, RecipeChoice r => r.Recipe.DisplayName, _ => null };
         internal string? OutputName => Items.SelectedItem is RecipeChoice r
-            ? new AlteringPlan(AlteringPlan.Facilities[0], r.Recipe.DisplayName, 1, r.Recipe.ProducedPerWork, true).OutputName : SelectedName;
+            ? new AlteringPlan(AlteringPlan.Facilities[0], r.Recipe.DisplayName, 1, r.Recipe.ProducedPerWork, false).OutputName : SelectedName;
 
         internal ProductionPage(MainForm owner, bool altering)
         {
