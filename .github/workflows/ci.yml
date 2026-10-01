@@ -178,10 +178,10 @@ jobs:
           if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
           if ($screen -notmatch 'ConfirmFacilityTravelPopupAsync') { throw 'facility travel popup confirmation missing' }
-          if ($screen -notmatch 'FacilityTravelCancelButton' -or $screen -notmatch 'FacilityTravelConfirmButton') { throw 'tight popup button ROIs missing' }
-          if ($screen -notmatch 'HasDialogButtonAsync\(first, FacilityTravelConfirmButton, "확인"' -or $screen -notmatch 'HasDialogButtonAsync\(first, FacilityTravelCancelButton, "취소"') { throw 'popup must require confirm/cancel controls' }
-          if ($screen -notmatch '취소/확인 2프레임 확인') { throw 'popup two-frame confirmation log missing' }
-          if ($screen -match '"반호르"') { throw 'facility travel confirmation must not depend on a destination name' }
+          if ($screen -notmatch 'FacilityTravelConfirmButton') { throw 'lower confirmation ROI missing' }
+          if ($screen -match 'FacilityTravelCancelButton') { throw 'travel popup must not depend on cancel button' }
+          if ($screen -notmatch 'HasDialogButtonAsync\(frame, FacilityTravelConfirmButton, "확인"') { throw 'travel popup must depend only on lower confirm button' }
+          if ($screen -notmatch '하단 확인창 감지') { throw 'lower confirmation log missing' }
           if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
