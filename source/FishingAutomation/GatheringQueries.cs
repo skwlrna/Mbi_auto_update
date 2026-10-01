@@ -11,14 +11,53 @@ internal sealed record GatheringActivity(bool IsDead, bool IsReviving, bool IsIn
 {
     internal bool IsGathering => MainButtonState == "Stop" && LastRunningInteractionType == "Gathering" && !IsAutoTraveling;
     internal bool IsFishing => MainButtonState is "Fishing" or "FishingPull";
-    internal bool IsSafeField => !IsDead && !IsReviving && !IsInCombat && !IsAutoPlaying &&
+    internal bool IsSafeField => !IsDead && !IsReviving && !IsInCombat &&
         !IsDialoguePlaying && !IsWaitingForSelection && DungeonState == "NotInDungeon" &&
-        !IsInBattlefield && !IsPlayingTutorial && !IsInScenario && !IsPlayingPerformance &&
+        !IsPlayingTutorial && !IsInScenario && !IsPlayingPerformance &&
         !IsPlayingMiniGame && !IsHousingEditMode;
 }
 
 internal static class GatheringQueries
 {
+    internal static string DescribeCatalogSchema(MabinogiCliResult response, string? selectedDisplayName = null)
+    {
+        var root = Data(response);
+        var rootFields = root.ValueKind == JsonValueKind.Object
+            ? root.EnumerateObject().Select(p => p.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray()
+            : Array.Empty<string>();
+
+        if (!root.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+            return "root=[" + string.Join(",", rootFields) + "] · items=없음";
+
+        var rows = items.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Object).ToArray();
+        var allFields = rows
+            .SelectMany(x => x.EnumerateObject().Select(p => p.Name))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        JsonElement? selected = null;
+        if (!string.IsNullOrWhiteSpace(selectedDisplayName))
+        {
+            foreach (var row in rows)
+            {
+                if (row.TryGetProperty("DisplayName", out var name) &&
+                    name.ValueKind == JsonValueKind.String &&
+                    string.Equals(name.GetString(), selectedDisplayName, StringComparison.Ordinal))
+                {
+                    selected = row;
+                    break;
+                }
+            }
+        }
+
+        string selectedFields = selected is JsonElement item
+            ? string.Join(", ", item.EnumerateObject().Select(p =>
+                p.Name + ":" + p.Value.ValueKind))
+            : "선택 품목 행 없음";
+
+        return $"root=[{string.Join(",", rootFields)}] · items={rows.Length} · itemFields=[{string.Join(",", allFields)}] · selected=[{selectedFields}]";
+    }
     internal static IReadOnlyList<GatherableItem> ParseCatalog(MabinogiCliResult response)
     {
         var root = Data(response);

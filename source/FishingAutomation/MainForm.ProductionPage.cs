@@ -9,6 +9,7 @@ public sealed partial class MainForm
     private bool _productionPolling;
     private DateTime _productionNextPoll;
     private long? _productionBaseline;
+    private string _productionProgressSummary = "";
 
     private GatheringPlan SelectedGatheringPlan()
     {
@@ -22,10 +23,24 @@ public sealed partial class MainForm
     {
         if (_alteringPage.Items.SelectedItem is not RecipeChoice choice)
             throw new InvalidOperationException("가공 제법 목록을 불러온 뒤 제법을 선택하세요.");
-        if (!choice.Recipe.Alterable) throw new InvalidOperationException("선택한 제법의 가공 조건을 확인하세요.");
-        // Preserve the existing direct-CLI first-row semantics and execution guards.
+
+        if (!choice.Recipe.Alterable)
+        {
+            string reason = choice.Recipe.Reason ?? "unknown";
+            string missing = choice.Recipe.MissingIngredients.Count == 0
+                ? "없음"
+                : string.Join(", ", choice.Recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}"));
+            _log.Write($"[자동 가공] 선택 제법 상태 · {choice.Recipe.DisplayName} · Alterable=false · Reason={reason} · Missing={missing}");
+
+            // MissingIngredients is stronger evidence than a localized/changed Reason string.
+            // If concrete deficits are present, let the recursive resolver handle them.
+            if (choice.Recipe.MissingIngredients.Count == 0)
+                throw new InvalidOperationException($"선택한 제법의 가공 조건을 확인하세요. Reason={reason} · Missing={missing}");
+        }
+
+        // Missing ingredients are resolved recursively. Spirit Wings are never authorized.
         return new(_alteringPage.Facility.SelectedItem!.ToString()!, choice.Recipe.DisplayName,
-            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, true);
+            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, false);
     }
 
     private async Task RefreshProductionStateAsync(ProductionPage page)
@@ -84,10 +99,17 @@ public sealed partial class MainForm
     {
         private readonly MainForm _owner;
         internal bool IsAltering { get; }
+        private readonly Button? _inspect;
         internal readonly ComboBox Items = new LauncherCombo(), Facility = new LauncherCombo();
-        internal readonly NumericUpDown Quantity = new() { Minimum = 1, Maximum = 1000000, Value = 100 };
+        internal readonly NumericUpDown Quantity;
         internal readonly Label Owned = new();
         private readonly TextBox _search = new();
+        private readonly Dictionary<string, Button> _facilityTabButtons = new(StringComparer.Ordinal);
+        private static readonly string[] FacilityUiOrder =
+        {
+            "목재 가공 시설", "금속 가공 시설", "가죽 가공 시설",
+            "옷감 가공 시설", "약품 가공 시설", "식재료 가공 시설"
+        };
         private readonly Label _condition = new(), _materials = new(), _progressText = new(), _elapsed = new(),
             _state = new(), _cli = new(), _character = new(), _collection = new();
         private readonly Label _selectedName = new(), _percentage = new();
@@ -96,7 +118,6 @@ public sealed partial class MainForm
         private int _percent;
         private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
-        private readonly Button? _inspect;
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
@@ -104,11 +125,17 @@ public sealed partial class MainForm
         internal string? SelectedName => Items.SelectedItem switch
         { GatheringChoice g => g.Item.DisplayName, RecipeChoice r => r.Recipe.DisplayName, _ => null };
         internal string? OutputName => Items.SelectedItem is RecipeChoice r
-            ? new AlteringPlan(AlteringPlan.Facilities[0], r.Recipe.DisplayName, 1, r.Recipe.ProducedPerWork, true).OutputName : SelectedName;
+            ? new AlteringPlan(AlteringPlan.Facilities[0], r.Recipe.DisplayName, 1, r.Recipe.ProducedPerWork, false).OutputName : SelectedName;
 
         internal ProductionPage(MainForm owner, bool altering)
         {
             _owner = owner; IsAltering = altering;
+            Quantity = new ArrowlessNumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 1000000,
+                Value = 100
+            };
             Name = altering ? "AlteringPage" : "GatheringPage";
             AccessibleName = altering ? "자동 가공" : "자동 채집";
             BackColor = WindowBg; ForeColor = TitleText; Visible = false;
@@ -119,16 +146,16 @@ public sealed partial class MainForm
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty };
             header.RowStyles.Add(new(SizeType.Percent, 58)); header.RowStyles.Add(new(SizeType.Percent, 42));
             header.Controls.Add(owner.SectionTitle(AccessibleName, 26));
-            header.Controls.Add(new Label { Text = altering ? "보유 재료로 원하는 아이템을 자동 가공합니다." : "CLI 조회·검사 가능 · 날개 5개 소모 시작은 무료 모드에서 차단됩니다.", Dock = DockStyle.Fill, ForeColor = Muted });
+            header.Controls.Add(new Label { Text = altering ? "보유 재료로 원하는 아이템을 자동 가공합니다." : "채집 재료를 자동으로 수집합니다.", Dock = DockStyle.Fill, ForeColor = Muted });
             root.Controls.Add(header, 0, 0);
 
             var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10) };
             settings.ColumnStyles.Add(new(SizeType.Percent, 62)); settings.ColumnStyles.Add(new(SizeType.Percent, 38));
             var card = new LauncherCard { Padding = new Padding(16, 9, 16, 9), Margin = new Padding(0, 0, 9, 0) };
-            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = altering ? 5 : 4, BackColor = Color.Transparent };
+            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, BackColor = Color.Transparent };
             form.ColumnStyles.Add(new(SizeType.Absolute, 112)); form.ColumnStyles.Add(new(SizeType.Percent, 100));
             form.RowStyles.Add(new(SizeType.Absolute, 32));
-            for (int i = 1; i < form.RowCount; i++) form.RowStyles.Add(new(SizeType.Percent, 100f / (form.RowCount-1)));
+            for (int i = 1; i < form.RowCount; i++) form.RowStyles.Add(new(SizeType.Percent, 100f / (form.RowCount - 1)));
             var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
             settingsHeading.Controls.Add(new Label { Text = altering ? "가공 설정" : "채집 설정", Dock = DockStyle.Fill, ForeColor = TitleText, Font = new Font("맑은 고딕", 15f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft });
             form.Controls.Add(settingsHeading, 0, 0); form.SetColumnSpan(settingsHeading, 2);
@@ -141,13 +168,32 @@ public sealed partial class MainForm
                 _inspect.Dock = DockStyle.Right; _inspect.Width = 90;
                 settingsHeading.Controls.Add(_inspect);
             }
-            _search.PlaceholderText = "품목을 검색하세요"; StyleField(_search); AddRow(form, 1, "품목 검색", _search);
+
+
             Items.DropDownStyle = ComboBoxStyle.DropDownList; StyleField(Items); StyleCombo(Items);
-            Items.AccessibleName = altering ? "가공 제법" : "채집 품목"; AddRow(form, 2, Items.AccessibleName, Items);
-            Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity); AddRow(form, 3, "목표 수량", Quantity);
-            StyleField(Facility); Facility.DropDownStyle = ComboBoxStyle.DropDownList; StyleCombo(Facility);
-            Facility.Items.AddRange(AlteringPlan.Facilities); Facility.SelectedIndex = 0;
-            if (altering) { Facility.AccessibleName = "가공 시설"; AddRow(form, 4, "가공 시설", Facility); }
+            Items.AccessibleName = altering ? "가공 제법" : "채집 품목";
+            Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity);
+
+            Facility.DropDownStyle = ComboBoxStyle.DropDownList;
+            Facility.Items.AddRange(FacilityUiOrder);
+            Facility.SelectedIndex = 0;
+
+            if (altering)
+            {
+                var facilityTabs = BuildFacilityTabs();
+                form.Controls.Add(facilityTabs, 0, 1); form.SetColumnSpan(facilityTabs, 2);
+                AddRow(form, 2, Items.AccessibleName, Items);
+                AddRow(form, 3, "목표 수량", Quantity);
+            }
+            else
+            {
+                _search.PlaceholderText = "품목을 검색하세요";
+                StyleField(_search);
+                AddRow(form, 1, "품목 검색", _search);
+                AddRow(form, 2, Items.AccessibleName, Items);
+                AddRow(form, 3, "목표 수량", Quantity);
+            }
+
             card.Controls.Add(form); settings.Controls.Add(card, 0, 0);
             var summaries = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
             summaries.RowStyles.Add(new(SizeType.Percent, 52)); summaries.RowStyles.Add(new(SizeType.Percent, 48));
@@ -257,11 +303,104 @@ public sealed partial class MainForm
                 fitting = false;
             }
             Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
-            _search.TextChanged += (_, _) => Filter();
+            _search.TextChanged += (_, _) => { if (!IsAltering) Filter(); };
             Items.SelectedIndexChanged += (_, _) => SelectionChanged();
-            Quantity.ValueChanged += (_, _) => UpdateExecution();
-            Facility.SelectedIndexChanged += (_, _) => SelectionChanged();
+            Quantity.ValueChanged += (_, _) => SelectionChanged();
+            Facility.SelectedIndexChanged += (_, _) =>
+            {
+                UpdateFacilityTabs();
+                Filter();
+            };
             _condition.Text = "목록 확인 전"; Owned.Text = "—"; UpdateExecution();
+        }
+
+        private TableLayoutPanel BuildFacilityTabs()
+        {
+            var tabs = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = FacilityUiOrder.Length,
+                RowCount = 1,
+                Margin = new Padding(0, 4, 0, 4),
+                BackColor = Color.Transparent,
+                AccessibleName = "가공 시설 탭"
+            };
+            tabs.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            foreach (string facility in FacilityUiOrder)
+            {
+                tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / FacilityUiOrder.Length));
+                string title = facility switch
+                {
+                    "목재 가공 시설" => "목재",
+                    "금속 가공 시설" => "금속",
+                    "가죽 가공 시설" => "가죽",
+                    "옷감 가공 시설" => "옷감",
+                    "약품 가공 시설" => "약품",
+                    "식재료 가공 시설" => "식재료",
+                    _ => facility.Replace(" 시설", "")
+                };
+                var button = PageButton(title, () =>
+                {
+                    if (Facility.Items.Contains(facility))
+                        Facility.SelectedItem = facility;
+                });
+                button.AccessibleName = "가공 시설 " + title;
+                button.Margin = new Padding(2);
+                button.Font = new Font("맑은 고딕", 10.5f, FontStyle.Bold);
+                _facilityTabButtons[facility] = button;
+                tabs.Controls.Add(button);
+            }
+
+            UpdateFacilityTabs();
+            return tabs;
+        }
+
+        private void UpdateFacilityTabs()
+        {
+            string? selected = Facility.SelectedItem?.ToString();
+            foreach (var pair in _facilityTabButtons)
+            {
+                pair.Value.BackColor = pair.Key == selected ? Accent : CardBg2;
+                pair.Value.ForeColor = pair.Key == selected ? Color.White : TitleText;
+                pair.Value.Invalidate();
+            }
+        }
+
+        private static string? RecipeFacility(AlteringRecipe recipe)
+            => AlteringFacilityResolver.Resolve(recipe);
+
+        private sealed class ArrowlessNumericUpDown : NumericUpDown
+        {
+            protected override void OnCreateControl()
+            {
+                base.OnCreateControl();
+                HideArrowButtons();
+            }
+
+            protected override void OnResize(EventArgs e)
+            {
+                base.OnResize(e);
+                HideArrowButtons();
+            }
+
+            private void HideArrowButtons()
+            {
+                foreach (Control child in Controls)
+                {
+                    string typeName = child.GetType().Name;
+                    if (typeName.Contains("UpDownButtons", StringComparison.Ordinal))
+                    {
+                        child.Visible = false;
+                        child.Width = 0;
+                    }
+                    else if (typeName.Contains("UpDownEdit", StringComparison.Ordinal))
+                    {
+                        child.Dock = DockStyle.Fill;
+                        child.Width = ClientSize.Width;
+                    }
+                }
+            }
         }
 
         private static void StyleField(Control control)
@@ -455,18 +594,34 @@ public sealed partial class MainForm
 
         internal async Task LoadCatalogAsync(bool force = false)
         {
-            if (_loading || (_loaded && !force) || _owner.AnyRunning) return;
+            if (_loading || (_loaded && !force) || _owner.AnyRunning || _owner._gatheringDiagnosticRunning) return;
             _loading = true; UpdateExecution();
             try
             {
-                _choices = IsAltering
-                    ? (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
-                        .GroupBy(x => x.DisplayName, StringComparer.Ordinal).Select(g => (object)new RecipeChoice(g.First())).ToArray()
-                    : (await new GatheringCliData(_owner._cli).CatalogAsync(CancellationToken.None))
+                if (IsAltering)
+                {
+                    _choices = (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
+                        .GroupBy(x => (Facility: RecipeFacility(x), x.DisplayName))
+                        .Select(g => (object)new RecipeChoice(g.First())).ToArray();
+                }
+                else
+                {
+                    string? selectedBeforeRefresh = SelectedName;
+                    var raw = await _owner._cli.GetGatherableItemsAsync(CancellationToken.None);
+                    if (!raw.Success)
+                        throw new InvalidDataException("채집 목록 원본 조회에 실패했습니다.");
+
+                    _owner._log.Write("[자동 채집][CLI 구조] " +
+                        GatheringQueries.DescribeCatalogSchema(raw, selectedBeforeRefresh));
+
+                    _choices = GatheringQueries.ParseCatalog(raw)
                         .Select(x => (object)new GatheringChoice(x)).ToArray();
+                }
                 _loaded = true;
                 if (IsDisposed) return;
-                Filter(); CliStatus = "정상";
+                if (IsAltering) ApplySavedAlteringSessionSelection();
+                else Filter();
+                CliStatus = "정상";
                 await _owner.RefreshProductionStateAsync(this);
             }
             catch (Exception ex)
@@ -480,14 +635,58 @@ public sealed partial class MainForm
             finally { _loading = false; if (!IsDisposed) UpdateExecution(); }
         }
 
+        private void ApplySavedAlteringSessionSelection()
+        {
+            if (!IsAltering) return;
+            try
+            {
+                var saved = new AlteringSessionStore().Load();
+                if (saved is null)
+                {
+                    Filter();
+                    return;
+                }
+
+                if (Facility.Items.Contains(saved.FacilityName))
+                    Facility.SelectedItem = saved.FacilityName;
+                Filter();
+
+                int recipeIndex = Items.Items.Cast<object>().ToList().FindIndex(x =>
+                    x is RecipeChoice r && r.Recipe.DisplayName == saved.DisplayName);
+                if (recipeIndex < 0) return;
+
+                Items.SelectedIndex = recipeIndex;
+                Quantity.Value = Math.Clamp(saved.TargetQuantity, (int)Quantity.Minimum, (int)Quantity.Maximum);
+                _owner._productionProgressSummary =
+                    $"이어하기 대기 · {saved.DisplayName} · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 마지막 단계 {saved.Stage}";
+                _owner._log.Write(
+                    $"[자동 가공] 이어하기 기록 발견 · {saved.DisplayName} {saved.TargetQuantity}개 · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 단계={saved.Stage}");
+            }
+            catch (Exception ex)
+            {
+                _owner._log.Write("[자동 가공] 이어하기 기록 확인 실패: " + ex.Message);
+            }
+        }
+
         private void Filter()
         {
             string? previous = SelectedName;
-            Items.BeginUpdate(); Items.Items.Clear();
-            Items.Items.AddRange(_choices.Where(x => x.ToString()!.Contains(_search.Text.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray());
+            IEnumerable<object> visible = _choices;
+
+            if (IsAltering && Facility.SelectedItem is string facility)
+                visible = visible.Where(x => x is RecipeChoice r &&
+                    RecipeFacility(r.Recipe) == facility);
+            else if (!IsAltering)
+                visible = visible.Where(x =>
+                    x.ToString()!.Contains(_search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            Items.BeginUpdate();
+            Items.Items.Clear();
+            Items.Items.AddRange(visible.ToArray());
             int index = Items.Items.Cast<object>().ToList().FindIndex(x => x.ToString() == previous);
             if (Items.Items.Count > 0) Items.SelectedIndex = Math.Max(0, index);
-            Items.EndUpdate(); SelectionChanged();
+            Items.EndUpdate();
+            SelectionChanged();
         }
 
         private void SelectionChanged()
@@ -499,12 +698,13 @@ public sealed partial class MainForm
             { _condition.Text = g.Item.ToolOk ? "사용 가능" : "확인 필요"; _condition.ForeColor = g.Item.ToolOk ? Green : Color.Orange; _materials.Text = g.Item.ToolOk ? "선택 품목의 도구 사용 가능" : "채집 도구를 확인하세요"; }
             else if (Items.SelectedItem is RecipeChoice r)
             {
-                _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.Reason == "not_enough_ingredient" ? "재료 부족" : "확인 필요";
+                _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.MissingIngredients.Count > 0 ? "재료 부족" : "확인 필요";
                 _condition.ForeColor = r.Recipe.Alterable ? Green : Color.Orange;
-                // MissingIngredients is not a complete bill of materials; never invent it.
-                _materials.Text = (r.Recipe.MissingIngredients.Count > 0
-                    ? string.Join(" / ", r.Recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Required}개 · 보유 {x.Owned}개"))
-                    : "재료 상세 정보 확인 필요") + $" · 1회 {r.Recipe.ProducedPerWork}개";
+                string facility = Facility.SelectedItem?.ToString() ?? FacilityUiOrder[0];
+                var previewPlan = new AlteringPlan(
+                    facility, r.Recipe.DisplayName, (int)Quantity.Value, r.Recipe.ProducedPerWork, false);
+                _materials.Text = AlteringMaterialEstimate.Describe(previewPlan, r.Recipe) +
+                    $" · 1회 {r.Recipe.ProducedPerWork}개";
             }
             else { _condition.Text = "품목을 선택하세요"; _materials.Text = "—"; Owned.Text = "—"; }
             UpdateExecution();
@@ -512,11 +712,20 @@ public sealed partial class MainForm
 
         internal void UpdateExecution()
         {
-            bool running = _owner.AnyRunning || _owner._gatheringDiagnosticRunning;
-            bool available = Items.SelectedItem is GatheringChoice { Item.ToolOk: true } or RecipeChoice { Recipe.Alterable: true };
-            foreach (var field in new Control[] { Items, Quantity, Facility, _search, _reload }) field.Enabled = !running && !_loading;
-            _start.Enabled = !running && !_loading && available; _stop.Enabled = _owner.AnyRunning && !_owner._gatheringDiagnosticRunning;
-            if (_inspect is not null) _inspect.Enabled = !running && !_owner._starting && !_owner._productionPolling && !_loading && SelectedName is not null;
+            bool running = _owner.AnyRunning && !_owner._gatheringDiagnosticRunning;
+            bool busy = running || _owner._starting || _owner._gatheringDiagnosticRunning;
+            bool available = Items.SelectedItem switch
+            {
+                GatheringChoice { Item.ToolOk: true } => true,
+                RecipeChoice r => r.Recipe.Alterable || r.Recipe.MissingIngredients.Count > 0,
+                _ => false
+            };
+            foreach (var field in new Control[] { Items, Quantity, _reload }) field.Enabled = !busy && !_loading;
+            _search.Enabled = !busy && !_loading;
+            Facility.Enabled = !busy && !_loading;
+            foreach (var tab in _facilityTabButtons.Values) tab.Enabled = !busy && !_loading;
+            if (_inspect is not null) _inspect.Enabled = !busy && !_loading && SelectedName is not null;
+            _start.Enabled = !busy && !_loading && available; _stop.Enabled = running;
             bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
             bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
@@ -533,7 +742,14 @@ public sealed partial class MainForm
             _cli.Text = "CLI 상태\n" + CliStatus; _character.Text = "캐릭터\n" + CharacterStatus;
             _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
             _character.ForeColor = CharacterStatus == "확인됨" ? Green : Muted;
-            _collection.Text = IsAltering ? $"완료 대기 작업 수  {CompletedWorks?.ToString() ?? "—"}   ·   완료품 자동 수령  {(ownRun ? "작동 중" : "대기")}" : "목표 수량은 현재 보유량에서 추가로 수집할 수량입니다.";
+            _collection.Text = IsAltering
+                ? ownRun && !string.IsNullOrWhiteSpace(_owner._productionProgressSummary)
+                    ? _owner._productionProgressSummary
+                    : !ownRun && !string.IsNullOrWhiteSpace(_owner._productionProgressSummary) &&
+                      _owner._productionProgressSummary.StartsWith("이어하기 대기", StringComparison.Ordinal)
+                        ? _owner._productionProgressSummary
+                        : $"완료 대기 작업 수  {CompletedWorks?.ToString() ?? "—"}   ·   완료품 자동 수령  {(ownRun ? "작동 중" : "대기")}"
+                : "목표 수량은 현재 보유량에서 추가로 수집할 수량입니다.";
         }
     }
     private string? _productionLastMode;

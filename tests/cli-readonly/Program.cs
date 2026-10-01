@@ -24,57 +24,49 @@ foreach (bool zeroWing in new[] { true, false })
 }
 Check(launches == 0, "blocked commands launched a process");
 
-int freeActions = 0;
-var freeCli = new MabinogiMobileCli(log, true,
-    (_, _) => Task.FromResult(new CliProcessOutput(0, "{}", "")),
-    (_, _) => { freeActions++; return Task.FromResult(new CliProcessOutput(0, "{}", "")); });
-foreach (string name in new[] { "철 광석", "상급 통나무+", "", "get_items;execute_gathering" })
-{
-    var blocked = await freeCli.ExecuteGatheringAsync(name);
-    Check(blocked.State == "blocked" && blocked.Error == "gathering_requires_five_wings",
-        "zero-wing typed gathering must fail before process launch");
-}
-Check(freeActions == 0, "free gathering spent wings at process boundary");
-
 var actionCalls = new List<string[]>();
-var actionCli = new MabinogiMobileCli(log, false,
+var actionCli = new MabinogiMobileCli(log, true,
     (_, _) => Task.FromResult(new CliProcessOutput(0, "{}", "")),
     (arguments, _) =>
     {
         actionCalls.Add(arguments.ToArray());
         return Task.FromResult(new CliProcessOutput(0, "{\"result\":\"accepted\"}", ""));
     });
-Check((await actionCli.ExecuteGatheringAsync("철 광석")).Success, "execute_gathering typed action rejected");
-Check((await actionCli.ExecuteAlteringAsync("강철괴")).Success, "execute_altering typed action rejected");
-Check((await actionCli.CompleteAlteringWorkAsync("강철괴")).Success, "complete_altering_work typed action rejected");
-Check((await actionCli.StopActionAsync()).Success, "stop_action typed action rejected");
-Check(actionCalls.Count == 4, "typed action launch count mismatch");
-Check(actionCalls[0][0] == "execute_gathering" && actionCalls[1][0] == "execute_altering" &&
-      actionCalls[2][0] == "complete_altering_work" && actionCalls[3].SequenceEqual(new[] { "stop_action" }),
-    "typed action command names or stop_action shape changed");
-foreach (var call in actionCalls.Take(3))
+foreach (var result in new[]
 {
-    Check(call.Length == 2 && call[1].StartsWith("base64:", StringComparison.Ordinal), "action body is not a single base64 argument");
-    string json = Encoding.UTF8.GetString(Convert.FromBase64String(call[1]["base64:".Length..]));
-    using var body = JsonDocument.Parse(json);
-    Check(!string.IsNullOrWhiteSpace(body.RootElement.GetProperty("displayName").GetString()), "action displayName missing from body");
-}
-int beforeInvalid = actionCalls.Count;
-Check((await actionCli.ExecuteGatheringAsync("")).State == "blocked", "empty gathering name was accepted");
-Check(actionCalls.Count == beforeInvalid, "invalid typed action reached process runner");
+    await actionCli.ExecuteGatheringAsync("철 광석"),
+    await actionCli.ExecuteAlteringAsync("강철괴"),
+    await actionCli.CompleteAlteringWorkAsync("강철괴"),
+    await actionCli.StopActionAsync()
+})
+    Check(result.State == "blocked", "typed CLI action was not blocked");
+Check(actionCalls.Count == 0, "blocked typed CLI action reached process runner");
 
-var filteredArgs = MabinogiMobileCli.BuildFilteredQueryArguments("get_gatherable_items", "달걀");
-Check(filteredArgs.Count == 2 && filteredArgs[0] == "get_gatherable_items" &&
-      filteredArgs[1].StartsWith("base64:", StringComparison.Ordinal),
-    "filtered gatherable query argument shape changed");
-string filteredText = Encoding.UTF8.GetString(Convert.FromBase64String(filteredArgs[1]["base64:".Length..]));
-Check(filteredText == "달걀", "filtered gatherable query body encoding changed");
-try
+foreach (bool zeroWing in new[] { true, false })
 {
-    MabinogiMobileCli.BuildFilteredQueryArguments("status", "달걀");
-    throw new Exception("non-gather filtered query accepted");
+    var strictCli = new MabinogiMobileCli(log, zeroWing,
+        (_, _) => Task.FromResult(new CliProcessOutput(0, "{}", "")),
+        (_, _) => { launches++; return Task.FromResult(new CliProcessOutput(0, "{}", "")); });
+    Check((await strictCli.ExecuteGatheringAsync("달걀")).State == "blocked",
+        "five-wing execute_gathering is blocked for every config mode");
+    Check((await strictCli.ExecuteAlteringAsync("목재+")).State == "blocked", "paid altering cannot launch");
+    Check((await strictCli.StopActionAsync()).State == "blocked", "free screen stop cannot use CLI action");
 }
-catch (InvalidOperationException) { checks++; }
+Check(launches == 0, "no typed action crossed the process boundary");
+
+var filteredCalls = new List<string[]>();
+actionCli.RunFilteredQuery = (arguments, _) =>
+{
+    filteredCalls.Add(arguments.ToArray());
+    return Task.FromResult(new CliProcessOutput(0, "{\"items\":[{\"DisplayName\":\"달걀\",\"ToolOk\":true}]}", ""));
+};
+Check((await actionCli.GetGatherableItemsAsync("달걀")).Success, "read-only filter search failed");
+Check(filteredCalls.Count == 1 && filteredCalls[0][0] == "get_gatherable_items" &&
+    Encoding.UTF8.GetString(Convert.FromBase64String(filteredCalls[0][1][7..])) == "달걀",
+    "exact Korean filter body preserved");
+foreach (string bad in new[] { "", "\n달걀", new string('a', 257) })
+    Check((await actionCli.GetGatherableItemsAsync(bad)).State == "blocked", "invalid filter reaches runner");
+Check(filteredCalls.Count == 1 && actionCalls.Count == 0, "filter queries never use action runner");
 
 var wrappedStatus = MabinogiMobileCli.Parse("status", new(0,
     "{\"status\":\"accepted\",\"body\":\"{\\\"pipe\\\":\\\"connected\\\"}\"}", ""));
@@ -144,6 +136,28 @@ using var cancelled = new CancellationTokenSource();
 cancelled.Cancel();
 try { await defaults.StatusAsync(cancelled.Token); throw new Exception("cancellation ignored"); }
 catch (OperationCanceledException) { checks++; }
+
+int visibleBeforePolling = lines.Count;
+var quietPollingCli = new MabinogiMobileCli(log, true, (command, _) =>
+{
+    string stdout = command switch
+    {
+        "get_items" => "[]",
+        "get_my_info" => "{}",
+        "get_altering_works" => "{}",
+        "get_activity" => "{}",
+        _ => "{}"
+    };
+    return Task.FromResult(new CliProcessOutput(0, stdout, ""));
+});
+await quietPollingCli.GetItemsAsync();
+await quietPollingCli.GetMyInfoAsync();
+await quietPollingCli.GetAlteringWorksAsync();
+await quietPollingCli.GetActivityAsync();
+Check(lines.Count == visibleBeforePolling, "successful routine CLI polling leaked into on-screen log");
+Check(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cli-test.log")).Contains("[CLI] get_items: connected"),
+    "background CLI polling was not retained in the file log");
+
 Check(lines.Count > 0 && lines.All(x => x.Contains("[CLI]")), "existing logger integration failed");
 
 var recipes = AlteringQueries.ParseRecipes(MabinogiMobileCli.Parse("get_alterable_items", new(0,
@@ -179,15 +193,6 @@ if (args.Contains("--live"))
         if (command == "get_currencies") { CliAutomationGuards.ParseCurrencies(result); checks++; }
         if (command == "get_alterable_items") Check(AlteringQueries.ParseRecipes(result).Count > 0, "live recipe parsing failed");
         if (command == "get_altering_works") { AlteringQueries.ParseWorks(result); checks++; }
-    }
-
-    foreach (string filterName in new[] { "달걀", "밀", "우유" })
-    {
-        var filtered = await defaults.GetGatherableItemsAsync(filterName);
-        Console.WriteLine($"LIVE get_gatherable_items filter={filterName}: success={filtered.Success} state={filtered.State} exit={filtered.ExitCode}");
-        if (filtered.Data is JsonElement data)
-            Console.WriteLine(data.GetRawText());
-        Check(filtered.Success && filtered.Data is not null, $"Live filtered gatherable query failed: {filterName} {filtered.State}/{filtered.Error}");
     }
 }
 Console.WriteLine($"PASS {checks} checks");

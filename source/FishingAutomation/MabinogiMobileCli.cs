@@ -9,7 +9,7 @@ public sealed record MabinogiCliResult(string Command, bool Success, string Stat
 
 internal sealed record CliProcessOutput(int ExitCode, string Stdout, string Stderr);
 
-/// <summary>Allowlisted CLI connector with a process-boundary guard for paid gathering.</summary>
+/// <summary>Read-only CLI connector for automation. Cost/action commands are blocked at the process boundary.</summary>
 public sealed class MabinogiMobileCli
 {
     public const string DefaultPath = @"C:\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe";
@@ -75,10 +75,6 @@ public sealed class MabinogiMobileCli
 
     private async Task<MabinogiCliResult> ActionAsync(string command, string? displayName, CancellationToken token)
     {
-        // execute_gathering consumes FIVE spirit wings, even when requiresConfirm is false.
-        // Free gathering and diagnostics must never reach the action process boundary.
-        if (command == "execute_gathering" && ZeroWingMode)
-            return Finish(new(command, false, "blocked", null, null, "gathering_requires_five_wings"));
         if (!IsAllowedAction(command))
             return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
         if (command == "stop_action" ? displayName is not null :
@@ -179,10 +175,17 @@ public sealed class MabinogiMobileCli
 
     private MabinogiCliResult Finish(MabinogiCliResult result)
     {
-        // Inventory and environment data stay out of the existing log.
-        // Do not echo arbitrary rejected input or CLI stderr into the log.
+        // Never echo arbitrary rejected input or CLI stderr. Successful read-only
+        // polling is still written to the file, but hidden from the on-screen log.
+        // Failures/rejections plus startup status/capabilities remain visible.
         string label = result.State == "blocked" ? "blocked_command" : result.Command;
-        _log.Write($"[CLI] {label}: {result.State} · exit={result.ExitCode?.ToString() ?? "none"} · error={result.Error ?? "none"}");
+        string line = $"[CLI] {label}: {result.State} · exit={result.ExitCode?.ToString() ?? "none"} · error={result.Error ?? "none"}";
+        bool backgroundOnly = result.Success &&
+            result.Command is not ("status" or "capabilities");
+        if (backgroundOnly)
+            _log.WriteBackground(line);
+        else
+            _log.Write(line);
         return result;
     }
 
@@ -308,6 +311,8 @@ public sealed class MabinogiMobileCli
             or "get_items" or "get_activity" or "get_current_environment"
             or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
 
+    // execute_gathering consumes five spirit wings. The ZIP's free screen paths
+    // must never launch it, even if ZeroWingMode is false or requiresConfirm is false.
     private static bool IsAllowedAction(string command)
-        => command is "execute_gathering" or "execute_altering" or "complete_altering_work" or "stop_action";
+        => false;
 }

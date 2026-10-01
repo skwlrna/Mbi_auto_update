@@ -6,6 +6,39 @@ public sealed partial class MainForm
 {
     private string _gatheringDisplay = "품목·수량 선택";
 
+    private async Task<GatheringPlan> AttachFreeGatheringSourceAsync(GatheringPlan plan, CancellationToken ct)
+    {
+        if (plan.SourceRecipe is not null) return plan;
+
+        var recipes = await new AlteringCliData(_cli).RecipesAsync(ct);
+        var candidateRows = recipes
+            .Select((recipe, index) => new { recipe, index })
+            .Where(x => x.recipe.MissingIngredients.Any(m => m.DisplayName == plan.DisplayName))
+            .ToArray();
+        if (candidateRows.Length == 0)
+        {
+            _log.Write("[자동 채집] 대상 재료를 포함한 가공 제법을 CLI에서 찾지 못했습니다. 재료 상세/구하는 방법 화면에서 시작합니다.");
+            return plan;
+        }
+
+        var chosen = candidateRows
+            .OrderBy(x => x.recipe.DisplayName, StringComparer.Ordinal)
+            .ThenBy(x => x.index)
+            .First();
+        string? facility = chosen.recipe.FacilityName;
+        if (string.IsNullOrWhiteSpace(facility) || !AlteringPlan.Facilities.Contains(facility))
+        {
+            _log.Write("[자동 채집] 시작 가공 시설을 확인할 수 없어 재료 상세/구하는 방법 화면에서 시작합니다.");
+            return plan;
+        }
+
+        int ordinal = recipes.Take(chosen.index + 1).Count(x => x.DisplayName == chosen.recipe.DisplayName);
+        var source = new AlteringPlan(
+            facility, chosen.recipe.DisplayName, 1, chosen.recipe.ProducedPerWork, false, ordinal);
+        _log.Write($"[자동 채집] 무료 시작 경로 · {source.ScreenTitle} > {source.DisplayName} > {plan.DisplayName}");
+        return plan with { SourceRecipe = source };
+    }
+
     private async Task StartGatheringAsync()
     {
         _starting = true; _cancelStart = false;
@@ -13,47 +46,26 @@ public sealed partial class MainForm
         {
             var plan = SelectedGatheringPlan();
             plan.Validate();
-            // Never treat F9, ToolOk or requiresConfirm as authorization to spend wings.
-            if (_cli.ZeroWingMode)
-                throw new InvalidOperationException("자동 채집 시작 차단: execute_gathering은 정령의 날개 5개를 소모합니다. 무료 시작 경로가 검증될 때까지 CLI 검사만 사용할 수 있습니다.");
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",
-                "get_inventory", "get_items", "execute_gathering", "stop_action"
+                "get_inventory", "get_items", "get_alterable_items"
             };
             var capabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(_cli, requiredCommands, CancellationToken.None);
             var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
             _log.Write("[자동 채집] CLI capabilities 확인 완료 · 필수 명령 " + requiredCommands.Length + "개");
-            _log.Write("[자동 채집][CLI 전체 명령] " +
-                string.Join(", ", capabilities.Keys.OrderBy(x => x, StringComparer.Ordinal)));
             if (confirmCommands.Length > 0)
                 _log.Write("[자동 채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
 
-            var filtered = await _cli.GetGatherableItemsAsync(plan.DisplayName, CancellationToken.None);
-            if (filtered.Success && filtered.Data is System.Text.Json.JsonElement root &&
-                root.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                root.TryGetProperty("items", out var items) &&
-                items.ValueKind == System.Text.Json.JsonValueKind.Array)
-            {
-                var fields = new SortedSet<string>(StringComparer.Ordinal);
-                int exact = 0;
-                foreach (var row in items.EnumerateArray())
-                {
-                    if (row.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
-                    foreach (var property in row.EnumerateObject()) fields.Add(property.Name);
-                    if (row.TryGetProperty("DisplayName", out var displayName) &&
-                        displayName.ValueKind == System.Text.Json.JsonValueKind.String &&
-                        displayName.GetString() == plan.DisplayName)
-                        exact++;
-                }
-                _log.Write($"[자동 채집][CLI 직접검색] query={plan.DisplayName} · items={items.GetArrayLength()} · itemFields=[{string.Join(",", fields)}] · exact={exact}");
-            }
-            else
-            {
-                _log.Write($"[자동 채집][CLI 직접검색] query={plan.DisplayName} · 실패 · state={filtered.State} · error={filtered.Error ?? "none"}");
-            }
-
             var data = new GatheringCliData(_cli);
+            // Read-only exact filter search; paid execute_gathering is never used.
+            var filtered = await _cli.GetGatherableItemsAsync(plan.DisplayName, CancellationToken.None);
+            var exact = GatheringQueries.ParseCatalog(filtered)
+                .SingleOrDefault(x => x.DisplayName == plan.DisplayName);
+            if (exact is null || !exact.ToolOk)
+                throw new InvalidOperationException("CLI 직접검색에서 대상 품목 또는 채집 도구를 확인하지 못했습니다.");
+            _log.Write($"[자동 채집][CLI 직접검색] query={plan.DisplayName} · exact=1 · ToolOk=true");
+            plan = await AttachFreeGatheringSourceAsync(plan, CancellationToken.None);
             if (_cancelStart || IsDisposed) return;
             _productionLastMode = "채집";
             _productionDisplayName = plan.DisplayName;
@@ -65,7 +77,18 @@ public sealed partial class MainForm
             if (_cancelStart || IsDisposed) return;
             _log.Write("[자동 채집] 캐릭터 문맥 저장 · " + identity.Description);
             _gatheringPage.CharacterStatus = "확인됨";
-            var screen = new GatheringCliScreen(_cli, identity);
+
+            var windows = WindowTools.EnumerateVisibleWindows();
+            if (windows.Count != 1)
+                throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
+            var settings = LoadJson<AppSettings>(Path.Combine(AppContext.BaseDirectory, "dungeon", "config", "appsettings.json"));
+            WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
+            await Task.Delay(500);
+            if (_cancelStart || IsDisposed) return;
+
+            var visual = new GatheringScreen(
+                windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, data);
+            var screen = new ZeroWingGatheringScreen(visual, _cli, identity);
             var automation = new GatheringAutomation(data, screen);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
@@ -73,8 +96,9 @@ public sealed partial class MainForm
             _gatheringDisplay = $"{plan.DisplayName} {plan.TargetQuantity}개";
             _dungeonStartedAt = DateTime.Now; _dungeonStoppedAt = null;
             _dungeonCycles = _dungeonCompleted = 0; _runError = null;
-            _inputValue.Text = _dungeonInputName = screen.InputMode;
+            _inputValue.Text = _dungeonInputName = visual.InputMode;
             SetStatus("채집 시작 준비", Blue);
+            visual.Log += text=>Ui(()=>_log.Write(text));
             screen.Log += text=>Ui(()=>_log.Write(text));
             automation.Log += text => Ui(() =>
             {
@@ -85,7 +109,7 @@ public sealed partial class MainForm
                 UpdateStats();
                 RefreshProductionDashboard();
             });
-            _log.Write("[자동 채집] 시작(F9) · " + _gatheringDisplay);
+            _log.Write("[자동 채집] 시작(F9) · " + _gatheringDisplay + " · CLI 조회 전용 / 일반 이동");
             _dungeonTask = Task.Run(async () =>
             {
                 using (screen)
