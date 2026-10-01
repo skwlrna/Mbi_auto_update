@@ -8,6 +8,118 @@ internal sealed record AlteringRecipe(string DisplayName, bool Alterable, int Pr
 internal sealed record AlteringWork(string DisplayName, string FacilityName, string State,
     bool IsCompleted, long RemainingSeconds);
 
+internal static class AlteringFacilityResolver
+{
+    private static readonly HashSet<string> FoodRecipes = new(StringComparer.Ordinal)
+    {
+        "마요네즈", "밀가루", "치즈", "면", "생크림", "물에 불린 콩", "두부", "두유",
+        "숙성된 커다란 고기", "물에 불린 쌀", "밥", "말린 찻잎", "발효된 찻잎",
+        "헤이즐넛 오일", "오트밀"
+    };
+
+    private static readonly HashSet<string> MedicineRecipes = new(StringComparer.Ordinal)
+    {
+        "새록 버섯 진액", "튼튼 버섯 가루", "튼튼 버섯 진액",
+        "광휘의 결정(유령 반딧불이)", "새록 버섯 포자", "튼튼 버섯 포자",
+        "쑥쑥 버섯 포자", "쑥쑥 버섯 진액", "불꽃의 결정(석양 나비)", "아교",
+        "숨숨꽃 가루", "깔끔 버섯 포자", "깔끔 버섯 진액", "얼음의 결정(흰얼음풍뎅이)",
+        "마력 기폭제", "봉인된 분노의 파편", "봉인된 망각의 파편", "봉인된 야성의 파편",
+        "생채기꽃 가루", "증폭 버섯 포자", "증폭 버섯 진액", "전기의 결정(낙엽나방)",
+        "진정초 가루", "솔솔 버섯 포자", "솔솔 버섯 진액", "봉인의 결정(황혼잠자리)",
+        "환영 가루"
+    };
+
+    internal static string? Resolve(AlteringRecipe recipe)
+        => NormalizeFacility(recipe.FacilityName) ?? ResolveByName(recipe.DisplayName);
+
+    internal static string? FromJson(JsonElement item, string displayName)
+        => FindFacilityString(item) ?? ResolveByName(displayName);
+
+    private static string? FindFacilityString(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                return NormalizeFacility(value.GetString());
+            case JsonValueKind.Object:
+                foreach (var property in value.EnumerateObject())
+                {
+                    string? direct = NormalizeFacility(property.Name);
+                    if (direct is not null) return direct;
+                    string? nested = FindFacilityString(property.Value);
+                    if (nested is not null) return nested;
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var child in value.EnumerateArray())
+                {
+                    string? nested = FindFacilityString(child);
+                    if (nested is not null) return nested;
+                }
+                break;
+        }
+        return null;
+    }
+
+    private static string? NormalizeFacility(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        foreach (string facility in AlteringPlan.Facilities)
+        {
+            string title = facility.Replace(" 시설", "");
+            if (value.Equals(facility, StringComparison.Ordinal) ||
+                value.Equals(title, StringComparison.Ordinal) ||
+                value.Contains(facility, StringComparison.Ordinal) ||
+                value.Contains(title, StringComparison.Ordinal))
+                return facility;
+        }
+        return null;
+    }
+
+    private static string? ResolveByName(string displayName)
+    {
+        string output = System.Text.RegularExpressions.Regex
+            .Replace(displayName, @"\([^()]*\)$", "").Trim();
+
+        // Exact food names are checked before generic "가루/결정/포자" medicine
+        // patterns so names such as 밀가루 never fall into the medicine facility.
+        if (FoodRecipes.Contains(output))
+            return "식재료 가공 시설";
+        if (MedicineRecipes.Contains(displayName) || MedicineRecipes.Contains(output))
+            return "약품 가공 시설";
+
+        if (output.Contains("목재", StringComparison.Ordinal) ||
+            output.Contains("원목", StringComparison.Ordinal) ||
+            output.Contains("통나무", StringComparison.Ordinal))
+            return "목재 가공 시설";
+        if (output.Contains("괴", StringComparison.Ordinal) ||
+            output.Contains("철", StringComparison.Ordinal) ||
+            output.Contains("금속", StringComparison.Ordinal))
+            return "금속 가공 시설";
+        if (output.Contains("가죽", StringComparison.Ordinal) ||
+            output.Contains("피혁", StringComparison.Ordinal))
+            return "가죽 가공 시설";
+        if (output.Contains("옷감", StringComparison.Ordinal) ||
+            output.Contains("실크", StringComparison.Ordinal) ||
+            output.Contains("식물 섬유", StringComparison.Ordinal) ||
+            output.Contains("밧줄", StringComparison.Ordinal))
+            return "옷감 가공 시설";
+
+        if (output.Contains("버섯", StringComparison.Ordinal) ||
+            output.Contains("결정", StringComparison.Ordinal) ||
+            output.Contains("포자", StringComparison.Ordinal) ||
+            output.Contains("진액", StringComparison.Ordinal) ||
+            output.Contains("기폭제", StringComparison.Ordinal) ||
+            output.Contains("봉인된 ", StringComparison.Ordinal) ||
+            output.EndsWith("꽃 가루", StringComparison.Ordinal) ||
+            output.Equals("아교", StringComparison.Ordinal) ||
+            output.Equals("환영 가루", StringComparison.Ordinal))
+            return "약품 가공 시설";
+
+        return null;
+    }
+}
+
 /// <summary>Typed read-only data. This module never starts, collects, or cancels work.</summary>
 internal static class AlteringQueries
 {
@@ -33,10 +145,7 @@ internal static class AlteringQueries
                     missing.Add(new(RequireString(ingredient, "DisplayName"), required, owned));
                 }
             }
-            string? facility = null;
-            if (item.TryGetProperty("FacilityName", out var facilityValue) &&
-                facilityValue.ValueKind == JsonValueKind.String)
-                facility = facilityValue.GetString();
+            string? facility = AlteringFacilityResolver.FromJson(item, name);
             recipes.Add(new(name, alterable, produced, reason, missing, facility));
         }
         return recipes;
