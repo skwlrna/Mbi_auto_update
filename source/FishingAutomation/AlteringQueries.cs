@@ -33,7 +33,34 @@ internal static class AlteringFacilityResolver
         => NormalizeFacility(recipe.FacilityName) ?? ResolveByName(recipe.DisplayName);
 
     internal static string? FromJson(JsonElement item, string displayName)
-        => FindFacilityString(item) ?? ResolveByName(displayName);
+    {
+        if (item.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in item.EnumerateObject())
+            {
+                if (property.Name is "DisplayName" or "Reason" or "MissingIngredients")
+                    continue;
+
+                bool facilityMetadata =
+                    property.Name.Contains("Facility", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Contains("Category", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Contains("Group", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Contains("Station", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Contains("Alter", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Equals("Type", StringComparison.OrdinalIgnoreCase);
+
+                if (!facilityMetadata) continue;
+
+                string? direct = NormalizeFacility(property.Name);
+                if (direct is not null) return direct;
+
+                string? nested = FindFacilityString(property.Value);
+                if (nested is not null) return nested;
+            }
+        }
+
+        return ResolveByName(displayName);
+    }
 
     private static string? FindFacilityString(JsonElement value)
     {
