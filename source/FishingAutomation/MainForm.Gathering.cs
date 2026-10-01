@@ -21,8 +21,34 @@ public sealed partial class MainForm
             var capabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(_cli, requiredCommands, CancellationToken.None);
             var confirmCommands = requiredCommands.Where(x => capabilities[x].RequiresConfirm).ToArray();
             _log.Write("[자동 채집] CLI capabilities 확인 완료 · 필수 명령 " + requiredCommands.Length + "개");
+            _log.Write("[자동 채집][CLI 전체 명령] " +
+                string.Join(", ", capabilities.Keys.OrderBy(x => x, StringComparer.Ordinal)));
             if (confirmCommands.Length > 0)
                 _log.Write("[자동 채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
+
+            var filtered = await _cli.GetGatherableItemsAsync(plan.DisplayName, CancellationToken.None);
+            if (filtered.Success && filtered.Data is System.Text.Json.JsonElement root &&
+                root.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                root.TryGetProperty("items", out var items) &&
+                items.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                var fields = new SortedSet<string>(StringComparer.Ordinal);
+                int exact = 0;
+                foreach (var row in items.EnumerateArray())
+                {
+                    if (row.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                    foreach (var property in row.EnumerateObject()) fields.Add(property.Name);
+                    if (row.TryGetProperty("DisplayName", out var displayName) &&
+                        displayName.ValueKind == System.Text.Json.JsonValueKind.String &&
+                        displayName.GetString() == plan.DisplayName)
+                        exact++;
+                }
+                _log.Write($"[자동 채집][CLI 직접검색] query={plan.DisplayName} · items={items.GetArrayLength()} · itemFields=[{string.Join(",", fields)}] · exact={exact}");
+            }
+            else
+            {
+                _log.Write($"[자동 채집][CLI 직접검색] query={plan.DisplayName} · 실패 · state={filtered.State} · error={filtered.Error ?? "none"}");
+            }
 
             var data = new GatheringCliData(_cli);
             if (_cancelStart || IsDisposed) return;
