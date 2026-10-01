@@ -177,11 +177,12 @@ jobs:
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
           if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
-          if ($screen -notmatch 'ConfirmFacilityTravelPopupAsync') { throw 'facility travel popup confirmation missing' }
-          if ($screen -notmatch 'FacilityTravelConfirmButton') { throw 'lower confirmation ROI missing' }
-          if ($screen -match 'FacilityTravelCancelButton') { throw 'travel popup must not depend on cancel button' }
-          if ($screen -notmatch 'HasDialogButtonAsync\(frame, FacilityTravelConfirmButton, "확인"') { throw 'travel popup must depend only on lower confirm button' }
-          if ($screen -notmatch '하단 확인창 감지') { throw 'lower confirmation log missing' }
+          if ($screen -notmatch 'ConfirmFacilityTravelAsync') { throw 'facility travel confirmation flow missing' }
+          if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'visual popup detector missing' }
+          if ($screen -match 'HasDialogButtonAsync' -or $screen -match 'FacilityTravelConfirmButton') { throw 'travel popup must not depend on OCR labels' }
+          if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'green confirmation-button visual gate missing' }
+          if ($screen -notmatch '하단 확인 팝업 화면 감지') { throw 'visual popup confirmation log missing' }
+          if ($screen -notmatch '하단 확인 팝업 없음 · Space 입력 생략') { throw 'no-popup path must skip Space' }
           if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
