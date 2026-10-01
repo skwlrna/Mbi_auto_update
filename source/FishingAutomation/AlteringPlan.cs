@@ -151,58 +151,122 @@ internal sealed class AlteringAutomation
                 Log?.Invoke($"[자동 가공] 완료 · {plan.DisplayName} +{gained}개 · 등록 {QueuedWorks}회 · 버튼 비용 예약 {ReservedWings}개");
                 return;
             }
-            // The provided facility UI has seven slots. Do not spend a paid click when full.
-            bool full = works.Count(x => x.FacilityName == plan.FacilityName) >= 7;
-            if (QueuedWorks < plan.RequiredWorks && !full)
+            // The facility has seven work slots. Fill every currently free slot
+            // before entering the completion-wait path. Each slot is still verified
+            // through the read-only CLI before the next registration.
+            int facilityCount = works.Count(x => x.FacilityName == plan.FacilityName);
+            int freeSlots = Math.Max(0, 7 - facilityCount);
+            if (QueuedWorks < plan.RequiredWorks && freeSlots > 0)
             {
-                recipes = await _data.RecipesAsync(ct);
-                selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
-                if (selected.Length != plan.RecipeCount || selected.ElementAtOrDefault(plan.RecipeOrdinal - 1)?.ProducedPerWork != plan.ProducedPerWork)
-                    throw new InvalidOperationException("가공 제법 또는 생산 수량이 바뀌어 정지합니다.");
-                plan = plan with { VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName)) };
-                if (selected.Length < plan.RecipeOrdinal || !selected[plan.RecipeOrdinal - 1].Alterable)
-                {
-                    var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
-                    if (recipe is not null && recipe.MissingIngredients.Count > 0 && _supplyResolver is not null)
-                    {
-                        int remainingWorks = plan.RequiredWorks - QueuedWorks;
-                        string missingText = string.Join(", ", recipe.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}"));
-                        Log?.Invoke($"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
-                        await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
-                        recipes = await _data.RecipesAsync(ct);
-                        selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
-                        var refreshed = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
-                        if (refreshed is not null && refreshed.Alterable)
-                        {
-                            Log?.Invoke($"[자동 가공] 재료 재확인 완료 · {plan.DisplayName} 가공을 이어갑니다.");
-                            continue;
-                        }
-                    }
+                int batchGoal = Math.Min(freeSlots, plan.RequiredWorks - QueuedWorks);
+                int queuedThisBatch = 0;
+                Log?.Invoke($"[자동 가공] 일괄 등록 시작 · 빈 슬롯 {freeSlots}칸 · 이번 묶음 {batchGoal}작업 / 최대 {batchGoal * plan.ProducedPerWork}개");
 
-                    string reason = recipe?.Reason ?? "not_found";
-                    string missing = string.Join(", ", recipe?.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}") ?? Array.Empty<string>());
-                    throw new InvalidOperationException($"가공 불가: {reason} {missing}. 등록된 작업은 게임에 남습니다.");
-                }
-                int previous = outstanding.Length;
-                bool reserved = false;
-                await _screen.QueueAsync(plan, () =>
+                while (queuedThisBatch < batchGoal && QueuedWorks < plan.RequiredWorks)
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (reserved || !plan.AllowPaidButton || ReservedWings + 5 > plan.MaximumWings)
-                        throw new InvalidOperationException("정령의 날개 사용 시도가 0개 사용 원칙에 의해 차단되었습니다.");
-                    reserved = true; ReservedWings += 5;
-                }, ct);
-                // A paid click is never retried if registration is uncertain.
-                await VerifyAsync(async token =>
-                {
-                    int count = Matching(await _data.WorksAsync(token), plan).Count();
-                    if (count > previous + 1) throw new InvalidOperationException("동시에 다른 가공 작업이 등록되어 수량을 확정할 수 없습니다.");
-                    return count == previous + 1;
-                }, "작업 등록을 확인하지 못했습니다. 재화 중복 사용을 막기 위해 재클릭하지 않고 정지합니다.", ct);
-                QueuedWorks++;
-                Log?.Invoke($"[자동 가공] 작업 등록 확인 {QueuedWorks}/{plan.RequiredWorks} · {plan.DisplayName}");
+
+                    // Re-read availability before every slot. This keeps recursive
+                    // material resolution correct even when the current stock can only
+                    // support part of a seven-slot batch.
+                    recipes = await _data.RecipesAsync(ct);
+                    selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
+                    if (selected.Length != plan.RecipeCount ||
+                        selected.ElementAtOrDefault(plan.RecipeOrdinal - 1)?.ProducedPerWork != plan.ProducedPerWork)
+                        throw new InvalidOperationException("가공 제법 또는 생산 수량이 바뀌어 정지합니다.");
+
+                    plan = plan with
+                    {
+                        VerifiedOcrAlias = AlteringText.UniqueOcrAlias(
+                            plan.DisplayName, recipes.Select(x => x.DisplayName))
+                    };
+
+                    if (selected.Length < plan.RecipeOrdinal ||
+                        !selected[plan.RecipeOrdinal - 1].Alterable)
+                    {
+                        var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                        if (recipe is not null &&
+                            recipe.MissingIngredients.Count > 0 &&
+                            _supplyResolver is not null)
+                        {
+                            int remainingWorks = plan.RequiredWorks - QueuedWorks;
+                            string missingText = string.Join(", ",
+                                recipe.MissingIngredients.Select(x =>
+                                    $"{x.DisplayName} {x.Owned}/{x.Required}"));
+                            Log?.Invoke(
+                                $"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
+
+                            await _supplyResolver.ResolveAsync(
+                                plan, recipe, remainingWorks, ct);
+
+                            recipes = await _data.RecipesAsync(ct);
+                            selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
+                            var refreshed = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                            if (refreshed is not null && refreshed.Alterable)
+                            {
+                                Log?.Invoke(
+                                    $"[자동 가공] 재료 재확인 완료 · {plan.DisplayName} 가공을 이어갑니다.");
+                                continue;
+                            }
+                        }
+
+                        string reason = recipe?.Reason ?? "not_found";
+                        string missing = string.Join(", ",
+                            recipe?.MissingIngredients.Select(x =>
+                                $"{x.DisplayName} {x.Owned}/{x.Required}") ??
+                            Array.Empty<string>());
+                        throw new InvalidOperationException(
+                            $"가공 불가: {reason} {missing}. 등록된 작업은 게임에 남습니다.");
+                    }
+
+                    // Another process/user may have changed the queue while material
+                    // resolution was running. Re-check real free capacity immediately
+                    // before each registration.
+                    works = await _data.WorksAsync(ct);
+                    int currentFacilityCount = works.Count(x => x.FacilityName == plan.FacilityName);
+                    if (currentFacilityCount >= 7)
+                        break;
+
+                    int previous = Matching(works, plan).Count();
+                    bool reserved = false;
+                    await _screen.QueueAsync(plan, () =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (reserved || !plan.AllowPaidButton ||
+                            ReservedWings + 5 > plan.MaximumWings)
+                            throw new InvalidOperationException(
+                                "정령의 날개 사용 시도가 0개 사용 원칙에 의해 차단되었습니다.");
+                        reserved = true;
+                        ReservedWings += 5;
+                    }, ct);
+
+                    // Verify exactly one new work before sending the next free-screen
+                    // registration. No unverified multi-click burst is allowed.
+                    await VerifyAsync(async token =>
+                    {
+                        int count = Matching(await _data.WorksAsync(token), plan).Count();
+                        if (count > previous + 1)
+                            throw new InvalidOperationException(
+                                "동시에 다른 가공 작업이 등록되어 수량을 확정할 수 없습니다.");
+                        return count == previous + 1;
+                    }, "작업 등록을 확인하지 못했습니다. 재화 중복 사용을 막기 위해 재클릭하지 않고 정지합니다.", ct);
+
+                    QueuedWorks++;
+                    queuedThisBatch++;
+                    Log?.Invoke(
+                        $"[자동 가공] 일괄 등록 진행 {queuedThisBatch}/{batchGoal} · 전체 {QueuedWorks}/{plan.RequiredWorks} · {plan.DisplayName}");
+                }
+
+                if (queuedThisBatch > 0)
+                    Log?.Invoke(
+                        $"[자동 가공] 일괄 등록 완료 · {queuedThisBatch}작업 / {queuedThisBatch * plan.ProducedPerWork}개 생산 예약");
+
+                // Re-read queue state on the next outer turn. If slots remain, another
+                // batch starts immediately; otherwise completion waiting begins.
                 continue;
             }
+
+            bool full = facilityCount >= 7;
             if (full && !works.Any(x => x.FacilityName == plan.FacilityName && x.State == "InProgress"))
                 throw new InvalidOperationException("가공 대기열이 가득 찼지만 진행 중인 작업이 없습니다. 게임에서 작업 상태를 확인하세요.");
             var remaining = works.Where(x => x.FacilityName == plan.FacilityName && x.State == "InProgress")
