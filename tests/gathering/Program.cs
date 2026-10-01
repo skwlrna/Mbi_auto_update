@@ -41,6 +41,11 @@ var success=new FakeWorld();
 await new GatheringAutomation(success,success,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(success.Starts==1 && success.Stops==1 && success.Owned==106,"target counts new inventory only and stops after target");
 
+var silentComplete=new FakeWorld{SilentCompleteOnStart=true};
+await new GatheringAutomation(silentComplete,silentComplete,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(silentComplete.Starts==1 && silentComplete.Owned==105 && !silentComplete.State.IsGathering && !silentComplete.State.IsAutoTraveling,
+    "inventory target completion succeeds even when activity never exposes gathering/travel");
+
 var autoPlayingField = new FakeWorld { State = FakeWorld.Idle with { IsAutoPlaying = true } };
 await new GatheringAutomation(autoPlayingField,autoPlayingField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(autoPlayingField.Starts==1 && autoPlayingField.Owned>=105,
@@ -92,12 +97,24 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen
     internal GatheringActivity State=Idle;
     internal int Starts,Stops,Gain=2;
     internal long Owned=100;
-    internal bool Tool=true,Full,IgnoreStop,TravelOnStart;
+    internal bool Tool=true,Full,IgnoreStop,TravelOnStart,SilentCompleteOnStart;
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]{new GatherableItem("철 광석",Tool)});}
     public Task<GatheringActivity> ActivityAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(State);}
     public Task<(decimal Current,decimal Maximum)> WeightAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(((decimal)(Full?100:1),100m));}
     public Task<long> ItemCountAsync(string name,CancellationToken ct){ct.ThrowIfCancellationRequested();if(State.IsGathering)Owned+=Gain;return Task.FromResult(Owned);}
-    public Task StartAsync(GatheringPlan plan,CancellationToken ct){ct.ThrowIfCancellationRequested();Starts++;State=Idle with{MainButtonState="Stop",LastRunningInteractionType="Gathering",IsAutoTraveling=TravelOnStart};return Task.CompletedTask;}
+    public Task StartAsync(GatheringPlan plan,CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Starts++;
+        if(SilentCompleteOnStart)
+        {
+            Owned+=plan.TargetQuantity;
+            State=Idle;
+        }
+        else
+            State=Idle with{MainButtonState="Stop",LastRunningInteractionType="Gathering",IsAutoTraveling=TravelOnStart};
+        return Task.CompletedTask;
+    }
     public Task StopAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();Stops++;if(!IgnoreStop)State=Idle;return Task.CompletedTask;}
     public void Dispose(){}
 }
