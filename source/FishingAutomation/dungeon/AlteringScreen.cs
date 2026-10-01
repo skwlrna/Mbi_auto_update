@@ -8,18 +8,21 @@ internal sealed class AlteringScreen : IAlteringScreen
     private readonly WindowCapture _capture = new();
     private readonly OcrRecognizer _ocr = new();
     private readonly string _debugDir;
+    private readonly MabinogiMobileCli? _cli;
     private nint _hwnd;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
+    private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
+    private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     internal string InputMode => _input.ModeName;
     internal event Action<string>? Log;
 
-    internal AlteringScreen(nint hwnd, AppSettings settings, string debugDir)
+    internal AlteringScreen(nint hwnd, AppSettings settings, string debugDir, MabinogiMobileCli? cli = null)
     {
-        _hwnd = hwnd; _debugDir = debugDir;
+        _hwnd = hwnd; _debugDir = debugDir; _cli = cli;
         _input = new GuardedInputController(new InterceptionInput(settings.InterceptionMouseDevice, settings.InterceptionKeyboardDevice));
     }
 
@@ -219,23 +222,109 @@ internal sealed class AlteringScreen : IAlteringScreen
 
     public async Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
     {
+        plan.Validate();
+        if (plan.AllowPaidButton)
+            throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
+
+        // First inspect the selected recipe. If the character is already beside the
+        // facility, the detail card exposes the free "가공하기" button. When away from
+        // the facility, the same card exposes "가공하러 가기" with a 5-wing cost.
+        // The latter is observation-only and is never clicked.
         await EnterFacilityAsync(plan, ct);
         await SelectRecipeAsync(plan, ct);
+
+        if (!await HasFreeProcessButtonAsync(plan, ct))
+        {
+            using (var remote = Capture(ct))
+            {
+                if (await FindRecipeAsync(remote, plan, ct) is null)
+                    Fail(remote, "품목 상세 화면이 바뀌었습니다.");
+                var paid = await FindAsync(remote, RecipeActionButton, "가공하러 가기", ct);
+                if (paid is null)
+                    Fail(remote, "무료 가공하기 버튼도 원격 가공하러 가기 버튼도 확인하지 못했습니다.");
+                var cost = await FindAsync(remote, RecipeActionButton, "5", ct);
+                if (cost is null)
+                    Fail(remote, "원격 가공 버튼의 정령의 날개 5개 표시를 확인하지 못했습니다.");
+                Log?.Invoke("[자동 가공] 원격 가공 버튼 감지 · 클릭하지 않고 설비로 일반 이동합니다.");
+            }
+
+            _input.TapScanCode(0x01);
+            await Task.Delay(500, ct);
+            await EnterFacilityAsync(plan, ct);
+            await TravelToFacilityAsync(plan, ct);
+            await EnterFacilityAsync(plan, ct);
+            await SelectRecipeAsync(plan, ct);
+        }
+
+        // Two fresh observations are required immediately before the only registration
+        // click. The free label must be exact, and any paid label / wing-5 marker in the
+        // action area blocks input.
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
-            if (await FindRecipeAsync(frame, plan, ct) is null) Fail(frame, "품목 상세 화면이 바뀌었습니다.");
-            var paid = await FindAsync(frame, new(180, 860, 490, 130), "가공하러 가기", ct);
-            if (paid is null) Fail(frame, "허용된 가공하러 가기 버튼을 확인하지 못했습니다.");
-            var button = paid!.Value;
-            var costRoi = Rectangle.Intersect(Whole, new(button.Bounds.Left - 25, button.Bounds.Top - 5, button.Bounds.Width + 25, button.Bounds.Height + 10));
-            var cost = await FindAsync(frame, costRoi, "5", ct);
-            if (cost is null || cost.Value.Bounds.Right >= button.Bounds.Left) Fail(frame, "가공 버튼의 재화 5개 표시를 확인하지 못했습니다.");
+            if (await FindRecipeAsync(frame, plan, ct) is null)
+                Fail(frame, "품목 상세 화면이 바뀌었습니다.");
+            var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
+            var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
+            var cost = await FindAsync(frame, RecipeActionButton, "5", ct);
+            if (free is null || paid is not null || cost is not null)
+                Fail(frame, "무료 현장 가공하기 버튼을 안전하게 확인하지 못했습니다.");
             if (pass == 0) { await Task.Delay(200, ct); continue; }
-            // Reserve before input. Even an uncertain click cannot be repeated for free.
-            reserveFiveWings();
-            _input.ClickClientPoint(_hwnd, button.Center);
+
+            Log?.Invoke("[자동 가공] 무료 현장 가공하기 확인 · 정령의 날개 버튼 입력 없음");
+            _input.ClickClientPoint(_hwnd, free.Value.Center);
         }
+    }
+
+    private async Task<bool> HasFreeProcessButtonAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        using var frame = Capture(ct);
+        if (await FindRecipeAsync(frame, plan, ct) is null) return false;
+        var free = await FindAsync(frame, RecipeActionButton, "가공하기", ct);
+        var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
+        var cost = await FindAsync(frame, RecipeActionButton, "5", ct);
+        return free is not null && paid is null && cost is null;
+    }
+
+    private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        if (_cli is null)
+            throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
+            var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
+            if (move is null)
+                Fail(frame, "무료 설비로 이동 버튼을 확인하지 못했습니다.");
+            if (pass == 0) { await Task.Delay(180, ct); continue; }
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 일반 이동 시작");
+            _input.ClickClientPoint(_hwnd, move.Value.Center);
+        }
+
+        bool sawTravel = false;
+        for (int attempt = 0; attempt < 120; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(500, ct);
+            var activity = GatheringQueries.ParseActivity(await _cli.GetActivityAsync(ct));
+            if (!activity.IsSafeField)
+                throw new InvalidOperationException("설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+            if (activity.IsAutoTraveling)
+            {
+                sawTravel = true;
+                continue;
+            }
+            if (sawTravel || attempt >= 6)
+            {
+                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 일반 이동 종료 확인");
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("설비로 이동이 제한 시간 안에 끝나지 않아 정지합니다.");
     }
 
     // Free navigation only, for opening an ingredient's obtain-method route.
