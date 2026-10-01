@@ -107,8 +107,20 @@ internal sealed class GatheringCliScreen : IGatheringScreen
     public async Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (!_cli.ZeroWingMode)
+            throw new InvalidOperationException("ZeroWingMode가 꺼져 있어 자동 채집 실행을 차단합니다.");
+
         await _identity.VerifyAsync(ct).ConfigureAwait(false);
         var currenciesBefore = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
+        decimal wingsBefore = GatheringSpiritWings(currenciesBefore);
+
+        // execute_gathering may perform travel under the game CLI's rules. Because a
+        // post-action currency check cannot undo a spend, only run it when there are
+        // no Spirit Wings available to spend.
+        if (wingsBefore != 0)
+            throw new InvalidOperationException(
+                $"정령의 날개 0개 사용 원칙으로 CLI execute_gathering를 실행하지 않습니다. 현재 보유 {wingsBefore}개. " +
+                "무료 이동 경로가 확인되기 전에는 자동 채집을 중단합니다.");
 
         var result = await _cli.ExecuteGatheringAsync(plan.DisplayName, ct).ConfigureAwait(false);
         if (!result.Success)
@@ -116,11 +128,22 @@ internal sealed class GatheringCliScreen : IGatheringScreen
 
         await _identity.VerifyAsync(ct).ConfigureAwait(false);
         var currenciesAfter = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
+        decimal wingsAfter = GatheringSpiritWings(currenciesAfter);
+        if (wingsAfter != 0)
+            throw new InvalidOperationException("정령의 날개 수량이 0이 아닌 상태로 바뀌어 자동 채집을 즉시 중단합니다.");
+
         string[] changes = CliAutomationGuards.CurrencyChanges(currenciesBefore, currenciesAfter);
         Log?.Invoke(changes.Length == 0
-            ? "[자동 채집] 시작 재화 변화 · 변화 없음"
+            ? "[자동 채집] 시작 재화 변화 · 변화 없음 · 정령의 날개 0개 확인"
             : "[자동 채집] 시작 재화 변화 · " + string.Join(" · ", changes));
         Log?.Invoke($"[자동 채집] CLI execute_gathering 완료 · {plan.DisplayName} · 캐릭터 문맥 재확인");
+    }
+
+    private static decimal GatheringSpiritWings(IReadOnlyDictionary<string, decimal> currencies)
+    {
+        if (!currencies.TryGetValue("정령의 날개", out decimal amount))
+            throw new InvalidOperationException("정령의 날개 보유량을 확인할 수 없어 자동 채집 실행을 차단합니다.");
+        return amount;
     }
 
     public async Task StopAsync(CancellationToken ct)
