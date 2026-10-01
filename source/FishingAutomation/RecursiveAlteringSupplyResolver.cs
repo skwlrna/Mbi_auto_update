@@ -173,36 +173,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         => System.Text.RegularExpressions.Regex.Replace(displayName, @"\([^()]*\)$", "").Trim();
 
     private static string ResolveFacility(AlteringRecipe recipe, string outputName)
-    {
-        if (!string.IsNullOrWhiteSpace(recipe.FacilityName) &&
-            AlteringPlan.Facilities.Contains(recipe.FacilityName))
-            return recipe.FacilityName;
-
-        if (outputName.Contains("괴", StringComparison.Ordinal) ||
-            outputName.Contains("철", StringComparison.Ordinal) ||
-            outputName.Contains("금속", StringComparison.Ordinal))
-            return "금속 가공 시설";
-        if (outputName.Contains("목재", StringComparison.Ordinal) ||
-            outputName.Contains("원목", StringComparison.Ordinal) ||
-            outputName.Contains("통나무", StringComparison.Ordinal))
-            return "목재 가공 시설";
-        if (outputName.Contains("가죽", StringComparison.Ordinal) ||
-            outputName.Contains("피혁", StringComparison.Ordinal))
-            return "가죽 가공 시설";
-        if (outputName.Contains("옷감", StringComparison.Ordinal) ||
-            outputName.Contains("실크", StringComparison.Ordinal) ||
-            outputName.Contains("천", StringComparison.Ordinal) ||
-            outputName.Contains("실", StringComparison.Ordinal))
-            return "옷감 가공 시설";
-        if (outputName.Contains("물약", StringComparison.Ordinal) ||
-            outputName.Contains("비약", StringComparison.Ordinal) ||
-            outputName.Contains("가루", StringComparison.Ordinal) ||
-            outputName.Contains("항마석", StringComparison.Ordinal))
-            return "약품 가공 시설";
-        if (outputName.Contains("식재료", StringComparison.Ordinal) ||
-            outputName.Contains("요리", StringComparison.Ordinal))
-            return "식재료 가공 시설";
-
-        throw new InvalidOperationException($"{outputName}의 가공 시설을 CLI 정보에서 확인할 수 없습니다.");
-    }
+        => AlteringFacilityResolver.Resolve(recipe)
+            ?? throw new InvalidOperationException(
+                $"{outputName}의 가공 시설을 CLI 정보와 제법 이름에서 확인할 수 없습니다.");
 }
