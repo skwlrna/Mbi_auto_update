@@ -168,7 +168,10 @@ jobs:
           dotnet build tests/altering-visual/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Altering visual harness build failed' }
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
-          if ($screen -notmatch '"모두 받기"') { throw 'collect button OCR gate missing' }
+          if ($screen -notmatch 'HasCollectButtonVisual') { throw 'visual collect-button detector missing' }
+          if ($screen -notmatch 'GetAlteringWorksAsync' -or $screen -notmatch 'IsCompleted') { throw 'collect must require a completed CLI work' }
+          if ($screen -notmatch 'CollectVisualButton') { throw 'tight visual collect ROI missing' }
+          if ($screen -match 'FindAsync\([^\r\n]*CollectButton[^\r\n]*"모두 받기"' -or $screen -match 'FindCompactLabelAsync\([^\r\n]*CollectButton[^\r\n]*"모두 받기"') { throw 'collect must not depend on 모두 받기 OCR' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
           if ($screen -notmatch '설비 도착 후 무료 가공하기 확인') { throw 'on-site free processing confirmation log missing' }
           if ($screen -notmatch 'IsRecipeDetailAsync') { throw 'structural recipe detail fallback missing' }
@@ -189,6 +192,7 @@ jobs:
           if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'green confirmation-button visual gate missing' }
           if ($screen -notmatch '하단 확인 팝업 화면 감지') { throw 'visual popup confirmation log missing' }
           if ($screen -notmatch '하단 확인 팝업 없음 · Space 입력 생략') { throw 'no-popup path must skip Space' }
+          if ($screen -notmatch 'p\.B >= 120' -or $screen -notmatch 'blue \* 100 >= sampled \* 8') { throw 'blue collect-button visual gate missing' }
           if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
