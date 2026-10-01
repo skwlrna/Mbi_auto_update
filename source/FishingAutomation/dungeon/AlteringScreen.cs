@@ -2,7 +2,7 @@ using FishingAutomation;
 
 namespace DungeonVisionBot;
 
-internal sealed class AlteringScreen : IAlteringScreen
+internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
 {
     private readonly GuardedInputController _input;
     private readonly WindowCapture _capture = new();
@@ -834,6 +834,77 @@ internal sealed class AlteringScreen : IAlteringScreen
 
         return true;
     }
+    public async Task RecoverStallAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // A stall is the one time we deliberately discard fast-path assumptions.
+        // The next registration must prove the facility and recipe again from scratch.
+        _confirmedOnsiteFacility = null;
+        _cachedRecipeKey = null;
+        _hasCachedRecipeCenter = false;
+
+        using (var snapshot = Capture(ct))
+        {
+            Directory.CreateDirectory(_debugDir);
+            string path = Path.Combine(_debugDir, "altering-stall-last.png");
+            try
+            {
+                snapshot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                Log?.Invoke($"[자동 가공] 정체 진단 화면 저장 · {path}");
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"[자동 가공] 정체 진단 화면 저장 실패 · {ex.Message}");
+            }
+
+            bool sameFacility = await FindFacilityHeaderAsync(snapshot, plan.ScreenTitle, ct) is not null;
+            bool detailVisible = await FindAsync(
+                snapshot, new Rectangle(100, 690, 580, 200), "필요한 재료", ct) is not null;
+
+            if (detailVisible)
+            {
+                Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재=품목 상세 · Esc로 시설창 복귀");
+                _input.TapScanCode(0x01);
+                await Task.Delay(500, ct);
+            }
+            else if (sameFacility)
+            {
+                bool popupVisible = HasBottomConfirmationModal(snapshot);
+                bool moveVisible = !popupVisible &&
+                    await FindAsync(snapshot, FacilityMoveButton, "설비로 이동", ct) is not null;
+
+                if (!popupVisible)
+                {
+                    _confirmedOnsiteFacility = moveVisible ? null : plan.FacilityName;
+                    Log?.Invoke(moveVisible
+                        ? $"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={plan.ScreenTitle} 원격 시설창 · 입력 없이 대기 계속"
+                        : $"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={plan.ScreenTitle} 현장 시설창 · 입력 없이 대기 계속");
+                    return;
+                }
+
+                Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={plan.ScreenTitle} + 하단 팝업 · 임의 확인 입력 없이 시설창 재확인");
+            }
+            else
+            {
+                string state = await FindFacilityHeaderAsync(snapshot, "가공", ct) is not null
+                    ? "가공 허브"
+                    : "일반/전환 중";
+                Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={state} · 안전한 가공 시설창으로 복귀 시도");
+            }
+        }
+
+        // Only navigate back to the requested facility category. Recovery never calls
+        // TravelToFacilityAsync, SelectRecipeAsync, QueueAsync or any processing action.
+        await EnterFacilityAsync(plan, ct);
+        using var verified = Capture(ct);
+        if (await FindFacilityHeaderAsync(verified, plan.ScreenTitle, ct) is null)
+            Fail(verified, "정체 복구 후 가공 시설 화면을 확인하지 못했습니다.");
+
+        Log?.Invoke($"[자동 가공] 정체 화면 재판정 완료 · {plan.ScreenTitle} 시설창 확인 · 등록/가공 입력 없음 · {reason}");
+    }
+
     private void Fail(Bitmap frame, string message)
     {
         Directory.CreateDirectory(_debugDir);
