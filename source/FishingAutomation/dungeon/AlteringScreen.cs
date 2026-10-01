@@ -16,6 +16,7 @@ internal sealed class AlteringScreen : IAlteringScreen
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
+    private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     internal string InputMode => _input.ModeName;
     internal event Action<string>? Log;
@@ -306,6 +307,44 @@ internal sealed class AlteringScreen : IAlteringScreen
     }
 
 
+    private async Task<bool> ConfirmFacilityTravelPopupAsync(CancellationToken ct)
+    {
+        // The destination varies by facility/current location, so never match a place
+        // name such as "반호르". Only the generic travel question + confirm/cancel
+        // controls authorize the single Space confirmation.
+        for (int wait = 0; wait < 8; wait++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            using var first = Capture(ct);
+            var question1 = await FindAsync(first, FacilityTravelDialog, "이동할까요", ct);
+            var confirm1 = await FindAsync(first, FacilityTravelDialog, "확인", ct);
+            var cancel1 = await FindAsync(first, FacilityTravelDialog, "취소", ct);
+
+            if (question1 is null || confirm1 is null || cancel1 is null)
+            {
+                await Task.Delay(250, ct);
+                continue;
+            }
+
+            await Task.Delay(180, ct);
+            using var second = Capture(ct);
+            var question2 = await FindAsync(second, FacilityTravelDialog, "이동할까요", ct);
+            var confirm2 = await FindAsync(second, FacilityTravelDialog, "확인", ct);
+            var cancel2 = await FindAsync(second, FacilityTravelDialog, "취소", ct);
+
+            if (question2 is null || confirm2 is null || cancel2 is null)
+                continue;
+
+            Log?.Invoke("[자동 가공] 설비 이동 확인 팝업 · 목적지명 무관 · Space로 확인");
+            _input.TapScanCode(0x39);
+            await Task.Delay(700, ct);
+            return true;
+        }
+
+        return false;
+    }
+
     private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
     {
         if (_cli is null)
@@ -320,9 +359,15 @@ internal sealed class AlteringScreen : IAlteringScreen
             if (move is null)
                 Fail(frame, "무료 설비로 이동 버튼을 확인하지 못했습니다.");
             if (pass == 0) { await Task.Delay(180, ct); continue; }
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 일반 이동 시작");
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭");
             _input.ClickClientPoint(_hwnd, move.Value.Center);
         }
+
+        bool popupConfirmed = await ConfirmFacilityTravelPopupAsync(ct);
+        if (popupConfirmed)
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 이동 확인 완료 · 실제 이동 대기");
+        else
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 이동 확인 팝업 없음 · 직접 이동 시작 여부 확인");
 
         bool sawDeparture = false;
         bool sawTravel = false;
