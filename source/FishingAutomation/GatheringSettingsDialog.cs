@@ -51,7 +51,7 @@ internal sealed class GatheringSettingsDialog : Form
         {
             Dock = DockStyle.Fill,
             Text = "게임 CLI의 execute_gathering 명령으로 직접 시작합니다. 화면 OCR·좌표 입력은 사용하지 않습니다.\n" +
-                   "실제 이동·비용 처리는 게임 CLI의 규칙을 따르며 정령의 날개 0개 사용을 보장하지 않습니다.\n" +
+                   "정령의 날개가 1개 이상 보유 중이면 실행하지 않습니다. 소비 후 감지가 아니라 실행 전 차단 방식입니다.\n" +
                    "목표 수량은 get_items로 확인하고 도달 시 stop_action으로 정지합니다. 낚시 품목은 지원하지 않습니다."
         };
         layout.Controls.Add(note, 0, 4);

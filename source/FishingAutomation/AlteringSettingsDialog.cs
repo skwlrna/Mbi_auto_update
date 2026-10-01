@@ -11,7 +11,7 @@ internal sealed class AlteringSettingsDialog : Form
     private readonly ComboBox _item = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly TextBox _filter = new() { Dock = DockStyle.Fill, PlaceholderText = "품목 검색" };
     private readonly NumericUpDown _quantity = new() { Minimum = 1, Maximum = 1000000, Value = 100, Dock = DockStyle.Fill };
-    private readonly CheckBox _paid = new() { Text = "가공하러 가기 버튼의 정령의 날개 5개 사용", Checked = true, AutoSize = true };
+    private readonly CheckBox _paid = new() { Text = "정령의 날개 사용 안 함 (0개 고정)", Checked = false, Enabled = false, AutoSize = true };
     private readonly Label _summary = new() { Dock = DockStyle.Fill, AutoSize = false };
     private readonly Label _materials = new() { Dock = DockStyle.Fill, AutoSize = false };
     private readonly Button _start = new() { Text = "이 설정으로 시작", AutoSize = true };
@@ -53,12 +53,12 @@ internal sealed class AlteringSettingsDialog : Form
         CancelButton = cancel; AcceptButton = _start;
         _filter.TextChanged += (_, _) => Filter();
         _item.SelectedIndexChanged += (_, _) => UpdateDetails();
-        _quantity.ValueChanged += (_, _) => UpdateDetails(); _paid.CheckedChanged += (_, _) => UpdateDetails();
+        _quantity.ValueChanged += (_, _) => UpdateDetails();
         _start.Click += (_, _) =>
         {
             if (_item.SelectedItem is not Choice choice) return;
             Plan = new(_facility.SelectedItem!.ToString()!, choice.Recipe.DisplayName, (int)_quantity.Value,
-                choice.Recipe.ProducedPerWork, _paid.Checked, choice.Ordinal);
+                choice.Recipe.ProducedPerWork, false, choice.Ordinal);
             Plan.Validate(); DialogResult = DialogResult.OK;
         };
         Filter();
@@ -82,9 +82,9 @@ internal sealed class AlteringSettingsDialog : Form
     {
         if (_item.SelectedItem is not Choice choice) { _start.Enabled = false; _summary.Text = "일치하는 품목이 없습니다."; return; }
         var r = choice.Recipe;
-        var plan = new AlteringPlan(_facility.SelectedItem!.ToString()!, r.DisplayName, (int)_quantity.Value, r.ProducedPerWork, _paid.Checked, choice.Ordinal);
+        var plan = new AlteringPlan(_facility.SelectedItem!.ToString()!, r.DisplayName, (int)_quantity.Value, r.ProducedPerWork, false, choice.Ordinal);
         _materials.Text = r.Alterable ? "현재 조건: 가공 가능" : "조건: " + ReasonText(r.Reason) + " · " + string.Join(", ", r.MissingIngredients.Select(x => $"{x.DisplayName} {x.Owned}/{x.Required}"));
-        _summary.Text = $"1회 {r.ProducedPerWork}개 · {plan.RequiredWorks}회 등록 → 최소 {plan.ExpectedQuantity}개 생산\n정령의 날개 사용 상한: {plan.MaximumWings}개 (대성공 보상은 추가될 수 있습니다)";
-        _start.Enabled = true;
+        _summary.Text = $"1회 {r.ProducedPerWork}개 · {plan.RequiredWorks}회 등록 → 최소 {plan.ExpectedQuantity}개 생산\n정령의 날개 사용: 0개 고정 (대성공 보상은 추가될 수 있습니다)";
+        _start.Enabled = r.Alterable || r.Reason == "not_enough_ingredient";
     }
 }

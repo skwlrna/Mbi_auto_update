@@ -73,31 +73,69 @@ jobs:
           dotnet run --project tests/cli-readonly/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'CLI regressions failed' }
 
-      - name: Direct CLI action wiring checks
+      - name: Read-only CLI and free screen wiring checks
         shell: pwsh
         run: |
           $cli = Get-Content source/FishingAutomation/MabinogiMobileCli.cs -Raw
-          foreach($command in @('execute_gathering','execute_altering','complete_altering_work','stop_action')){
-            if($cli -notmatch $command){throw "missing CLI action: $command"}
+          if($cli -notmatch 'private static bool IsAllowedAction\(string command\)[\s\S]*?=> false;'){throw 'CLI actions are not fully blocked'}
+          $appLog = Get-Content source/FishingAutomation/AppLog.cs -Raw
+          if($appLog -notmatch 'WriteBackground' -or $appLog -notmatch 'publishToScreen'){throw 'file-only background logging path missing'}
+          if($cli -notmatch 'backgroundOnly = result\.Success' -or $cli -notmatch 'WriteBackground\(line\)'){throw 'successful CLI polling is not hidden from screen'}
+          if($cli -notmatch 'result\.Command is not \("status" or "capabilities"\)'){throw 'startup CLI status/capabilities must remain visible'}
+          foreach($command in @('capabilities','get_my_info','get_currencies','get_items','get_activity','get_alterable_items','get_altering_works','get_gatherable_items','get_inventory')){
+            if($cli -notmatch $command){throw "missing CLI read-only query: $command"}
           }
-          if($cli -notmatch '"base64:"'){throw 'base64 CLI action body missing'}
           $g = Get-Content source/FishingAutomation/MainForm.Gathering.cs -Raw
-          if($g -notmatch 'new GatheringCliScreen\(_cli, identity\)'){throw 'gathering is not wired to CLI screen'}
+          if($g -notmatch 'new GatheringScreen\('){throw 'gathering is not wired to free screen navigation'}
+          if($g -match 'new GatheringCliScreen\('){throw 'gathering still wires paid CLI action screen'}
           $a = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
-          if($a -notmatch 'new AlteringCliScreen\(_cli, identity\)'){throw 'altering is not wired to CLI screen'}
-          if($g -match 'new GatheringScreen\('){throw 'gathering still instantiates OCR screen'}
-          if($a -match 'new AlteringScreen\('){throw 'altering still instantiates OCR screen'}
-          $gs = Get-Content source/FishingAutomation/GatheringSettingsDialog.cs -Raw
-          if($gs -match '날개 사용 0개'){throw 'obsolete zero-wing guarantee remains in gathering UI'}
-          foreach($command in @('capabilities','get_my_info','get_currencies')){
-            if($cli -notmatch $command){throw "missing CLI guard query: $command"}
+          if($a -notmatch 'new AlteringScreen\('){throw 'altering is not wired to free screen navigation'}
+          if($a -match 'new AlteringCliScreen\('){throw 'altering still wires paid CLI action screen'}
+          foreach($file in @($g,$a)){
+            if($file -match '"execute_gathering"' -or $file -match '"execute_altering"' -or $file -match '"complete_altering_work"' -or $file -match '"stop_action"'){
+              throw 'production main flow still requires CLI action commands'
+            }
           }
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
           if($guards -notmatch 'EnsureCapabilitiesAsync'){throw 'capability preflight missing'}
           if($guards -notmatch 'CliIdentityGuard'){throw 'identity guard missing'}
           if($guards -notmatch 'CurrencyChanges'){throw 'currency delta tracking missing'}
-          if($g -notmatch 'EnsureCapabilitiesAsync' -or $a -notmatch 'EnsureCapabilitiesAsync'){throw 'mode capability preflight wiring missing'}
           if($g -notmatch 'CliIdentityGuard.CaptureAsync' -or $a -notmatch 'CliIdentityGuard.CaptureAsync'){throw 'mode identity capture wiring missing'}
+
+      - name: Zero Spirit Wings safety checks
+        shell: pwsh
+        run: |
+          $plan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          if($plan -notmatch 'MaximumWings => 0'){throw 'zero-wing invariant missing from AlteringPlan'}
+          if($plan -notmatch 'if \(AllowPaidButton\)'){throw 'paid altering plan rejection missing'}
+          $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          if($screen -notmatch '"가공하기"'){throw 'free on-site process button missing'}
+          if($screen -notmatch '"가공하러 가기"'){throw 'remote paid button observation gate missing'}
+          if($screen -notmatch '"설비로 이동"'){throw 'free facility travel path missing'}
+          if($screen -match 'reserveFiveWings\(\)'){throw 'screen still reserves Spirit Wings'}
+          if($screen -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"5"'){throw 'fixed wing-cost number returned to production screen logic'}
+          if($screen -notmatch 'plan\.OutputName'){throw 'qualified recipe detail-title fallback missing'}
+          $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if($wingGuard -notmatch 'after < before'){throw 'Spirit Wings decrease guard missing'}
+          if($wingGuard -notmatch 'actionFailure' -or $wingGuard -notmatch 'verificationFailure'){throw 'post-failure Spirit Wings verification missing'}
+          if($wingGuard -notmatch 'VerifyWithLoadingRetryAsync' -or $wingGuard -notmatch 'CurrencySnapshotWithLoadingRetryAsync'){throw 'post-loading wing verification retry missing'}
+          if($wingGuard -notmatch 'TimeSpan.FromSeconds\(20\)'){throw 'post-loading wing verification retry window missing'}
+          if($wingGuard -notmatch 'ZeroWingAlteringScreen' -or $wingGuard -notmatch 'ZeroWingGatheringScreen'){throw 'screen wing guards missing'}
+          $settings = Get-Content source/FishingAutomation/AlteringSettingsDialog.cs -Raw
+          if($settings -match 'Checked = true' -and $settings -match '정령의 날개'){throw 'paid Spirit Wings option remains enabled'}
+          $production = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          if($production -match 'ProducedPerWork, true'){throw 'production UI still authorizes paid altering'}
+          if($production -notmatch 'MissingIngredients\.Count > 0'){throw 'concrete missing ingredient startup gate missing'}
+          $project = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          if($project -notmatch 'interception\.dll[^>]*CopyToPublishDirectory="PreserveNewest"'){throw 'interception.dll publish copy missing'}
+
+      - name: Test publish contains Interception
+        shell: pwsh
+        run: |
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -o artifacts/ci-test-publish
+          if ($LASTEXITCODE -ne 0) { throw 'test publish failed' }
+          if (-not (Test-Path artifacts/ci-test-publish/FishingAutomation.exe)) { throw 'published exe missing' }
+          if (-not (Test-Path artifacts/ci-test-publish/interception.dll)) { throw 'published interception.dll missing' }
 
       - name: Unified production UI checks
         shell: pwsh
@@ -134,8 +172,153 @@ jobs:
           dotnet build tests/altering-visual/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Altering visual harness build failed' }
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
-          if ($screen -notmatch '"모두 받기"') { throw 'collect button OCR gate missing' }
+          if ($screen -notmatch 'HasCollectButtonVisual') { throw 'visual collect-button detector missing' }
+          if ($screen -notmatch 'GetAlteringWorksAsync' -or $screen -notmatch 'IsCompleted') { throw 'collect must require a completed CLI work' }
+          if ($screen -notmatch 'CollectVisualButton') { throw 'tight visual collect ROI missing' }
+          if ($screen -match 'FindAsync\([^\r\n]*CollectButton[^\r\n]*"모두 받기"' -or $screen -match 'FindCompactLabelAsync\([^\r\n]*CollectButton[^\r\n]*"모두 받기"') { throw 'collect must not depend on 모두 받기 OCR' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
+          if ($screen -notmatch '설비 도착 후 현장 가공 버튼 화면 확인') { throw 'on-site visual processing confirmation log missing' }
+          if ($screen -notmatch 'TryFindFreeProcessButtonVisual' -or $screen -notmatch 'FreeProcessVisualButton') { throw 'visual on-site process detector missing' }
+          if ($screen -notmatch 'actionPixels \* 100 < sampled \* 8' -or $screen -notmatch 'width < 300' -or $screen -notmatch 'height < 28') { throw 'wide green process-button shape gate missing' }
+          if ($screen -notmatch 'IsRecipeDetailAsync') { throw 'structural recipe detail fallback missing' }
+          $selectRecipe = [regex]::Match($screen, 'private async Task SelectRecipeAsync[\s\S]*?(?=\r?\n    public async Task QueueAsync)').Value
+          if ($selectRecipe -match 'DragClientPoint') { throw 'altering recipe selection must not drag the fixed UI' }
+          if ($selectRecipe -notmatch 'attempt <= 4') { throw 'fixed-position recipe OCR retry missing' }
+          if ($selectRecipe -notmatch 'RecipeCacheKey' -or $selectRecipe -notmatch '_cachedRecipeCenter') { throw 'confirmed recipe-coordinate reuse missing' }
+          if ($selectRecipe -notmatch '고정 품목 좌표 재사용' -or $selectRecipe -notmatch '고정 품목 좌표 저장') { throw 'recipe coordinate cache diagnostics missing' }
+          if ($selectRecipe -match 'DragClientPoint') { throw 'cached recipe path must never drag the UI' }
+          $travelConfirm = [regex]::Match($screen, 'private async Task<bool> ConfirmFacilityTravelAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
+          if ($travelConfirm -notmatch 'attempt < 10' -or $travelConfirm -match 'attempt < 40') { throw 'facility confirmation no-popup wait must be about two seconds' }
+          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
+          $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
+          $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
+          if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'recipe must be selected only after facility travel' }
+          if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
+          if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
+          if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
+          if ($queue -notmatch '"설비로 이동"' -or $queue -notmatch '"가공하러 가기"') { throw 'remote-state veto missing before visual process click' }
+          if ($queue -notmatch 'visualActionCenter') { throw 'visual action coordinates must drive the on-site click' }
+          if ($queue -notmatch 'TryReuseOnsiteFacilityAsync') { throw 'consecutive on-site facility reuse missing' }
+          if ($screen -notmatch '_confirmedOnsiteFacility' -or $screen -notmatch '연속 등록 · 현장 상태 유지 확인') { throw 'stable on-site facility cache missing' }
+          if ($screen -notmatch 'string\.Equals\(_confirmedOnsiteFacility, plan\.FacilityName') { throw 'on-site cache must be scoped by facility' }
+          if ($screen -notmatch 'RecipeCacheKey\(AlteringPlan plan\)' -or $screen -notmatch 'plan\.FacilityName' -or $screen -notmatch 'plan\.DisplayName' -or $screen -notmatch 'plan\.RecipeOrdinal') { throw 'recipe cache must be scoped by facility/name/ordinal' }
+          $planText = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          foreach($facility in @('금속 가공 시설','목재 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
+            if($planText -notmatch [regex]::Escape($facility)){throw "facility missing from common altering path: $facility"}
+          }
+          if ($screen -notmatch '설비로 이동 버튼 없음 · 이미 현장 가공창') { throw 'already-on-site facility state missing' }
+          if ($screen -notmatch 'facilityVisible && !moveVisible' -or $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must use facility visible + move button absent' }
+          if ($screen -notmatch '설비 도착 확인 · 설비로 이동 버튼 없음') { throw 'on-site arrival confirmation log missing' }
+          if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
+          if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
+          if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
+          if ($screen -notmatch 'ConfirmFacilityTravelAsync') { throw 'facility travel confirmation flow missing' }
+          if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'visual popup detector missing' }
+          if ($screen -match 'HasDialogButtonAsync' -or $screen -match 'FacilityTravelConfirmButton') { throw 'travel popup must not depend on OCR labels' }
+          if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'green confirmation-button visual gate missing' }
+          if ($screen -notmatch '하단 확인 팝업 화면 감지') { throw 'visual popup confirmation log missing' }
+          if ($screen -notmatch '하단 확인 팝업 없음 · Space 입력 생략') { throw 'no-popup path must skip Space' }
+          if ($screen -notmatch 'p\.B >= 95' -or $screen -notmatch 'blue \* 100 >= sampled \* 2') { throw 'tolerant blue collect-button visual gate missing' }
+          if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
+          if ($screen -notmatch 'attempts: 20, delayMs: 250') { throw 'initial receive wait window missing' }
+          if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
+          if ($screen -notmatch 'resultAttempts: 8') { throw 'first receive completion-result wait must be short' }
+          if ($screen -notmatch 'return collected;') { throw 'first receive must return collection/travel result' }
+          if ($screen -notmatch '가공 완료 결과창 확인 · Space 입력') { throw 'completion result Space confirmation log missing' }
+          if ($screen -notmatch '가공 완료 확인창 닫기 완료') { throw 'completion result facility-return log missing' }
+          if ($screen -notmatch 'greenConfirm && !facilityVisible') { throw 'completion result must be distinguished from facility popup' }
+          if ($screen -notmatch 'facilityFrames >= 2') { throw 'facility return must be stable before continuing' }
+          if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
+          if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
+          $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
+          if ($guards -notmatch 'IsTransientLoadingRejection' -or $guards -notmatch 'VerifyWithLoadingRetryAsync' -or $guards -notmatch 'CurrencySnapshotWithLoadingRetryAsync') { throw 'bounded loading retry helpers missing' }
+          $altering = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
+          if ($session -notmatch 'altering-session\.json' -or $session -notmatch 'LocalApplicationData') { throw 'persistent altering session path missing' }
+          if ($session -notmatch 'PendingRegistration' -or $session -notmatch 'PendingBeforeMatchingCount') { throw 'duplicate-safe pending-registration checkpoint missing' }
+          if ($session -notmatch 'InitialExistingWorks' -or $session -notmatch 'BaselineQuantity') { throw 'resume baseline/legacy-work accounting missing' }
+          if ($session -notmatch 'LastObservedOutputQuantity') { throw 'last observed output checkpoint missing from resume state' }
+          if ($session -notmatch 'MatchesPlan' -or $session -notmatch 'MatchesIdentity') { throw 'resume plan/identity validation missing' }
+          if ($session -notmatch 'AlteringProgress' -or $session -notmatch '대기열.*7' -or $session -notmatch '다음 완료') { throw 'one-line altering progress summary missing' }
+          if ($session -notmatch 'AlteringMaterialEstimate' -or $session -notmatch '전체 재료표는 CLI가 부족 항목만 제공') { throw 'honest material estimate preview missing' }
+
+          $queueCheckpoint = [regex]::Match($altering, 'int previous = Matching\(works, plan\)\.Count\(\);[\s\S]*?QueuedWorks\+\+;[\s\S]*?SaveConfirmedRegistration\(\);').Value
+          if ([string]::IsNullOrWhiteSpace($queueCheckpoint) -or $queueCheckpoint -notmatch 'SavePendingRegistration\(previous\)' -or $queueCheckpoint.IndexOf('SavePendingRegistration(previous)') -gt $queueCheckpoint.IndexOf('await _screen.QueueAsync')) { throw 'registration checkpoint must be persisted before screen input' }
+          if ($altering -notmatch '이어하기 등록 복구' -or $altering -notmatch 'current == before \+ 1' -or $altering -notmatch 'current == before') { throw 'interrupted registration reconciliation missing' }
+          if ($altering -notmatch 'maximumKnownWorks' -or $altering -notmatch 'LastObservedOutputQuantity') { throw 'resume live queue/output reconciliation missing' }
+          if ($altering -notmatch 'internal void NoteStage') { throw 'recursive material stage checkpoint hook missing' }
+          if ($altering -notmatch '_sessionStore\?\.Delete\(\)') { throw 'successful production must clear resume checkpoint' }
+          if ($altering -notmatch 'oldMinimum = checked' -or $altering -notmatch 'grossGained - oldMinimum') { throw 'pre-existing output exclusion missing from final verification' }
+
+          $mainAltering = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
+          if ($mainAltering -notmatch 'sessionStore\.Load\(\)' -or $mainAltering -notmatch 'MatchesPlan\(plan\)' -or $mainAltering -notmatch 'MatchesIdentity\(identity\.Baseline\)') { throw 'UI resume preflight validation missing' }
+          if ($mainAltering -notmatch 'sessionStore: sessionStore' -or $mainAltering -notmatch 'session: session') { throw 'persistent session not wired into altering automation' }
+          if ($mainAltering -notmatch 'automation\.Progress \+=' -or $mainAltering -notmatch '_productionProgressSummary = progress\.Summary') { throw 'live one-line progress is not wired to the UI' }
+          if ($mainAltering -notmatch 'automation\.NoteStage' -or $mainAltering -notmatch 'LastObservedOutputQuantity') { throw 'deep material stage/output resume validation is not wired' }
+          if ($mainAltering -notmatch '시작 전.*materialEstimate') { throw 'start-time material estimate log missing' }
+
+          $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -notmatch '이어하기 대기') { throw 'saved altering session is not restored into the production page' }
+          $alteringQueries = Get-Content source/FishingAutomation/AlteringQueries.cs -Raw
+          if ($alteringQueries -notmatch 'AlteringFacilityResolver' -or $alteringQueries -notmatch 'FoodRecipes' -or $alteringQueries -notmatch 'MedicineRecipes') { throw 'shared facility resolver for food/medicine missing' }
+          foreach($foodName in @('마요네즈','밀가루','치즈','면','생크림')){
+            if($alteringQueries -notmatch [regex]::Escape($foodName)){throw "food recipe classification missing: $foodName"}
+          }
+          foreach($medicineName in @('새록 버섯 진액','튼튼 버섯 가루','불꽃의 결정')){
+            if($alteringQueries -notmatch [regex]::Escape($medicineName)){throw "medicine recipe classification missing: $medicineName"}
+          }
+          if ($alteringQueries -notmatch 'MissingIngredients' -or $alteringQueries -notmatch 'continue;') { throw 'facility metadata scan must skip ingredient payloads' }
+          foreach($tabLabel in @('"목재"','"금속"','"가죽"','"옷감"','"약품"','"식재료"')){
+            if($productionPage -notmatch [regex]::Escape($tabLabel)){throw "short facility tab label missing: $tabLabel"}
+          }
+          if ($productionPage -notmatch 'AlteringFacilityResolver\.Resolve') { throw 'production tabs are not using shared facility resolver' }
+          if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
+          if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
+          if ($productionPage -notmatch '_search\.PlaceholderText = "품목을 검색하세요"' -or
+              $productionPage -notmatch 'AddRow\(form, 1, "품목 검색", _search\)') { throw 'gathering-only item search wiring missing' }
+          $alteringSettings = [regex]::Match($productionPage, 'if \(altering\)\s*\{[\s\S]*?\}\s*else').Value
+          if ([string]::IsNullOrWhiteSpace($alteringSettings) -or $alteringSettings -match '품목 검색') { throw 'automatic altering must not render an item search field' }
+          if ($productionPage -notmatch 'FacilityUiOrder' -or $productionPage -notmatch 'BuildFacilityTabs' -or $productionPage -notmatch 'RecipeFacility') { throw 'facility-tab recipe filtering UI missing' }
+          foreach($facilityTab in @('목재 가공 시설','금속 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
+            if($productionPage -notmatch [regex]::Escape($facilityTab)){throw "facility tab missing: $facilityTab"}
+          }
+          if ($productionPage -notmatch 'ArrowlessNumericUpDown' -or $productionPage -notmatch 'UpDownButtons' -or $productionPage -notmatch 'child\.Visible = false') { throw 'arrowless target quantity input missing' }
+          if ($productionPage -notmatch 'Quantity = new ArrowlessNumericUpDown') { throw 'gathering and altering must both use arrowless target quantity input' }
+          if ($productionPage -match 'AddRow\(form, 4, "가공 시설", Facility\)') { throw 'old altering facility dropdown returned to visible UI' }
+          if ($altering -notmatch 'int freeSlots = Math\.Max\(0, 7 - facilityCount\)') { throw 'seven-slot free-capacity calculation missing' }
+          if ($altering -notmatch 'int batchGoal = Math\.Min\(freeSlots, plan\.RequiredWorks - QueuedWorks\)') { throw 'batch size must be capped by free slots and remaining works' }
+          if ($altering -notmatch 'while \(queuedThisBatch < batchGoal') { throw 'verified batch registration loop missing' }
+          if ($altering -notmatch '일괄 등록 시작' -or $altering -notmatch '일괄 등록 완료') { throw 'batch registration diagnostics missing' }
+          if ($altering -notmatch 'count > previous \+ 1' -or $altering -notmatch 'count == previous \+ 1') { throw 'each batched slot must still be CLI-verified exactly once' }
+          if ($altering -notmatch 'ct, TimeSpan\.FromSeconds\(1\)') { throw 'registration verification must poll every second' }
+          if ($altering -notmatch '기존 .* 작업 .*건 유지 · 완료되는 즉시 수령하고 빈 슬롯에 새 목표 작업을 채웁니다') { throw 'legacy jobs must remain while freed slots are refilled' }
+          if ($altering -match '기존 동일 품목 작업 수령 완료') { throw 'legacy jobs must not be fully drained before new target registration' }
+          if ($altering -notmatch 'bool firstCollected = await _screen\.CollectAsync') { throw 'first receive must report collection versus travel immediately' }
+          if ($altering -match 'for \(int i = 0; i < 4; i\+\+\)[\s\S]{0,500}TimeSpan\.FromSeconds\(2\)') { throw 'old eight-second first-receipt queue polling returned' }
+          if ($altering -notmatch '1차 모두 받기 = 설비 이동 · 즉시 가공대 수령 화면 대기') { throw 'immediate travel branch diagnostic missing' }
+          if ($altering -notmatch 'TimeSpan delay = pollDelay \?\? TimeSpan\.FromSeconds\(5\)') { throw 'non-registration verification default delay changed unexpectedly' }
+          if ($altering -notmatch 'StallThreshold = TimeSpan\.FromSeconds\(60\)') { throw 'altering stall threshold must stay at 60 seconds' }
+          if ($altering -notmatch 'MaxStallRecoveries = 3') { throw 'altering stall recovery bound missing' }
+          if ($altering -notmatch 'ProgressSignature\(works, plan, QueuedWorks\)') { throw 'queue progress signature stall detector missing' }
+          if ($altering -notmatch '정체 감지' -or $altering -notmatch 'RecoverStallAsync') { throw 'altering stall recovery invocation missing' }
+          if ($altering -notmatch 'lastProgressAt = DateTime\.UtcNow') { throw 'stall recovery grace window reset missing' }
+          if ($altering -notmatch '마지막 진단 화면을 저장한 상태로 정지합니다') { throw 'bounded stall final-stop diagnostic missing' }
+
+          $recovery = [regex]::Match($screen, 'public async Task RecoverStallAsync[\s\S]*?(?=\r?\n    private void Fail)').Value
+          if ([string]::IsNullOrWhiteSpace($recovery)) { throw 'altering screen stall recovery method missing' }
+          if ($recovery -notmatch 'altering-stall-last\.png') { throw 'stall screenshot output missing' }
+          if ($recovery -notmatch '_cachedRecipeKey = null' -or $recovery -notmatch '_hasCachedRecipeCenter = false') { throw 'stall recovery must clear fast-path recipe assumptions' }
+          if ($recovery -notmatch 'EnterFacilityAsync\(plan, ct\)') { throw 'stall recovery must safely re-evaluate the requested facility' }
+          if ($recovery -match 'TravelToFacilityAsync\(' -or $recovery -match 'SelectRecipeAsync\(' -or $recovery -match 'QueueAsync\(') { throw 'stall recovery must not travel, select recipe, or register work' }
+          if ($recovery -notmatch 'TapScanCode\(0x01\)' -or $recovery -match 'TapScanCode\(0x39\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
+
+          $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose guarded stall recovery' }
+          if ($zeroWing -notmatch 'GuardAsync\("\[자동 가공\] 정체 화면 재판정"') { throw 'stall recovery is not wrapped in currency verification' }
+          $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
+          if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
+          $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if ($wingGuard -notmatch '시작 실패 후 날개 검사') { throw 'failed gathering start wing log label missing' }
 
 
       - name: Automatic gathering regression tests
@@ -143,6 +326,29 @@ jobs:
         run: |
           dotnet run --project tests/gathering/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Gathering regressions failed' }
+          $screen = Get-Content source/FishingAutomation/dungeon/GatheringScreen.cs -Raw
+          if ($screen -match 'Normalize\(name') { throw 'first-place OCR string equality check returned' }
+          if ($screen -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow') { throw 'first-place geometry stability gate missing' }
+          if ($screen -notmatch 'first\.Value\.Bounds\.Left\+first\.Value\.Bounds\.Width/2') { throw 'fresh second-frame row click missing' }
+          if ($screen -notmatch 'beforeCount=await _data\.ItemCountAsync' -or $screen -notmatch 'gained>=plan\.TargetQuantity') { throw 'inventory-based gathering success evidence missing' }
+          if ($screen -notmatch 'activity 상태와 무관하게 성공 처리') { throw 'inventory-authoritative completion log missing' }
+          $ingredientClick = [regex]::Match($screen, 'private async Task ClickIngredientAsync[\s\S]*?(?=\r?\n    private async Task ClickMethodAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($ingredientClick)) { throw 'gathering ingredient selection method missing' }
+          if ($ingredientClick -notmatch 'dim:true') { throw 'gathering ingredient names must use dim-text OCR' }
+          if ($ingredientClick -notmatch '필요한 재료' -or $ingredientClick -notmatch '어두운 재료명 OCR 2프레임 확인') { throw 'dim ingredient structural/two-frame confirmation missing' }
+          if ($ingredientClick -match 'DragClientPoint') { throw 'gathering ingredient selection must not drag the recipe UI' }
+          $vision = Get-Content source/FishingAutomation/dungeon/GatheringVision.cs -Raw
+          if ($vision -match 'names\.Length != 1') { throw 'first-place OCR still requires exactly one text read' }
+          $queries = Get-Content source/FishingAutomation/GatheringQueries.cs -Raw
+          if ($queries -match 'IsSafeField[^\r\n]*IsAutoPlaying' -or $queries -match '!IsAutoPlaying') { throw 'IsAutoPlaying must not be an unsafe-field gate' }
+          if ($queries -notmatch 'DescribeCatalogSchema') { throw 'read-only gatherable schema diagnostics missing' }
+          $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          $catalogLoader = [regex]::Match($productionPage, 'internal async Task LoadCatalogAsync[\s\S]*?(?=\r?\n        private void ApplySavedAlteringSessionSelection)').Value
+          if ($catalogLoader -notmatch 'GetGatherableItemsAsync' -or $catalogLoader -notmatch 'DescribeCatalogSchema') { throw 'gatherable schema probe is not wired to catalog refresh' }
+          if ($catalogLoader -match 'ExecuteGatheringAsync|ExecuteAlteringAsync|StopActionAsync|CompleteAlteringWorkAsync') { throw 'catalog schema probe must remain read-only' }
+          if ($queries -match 'IsSafeField[\s\S]{0,300}!IsInBattlefield') { throw 'Battlefield flag must not be an unsafe-field gate' }
+          $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
+          if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
 
       - name: Inline production UI regression tests
         shell: pwsh

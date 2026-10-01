@@ -29,6 +29,9 @@ internal static class Program
             Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ComboBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
             var gi = All(gathering).OfType<ComboBox>().Single();
             var gq = All(gathering).OfType<NumericUpDown>().Single();
+            Check(!gq.Controls.Cast<Control>().Any(x =>
+                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
+                "gathering target quantity hides numeric up/down arrow buttons");
             Check(gi.Items.Count == 3 && gi.Items[1]!.ToString() == "상급 통나무+", "gathering dropdown uses actual CLI catalog including plus name");
             gi.SelectedIndex = 2; Pump();
             var gs = All(gathering).OfType<Button>().Single(x => x.AccessibleName == "자동 채집 시작");
@@ -37,35 +40,52 @@ internal static class Program
             Menu("자동 가공"); Exclusive(true);
             var ai = All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 제법");
             var aq = All(altering).OfType<NumericUpDown>().Single();
-            Check(ai.Items.Count == 3, "recipe dropdown exposes first CLI row for duplicate display names");
-            ai.SelectedIndex = 2; Check(!All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled, "unavailable recipe disables start");
-            ai.SelectedIndex = 1; aq.Value = 5;
-            All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 시설").SelectedIndex = 1;
+            var facilityTabs = All(altering).OfType<Button>()
+                .Where(x => x.AccessibleName?.StartsWith("가공 시설 ", StringComparison.Ordinal) == true).ToArray();
+            Check(facilityTabs.Length == 6, "automatic altering exposes six large facility tabs");
+            Check(!All(altering).OfType<Label>().Any(x => x.Text == "품목 검색") &&
+                  !All(altering).OfType<TextBox>().Any(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal)),
+                "item search field is removed from automatic altering");
+            Check(!aq.Controls.Cast<Control>().Any(x =>
+                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
+                "target quantity hides numeric up/down arrow buttons");
+
+            Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "목재+",
+                "default wood facility tab shows only wood recipes");
+            facilityTabs.Single(x => x.Text == "금속").PerformClick(); Pump();
+            Check(ai.Items.Count == 2 && ai.Items.Cast<object>().All(x => x.ToString() is "철괴" or "강철괴"),
+                "metal facility tab filters recipe dropdown to metal recipes");
+            ai.SelectedIndex = 1;
+            Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
+                "missing-material recipe remains startable for recursive resolution");
+
+            facilityTabs.Single(x => x.Text == "약품").PerformClick(); Pump();
+            Check(ai.Items.Count == 3 &&
+                  ai.Items.Cast<object>().Select(x => x.ToString()).SequenceEqual(
+                      new[] { "새록 버섯 진액", "튼튼 버섯 가루", "불꽃의 결정(석양 나비)" }),
+                "medicine facility tab shows medicine processing recipes");
+
+            facilityTabs.Single(x => x.Text == "식재료").PerformClick(); Pump();
+            Check(ai.Items.Count == 5 &&
+                  ai.Items.Cast<object>().Select(x => x.ToString()).SequenceEqual(
+                      new[] { "마요네즈", "밀가루", "치즈", "면", "생크림" }),
+                "food facility tab shows multiple food-processing recipes, not only flour");
+
+            facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump();
+            ai.SelectedIndex = 0; aq.Value = 5;
             Menu("자동 채집"); Exclusive(false);
             Check(gi.SelectedIndex == 1 && gq.Value == 5, "switching preserves each page's independent settings");
-            gs.PerformClick();
-            PumpUntil(() => fake.Actions.Any(x => x.Command == "execute_gathering"));
-            Check(fake.Actions.Last(x => x.Command == "execute_gathering").Name == "상급 통나무+" && Field<int>(form, "_productionTargetQuantity") == 5, "main selection and numeric quantity reach StartGatheringAsync");
-            PumpUntil(() => fake.Actions.Any(x => x.Command == "stop_action"));
-            PumpUntil(() => Field<string?>(form, "_activeMode") is null);
-            Check(Application.OpenForms.Count == 1, "gathering starts without a settings dialog");
-            Menu("자동 가공");
-            All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").PerformClick();
-            PumpUntil(() => fake.Actions.Count(x => x.Command == "execute_altering") == 2);
-            PumpUntil(() => Field<string?>(form, "_activeMode") is null);
-            Check(fake.Actions.Where(x => x.Command == "execute_altering").All(x => x.Name == "목재+") && Field<int>(form, "_productionTargetQuantity") == 5, "main recipe and numeric quantity reach StartAlteringAsync");
-            Check(fake.Actions.Count(x => x.Command == "complete_altering_work") == 2, "existing CLI collection preserved");
-            Check(Field<long>(form, "_productionCurrentQuantity") >= 5, "completion quantity is shown");
-            Check(Application.OpenForms.Count == 1, "altering starts without a settings dialog");
-            Menu("자동 채집"); fake.Gain = false; gq.Value = 100;
-            gs.PerformClick(); PumpUntil(() => Field<string?>(form, "_activeMode") == "채집");
-            Check(!gi.Enabled && !gq.Enabled, "run locks settings");
-            int stops = fake.Actions.Count(x => x.Command == "stop_action");
-            All(gathering).OfType<Button>().Single(x => x.AccessibleName == "정지").PerformClick();
-            PumpUntil(() => fake.Actions.Count(x => x.Command == "stop_action") > stops);
-            PumpUntil(() => Field<string?>(form, "_activeMode") is null);
-            PumpUntil(() => gi.Enabled && gq.Enabled);
-            Check(gi.Enabled && gq.Enabled, "stop uses existing cancellation and unlocks settings");
+            var selectedGather = Invoke<GatheringPlan>(form, "SelectedGatheringPlan");
+            Check(selectedGather.DisplayName == "상급 통나무+" && selectedGather.TargetQuantity == 5,
+                "main gathering selection and numeric quantity map to the free-screen plan");
+
+            Menu("자동 가공"); Exclusive(true);
+            var selectedAlter = Invoke<AlteringPlan>(form, "SelectedAlteringPlan");
+            Check(selectedAlter.DisplayName == "목재+" && selectedAlter.FacilityName == "목재 가공 시설" &&
+                  selectedAlter.TargetQuantity == 5 && !selectedAlter.AllowPaidButton && selectedAlter.MaximumWings == 0,
+                "selected facility tab and recipe map to the zero-wing altering plan");
+            Check(fake.Actions.Count == 0, "production UI performs no CLI action commands while configuring plans");
+
             foreach (string mode in new[] { "낚시", "던전", "어비스" })
             { Menu(mode); Check(!altering.Visible && !gathering.Visible, "legacy page preserved: " + mode); }
             fake.Fail = true; Menu("자동 채집");
@@ -104,8 +124,7 @@ internal static class Program
                 Directory.CreateDirectory(args[0]); form.ClientSize = new Size(1200, 900);
                 gi.SelectedIndex = 0; gq.Value = 100; Menu("자동 채집");
                 InvokeTask(form, "RefreshProductionStateAsync", gathering); Pump(); Save(form, Path.Combine(args[0], "automatic-gathering.png"));
-                Menu("자동 가공"); ai.SelectedIndex = 0; aq.Value = 50;
-                All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 시설").SelectedIndex = 0;
+                Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump(); ai.SelectedIndex = 0; aq.Value = 50;
                 InvokeTask(form, "RefreshProductionStateAsync", altering); Pump(); Save(form, Path.Combine(args[0], "automatic-altering.png"));
                 Menu("홈"); Pump(); Save(form, Path.Combine(args[0], "home.png"));
             }
@@ -124,6 +143,8 @@ internal static class Program
     private static IEnumerable<Control> All(Control root)
     { foreach(Control c in root.Controls) { yield return c; foreach(var child in All(c)) yield return child; } }
     private static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
+    private static T Invoke<T>(object target, string name)
+        => (T)target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, null)!;
     private static void InvokeTask(object target, string name, object arg)
     { var task=(Task)target.GetType().GetMethod(name,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(target,new[]{arg})!; PumpUntil(()=>task.IsCompleted); task.GetAwaiter().GetResult(); }
     private static void Check(bool ok, string message)
@@ -152,9 +173,22 @@ internal sealed class FakeCli
             "status" => new {pipe="connected"},
             "capabilities" => new { commands = new[]{"get_my_info","get_currencies","get_gatherable_items","get_activity","get_inventory","get_items","execute_gathering","stop_action","get_alterable_items","get_altering_works","execute_altering","complete_altering_work"}.Select(x=>new{Command=x,Metadata=new{requiresConfirm=true}}).ToArray() },
             "get_my_info" => new {CharacterId="ui-test",CharacterName="테스트",RealmName="테스트 서버"},
-            "get_currencies" => new[]{new{DisplayName="골드",Amount=5000}},
+            "get_currencies" => new[]{new{DisplayName="정령의 날개",Amount=105455},new{DisplayName="골드",Amount=5000}},
             "get_gatherable_items" => new {items=new[]{new{DisplayName="철 광석",ToolOk=true},new{DisplayName="상급 통나무+",ToolOk=true},new{DisplayName="가죽",ToolOk=false}}},
-            "get_alterable_items" => new {items=new[]{new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null},new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null},new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"not_enough_ingredient"},new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"not_enough_ingredient"}}},
+            "get_alterable_items" => new {items=new object[]{
+                new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="금속 가공 시설"},
+                new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="목재 가공 시설"},
+                new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철 광석",Required=10L,Owned=0L}},FacilityName="금속 가공 시설"},
+                new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철괴",Required=3L,Owned=0L}},FacilityName="금속 가공 시설"},
+                new{DisplayName="새록 버섯 진액",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="튼튼 버섯 가루",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="불꽃의 결정(석양 나비)",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="마요네즈",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="밀가루",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="치즈",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="면",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="생크림",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()}
+            }},
             "get_items" => new[]{new{DisplayName="철 광석",Count=184L,Location="inventory"},new{DisplayName="상급 통나무+",Count=_logs,Location="inventory"},new{DisplayName="철괴",Count=_ingots,Location="inventory"},new{DisplayName="목재+",Count=_wood,Location="inventory"}},
             "get_altering_works" => new{completedCount=_work is null?0:1,works=_work is null?Array.Empty<object>():new object[]{new{DisplayName=_work,FacilityName="목재 가공 시설",State="Completed",IsCompleted=true,RemainingSeconds=0}}},
             "get_inventory" => new{CurrentInventoryWeightAsDecimal=1,MaxInventoryWeightAsDecimal=100},
