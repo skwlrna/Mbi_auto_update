@@ -40,7 +40,12 @@ catch(InvalidDataException){Check(true,"source recipe cannot enable paid alterin
 var success=new FakeWorld();
 await new GatheringAutomation(success,success,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(success.Starts==1 && success.Stops==1 && success.Owned==106,"target counts new inventory only and stops after target");
-foreach(var world in new[]{new FakeWorld {Tool=false},new FakeWorld{Full=true},new FakeWorld{State=FakeWorld.Idle with {IsInCombat=true}},new FakeWorld{State=FakeWorld.Idle with {IsAutoTraveling=true}}})
+
+var autoPlayingField = new FakeWorld { State = FakeWorld.Idle with { IsAutoPlaying = true } };
+await new GatheringAutomation(autoPlayingField,autoPlayingField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(autoPlayingField.Starts==1 && autoPlayingField.Owned>=105,
+    "IsAutoPlaying alone is allowed in safe field gathering state");
+foreach(var world in new[]{new FakeWorld {Tool=false},new FakeWorld{Full=true},new FakeWorld{State=FakeWorld.Idle with {IsInCombat=true}},new FakeWorld{State=FakeWorld.Idle with {IsDialoguePlaying=true}},new FakeWorld{State=FakeWorld.Idle with {IsAutoTraveling=true}}})
 {
     try{await new GatheringAutomation(world,world).RunAsync(plan,default);throw new Exception("unsafe start accepted");}
     catch(InvalidOperationException){Check(world.Starts==0,"unavailable tool/full bag/unsafe state cannot start");}
