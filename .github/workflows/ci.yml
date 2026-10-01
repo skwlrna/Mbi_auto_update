@@ -177,7 +177,9 @@ jobs:
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'recipe must be selected only after facility travel' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
-          if ($screen -notmatch '가공창 재등장') { throw 'facility arrival must be confirmed by processing screen reappearance' }
+          if ($screen -notmatch '설비로 이동 버튼 없음 · 이미 현장 가공창') { throw 'already-on-site facility state missing' }
+          if ($screen -notmatch 'facilityVisible && !moveVisible' -or $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must use facility visible + move button absent' }
+          if ($screen -notmatch '설비 도착 확인 · 설비로 이동 버튼 없음') { throw 'on-site arrival confirmation log missing' }
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
