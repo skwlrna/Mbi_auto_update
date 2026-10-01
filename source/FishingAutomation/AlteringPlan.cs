@@ -10,9 +10,11 @@ internal sealed record AlteringPlan(string FacilityName, string DisplayName, int
     internal int RecipeCount { get; init; } = 1;
     internal int RequiredWorks => checked((int)(((long)TargetQuantity + ProducedPerWork - 1) / ProducedPerWork));
     internal long ExpectedQuantity => (long)RequiredWorks * ProducedPerWork;
-    internal long MaximumWings => AllowPaidButton ? (long)RequiredWorks * 5 : 0;
+    internal long MaximumWings => 0;
     internal void Validate()
     {
+        if (AllowPaidButton)
+            throw new InvalidDataException("정령의 날개 사용은 허용되지 않습니다. 자동 가공은 항상 0개 사용 모드입니다.");
         if (!Facilities.Contains(FacilityName) || string.IsNullOrWhiteSpace(DisplayName) ||
             TargetQuantity is < 1 or > 1000000 || ProducedPerWork <= 0 || RecipeOrdinal < 1)
             throw new InvalidDataException("가공 설정이 올바르지 않습니다.");
