@@ -74,7 +74,7 @@ internal sealed class AlteringSessionStore
 
     internal AlteringSessionStore(string? path = null)
     {
-        _path = path ?? Path.Combine(
+        _path = path ?? System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "MabiAuto", "altering-session.json");
     }
