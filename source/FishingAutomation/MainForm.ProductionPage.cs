@@ -94,6 +94,7 @@ public sealed partial class MainForm
         private readonly Panel _itemIcon = new(), _toolIcon = new();
         private readonly Panel _progress = new();
         private int _percent;
+        private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
@@ -149,7 +150,7 @@ public sealed partial class MainForm
             var execution = new LauncherCard { Padding = new Padding(16, 8, 16, 9), Margin = Padding.Empty };
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = Color.Transparent };
             status.RowStyles.Add(new(SizeType.Absolute, 34)); status.RowStyles.Add(new(SizeType.Absolute, 59));
-            status.RowStyles.Add(new(SizeType.Percent, 56)); status.RowStyles.Add(new(SizeType.Percent, 44)); status.RowStyles.Add(new(SizeType.Absolute, 23));
+            status.RowStyles.Add(new(SizeType.Percent, 62)); status.RowStyles.Add(new(SizeType.Percent, 38)); status.RowStyles.Add(new(SizeType.Absolute, 23));
             status.Controls.Add(owner.SectionTitle("▶  실행 상태", 15), 0, 0);
             var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
             actions.ColumnStyles.Add(new(SizeType.Percent, 72)); actions.ColumnStyles.Add(new(SizeType.Percent, 28));
@@ -160,9 +161,9 @@ public sealed partial class MainForm
             var progressCard = new LauncherCard { Padding = new Padding(12, 6, 12, 6), Margin = new Padding(2, 7, 2, 7) };
             var progressLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 2, BackColor = Color.Transparent };
             progressLayout.ColumnStyles.Add(new(SizeType.Percent, 50)); progressLayout.ColumnStyles.Add(new(SizeType.Percent, 50));
-            progressLayout.RowStyles.Add(new(SizeType.Absolute, 17)); progressLayout.RowStyles.Add(new(SizeType.Percent, 74)); progressLayout.RowStyles.Add(new(SizeType.Percent, 26));
-            progressLayout.Controls.Add(new Label { Text = "진행 수량", ForeColor = Muted, Dock = DockStyle.Fill, Font = new Font("맑은 고딕", 10f) }, 0, 0);
-            progressLayout.Controls.Add(new Label { Text = "진행률", ForeColor = Muted, Dock = DockStyle.Fill, Font = new Font("맑은 고딕", 10f) }, 1, 0);
+            progressLayout.RowStyles.Add(new(SizeType.Absolute, 17)); progressLayout.RowStyles.Add(new(SizeType.Percent, 82)); progressLayout.RowStyles.Add(new(SizeType.Percent, 18));
+            progressLayout.Controls.Add(new Label { Text = "진행 수량", ForeColor = Muted, Dock = DockStyle.Fill, Margin = Padding.Empty, Font = new Font("맑은 고딕", 10f) }, 0, 0);
+            progressLayout.Controls.Add(new Label { Text = "진행률", ForeColor = Muted, Dock = DockStyle.Fill, Margin = Padding.Empty, Font = new Font("맑은 고딕", 10f) }, 1, 0);
             _progressText.Font = new Font("맑은 고딕", 22f, FontStyle.Bold); _progressText.ForeColor = Color.FromArgb(36, 195, 255);
             _percentage.Font = new Font("맑은 고딕", 22f, FontStyle.Bold); _percentage.ForeColor = _progressText.ForeColor;
             _percentage.Dock = DockStyle.Fill; _percentage.TextAlign = ContentAlignment.MiddleLeft;
@@ -171,6 +172,7 @@ public sealed partial class MainForm
             _progress.Paint += (_, e) => DrawProgress(e.Graphics);
             progressLayout.Controls.Add(_progress, 0, 2); progressLayout.SetColumnSpan(_progress, 2); progressCard.Controls.Add(progressLayout); status.Controls.Add(progressCard, 0, 2);
             var chips = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 4, Margin = Padding.Empty };
+            chips.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             foreach (var label in new[] { _elapsed, _state, _cli, _character })
             {
                 chips.ColumnStyles.Add(new(SizeType.Percent, 25));
@@ -181,12 +183,72 @@ public sealed partial class MainForm
             foreach (var label in new[] { Owned, _condition, _materials, _selectedName, _progressText, _elapsed, _state, _cli, _character, _collection })
             { label.Dock = DockStyle.Fill; label.TextAlign = ContentAlignment.MiddleLeft; label.AutoEllipsis = true; label.BackColor = Color.Transparent; }
             _selectedName.Font = new Font("맑은 고딕", 17f, FontStyle.Bold);
+            _progressText.Margin = _percentage.Margin = Padding.Empty;
             Owned.Font = new Font("맑은 고딕", 13f, FontStyle.Bold); Owned.ForeColor = TitleText;
             _condition.Font = new Font("맑은 고딕", 17f, FontStyle.Bold);
             _materials.Font = new Font("맑은 고딕", 11f); _materials.ForeColor = Muted;
             _collection.Font = new Font("맑은 고딕", 8.5f); _collection.ForeColor = Muted;
             _elapsed.Font = _state.Font = _cli.Font = _character.Font = new Font("맑은 고딕", 10.5f);
             execution.Controls.Add(status); root.Controls.Add(execution, 0, 2); Controls.Add(root);
+            // ReferenceDashboard uses pixel fonts at 1448x1086, with the same
+            // minimum legible sizes below. Use its title/content hierarchy here.
+            foreach (var control in Descendants(root).Prepend(root))
+                control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
+            void Typography(Control control, float pixels) => control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
+            Typography(header.Controls[0], 36); Typography(header.Controls[1], 18);
+            Typography(settingsHeading.Controls[0], 21); Typography(status.Controls[0], 21);
+            Typography(_selectedName, 20); Typography(_condition, 20); Typography(Owned, 18);
+            Typography(_start, 22); Typography(_stop, 22);
+            Typography(_progressText, 20); Typography(_percentage, 20);
+            Typography(_materials, 17); Typography(_collection, 14); Typography(_reload, 14);
+            foreach (var label in new[] { _elapsed, _state, _cli, _character }) Typography(label, 17);
+            foreach (Control label in progressLayout.Controls) if (label is Label && label != _progressText && label != _percentage) Typography(label, 14);
+            foreach (var summary in new[] { summaries.Controls[0], summaries.Controls[1] })
+                Typography(((TableLayoutPanel)summary.Controls[0]).GetControlFromPosition(0, 0)!, 21);
+            // Match the reviewed 1200x900 preview at every supported window size.
+            // Dashboard bounds scale independently of WinForms fonts and absolute rows.
+            var metrics = Descendants(root).Prepend(root).Select(c => new PageMetric(c, c.Font.FontFamily.Name,
+                c.Font.Size, c.Font.Style, c.Padding, c.Margin)).ToArray();
+            var rows = metrics.SelectMany(m => m.Control is TableLayoutPanel t
+                ? t.RowStyles.Cast<RowStyle>().Where(s => s.SizeType == SizeType.Absolute).Select(s => (Style: s, Size: s.Height))
+                : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
+            var columns = metrics.SelectMany(m => m.Control is TableLayoutPanel t
+                ? t.ColumnStyles.Cast<ColumnStyle>().Where(s => s.SizeType == SizeType.Absolute).Select(s => (Style: s, Size: s.Width))
+                : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
+            var scaledFonts = new List<Font>();
+            var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
+            float lastScale = -1; int lastDpi = -1;
+            bool fitting = false;
+            Disposed += (_, _) => { foreach (var font in scaledFonts) font.Dispose(); };
+            void FitPage()
+            {
+                if (fitting || ClientSize.Width < 1 || ClientSize.Height < 1) return;
+                float scale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
+                float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
+                if (Math.Abs(scale - lastScale) < .001f && DeviceDpi == lastDpi) return;
+                lastScale = scale; lastDpi = DeviceDpi;
+                fitting = true;
+                _layoutScale = scale;
+                root.SuspendLayout();
+                foreach (var metric in metrics)
+                {
+                    float size = Math.Max(metric.Size >= 18 ? 13f : 12f, MathF.Round(metric.Size * fontScale));
+                    var key = (metric.Family, size, metric.Style);
+                    if (!fontCache.TryGetValue(key, out var font)) { font = new Font(metric.Family, size, metric.Style, GraphicsUnit.Pixel); fontCache.Add(key, font); scaledFonts.Add(font); }
+                    metric.Control.Font = font;
+                    metric.Control.Padding = ScalePadding(metric.Padding, scale);
+                    metric.Control.Margin = ScalePadding(metric.Margin, scale);
+                }
+                foreach (var row in rows) row.Style.Height = row.Size * scale;
+                progressLayout.RowStyles[0].Height = progressLayout.GetControlFromPosition(0, 0)!.Font.Height + 3;
+                foreach (var column in columns) column.Style.Width = column.Size * scale;
+                _reload.Width = Math.Max(70, (int)(110 * scale));
+                foreach (var field in Descendants(root).Where(c => c.Tag is string tag && tag == "production-field"))
+                    LayoutField(field);
+                root.ResumeLayout(true);
+                fitting = false;
+            }
+            Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
             _search.TextChanged += (_, _) => Filter();
             Items.SelectedIndexChanged += (_, _) => SelectionChanged();
             Quantity.ValueChanged += (_, _) => UpdateExecution();
@@ -345,19 +407,32 @@ public sealed partial class MainForm
                 if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -4, -4));
             }
         }
-        private static void AddRow(TableLayoutPanel form, int row, string caption, Control control)
+        private void AddRow(TableLayoutPanel form, int row, string caption, Control control)
         {
             form.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft }, 0, row);
-            var field = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(3, 5, 3, 5) };
+            var field = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(3, 5, 3, 5), Tag = "production-field" };
             var surface = new LauncherCard { Dock = DockStyle.None, BackColor = CardBg2 };
             control.Dock = DockStyle.None;
-            void AlignField() {
-                surface.Bounds = new Rectangle(0, Math.Max(0, (field.Height - 44) / 2), field.Width, Math.Min(44, field.Height));
-                control.Width = Math.Max(1, surface.Width - 22); control.Location = new Point(11, Math.Max(0, (surface.Height - control.Height) / 2));
-            }
             surface.Controls.Add(control); field.Controls.Add(surface);
-            field.Resize += (_, _) => AlignField();
-            form.Controls.Add(field, 1, row); AlignField();
+            field.Resize += (_, _) => LayoutField(field);
+            form.Controls.Add(field, 1, row); LayoutField(field);
+        }
+
+        private void LayoutField(Control field)
+        {
+            var surface = field.Controls[0]; var control = surface.Controls[0];
+            int height = Math.Min(field.Height, Math.Max(control.Font.Height + 8, (int)(44 * _layoutScale)));
+            int inset = Math.Max(4, (int)(11 * _layoutScale));
+            surface.Bounds = new Rectangle(0, Math.Max(0, (field.Height - height) / 2), field.Width, height);
+            control.Width = Math.Max(1, surface.Width - inset * 2);
+            control.Location = new Point(inset, Math.Max(0, (surface.Height - control.Height) / 2));
+        }
+
+        private sealed record PageMetric(Control Control, string Family, float Size, FontStyle Style, Padding Padding, Padding Margin);
+        private static Padding ScalePadding(Padding p, float scale) => new((int)(p.Left * scale), (int)(p.Top * scale), (int)(p.Right * scale), (int)(p.Bottom * scale));
+        private static IEnumerable<Control> Descendants(Control root)
+        {
+            foreach (Control child in root.Controls) { yield return child; foreach (var nested in Descendants(child)) yield return nested; }
         }
 
         private static Color SurfaceColor(Control? control)

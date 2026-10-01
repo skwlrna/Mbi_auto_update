@@ -81,6 +81,23 @@ internal static class Program
                 Check(gathering.Right <= form.ClientSize.Width && gathering.Bottom < form.ClientSize.Height,
                     "production content fits at " + size);
                 Check(All(gathering).Where(x => x.Visible).All(x => x.Width > 0 && x.Height > 0), "native controls remain visible at " + size);
+                foreach (var page in new[] { gathering, altering })
+                {
+                    Menu(page == gathering ? "자동 채집" : "자동 가공"); Pump();
+                    float referenceScale = Math.Min(page.Width / 1212f, page.Height / 858f);
+                    var title = All(page).OfType<Label>().Single(x => x.Text == (page == gathering ? "자동 채집" : "자동 가공"));
+                    var input = All(page).OfType<NumericUpDown>().Single();
+                    Check(title.Font.Unit == GraphicsUnit.Pixel && title.Font.Size == Math.Max(13f, MathF.Round(36 * referenceScale))
+                        && input.Font.Unit == GraphicsUnit.Pixel && input.Font.Size == Math.Max(13f, MathF.Round(18 * referenceScale)),
+                        page.Name + " title and content match abyss typography at " + size);
+                    var values = All(page).OfType<Label>().Where(x => x.Visible &&
+                        (x.Text is "진행 수량" or "진행률" || x.Text.Contains(" / ") || x.Text.EndsWith("%") || x.Text.Contains("\n"))).ToArray();
+                    foreach (var value in values.Where(x => x.Height < x.Font.Height * x.Text.Split('\n').Length)) Console.WriteLine($"CLIPPED {value.Text} height={value.Height} font={value.Font.Height}");
+                    Check(values.Length >= 6 && values.All(x => x.Height >= x.Font.Height * x.Text.Split('\n').Length),
+                        page.Name + " progress and status text fits at " + size);
+                    Check(values.All(x => FullyContained(x, page)), page.Name + " status cards do not extend beyond parent rows at " + size);
+                    if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }
+                }
             }
             if (args.Length > 0)
             {
@@ -98,6 +115,12 @@ internal static class Program
     }
     private static bool Inside(Control control, Control page)
     { for(var p=control.Parent; p is not null; p=p.Parent) if(p==page) return true; return false; }
+    private static bool FullyContained(Control control, Control page)
+    {
+        for (var child = control; child != page && child.Parent != null; child = child.Parent)
+            if (child.Left < 0 || child.Top < 0 || child.Right > child.Parent.ClientSize.Width || child.Bottom > child.Parent.ClientSize.Height) return false;
+        return true;
+    }
     private static IEnumerable<Control> All(Control root)
     { foreach(Control c in root.Controls) { yield return c; foreach(var child in All(c)) yield return child; } }
     private static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
