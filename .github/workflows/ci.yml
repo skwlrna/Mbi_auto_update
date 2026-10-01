@@ -233,6 +233,30 @@ jobs:
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
           if ($guards -notmatch 'IsTransientLoadingRejection' -or $guards -notmatch 'VerifyWithLoadingRetryAsync' -or $guards -notmatch 'CurrencySnapshotWithLoadingRetryAsync') { throw 'bounded loading retry helpers missing' }
           $altering = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
+          if ($session -notmatch 'altering-session\.json' -or $session -notmatch 'LocalApplicationData') { throw 'persistent altering session path missing' }
+          if ($session -notmatch 'PendingRegistration' -or $session -notmatch 'PendingBeforeMatchingCount') { throw 'duplicate-safe pending-registration checkpoint missing' }
+          if ($session -notmatch 'InitialExistingWorks' -or $session -notmatch 'BaselineQuantity') { throw 'resume baseline/legacy-work accounting missing' }
+          if ($session -notmatch 'MatchesPlan' -or $session -notmatch 'MatchesIdentity') { throw 'resume plan/identity validation missing' }
+          if ($session -notmatch 'AlteringProgress' -or $session -notmatch '대기열.*7' -or $session -notmatch '다음 완료') { throw 'one-line altering progress summary missing' }
+          if ($session -notmatch 'AlteringMaterialEstimate' -or $session -notmatch '전체 재료표는 CLI가 부족 항목만 제공') { throw 'honest material estimate preview missing' }
+
+          $queueCheckpoint = [regex]::Match($altering, 'int previous = Matching\(works, plan\)\.Count\(\);[\s\S]*?QueuedWorks\+\+;[\s\S]*?SaveConfirmedRegistration\(\);').Value
+          if ([string]::IsNullOrWhiteSpace($queueCheckpoint) -or $queueCheckpoint -notmatch 'SavePendingRegistration\(previous\)' -or $queueCheckpoint.IndexOf('SavePendingRegistration(previous)') -gt $queueCheckpoint.IndexOf('await _screen.QueueAsync')) { throw 'registration checkpoint must be persisted before screen input' }
+          if ($altering -notmatch '이어하기 등록 복구' -or $altering -notmatch 'current == before \+ 1' -or $altering -notmatch 'current == before') { throw 'interrupted registration reconciliation missing' }
+          if ($altering -notmatch '_sessionStore\?\.Delete\(\)') { throw 'successful production must clear resume checkpoint' }
+          if ($altering -notmatch 'oldMinimum = checked' -or $altering -notmatch 'grossGained - oldMinimum') { throw 'pre-existing output exclusion missing from final verification' }
+
+          $mainAltering = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
+          if ($mainAltering -notmatch 'sessionStore\.Load\(\)' -or $mainAltering -notmatch 'MatchesPlan\(plan\)' -or $mainAltering -notmatch 'MatchesIdentity\(identity\.Baseline\)') { throw 'UI resume preflight validation missing' }
+          if ($mainAltering -notmatch 'sessionStore: sessionStore' -or $mainAltering -notmatch 'session: session') { throw 'persistent session not wired into altering automation' }
+          if ($mainAltering -notmatch 'automation\.Progress \+=' -or $mainAltering -notmatch '_productionProgressSummary = progress\.Summary') { throw 'live one-line progress is not wired to the UI' }
+          if ($mainAltering -notmatch '시작 전.*materialEstimate') { throw 'start-time material estimate log missing' }
+
+          $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -notmatch '이어하기 대기') { throw 'saved altering session is not restored into the production page' }
+          if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
+          if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
           if ($altering -notmatch 'int freeSlots = Math\.Max\(0, 7 - facilityCount\)') { throw 'seven-slot free-capacity calculation missing' }
           if ($altering -notmatch 'int batchGoal = Math\.Min\(freeSlots, plan\.RequiredWorks - QueuedWorks\)') { throw 'batch size must be capped by free slots and remaining works' }
           if ($altering -notmatch 'while \(queuedThisBatch < batchGoal') { throw 'verified batch registration loop missing' }
