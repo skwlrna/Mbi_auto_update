@@ -173,13 +173,19 @@ jobs:
           if ($screen -notmatch 'CollectVisualButton') { throw 'tight visual collect ROI missing' }
           if ($screen -match 'FindAsync\([^\r\n]*CollectButton[^\r\n]*"모두 받기"' -or $screen -match 'FindCompactLabelAsync\([^\r\n]*CollectButton[^\r\n]*"모두 받기"') { throw 'collect must not depend on 모두 받기 OCR' }
           if ($screen -match 'FindAsync\([^\r\n]*"Space"') { throw 'collect must not depend on tiny Space OCR' }
-          if ($screen -notmatch '설비 도착 후 무료 가공하기 확인') { throw 'on-site free processing confirmation log missing' }
+          if ($screen -notmatch '설비 도착 후 현장 가공 버튼 화면 확인') { throw 'on-site visual processing confirmation log missing' }
+          if ($screen -notmatch 'TryFindFreeProcessButtonVisual' -or $screen -notmatch 'FreeProcessVisualButton') { throw 'visual on-site process detector missing' }
+          if ($screen -notmatch 'actionPixels \* 100 < sampled \* 8' -or $screen -notmatch 'width < 300' -or $screen -notmatch 'height < 28') { throw 'wide green process-button shape gate missing' }
           if ($screen -notmatch 'IsRecipeDetailAsync') { throw 'structural recipe detail fallback missing' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'recipe must be selected only after facility travel' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
+          if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
+          if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
+          if ($queue -notmatch '"설비로 이동"' -or $queue -notmatch '"가공하러 가기"') { throw 'remote-state veto missing before visual process click' }
+          if ($queue -notmatch 'visualActionCenter') { throw 'visual action coordinates must drive the on-site click' }
           if ($screen -notmatch '설비로 이동 버튼 없음 · 이미 현장 가공창') { throw 'already-on-site facility state missing' }
           if ($screen -notmatch 'facilityVisible && !moveVisible' -or $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must use facility visible + move button absent' }
           if ($screen -notmatch '설비 도착 확인 · 설비로 이동 버튼 없음') { throw 'on-site arrival confirmation log missing' }
