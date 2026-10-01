@@ -58,15 +58,6 @@ public sealed partial class MainForm
                 _log.Write("[자동 채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
 
             var data = new GatheringCliData(_cli);
-
-            // Read-only schema probe. This runs before any screen input and only uses
-            // get_gatherable_items, so it cannot spend Spirit Wings or start movement.
-            var gatherableRaw = await _cli.GetGatherableItemsAsync(CancellationToken.None);
-            if (!gatherableRaw.Success)
-                throw new InvalidOperationException("채집 CLI 원본 구조 조회에 실패했습니다.");
-            _log.Write("[자동 채집][CLI 구조] " +
-                GatheringQueries.DescribeCatalogSchema(gatherableRaw, plan.DisplayName));
-
             plan = await AttachFreeGatheringSourceAsync(plan, CancellationToken.None);
             if (_cancelStart || IsDisposed) return;
             _productionLastMode = "채집";
