@@ -4,7 +4,7 @@ namespace FishingAutomation;
 
 internal sealed record AlteringIngredient(string DisplayName, long Required, long Owned);
 internal sealed record AlteringRecipe(string DisplayName, bool Alterable, int ProducedPerWork,
-    string? Reason, IReadOnlyList<AlteringIngredient> MissingIngredients);
+    string? Reason, IReadOnlyList<AlteringIngredient> MissingIngredients, string? FacilityName = null);
 internal sealed record AlteringWork(string DisplayName, string FacilityName, string State,
     bool IsCompleted, long RemainingSeconds);
 
@@ -33,7 +33,11 @@ internal static class AlteringQueries
                     missing.Add(new(RequireString(ingredient, "DisplayName"), required, owned));
                 }
             }
-            recipes.Add(new(name, alterable, produced, reason, missing));
+            string? facility = null;
+            if (item.TryGetProperty("FacilityName", out var facilityValue) &&
+                facilityValue.ValueKind == JsonValueKind.String)
+                facility = facilityValue.GetString();
+            recipes.Add(new(name, alterable, produced, reason, missing, facility));
         }
         return recipes;
     }
