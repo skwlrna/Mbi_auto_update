@@ -9,7 +9,7 @@ public sealed record MabinogiCliResult(string Command, bool Success, string Stat
 
 internal sealed record CliProcessOutput(int ExitCode, string Stdout, string Stderr);
 
-/// <summary>Read-only CLI connector. No action commands can reach the process boundary.</summary>
+/// <summary>Read-only CLI connector for automation. Cost/action commands are blocked at the process boundary.</summary>
 public sealed class MabinogiMobileCli
 {
     public const string DefaultPath = @"C:\Nexon\MabinogiMobile\MabinogiMobile_CLI.exe";
@@ -265,5 +265,5 @@ public sealed class MabinogiMobileCli
             or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
 
     private static bool IsAllowedAction(string command)
-        => command is "execute_gathering" or "execute_altering" or "complete_altering_work" or "stop_action";
+        => false;
 }
