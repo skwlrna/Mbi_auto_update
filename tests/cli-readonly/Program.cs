@@ -110,6 +110,28 @@ using var cancelled = new CancellationTokenSource();
 cancelled.Cancel();
 try { await defaults.StatusAsync(cancelled.Token); throw new Exception("cancellation ignored"); }
 catch (OperationCanceledException) { checks++; }
+
+int visibleBeforePolling = lines.Count;
+var quietPollingCli = new MabinogiMobileCli(log, true, (command, _) =>
+{
+    string stdout = command switch
+    {
+        "get_items" => "[]",
+        "get_my_info" => "{}",
+        "get_altering_works" => "{}",
+        "get_activity" => "{}",
+        _ => "{}"
+    };
+    return Task.FromResult(new CliProcessOutput(0, stdout, ""));
+});
+await quietPollingCli.GetItemsAsync();
+await quietPollingCli.GetMyInfoAsync();
+await quietPollingCli.GetAlteringWorksAsync();
+await quietPollingCli.GetActivityAsync();
+Check(lines.Count == visibleBeforePolling, "successful routine CLI polling leaked into on-screen log");
+Check(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "cli-test.log")).Contains("[CLI] get_items: connected"),
+    "background CLI polling was not retained in the file log");
+
 Check(lines.Count > 0 && lines.All(x => x.Contains("[CLI]")), "existing logger integration failed");
 
 var recipes = AlteringQueries.ParseRecipes(MabinogiMobileCli.Parse("get_alterable_items", new(0,
