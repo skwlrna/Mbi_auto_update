@@ -30,7 +30,7 @@ public sealed partial class MainForm
 
     private async Task RefreshProductionStateAsync(ProductionPage page)
     {
-        if (_productionPolling) return;
+        if (_productionPolling || _gatheringDiagnosticRunning) return;
         _productionPolling = true;
         string? selected = page.SelectedName;
         string? facility = page.Facility.SelectedItem?.ToString();
@@ -96,6 +96,7 @@ public sealed partial class MainForm
         private int _percent;
         private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
+        private readonly Button? _inspect;
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
@@ -133,6 +134,13 @@ public sealed partial class MainForm
             form.Controls.Add(settingsHeading, 0, 0); form.SetColumnSpan(settingsHeading, 2);
             _reload = PageButton("목록 새로고침", () => _ = LoadCatalogAsync(true));
             _reload.Font = new Font("맑은 고딕", 8.5f); _reload.Dock = DockStyle.Right; _reload.Width = 110; settingsHeading.Controls.Add(_reload);
+            if (!altering)
+            {
+                _inspect = PageButton("CLI 검사", () => _ = owner.InspectGatheringCliAsync());
+                _inspect.AccessibleName = "CLI 검사";
+                _inspect.Dock = DockStyle.Right; _inspect.Width = 90;
+                settingsHeading.Controls.Add(_inspect);
+            }
             _search.PlaceholderText = "품목을 검색하세요"; StyleField(_search); AddRow(form, 1, "품목 검색", _search);
             Items.DropDownStyle = ComboBoxStyle.DropDownList; StyleField(Items); StyleCombo(Items);
             Items.AccessibleName = altering ? "가공 제법" : "채집 품목"; AddRow(form, 2, Items.AccessibleName, Items);
@@ -504,10 +512,11 @@ public sealed partial class MainForm
 
         internal void UpdateExecution()
         {
-            bool running = _owner.AnyRunning;
+            bool running = _owner.AnyRunning || _owner._gatheringDiagnosticRunning;
             bool available = Items.SelectedItem is GatheringChoice { Item.ToolOk: true } or RecipeChoice { Recipe.Alterable: true };
             foreach (var field in new Control[] { Items, Quantity, Facility, _search, _reload }) field.Enabled = !running && !_loading;
-            _start.Enabled = !running && !_loading && available; _stop.Enabled = running;
+            _start.Enabled = !running && !_loading && available; _stop.Enabled = _owner.AnyRunning && !_owner._gatheringDiagnosticRunning;
+            if (_inspect is not null) _inspect.Enabled = !running && !_owner._starting && !_owner._productionPolling && !_loading && SelectedName is not null;
             bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
             bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;

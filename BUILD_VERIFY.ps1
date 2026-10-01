@@ -8,4 +8,6 @@ dotnet run --project changes/tests/stability/Regression.csproj -c Release
 if($LASTEXITCODE-ne0){throw 'Production regressions failed'}
 & ./changes/tests/stability/Updater.Tests.ps1 -Updater "$PSScriptRoot/source/tools/ApplyUpdate.ps1"
 if($LASTEXITCODE-ne0){throw 'Updater regressions failed'}
+dotnet run --project tests/gathering-diagnostic/Regression.csproj -c Release
+if($LASTEXITCODE-ne0){throw 'Diagnostic regressions failed'}
 Write-Host 'BUILD_AND_REGRESSIONS_OK (live game/device test still required)'
