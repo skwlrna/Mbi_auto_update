@@ -109,13 +109,27 @@ jobs:
           if($screen -notmatch '"가공하러 가기"'){throw 'remote paid button observation gate missing'}
           if($screen -notmatch '"설비로 이동"'){throw 'free facility travel path missing'}
           if($screen -match 'reserveFiveWings\(\)'){throw 'screen still reserves Spirit Wings'}
+          if($screen -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"5"'){throw 'fixed wing-cost number returned to production screen logic'}
+          if($screen -notmatch 'plan\.OutputName'){throw 'qualified recipe detail-title fallback missing'}
           $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if($wingGuard -notmatch 'after < before'){throw 'Spirit Wings decrease guard missing'}
+          if($wingGuard -notmatch 'actionFailure' -or $wingGuard -notmatch 'verificationFailure'){throw 'post-failure Spirit Wings verification missing'}
           if($wingGuard -notmatch 'ZeroWingAlteringScreen' -or $wingGuard -notmatch 'ZeroWingGatheringScreen'){throw 'screen wing guards missing'}
           $settings = Get-Content source/FishingAutomation/AlteringSettingsDialog.cs -Raw
           if($settings -match 'Checked = true' -and $settings -match '정령의 날개'){throw 'paid Spirit Wings option remains enabled'}
           $production = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
           if($production -match 'ProducedPerWork, true'){throw 'production UI still authorizes paid altering'}
+          if($production -notmatch 'MissingIngredients\.Count > 0'){throw 'concrete missing ingredient startup gate missing'}
+          $project = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          if($project -notmatch 'interception\.dll[^>]*CopyToPublishDirectory="PreserveNewest"'){throw 'interception.dll publish copy missing'}
+
+      - name: Test publish contains Interception
+        shell: pwsh
+        run: |
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -o artifacts/ci-test-publish
+          if ($LASTEXITCODE -ne 0) { throw 'test publish failed' }
+          if (-not (Test-Path artifacts/ci-test-publish/FishingAutomation.exe)) { throw 'published exe missing' }
+          if (-not (Test-Path artifacts/ci-test-publish/interception.dll)) { throw 'published interception.dll missing' }
 
       - name: Unified production UI checks
         shell: pwsh
