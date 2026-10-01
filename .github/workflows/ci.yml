@@ -192,7 +192,9 @@ jobs:
           if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'green confirmation-button visual gate missing' }
           if ($screen -notmatch '하단 확인 팝업 화면 감지') { throw 'visual popup confirmation log missing' }
           if ($screen -notmatch '하단 확인 팝업 없음 · Space 입력 생략') { throw 'no-popup path must skip Space' }
-          if ($screen -notmatch 'p\.B >= 120' -or $screen -notmatch 'blue \* 100 >= sampled \* 8') { throw 'blue collect-button visual gate missing' }
+          if ($screen -notmatch 'p\.B >= 95' -or $screen -notmatch 'blue \* 100 >= sampled \* 2') { throw 'tolerant blue collect-button visual gate missing' }
+          if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
+          if ($screen -notmatch 'attempts: 20, delayMs: 250') { throw 'initial receive wait window missing' }
           if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
