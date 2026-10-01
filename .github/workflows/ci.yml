@@ -245,6 +245,24 @@ jobs:
           if ($altering -match 'for \(int i = 0; i < 4; i\+\+\)[\s\S]{0,500}TimeSpan\.FromSeconds\(2\)') { throw 'old eight-second first-receipt queue polling returned' }
           if ($altering -notmatch '1차 모두 받기 = 설비 이동 · 즉시 가공대 수령 화면 대기') { throw 'immediate travel branch diagnostic missing' }
           if ($altering -notmatch 'TimeSpan delay = pollDelay \?\? TimeSpan\.FromSeconds\(5\)') { throw 'non-registration verification default delay changed unexpectedly' }
+          if ($altering -notmatch 'StallThreshold = TimeSpan\.FromSeconds\(60\)') { throw 'altering stall threshold must stay at 60 seconds' }
+          if ($altering -notmatch 'MaxStallRecoveries = 3') { throw 'altering stall recovery bound missing' }
+          if ($altering -notmatch 'ProgressSignature\(works, plan, QueuedWorks\)') { throw 'queue progress signature stall detector missing' }
+          if ($altering -notmatch '정체 감지' -or $altering -notmatch 'RecoverStallAsync') { throw 'altering stall recovery invocation missing' }
+          if ($altering -notmatch 'lastProgressAt = DateTime\.UtcNow') { throw 'stall recovery grace window reset missing' }
+          if ($altering -notmatch '마지막 진단 화면을 저장한 상태로 정지합니다') { throw 'bounded stall final-stop diagnostic missing' }
+
+          $recovery = [regex]::Match($screen, 'public async Task RecoverStallAsync[\s\S]*?(?=\r?\n    private void Fail)').Value
+          if ([string]::IsNullOrWhiteSpace($recovery)) { throw 'altering screen stall recovery method missing' }
+          if ($recovery -notmatch 'altering-stall-last\.png') { throw 'stall screenshot output missing' }
+          if ($recovery -notmatch '_cachedRecipeKey = null' -or $recovery -notmatch '_hasCachedRecipeCenter = false') { throw 'stall recovery must clear fast-path recipe assumptions' }
+          if ($recovery -notmatch 'EnterFacilityAsync\(plan, ct\)') { throw 'stall recovery must safely re-evaluate the requested facility' }
+          if ($recovery -match 'TravelToFacilityAsync\(' -or $recovery -match 'SelectRecipeAsync\(' -or $recovery -match 'QueueAsync\(') { throw 'stall recovery must not travel, select recipe, or register work' }
+          if ($recovery -notmatch 'TapScanCode\(0x01\)' -or $recovery -match 'TapScanCode\(0x39\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
+
+          $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose guarded stall recovery' }
+          if ($zeroWing -notmatch 'GuardAsync\("\[자동 가공\] 정체 화면 재판정"') { throw 'stall recovery is not wrapped in currency verification' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
           $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
