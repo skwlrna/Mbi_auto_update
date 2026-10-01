@@ -100,8 +100,9 @@ public sealed partial class MainForm
         private readonly MainForm _owner;
         internal bool IsAltering { get; }
         internal readonly ComboBox Items = new LauncherCombo(), Facility = new LauncherCombo();
-        internal readonly NumericUpDown Quantity = new ArrowlessNumericUpDown { Minimum = 1, Maximum = 1000000, Value = 100 };
+        internal readonly NumericUpDown Quantity;
         internal readonly Label Owned = new();
+        private readonly TextBox _search = new();
         private readonly Dictionary<string, Button> _facilityTabButtons = new(StringComparer.Ordinal);
         private static readonly string[] FacilityUiOrder =
         {
@@ -128,6 +129,9 @@ public sealed partial class MainForm
         internal ProductionPage(MainForm owner, bool altering)
         {
             _owner = owner; IsAltering = altering;
+            Quantity = altering
+                ? new ArrowlessNumericUpDown { Minimum = 1, Maximum = 1000000, Value = 100 }
+                : new NumericUpDown { Minimum = 1, Maximum = 1000000, Value = 100 };
             Name = altering ? "AlteringPage" : "GatheringPage";
             AccessibleName = altering ? "자동 가공" : "자동 채집";
             BackColor = WindowBg; ForeColor = TitleText; Visible = false;
@@ -144,7 +148,7 @@ public sealed partial class MainForm
             var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10) };
             settings.ColumnStyles.Add(new(SizeType.Percent, 62)); settings.ColumnStyles.Add(new(SizeType.Percent, 38));
             var card = new LauncherCard { Padding = new Padding(16, 9, 16, 9), Margin = new Padding(0, 0, 9, 0) };
-            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = altering ? 4 : 3, BackColor = Color.Transparent };
+            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, BackColor = Color.Transparent };
             form.ColumnStyles.Add(new(SizeType.Absolute, 112)); form.ColumnStyles.Add(new(SizeType.Percent, 100));
             form.RowStyles.Add(new(SizeType.Absolute, 32));
             for (int i = 1; i < form.RowCount; i++) form.RowStyles.Add(new(SizeType.Percent, 100f / (form.RowCount - 1)));
@@ -171,8 +175,11 @@ public sealed partial class MainForm
             }
             else
             {
-                AddRow(form, 1, Items.AccessibleName, Items);
-                AddRow(form, 2, "목표 수량", Quantity);
+                _search.PlaceholderText = "품목을 검색하세요";
+                StyleField(_search);
+                AddRow(form, 1, "품목 검색", _search);
+                AddRow(form, 2, Items.AccessibleName, Items);
+                AddRow(form, 3, "목표 수량", Quantity);
             }
 
             card.Controls.Add(form); settings.Controls.Add(card, 0, 0);
@@ -284,6 +291,7 @@ public sealed partial class MainForm
                 fitting = false;
             }
             Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
+            _search.TextChanged += (_, _) => { if (!IsAltering) Filter(); };
             Items.SelectedIndexChanged += (_, _) => SelectionChanged();
             Quantity.ValueChanged += (_, _) => SelectionChanged();
             Facility.SelectedIndexChanged += (_, _) =>
@@ -669,6 +677,9 @@ public sealed partial class MainForm
             if (IsAltering && Facility.SelectedItem is string facility)
                 visible = visible.Where(x => x is RecipeChoice r &&
                     RecipeFacility(r.Recipe) == facility);
+            else if (!IsAltering)
+                visible = visible.Where(x =>
+                    x.ToString()!.Contains(_search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
 
             Items.BeginUpdate();
             Items.Items.Clear();
@@ -710,6 +721,7 @@ public sealed partial class MainForm
                 _ => false
             };
             foreach (var field in new Control[] { Items, Quantity, _reload }) field.Enabled = !running && !_loading;
+            _search.Enabled = !running && !_loading;
             Facility.Enabled = !running && !_loading;
             foreach (var tab in _facilityTabButtons.Values) tab.Enabled = !running && !_loading;
             _start.Enabled = !running && !_loading && available; _stop.Enabled = running;
