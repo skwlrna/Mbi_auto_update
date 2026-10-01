@@ -582,6 +582,67 @@ internal sealed class AlteringScreen : IAlteringScreen
         await SelectRecipeAsync(plan, ct);
     }
 
+    private async Task<bool> ConfirmCompletionResultAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        // Successful receipt replaces the facility UI with the full-screen
+        // "가공 완료" result. Detect the large green bottom confirmation shape,
+        // while requiring the facility title to be absent so this cannot be confused
+        // with the facility-travel confirmation popup.
+        int stableFrames = 0;
+        for (int attempt = 0; attempt < 24; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(200, ct);
+
+            using var frame = Capture(ct);
+            bool greenConfirm = HasBottomConfirmationModal(frame);
+            bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+
+            if (greenConfirm && !facilityVisible)
+            {
+                stableFrames++;
+                if (stableFrames < 2)
+                    continue;
+
+                Log?.Invoke("[자동 가공] 가공 완료 결과창 확인 · Space 입력");
+                _input.TapScanCode(0x39);
+
+                // The user-confirmed game flow returns to the same processing facility
+                // window after closing the result screen. Do not continue until that
+                // facility window is stably back.
+                int facilityFrames = 0;
+                for (int wait = 0; wait < 30; wait++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await Task.Delay(200, ct);
+                    using var returned = Capture(ct);
+                    if (await FindFacilityHeaderAsync(returned, plan.ScreenTitle, ct) is not null)
+                    {
+                        facilityFrames++;
+                        if (facilityFrames >= 2)
+                        {
+                            Log?.Invoke($"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 확인");
+                            return true;
+                        }
+                    }
+                    else
+                    {
+                        facilityFrames = 0;
+                    }
+                }
+
+                using var failed = Capture(ct);
+                Fail(failed, "가공 완료 확인 후 가공 시설 화면 복귀를 확인하지 못했습니다.");
+            }
+            else
+            {
+                stableFrames = 0;
+            }
+        }
+
+        return false;
+    }
+
     public async Task CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         await EnterFacilityAsync(plan, ct);
@@ -598,6 +659,11 @@ internal sealed class AlteringScreen : IAlteringScreen
         Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 1차 Space");
         _input.TapScanCode(0x39);
         await Task.Delay(700, ct);
+
+        // If the first Space actually collected the jobs, close the result screen and
+        // prove that the facility window returned. If it only started travel, there is
+        // no completion-result signature and no extra input is sent here.
+        await ConfirmCompletionResultAsync(plan, ct);
     }
 
     public async Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
@@ -613,6 +679,15 @@ internal sealed class AlteringScreen : IAlteringScreen
         Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space");
         _input.TapScanCode(0x39);
         await Task.Delay(700, ct);
+
+        // At the bench this should be the real receipt. Close "가공 완료" and wait
+        // until the same processing facility window returns before reporting success.
+        if (!await ConfirmCompletionResultAsync(plan, ct))
+        {
+            using var failed = Capture(ct);
+            Fail(failed, "2차 모두 받기 후 가공 완료 확인창을 확인하지 못했습니다.");
+        }
+
         return true;
     }
     private void Fail(Bitmap frame, string message)
