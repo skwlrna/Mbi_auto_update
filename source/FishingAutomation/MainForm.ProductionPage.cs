@@ -606,7 +606,8 @@ public sealed partial class MainForm
             {
                 _choices = IsAltering
                     ? (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
-                        .GroupBy(x => x.DisplayName, StringComparer.Ordinal).Select(g => (object)new RecipeChoice(g.First())).ToArray()
+                        .GroupBy(x => (Facility: RecipeFacility(x), x.DisplayName))
+                        .Select(g => (object)new RecipeChoice(g.First())).ToArray()
                     : (await new GatheringCliData(_owner._cli).CatalogAsync(CancellationToken.None))
                         .Select(x => (object)new GatheringChoice(x)).ToArray();
                 _loaded = true;
