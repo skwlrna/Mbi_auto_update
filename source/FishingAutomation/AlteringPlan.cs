@@ -440,8 +440,6 @@ internal sealed class AlteringAutomation
         string materialState,
         CancellationToken ct)
     {
-        if (Progress is null) return;
-
         long current = await _data.ItemCountAsync(plan.OutputName, ct);
         if (_session is not null)
         {
@@ -452,6 +450,8 @@ internal sealed class AlteringAutomation
             if (current != _session.LastObservedOutputQuantity)
                 SaveSession(_session with { LastObservedOutputQuantity = current });
         }
+
+        if (Progress is null) return;
 
         long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
         long confirmed = Math.Max(0, current - baseline - oldMinimum);
