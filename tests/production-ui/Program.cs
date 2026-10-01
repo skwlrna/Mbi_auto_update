@@ -144,7 +144,12 @@ internal sealed class FakeCli
             "get_my_info" => new {CharacterId="ui-test",CharacterName="테스트",RealmName="테스트 서버"},
             "get_currencies" => new[]{new{DisplayName="정령의 날개",Amount=105455},new{DisplayName="골드",Amount=5000}},
             "get_gatherable_items" => new {items=new[]{new{DisplayName="철 광석",ToolOk=true},new{DisplayName="상급 통나무+",ToolOk=true},new{DisplayName="가죽",ToolOk=false}}},
-            "get_alterable_items" => new {items=new[]{new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null},new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null},new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"not_enough_ingredient"},new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"not_enough_ingredient"}}},
+            "get_alterable_items" => new {items=new object[]{
+                new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철 광석",Required=10L,Owned=0L}}},
+                new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철괴",Required=3L,Owned=0L}}}
+            }},
             "get_items" => new[]{new{DisplayName="철 광석",Count=184L,Location="inventory"},new{DisplayName="상급 통나무+",Count=_logs,Location="inventory"},new{DisplayName="철괴",Count=_ingots,Location="inventory"},new{DisplayName="목재+",Count=_wood,Location="inventory"}},
             "get_altering_works" => new{completedCount=_work is null?0:1,works=_work is null?Array.Empty<object>():new object[]{new{DisplayName=_work,FacilityName="목재 가공 시설",State="Completed",IsCompleted=true,RemainingSeconds=0}}},
             "get_inventory" => new{CurrentInventoryWeightAsDecimal=1,MaxInventoryWeightAsDecimal=100},
