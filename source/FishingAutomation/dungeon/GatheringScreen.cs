@@ -56,17 +56,51 @@ internal sealed class GatheringScreen : IGatheringScreen
         {
             if(await _vision.FirstPlaceAsync(frame,ct) is null) await ClickMethodAsync(plan,ct);
         }
+        long beforeCount=await _data.ItemCountAsync(plan.DisplayName,ct);
         await ClickFirstPlaceAsync(plan,ct);
-        for(int attempt=0;attempt<30;attempt++)
+
+        long lastCount=beforeCount;
+        for(int attempt=0;attempt<120;attempt++)
         {
             ct.ThrowIfCancellationRequested();
+
             var state=await _data.ActivityAsync(ct);
-            if(state.IsAutoTraveling || state.IsGathering || state.IsFishing) return;
-            if(!state.IsSafeField) throw new InvalidOperationException("이동 시작 중 게임 상태가 바뀌어 정지합니다.");
+            long currentCount=await _data.ItemCountAsync(plan.DisplayName,ct);
+            long gained=Math.Max(0,currentCount-beforeCount);
+
+            if(currentCount!=lastCount)
+            {
+                Log?.Invoke($"[자동채집] {plan.DisplayName} 수량 변화 확인 · {beforeCount} → {currentCount} · +{gained}/{plan.TargetQuantity}");
+                lastCount=currentCount;
+            }
+
+            // Inventory is the source of truth. Some live get_activity responses remain
+            // Compass/None for the whole route even though auto travel and gathering
+            // actually complete. If the requested new quantity is present, let the
+            // outer gathering session verify it and continue back to production.
+            if(gained>=plan.TargetQuantity)
+            {
+                Log?.Invoke($"[자동채집] 목표 수량 확보 확인 · {plan.DisplayName} +{gained} · activity 상태와 무관하게 성공 처리");
+                return;
+            }
+
+            // When activity is observable, return immediately and let
+            // GatheringAutomation monitor quantity/progress as before.
+            if(state.IsAutoTraveling || state.IsGathering || state.IsFishing)
+            {
+                Log?.Invoke($"[자동채집] 이동/채집 상태 확인 · AutoTraveling={state.IsAutoTraveling}, Gathering={state.IsGathering}, Fishing={state.IsFishing}");
+                return;
+            }
+
+            if(!state.IsSafeField)
+                throw new InvalidOperationException("이동/채집 대기 중 게임 상태가 바뀌어 정지합니다.");
+
             await Task.Delay(1000,ct);
         }
+
+        long finalCount=await _data.ItemCountAsync(plan.DisplayName,ct);
         using var failure=Capture(ct);
-        Fail(failure,"첫 번째 장소 선택 후 이동/채집 시작을 확인하지 못했습니다. 다른 버튼을 누르지 않고 정지합니다.");
+        Fail(failure,$"첫 번째 장소 선택 후 이동/채집 또는 목표 수량 확보를 확인하지 못했습니다. {plan.DisplayName} {beforeCount}→{finalCount}, 목표 +{plan.TargetQuantity}. 다른 버튼을 누르지 않고 정지합니다.");
     }
     private async Task ClickIngredientAsync(GatheringPlan plan,CancellationToken ct)
     {
