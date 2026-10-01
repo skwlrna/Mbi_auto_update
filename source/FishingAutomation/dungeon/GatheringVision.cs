@@ -66,9 +66,16 @@ internal sealed class GatheringVision
         var row = Rectangle.Intersect(new(0,0,800,1000),
             new Rectangle(header.Value.Bounds.Left, header.Value.Bounds.Bottom + 38, 465, 66));
         var lines = await _ocr.ReadLinesAsync(frame, row, 3, ct);
-        var names = lines.Where(x => x.Center.Y >= row.Top + 20 &&
-            Regex.IsMatch(x.ReadText ?? "", "[가-힣]", RegexOptions.CultureInvariant)).ToArray();
-        if(names.Length != 1) return null;
+        var names = lines.Where(x => x.Center.Y >= row.Top + 18 &&
+            Regex.IsMatch(x.ReadText ?? "", "[가-힣]", RegexOptions.CultureInvariant))
+            .OrderBy(x => Math.Abs(x.Center.Y - (row.Top + row.Height / 2)))
+            .ThenBy(x => x.Center.X)
+            .ToArray();
+        if(names.Length == 0) return null;
+
+        // The text is informational only. OCR can vary between consecutive frames
+        // (for example "철 광맥" vs a partially-read variant) while the top row is
+        // still the same place. Click authorization is based on row geometry.
         return (row, names[0].ReadText ?? "");
     }
 }

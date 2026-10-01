@@ -10,9 +10,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>2.0.1</Version>
-    <AssemblyVersion>2.0.1.0</AssemblyVersion>
-    <FileVersion>2.0.1.0</FileVersion>
+    <Version>2.0.2</Version>
+    <AssemblyVersion>2.0.2.0</AssemblyVersion>
+    <FileVersion>2.0.2.0</FileVersion>
     <RunAnalyzers>false</RunAnalyzers>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
@@ -32,7 +32,7 @@
     <Content Include="templates\*.png;templates\*.jpg;templates\*.jpeg;templates\*.bmp" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="config.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="notification.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="interception.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('interception.dll')" />
+    <Content Include="interception.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Condition="Exists('interception.dll')" />
     <Content Include="dungeon\config\*.json;dungeon\templates\*.png;dungeon\templates\*.jpg;dungeon\templates\*.jpeg;dungeon\templates\*.bmp" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="abyss\config\*.json;abyss\templates\*.png;abyss\templates\*.jpg;abyss\templates\*.jpeg;abyss\templates\*.bmp" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

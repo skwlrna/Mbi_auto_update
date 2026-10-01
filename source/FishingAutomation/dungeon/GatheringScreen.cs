@@ -56,28 +56,79 @@ internal sealed class GatheringScreen : IGatheringScreen
         {
             if(await _vision.FirstPlaceAsync(frame,ct) is null) await ClickMethodAsync(plan,ct);
         }
+        long beforeCount=await _data.ItemCountAsync(plan.DisplayName,ct);
         await ClickFirstPlaceAsync(plan,ct);
-        for(int attempt=0;attempt<30;attempt++)
+
+        long lastCount=beforeCount;
+        for(int attempt=0;attempt<120;attempt++)
         {
             ct.ThrowIfCancellationRequested();
+
             var state=await _data.ActivityAsync(ct);
-            if(state.IsAutoTraveling || state.IsGathering || state.IsFishing) return;
-            if(!state.IsSafeField) throw new InvalidOperationException("이동 시작 중 게임 상태가 바뀌어 정지합니다.");
+            long currentCount=await _data.ItemCountAsync(plan.DisplayName,ct);
+            long gained=Math.Max(0,currentCount-beforeCount);
+
+            if(currentCount!=lastCount)
+            {
+                Log?.Invoke($"[자동채집] {plan.DisplayName} 수량 변화 확인 · {beforeCount} → {currentCount} · +{gained}/{plan.TargetQuantity}");
+                lastCount=currentCount;
+            }
+
+            // Inventory is the source of truth. Some live get_activity responses remain
+            // Compass/None for the whole route even though auto travel and gathering
+            // actually complete. If the requested new quantity is present, let the
+            // outer gathering session verify it and continue back to production.
+            if(gained>=plan.TargetQuantity)
+            {
+                Log?.Invoke($"[자동채집] 목표 수량 확보 확인 · {plan.DisplayName} +{gained} · activity 상태와 무관하게 성공 처리");
+                return;
+            }
+
+            // When activity is observable, return immediately and let
+            // GatheringAutomation monitor quantity/progress as before.
+            if(state.IsAutoTraveling || state.IsGathering || state.IsFishing)
+            {
+                Log?.Invoke($"[자동채집] 이동/채집 상태 확인 · AutoTraveling={state.IsAutoTraveling}, Gathering={state.IsGathering}, Fishing={state.IsFishing}");
+                return;
+            }
+
+            if(!state.IsSafeField)
+                throw new InvalidOperationException("이동/채집 대기 중 게임 상태가 바뀌어 정지합니다.");
+
             await Task.Delay(1000,ct);
         }
+
+        long finalCount=await _data.ItemCountAsync(plan.DisplayName,ct);
         using var failure=Capture(ct);
-        Fail(failure,"첫 번째 장소 선택 후 이동/채집 시작을 확인하지 못했습니다. 다른 버튼을 누르지 않고 정지합니다.");
+        Fail(failure,$"첫 번째 장소 선택 후 이동/채집 또는 목표 수량 확보를 확인하지 못했습니다. {plan.DisplayName} {beforeCount}→{finalCount}, 목표 +{plan.TargetQuantity}. 다른 버튼을 누르지 않고 정지합니다.");
     }
     private async Task ClickIngredientAsync(GatheringPlan plan,CancellationToken ct)
     {
+        // Ingredient names in the live processing detail sheet are rendered in a dim
+        // gray style. Use the same high-contrast OCR path that material-detail titles
+        // use instead of requiring bright recipe-card text.
+        var ingredientArea = new Rectangle(120, 690, 560, 200);
+        var materialsHeaderArea = new Rectangle(100, 680, 600, 210);
+
         for(int pass=0;pass<2;pass++)
         {
             using var frame=Capture(ct);
-            var label=await _vision.FindExactAsync(frame,new(150,700,510,170),plan.DisplayName,ct);
-            if(label is null || await _vision.FindExactAsync(frame,new(100,690,580,200),"필요한 재료",ct) is null)
-                Fail(frame,"가공 품목에서 선택한 채집 재료를 확인하지 못했습니다.");
-            if(pass==0){await Task.Delay(180,ct);continue;}
-            _input.ClickClientPoint(_hwnd,label!.Value.Center);
+            var materialsHeader = await _vision.FindExactAsync(
+                frame, materialsHeaderArea, "필요한 재료", ct, dim:true);
+            var label = await _vision.FindExactAsync(
+                frame, ingredientArea, plan.DisplayName, ct, dim:true);
+
+            if(materialsHeader is null || label is null)
+                Fail(frame,$"가공 품목의 필요한 재료에서 {plan.DisplayName}을 확인하지 못했습니다.");
+
+            if(pass==0)
+            {
+                await Task.Delay(180,ct);
+                continue;
+            }
+
+            Log?.Invoke($"[자동채집] 필요한 재료 확인 · {plan.DisplayName} · 어두운 재료명 OCR 2프레임 확인");
+            _input.ClickClientPoint(_hwnd,label.Value.Center);
         }
         await Task.Delay(350,ct);
     }
@@ -96,17 +147,38 @@ internal sealed class GatheringScreen : IGatheringScreen
     }
     private async Task ClickFirstPlaceAsync(GatheringPlan plan,CancellationToken ct)
     {
-        string? name=null;
+        Rectangle? firstBounds=null;
+        string? firstText=null;
+
         for(int pass=0;pass<2;pass++)
         {
             using var frame=Capture(ct);
-            if(await _vision.FindMaterialAsync(frame,plan.DisplayName,ct) is null) Fail(frame,"장소 목록의 대상 재료가 바뀌었습니다.");
+            if(await _vision.FindMaterialAsync(frame,plan.DisplayName,ct) is null)
+                Fail(frame,"장소 목록의 대상 재료가 바뀌었습니다.");
+
             var first=await _vision.FirstPlaceAsync(frame,ct);
-            if(first is null) Fail(frame,"장소 목록의 맨 위 항목을 확인하지 못했습니다.");
-            if(pass==0){name=first!.Value.Text;await Task.Delay(180,ct);continue;}
-            if(AlteringText.Normalize(name!)!=AlteringText.Normalize(first!.Value.Text)) Fail(frame,"첫 번째 장소가 변경되어 입력을 정지합니다.");
-            Log?.Invoke("[자동채집] 첫 번째 장소 선택: "+name+" · 일반 이동");
-            _input.ClickClientPoint(_hwnd,new(first.Value.Bounds.Left+first.Value.Bounds.Width/2,first.Value.Bounds.Top+first.Value.Bounds.Height/2));
+            if(first is null)
+                Fail(frame,"장소 목록의 맨 위 항목을 확인하지 못했습니다.");
+
+            if(pass==0)
+            {
+                firstBounds=first.Value.Bounds;
+                firstText=first.Value.Text;
+                await Task.Delay(180,ct);
+                continue;
+            }
+
+            if(firstBounds is null || !GatheringNavigationPolicy.IsStableFirstRow(firstBounds.Value,first.Value.Bounds))
+                Fail(frame,"첫 번째 장소 행 위치가 변경되어 입력을 정지합니다.");
+
+            string display = string.IsNullOrWhiteSpace(first.Value.Text) ? firstText ?? "첫 번째 장소" : first.Value.Text;
+            Log?.Invoke("[자동채집] 첫 번째 장소 선택: "+display+" · 위치 재확인 완료 · 일반 이동");
+
+            // Always click the second, freshest frame. The recommendation badge,
+            // place-name OCR string and displayed distance do not affect selection.
+            _input.ClickClientPoint(_hwnd,new(
+                first.Value.Bounds.Left+first.Value.Bounds.Width/2,
+                first.Value.Bounds.Top+first.Value.Bounds.Height/2));
         }
     }
     public async Task StopAsync(CancellationToken ct)

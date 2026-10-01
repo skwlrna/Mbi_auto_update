@@ -44,6 +44,8 @@ internal sealed class CliIdentityGuard
         _baseline = baseline;
     }
 
+    internal CliIdentityContext Baseline => _baseline;
+
     internal string Description =>
         $"get_my_info 기준 {_baseline.ComparableFields}개 필드 · 강도={_baseline.Strength}";
 
@@ -60,10 +62,34 @@ internal sealed class CliIdentityGuard
         if (!_baseline.Matches(current))
             throw new InvalidOperationException("get_my_info 기준 캐릭터/계정/서버 문맥이 바뀌어 CLI 실행을 중단합니다.");
     }
+
+    internal async Task VerifyWithLoadingRetryAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var response = await _cli.GetMyInfoAsync(ct).ConfigureAwait(false);
+            if (response.Success)
+            {
+                var current = CliAutomationGuards.ParseIdentity(response);
+                if (!_baseline.Matches(current))
+                    throw new InvalidOperationException("get_my_info 기준 캐릭터/계정/서버 문맥이 바뀌어 CLI 실행을 중단합니다.");
+                return;
+            }
+
+            if (!CliAutomationGuards.IsTransientLoadingRejection(response))
+                _ = CliAutomationGuards.ParseIdentity(response); // throws with the existing diagnostic
+
+            await Task.Delay(500, ct).ConfigureAwait(false);
+        }
+    }
 }
 
 internal static class CliAutomationGuards
 {
+    internal static bool IsTransientLoadingRejection(MabinogiCliResult response)
+        => !response.Success && response.Error == "cli_rejected";
+
     internal static async Task<IReadOnlyDictionary<string, CliCommandCapability>> EnsureCapabilitiesAsync(
         MabinogiMobileCli cli, IEnumerable<string> required, CancellationToken ct = default)
     {
@@ -160,6 +186,23 @@ internal static class CliAutomationGuards
     internal static async Task<IReadOnlyDictionary<string, decimal>> CurrencySnapshotAsync(
         MabinogiMobileCli cli, CancellationToken ct)
         => ParseCurrencies(await cli.GetCurrenciesAsync(ct).ConfigureAwait(false));
+
+    internal static async Task<IReadOnlyDictionary<string, decimal>> CurrencySnapshotWithLoadingRetryAsync(
+        MabinogiMobileCli cli, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var response = await cli.GetCurrenciesAsync(ct).ConfigureAwait(false);
+            if (response.Success)
+                return ParseCurrencies(response);
+
+            if (!IsTransientLoadingRejection(response))
+                return ParseCurrencies(response); // throws with the existing diagnostic
+
+            await Task.Delay(500, ct).ConfigureAwait(false);
+        }
+    }
 
     internal static string[] CurrencyChanges(
         IReadOnlyDictionary<string, decimal> before,
