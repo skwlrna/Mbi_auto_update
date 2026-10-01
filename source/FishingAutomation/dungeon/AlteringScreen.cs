@@ -388,19 +388,35 @@ internal sealed class AlteringScreen : IAlteringScreen
 
         bool sawDeparture = false;
         bool sawTravel = false;
+        int loadingCliRejects = 0;
         for (int attempt = 0; attempt < 120; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(500, ct);
 
-            var activity = GatheringQueries.ParseActivity(await _cli.GetActivityAsync(ct));
-            if (!activity.IsSafeField)
-                throw new InvalidOperationException("설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
-
-            if (activity.IsAutoTraveling)
+            GatheringActivity? activity = null;
+            var activityResponse = await _cli.GetActivityAsync(ct);
+            if (activityResponse.Success)
             {
-                sawTravel = true;
-                sawDeparture = true;
+                activity = GatheringQueries.ParseActivity(activityResponse);
+                if (!activity.IsSafeField)
+                    throw new InvalidOperationException("설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+
+                if (activity.IsAutoTraveling)
+                {
+                    sawTravel = true;
+                    sawDeparture = true;
+                }
+            }
+            else if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
+            {
+                loadingCliRejects++;
+                if (loadingCliRejects == 1 || loadingCliRejects % 5 == 0)
+                    Log?.Invoke($"[자동 가공] 지역 이동 로딩 중 CLI 일시 거부 · 재시도 {loadingCliRejects}회");
+            }
+            else
+            {
+                _ = GatheringQueries.ParseActivity(activityResponse); // preserve the existing hard failure
             }
 
             using var frame = Capture(ct);
@@ -412,14 +428,17 @@ internal sealed class AlteringScreen : IAlteringScreen
             if (!facilityVisible)
                 sawDeparture = true;
 
-            if (sawDeparture && !activity.IsAutoTraveling && facilityVisible)
+            // The processing window itself is authoritative arrival evidence.
+            // During map loading get_activity can be temporarily rejected, so do not
+            // require a successful CLI sample on the exact arrival frame.
+            if (sawDeparture && facilityVisible && activity?.IsAutoTraveling != true)
             {
                 Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · 가공창 재등장");
                 return;
             }
 
             if (attempt > 0 && attempt % 10 == 0)
-                Log?.Invoke($"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · 화면이탈={sawDeparture} · 가공창={facilityVisible}");
+                Log?.Invoke($"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · 화면이탈={sawDeparture} · 가공창={facilityVisible} · CLI로딩거부={loadingCliRejects}");
         }
 
         throw new InvalidOperationException("설비로 이동 후 가공창 재등장을 제한 시간 안에 확인하지 못해 정지합니다.");
