@@ -80,7 +80,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         string category = plan.Category == CraftingCategory.Food ? "음식" : "아이템";
         _stage.Move(ProductionStage.SelectCategory, category);
         await ClickCraftingCategoryCardAsync(plan.Category, category, ct);
-        await Task.Delay(650, ct);
+        Log?.Invoke($"[제작] {category} 제작 목록 안정화 대기 · {CraftingHubLayout.ProductListSettleDelayMs}ms");
+        await Task.Delay(CraftingHubLayout.ProductListSettleDelayMs, ct);
 
         _stage.Move(ProductionStage.Search, plan.DisplayName);
         await SearchProductAsync(plan.DisplayName, category, ct);
