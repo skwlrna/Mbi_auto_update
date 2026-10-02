@@ -72,12 +72,19 @@ public sealed partial class MainForm
         private readonly Label _detail = new();
         private readonly Label _progress = new();
         private readonly Label _state = new();
+        private readonly Label _stage = new();
+        private readonly Label _percentage = new();
+        private readonly Label _elapsed = new();
+        private readonly Label _errors = new();
+        private readonly Panel _progressBar = new();
+        private readonly TextBox _pageLog = new();
+        private int _percent;
         private CraftableItem[] _choices = Array.Empty<CraftableItem>();
         private bool _loading;
         private bool _loaded;
         private float _layoutScale = 1;
 
-        internal readonly ComboBox Items = new CraftingCombo();
+        internal readonly ListBox Items = new();
         internal readonly NumericUpDown Quantity = new ArrowlessNumericUpDown();
         internal readonly Label Owned = new();
         internal CraftingCategory Category { get; private set; } = CraftingCategory.Food;
@@ -98,280 +105,136 @@ public sealed partial class MainForm
 
             var root = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 3,
-                Padding = new Padding(14, 6, 14, 10),
-                Margin = Padding.Empty,
-                BackColor = WindowBg
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Padding = new Padding(14, 6, 14, 10), Margin = Padding.Empty, BackColor = WindowBg
             };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 51));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 49));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
 
-            var header = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Margin = Padding.Empty
-            };
-            header.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-            header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+            var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 58)); header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
             header.Controls.Add(owner.SectionTitle("제작", 26), 0, 0);
-            header.Controls.Add(new Label
-            {
-                Text = "아이템·음식을 나눠 원하는 품목을 자동 제작합니다.",
-                Dock = DockStyle.Fill,
-                ForeColor = Muted,
-                TextAlign = ContentAlignment.MiddleLeft
-            }, 0, 1);
+            header.Controls.Add(new Label { Text = "아이템·음식 분류와 검색으로 원하는 제작 품목을 빠르게 찾습니다.", Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
             root.Controls.Add(header, 0, 0);
 
-            var settings = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 1,
-                Margin = new Padding(0, 0, 0, 10)
-            };
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
-
-            var left = Card();
-            left.Padding = new Padding(16, 9, 16, 9);
-            left.Margin = new Padding(0, 0, 9, 0);
-            var form = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 5,
-                BackColor = Color.Transparent
-            };
-            form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
-            form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            form.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            for (int i = 1; i < form.RowCount; i++)
-                form.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
-
-            var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
-            settingsHeading.Controls.Add(new Label
-            {
-                Text = "제작 설정",
-                Dock = DockStyle.Fill,
-                ForeColor = TitleText,
-                Font = new Font("맑은 고딕", 15f, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleLeft
-            });
-            form.Controls.Add(settingsHeading, 0, 0);
-            form.SetColumnSpan(settingsHeading, 2);
-
-            _reload = Button("목록 새로고침", () => _ = LoadCatalogAsync(true));
-            _reload.AccessibleName = "제작 목록 새로고침";
-            _reload.Dock = DockStyle.Right;
-            _reload.Width = 110;
-            _reload.Margin = new Padding(2);
-            settingsHeading.Controls.Add(_reload);
-
-            var categoryTabs = BuildCategoryTabs();
-            form.Controls.Add(categoryTabs, 0, 1);
-            form.SetColumnSpan(categoryTabs, 2);
-
-            _search.PlaceholderText = "품목을 검색하세요";
-            StyleField(_search);
-            AddRow(form, 2, "품목 검색", _search);
-
-            Items.DropDownStyle = ComboBoxStyle.DropDownList;
-            StyleField(Items);
-            StyleCombo(Items);
-            Items.AccessibleName = "제작 품목";
-            AddRow(form, 3, "제작 품목", Items);
-
-            Quantity.Minimum = 1;
-            Quantity.Maximum = 1_000_000;
-            Quantity.Value = 100;
-            StyleField(Quantity);
+            Items.AccessibleName = "제작 품목"; StyleListBox(Items);
+            _search.PlaceholderText = "품목을 검색하세요"; StyleField(_search);
+            Quantity.Minimum = 1; Quantity.Maximum = 1_000_000; Quantity.Value = 100; StyleField(Quantity);
             Quantity.AccessibleName = "제작 목표 수량";
-            AddRow(form, 4, "목표 수량", Quantity);
 
-            left.Controls.Add(form);
-            settings.Controls.Add(left, 0, 0);
-
-            var summary = Card();
-            var summaryLayout = new TableLayoutPanel
+            var body = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 5,
-                Padding = new Padding(16, 14, 16, 14)
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+                Margin = new Padding(0, 0, 0, 10), BackColor = Color.Transparent, AccessibleName = "제작 2열 본문"
             };
-            summaryLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
-            summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
-            summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 26));
-            summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 26));
-            summaryLayout.Controls.Add(Label("선택한 제작 품목", 21, true), 0, 0);
-            foreach (var label in new[] { _selected, Owned, _detail, _state })
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+
+            var leftCard = Card(); leftCard.Padding = new Padding(16, 10, 16, 10); leftCard.Margin = new Padding(0, 0, 9, 0); leftCard.AccessibleName = "제작 품목 영역";
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty, BackColor = Color.Transparent };
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72)); left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+
+            var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
+            settingsHeading.Controls.Add(new Label { Text = "제작 설정", Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft });
+            _reload = Button("목록 새로고침", () => _ = LoadCatalogAsync(true));
+            _reload.AccessibleName = "제작 목록 새로고침"; _reload.Dock = DockStyle.Right; _reload.Width = 110; _reload.Margin = new Padding(2);
+            settingsHeading.Controls.Add(_reload);
+            left.Controls.Add(settingsHeading, 0, 0);
+            left.Controls.Add(BuildCategoryTabs(), 0, 1);
+            left.Controls.Add(BuildLabeledField("품목 검색", _search, "crafting-field"), 0, 2);
+            left.Controls.Add(BuildListArea("제작 품목"), 0, 3);
+            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "crafting-field"), 0, 4);
+            leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
+
+            var right = new TableLayoutPanel
             {
-                label.Dock = DockStyle.Fill;
-                label.ForeColor = TitleText;
-                label.Font = new Font("맑은 고딕", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
-                label.TextAlign = ContentAlignment.MiddleLeft;
-                label.AutoEllipsis = true;
-                summaryLayout.Controls.Add(label);
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
+                BackColor = Color.Transparent, AccessibleName = "제작 실행 상태 및 로그"
+            };
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 56)); right.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
+
+            var statusCard = Card(); statusCard.Padding = new Padding(14, 10, 14, 10); statusCard.Margin = new Padding(0, 0, 0, 5);
+            var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 14)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            status.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            status.Controls.Add(Label("실행 상태", 21, true), 0, 0);
+
+            var progressLine = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, BackColor = Color.Transparent };
+            progressLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); progressLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            progressLine.Controls.Add(_progress, 0, 0); progressLine.Controls.Add(_percentage, 1, 0);
+            foreach (var label in new[] { _state, _stage, _progress, _percentage, _elapsed, _errors, _detail })
+            {
+                label.Dock = DockStyle.Fill; label.ForeColor = TitleText; label.TextAlign = ContentAlignment.MiddleLeft;
+                label.AutoEllipsis = true; label.BackColor = Color.Transparent; label.Margin = Padding.Empty;
             }
-            summary.Controls.Add(summaryLayout);
-            settings.Controls.Add(summary, 1, 0);
-            root.Controls.Add(settings, 0, 1);
+            _percentage.TextAlign = ContentAlignment.MiddleRight; _progress.ForeColor = _percentage.ForeColor = Color.FromArgb(36, 195, 255);
+            _progressBar.Dock = DockStyle.Fill; _progressBar.Margin = new Padding(0, 3, 0, 3); _progressBar.Paint += (_, e) => DrawProgress(e.Graphics);
+            status.Controls.Add(_state, 0, 1); status.Controls.Add(_stage, 0, 2); status.Controls.Add(progressLine, 0, 3);
+            status.Controls.Add(_progressBar, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_errors, 0, 6); status.Controls.Add(_detail, 0, 7);
+            statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
 
-            var execution = Card();
-            var executionLayout = new TableLayoutPanel
+            var logCard = Card(); logCard.Padding = new Padding(12, 9, 12, 10); logCard.Margin = new Padding(0, 5, 0, 0);
+            var logLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
+            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            logLayout.Controls.Add(Label("로그", 21, true), 0, 0);
+            _pageLog.Multiline = true; _pageLog.ReadOnly = true; _pageLog.ScrollBars = ScrollBars.Vertical; _pageLog.BorderStyle = BorderStyle.None;
+            _pageLog.BackColor = CardBg2; _pageLog.ForeColor = TitleText; _pageLog.Dock = DockStyle.Fill; _pageLog.AccessibleName = "제작 로그"; _pageLog.Margin = new Padding(2);
+            logLayout.Controls.Add(_pageLog, 0, 1); logCard.Controls.Add(logLayout); right.Controls.Add(logCard, 0, 1);
+            body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
+
+            var actions = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 4,
-                Padding = new Padding(16, 12, 16, 12)
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+                Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "제작 하단 시작 정지"
             };
-            executionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-            executionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
-            executionLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            executionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            executionLayout.Controls.Add(Label("▶  실행 상태", 21, true), 0, 0);
-
-            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 72));
-            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28));
-            _start = Button("▶   제작 시작", owner.StartSelected);
-            _start.AccessibleName = "제작 시작";
-            _start.BackColor = Accent;
-            _stop = Button("■   정지 (F10)", owner.StopSelected);
-            _stop.AccessibleName = "제작 정지";
-            actions.Controls.Add(_start, 0, 0);
-            actions.Controls.Add(_stop, 1, 0);
-            executionLayout.Controls.Add(actions, 0, 1);
-
-            _progress.Dock = DockStyle.Fill;
-            _progress.ForeColor = Color.FromArgb(36, 195, 255);
-            _progress.Font = new Font("맑은 고딕", 20f, FontStyle.Bold, GraphicsUnit.Pixel);
-            _progress.TextAlign = ContentAlignment.MiddleLeft;
-            executionLayout.Controls.Add(_progress, 0, 2);
-
-            var foot = new Label
-            {
-                Text = "제작은 최대 10회 퀘스트 · 직접 채집 재료는 퀘스트 추천 경로 · 중간재는 자동 가공",
-                Dock = DockStyle.Fill,
-                ForeColor = Muted,
-                Font = new Font("맑은 고딕", 14f, FontStyle.Regular, GraphicsUnit.Pixel),
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            executionLayout.Controls.Add(foot, 0, 3);
-            execution.Controls.Add(executionLayout);
-            root.Controls.Add(execution, 0, 2);
-
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent;
+            _stop = Button("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "제작 정지";
+            actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
 
-            // Match automatic-altering typography and responsive scaling exactly.
-            foreach (var control in Descendants(root).Prepend(root))
-                control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
-            void Typography(Control control, float pixels) =>
-                control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
+            foreach (var control in Descendants(root).Prepend(root)) control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
+            void Typography(Control control, float pixels) => control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
+            Typography(header.Controls[0], 36); Typography(header.Controls[1], 18); Typography(settingsHeading.Controls[0], 21);
+            Typography(status.Controls[0], 21); Typography(logLayout.Controls[0], 21); Typography(_reload, 14);
+            Typography(_item, 17); Typography(_food, 17);
+            foreach (var label in new[] { _state, _stage, _elapsed, _errors, _detail }) Typography(label, 17);
+            Typography(_progress, 18); Typography(_percentage, 18); Typography(_pageLog, 15); Typography(_start, 22); Typography(_stop, 22);
 
-            Typography(header.Controls[0], 36);
-            Typography(header.Controls[1], 18);
-            Typography(settingsHeading.Controls[0], 21);
-            Typography(summaryLayout.Controls[0], 21);
-            Typography(executionLayout.Controls[0], 21);
-            Typography(_reload, 14);
-            Typography(_selected, 20);
-            Typography(Owned, 18);
-            Typography(_detail, 17);
-            Typography(_state, 17);
-            Typography(_start, 22);
-            Typography(_stop, 22);
-            Typography(_progress, 20);
-            Typography(foot, 14);
-            Typography(_item, 18);
-            Typography(_food, 18);
-
-            var metrics = Descendants(root).Prepend(root)
-                .Select(control => new CraftingPageMetric(
-                    control,
-                    control.Font.FontFamily.Name,
-                    control.Font.Size,
-                    control.Font.Style,
-                    control.Padding,
-                    control.Margin))
-                .ToArray();
-            var rows = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table
-                ? table.RowStyles.Cast<RowStyle>()
-                    .Where(style => style.SizeType == SizeType.Absolute)
-                    .Select(style => (Style: style, Size: style.Height))
-                : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
-            var columns = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table
-                ? table.ColumnStyles.Cast<ColumnStyle>()
-                    .Where(style => style.SizeType == SizeType.Absolute)
-                    .Select(style => (Style: style, Size: style.Width))
-                : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
-            var scaledFonts = new List<Font>();
-            var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
-            float lastScale = -1;
-            int lastDpi = -1;
-            bool fitting = false;
-
-            Disposed += (_, _) =>
-            {
-                foreach (var font in scaledFonts) font.Dispose();
-            };
-
+            var metrics = Descendants(root).Prepend(root).Select(control => new CraftingPageMetric(control, control.Font.FontFamily.Name, control.Font.Size, control.Font.Style, control.Padding, control.Margin)).ToArray();
+            var rows = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table ? table.RowStyles.Cast<RowStyle>().Where(style => style.SizeType == SizeType.Absolute).Select(style => (Style: style, Size: style.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
+            var columns = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table ? table.ColumnStyles.Cast<ColumnStyle>().Where(style => style.SizeType == SizeType.Absolute).Select(style => (Style: style, Size: style.Width)) : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
+            var scaledFonts = new List<Font>(); var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
+            float lastScale = -1; int lastDpi = -1; bool fitting = false;
+            Disposed += (_, _) => { foreach (var font in scaledFonts) font.Dispose(); };
             void FitPage()
             {
                 if (fitting || ClientSize.Width < 1 || ClientSize.Height < 1) return;
                 float scale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
                 float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
                 if (Math.Abs(scale - lastScale) < .001f && DeviceDpi == lastDpi) return;
-
-                lastScale = scale;
-                lastDpi = DeviceDpi;
-                fitting = true;
-                _layoutScale = scale;
-                root.SuspendLayout();
+                lastScale = scale; lastDpi = DeviceDpi; fitting = true; _layoutScale = scale; root.SuspendLayout();
                 foreach (var metric in metrics)
                 {
-                    float size = Math.Max(
-                        metric.Size >= 18 ? 13f : 12f,
-                        MathF.Round(metric.Size * fontScale));
+                    float size = Math.Max(metric.Size >= 18 ? 13f : 12f, MathF.Round(metric.Size * fontScale));
                     var key = (metric.Family, size, metric.Style);
                     if (!fontCache.TryGetValue(key, out var font))
-                    {
-                        font = new Font(metric.Family, size, metric.Style, GraphicsUnit.Pixel);
-                        fontCache.Add(key, font);
-                        scaledFonts.Add(font);
-                    }
-
-                    metric.Control.Font = font;
-                    metric.Control.Padding = ScalePadding(metric.Padding, scale);
-                    metric.Control.Margin = ScalePadding(metric.Margin, scale);
+                    { font = new Font(metric.Family, size, metric.Style, GraphicsUnit.Pixel); fontCache.Add(key, font); scaledFonts.Add(font); }
+                    metric.Control.Font = font; metric.Control.Padding = ScalePadding(metric.Padding, scale); metric.Control.Margin = ScalePadding(metric.Margin, scale);
                 }
-
-                foreach (var row in rows) row.Style.Height = row.Size * scale;
-                foreach (var column in columns) column.Style.Width = column.Size * scale;
-                _reload.Width = Math.Max(70, (int)(110 * scale));
-                foreach (var field in Descendants(root)
-                    .Where(control => control.Tag is string tag && tag == "crafting-field"))
-                    LayoutField(field);
-                root.ResumeLayout(true);
-                fitting = false;
+                foreach (var x in rows) x.Style.Height = x.Size * scale; foreach (var x in columns) x.Style.Width = x.Size * scale;
+                _reload.Width = Math.Max(70, (int)(110 * scale)); Items.ItemHeight = Math.Max(26, Items.Font.Height + Math.Max(7, (int)(8 * scale)));
+                foreach (var field in Descendants(root).Where(control => control.Tag is string tag && tag == "crafting-field")) LayoutField(field);
+                root.ResumeLayout(true); fitting = false;
             }
-
-            Resize += (_, _) => FitPage();
-            DpiChangedAfterParent += (_, _) => FitPage();
-            FitPage();
-
-            _search.TextChanged += (_, _) => Filter();
-            Items.SelectedIndexChanged += (_, _) => SelectionChanged();
-            Quantity.ValueChanged += (_, _) => SelectionChanged();
-            SetCategory(CraftingCategory.Food);
-            UpdateExecution();
+            Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
+            _search.TextChanged += (_, _) => Filter(); Items.SelectedIndexChanged += (_, _) => SelectionChanged();
+            Quantity.ValueChanged += (_, _) => SelectionChanged(); SetCategory(CraftingCategory.Food); UpdateExecution();
         }
 
         private TableLayoutPanel BuildCategoryTabs()
@@ -577,6 +440,19 @@ public sealed partial class MainForm
             }
         }
 
+        private void DrawProgress(Graphics graphics)
+        {
+            if (_progressBar.Width < 2 || _progressBar.Height < 2) return;
+            graphics.Clear(CardBg); graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = new RectangleF(0, 0, _progressBar.Width - 1, _progressBar.Height - 1);
+            using var path = Rounded(bounds, 7); using var track = new SolidBrush(Line); graphics.FillPath(track, path);
+            if (_percent > 0)
+            {
+                using var filled = Rounded(new RectangleF(0, 0, Math.Max(8, bounds.Width * _percent / 100f), bounds.Height), 7);
+                using var fill = new LinearGradientBrush(bounds, Color.FromArgb(25, 209, 255), Accent, 90f); graphics.FillPath(fill, filled);
+            }
+        }
+
         private static GraphicsPath Rounded(RectangleF bounds, float radius)
         {
             float d = Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2);
@@ -608,6 +484,42 @@ public sealed partial class MainForm
             control.Font = new Font("맑은 고딕", 13f);
             if (control is TextBox text) text.BorderStyle = BorderStyle.None;
             if (control is NumericUpDown number) number.BorderStyle = BorderStyle.None;
+        }
+
+        private static void StyleListBox(ListBox list)
+        {
+            list.Dock = DockStyle.Fill; list.BorderStyle = BorderStyle.None; list.BackColor = CardBg2; list.ForeColor = TitleText;
+            list.IntegralHeight = false; list.DrawMode = DrawMode.OwnerDrawFixed; list.ItemHeight = 32; list.Margin = Padding.Empty;
+            list.DrawItem += (_, e) =>
+            {
+                if (e.Index < 0) return;
+                bool selected = (e.State & DrawItemState.Selected) != 0;
+                using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
+                e.Graphics.FillRectangle(background, e.Bounds);
+                TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
+                    selected ? Color.White : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
+            };
+        }
+
+        private Control BuildLabeledField(string caption, Control control, string tag)
+        {
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty }, 0, 0);
+            var field = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(0, 3, 0, 2), Tag = tag };
+            var surface = new CraftingCard { Dock = DockStyle.None, BackColor = CardBg2, Margin = Padding.Empty };
+            control.Dock = DockStyle.None; surface.Controls.Add(control); field.Controls.Add(surface);
+            field.Resize += (_, _) => LayoutField(field); layout.Controls.Add(field, 0, 1); LayoutField(field); return layout;
+        }
+
+        private Control BuildListArea(string caption)
+        {
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel) }, 0, 0);
+            var surface = new CraftingCard { Dock = DockStyle.Fill, BackColor = CardBg2, Padding = new Padding(5), Margin = new Padding(0, 2, 0, 2) };
+            surface.Controls.Add(Items); layout.Controls.Add(surface, 0, 1); return layout;
         }
 
         private static void StyleCombo(ComboBox combo)
@@ -772,6 +684,14 @@ public sealed partial class MainForm
             UpdateExecution();
         }
 
+        private void SyncPageLog()
+        {
+            if (_pageLog.IsDisposed || _owner._logBox.IsDisposed) return;
+            string text = _owner._logBox.Text; if (text.Length > 12000) text = text[^12000..];
+            if (string.Equals(_pageLog.Text, text, StringComparison.Ordinal)) return;
+            _pageLog.Text = text; _pageLog.SelectionStart = _pageLog.TextLength; _pageLog.ScrollToCaret();
+        }
+
         private sealed record CraftingPageMetric(
             Control Control,
             string Family,
@@ -811,10 +731,17 @@ public sealed partial class MainForm
                 ? _owner._productionCurrentQuantity : 0;
             int target = ownRun ? _owner._productionTargetQuantity : (int)Quantity.Value;
             int percent = target > 0 ? (int)Math.Clamp(current * 100 / target, 0, 100) : 0;
-            _progress.Text = $"진행 수량  {current:N0} / {target:N0}   ·   {percent}%";
-            _state.Text = ownRun
-                ? "현재 상태  " + _owner._statusValue.Text
-                : $"CLI {CliStatus} · {(Category == CraftingCategory.Food ? "음식" : "아이템")}";
+            _percent = percent; _progressBar.Invalidate();
+            bool ownResult = _owner._productionLastMode == "제작" && _owner._productionDisplayName == SelectedName;
+            var startedAt = _owner._dungeonStartedAt; var stoppedAt = _owner._dungeonStoppedAt;
+            var elapsed = ownRun && startedAt.HasValue ? DateTime.Now - startedAt.Value
+                : ownResult && stoppedAt.HasValue && startedAt.HasValue ? stoppedAt.Value - startedAt.Value : TimeSpan.Zero;
+            _state.Text = $"현재 상태  {(ownRun ? "실행 중" : _loading ? "목록 조회 중" : _owner._runError is not null && ownResult ? "오류" : "대기 중")}";
+            _stage.Text = $"현재 단계  {(ownRun ? _owner._statusValue.Text : "—")}";
+            _progress.Text = $"진행 수량  {current:N0} / {target:N0}"; _percentage.Text = $"진행률  {percent}%";
+            _elapsed.Text = $"경과 시간  {elapsed:hh\\:mm\\:ss}"; _errors.Text = $"오류 횟수  {(_owner._runError is null ? 0 : 1)}회";
+            _detail.Text = $"CLI 상태  {CliStatus}"; _detail.ForeColor = CliStatus == "정상" ? Green : Muted;
+            SyncPageLog();
         }
     }
 }

@@ -100,7 +100,8 @@ public sealed partial class MainForm
         private readonly MainForm _owner;
         internal bool IsAltering { get; }
         private readonly Button? _inspect;
-        internal readonly ComboBox Items = new LauncherCombo(), Facility = new LauncherCombo();
+        internal readonly ListBox Items = new();
+        internal readonly ComboBox Facility = new LauncherCombo();
         internal readonly NumericUpDown Quantity;
         internal readonly Label Owned = new();
         private readonly TextBox _search = new();
@@ -118,6 +119,7 @@ public sealed partial class MainForm
         private int _percent;
         private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
+        private readonly TextBox _pageLog = new();
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
@@ -140,139 +142,133 @@ public sealed partial class MainForm
             AccessibleName = altering ? "자동 가공" : "자동 채집";
             BackColor = WindowBg; ForeColor = TitleText; Visible = false;
             Font = new Font("맑은 고딕", 12f);
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(14, 6, 14, 10), Margin = Padding.Empty };
-            root.RowStyles.Add(new(SizeType.Absolute, 82));
-            root.RowStyles.Add(new(SizeType.Percent, 51)); root.RowStyles.Add(new(SizeType.Percent, 49));
-            var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty };
-            header.RowStyles.Add(new(SizeType.Percent, 58)); header.RowStyles.Add(new(SizeType.Percent, 42));
-            header.Controls.Add(owner.SectionTitle(AccessibleName, 26));
-            header.Controls.Add(new Label { Text = altering ? "보유 재료로 원하는 아이템을 자동 가공합니다." : "채집 재료를 자동으로 수집합니다.", Dock = DockStyle.Fill, ForeColor = Muted });
+            var root = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Padding = new Padding(14, 6, 14, 10), Margin = Padding.Empty, BackColor = WindowBg
+            };
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+
+            var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty, BackColor = Color.Transparent };
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 58)); header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+            header.Controls.Add(owner.SectionTitle(AccessibleName, 26), 0, 0);
+            header.Controls.Add(new Label
+            {
+                Text = altering ? "가공 분류를 유지하고 검색으로 원하는 품목을 빠르게 찾습니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
+                Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft
+            }, 0, 1);
             root.Controls.Add(header, 0, 0);
 
-            var settings = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 10) };
-            settings.ColumnStyles.Add(new(SizeType.Percent, 62)); settings.ColumnStyles.Add(new(SizeType.Percent, 38));
-            var card = new LauncherCard { Padding = new Padding(16, 9, 16, 9), Margin = new Padding(0, 0, 9, 0) };
-            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, BackColor = Color.Transparent };
-            form.ColumnStyles.Add(new(SizeType.Absolute, 112)); form.ColumnStyles.Add(new(SizeType.Percent, 100));
-            form.RowStyles.Add(new(SizeType.Absolute, 32));
-            for (int i = 1; i < form.RowCount; i++) form.RowStyles.Add(new(SizeType.Percent, 100f / (form.RowCount - 1)));
-            var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
-            settingsHeading.Controls.Add(new Label { Text = altering ? "가공 설정" : "채집 설정", Dock = DockStyle.Fill, ForeColor = TitleText, Font = new Font("맑은 고딕", 15f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft });
-            form.Controls.Add(settingsHeading, 0, 0); form.SetColumnSpan(settingsHeading, 2);
+            Items.AccessibleName = altering ? "가공 제법" : "채집 품목";
+            StyleListBox(Items);
+            Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity);
+            Facility.DropDownStyle = ComboBoxStyle.DropDownList;
+            Facility.Items.AddRange(FacilityUiOrder); Facility.SelectedIndex = 0;
+            _search.PlaceholderText = "품목을 검색하세요"; StyleField(_search);
+
+            var body = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+                Margin = new Padding(0, 0, 0, 10), BackColor = Color.Transparent, AccessibleName = "생산 2열 본문"
+            };
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+
+            var leftCard = new LauncherCard
+            {
+                Padding = new Padding(16, 10, 16, 10), Margin = new Padding(0, 0, 9, 0),
+                AccessibleName = altering ? "가공 품목 영역" : "채집 품목 영역"
+            };
+            int leftRows = altering ? 5 : 4;
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = leftRows, Margin = Padding.Empty, BackColor = Color.Transparent };
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
+            settingsHeading.Controls.Add(new Label { Text = altering ? "가공 설정" : "채집 설정", Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft });
             _reload = PageButton("목록 새로고침", () => _ = LoadCatalogAsync(true));
-            _reload.Font = new Font("맑은 고딕", 8.5f); _reload.Dock = DockStyle.Right; _reload.Width = 110; settingsHeading.Controls.Add(_reload);
+            _reload.AccessibleName = AccessibleName + " 목록 새로고침"; _reload.Dock = DockStyle.Right; _reload.Width = 110; _reload.Margin = new Padding(2);
+            settingsHeading.Controls.Add(_reload);
             if (!altering)
             {
                 _inspect = PageButton("CLI 검사", () => _ = owner.InspectGatheringCliAsync());
-                _inspect.AccessibleName = "CLI 검사";
-                _inspect.Dock = DockStyle.Right; _inspect.Width = 90;
+                _inspect.AccessibleName = "CLI 검사"; _inspect.Dock = DockStyle.Right; _inspect.Width = 90; _inspect.Margin = new Padding(2);
                 settingsHeading.Controls.Add(_inspect);
             }
-
-
-            Items.DropDownStyle = ComboBoxStyle.DropDownList; StyleField(Items); StyleCombo(Items);
-            Items.AccessibleName = altering ? "가공 제법" : "채집 품목";
-            Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity);
-
-            Facility.DropDownStyle = ComboBoxStyle.DropDownList;
-            Facility.Items.AddRange(FacilityUiOrder);
-            Facility.SelectedIndex = 0;
-
+            left.Controls.Add(settingsHeading, 0, 0);
+            int row = 1;
             if (altering)
             {
-                var facilityTabs = BuildFacilityTabs();
-                form.Controls.Add(facilityTabs, 0, 1); form.SetColumnSpan(facilityTabs, 2);
-                AddRow(form, 2, Items.AccessibleName, Items);
-                AddRow(form, 3, "목표 수량", Quantity);
+                left.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+                left.Controls.Add(BuildFacilityTabs(), 0, row++);
             }
-            else
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+            left.Controls.Add(BuildLabeledField("품목 검색", _search, "production-field"), 0, row++);
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            left.Controls.Add(BuildListArea(altering ? "가공 품목" : "채집 품목"), 0, row++);
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"), 0, row);
+            leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
+
+            var right = new TableLayoutPanel
             {
-                _search.PlaceholderText = "품목을 검색하세요";
-                StyleField(_search);
-                AddRow(form, 1, "품목 검색", _search);
-                AddRow(form, 2, Items.AccessibleName, Items);
-                AddRow(form, 3, "목표 수량", Quantity);
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
+                BackColor = Color.Transparent, AccessibleName = "실행 상태 및 로그"
+            };
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 56)); right.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
+            var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = new Padding(0, 0, 0, 5) };
+            var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 14)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            status.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            status.Controls.Add(owner.SectionTitle("실행 상태", 15), 0, 0);
+            var progressLine = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, BackColor = Color.Transparent };
+            progressLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); progressLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            progressLine.Controls.Add(_progressText, 0, 0); progressLine.Controls.Add(_percentage, 1, 0);
+            foreach (var label in new[] { _state, _condition, _progressText, _percentage, _elapsed, _collection, _character, _cli })
+            {
+                label.Dock = DockStyle.Fill; label.ForeColor = TitleText; label.TextAlign = ContentAlignment.MiddleLeft;
+                label.AutoEllipsis = true; label.BackColor = Color.Transparent; label.Margin = Padding.Empty;
             }
+            _percentage.TextAlign = ContentAlignment.MiddleRight;
+            _progressText.ForeColor = _percentage.ForeColor = Color.FromArgb(36, 195, 255);
+            _progress.Dock = DockStyle.Fill; _progress.Margin = new Padding(0, 3, 0, 3); _progress.Paint += (_, e) => DrawProgress(e.Graphics);
+            status.Controls.Add(_state, 0, 1); status.Controls.Add(_condition, 0, 2); status.Controls.Add(progressLine, 0, 3);
+            status.Controls.Add(_progress, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_collection, 0, 6);
+            status.Controls.Add(_character, 0, 7); status.Controls.Add(_cli, 0, 8);
+            statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
 
-            card.Controls.Add(form); settings.Controls.Add(card, 0, 0);
-            var summaries = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
-            summaries.RowStyles.Add(new(SizeType.Percent, 52)); summaries.RowStyles.Add(new(SizeType.Percent, 48));
-            summaries.Controls.Add(BuildSummaryCard(altering ? "선택한 가공 제법" : "선택한 채집 품목", false), 0, 0);
-            summaries.Controls.Add(BuildSummaryCard(altering ? "가공 가능 여부" : "도구 상태", true), 0, 1);
-            settings.Controls.Add(summaries, 1, 0); root.Controls.Add(settings, 0, 1);
+            var logCard = new LauncherCard { Padding = new Padding(12, 9, 12, 10), Margin = new Padding(0, 5, 0, 0) };
+            var logLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
+            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            logLayout.Controls.Add(owner.SectionTitle("로그", 15), 0, 0);
+            _pageLog.Multiline = true; _pageLog.ReadOnly = true; _pageLog.ScrollBars = ScrollBars.Vertical; _pageLog.BorderStyle = BorderStyle.None;
+            _pageLog.BackColor = CardBg2; _pageLog.ForeColor = TitleText; _pageLog.Dock = DockStyle.Fill; _pageLog.AccessibleName = AccessibleName + " 로그"; _pageLog.Margin = new Padding(2);
+            logLayout.Controls.Add(_pageLog, 0, 1); logCard.Controls.Add(logLayout); right.Controls.Add(logCard, 0, 1);
+            body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
-            var execution = new LauncherCard { Padding = new Padding(16, 8, 16, 9), Margin = Padding.Empty };
-            var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = Color.Transparent };
-            status.RowStyles.Add(new(SizeType.Absolute, 34)); status.RowStyles.Add(new(SizeType.Absolute, 59));
-            status.RowStyles.Add(new(SizeType.Percent, 62)); status.RowStyles.Add(new(SizeType.Percent, 38)); status.RowStyles.Add(new(SizeType.Absolute, 23));
-            status.Controls.Add(owner.SectionTitle("▶  실행 상태", 15), 0, 0);
-            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-            actions.ColumnStyles.Add(new(SizeType.Percent, 72)); actions.ColumnStyles.Add(new(SizeType.Percent, 28));
-            _start = PageButton("▶   " + AccessibleName + " 시작", owner.StartSelected); _start.BackColor = Accent;
-            _start.AccessibleName = AccessibleName + " 시작";
+            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 정지" };
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.AccessibleName = AccessibleName + " 시작";
             _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
-            actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); status.Controls.Add(actions, 0, 1);
-            var progressCard = new LauncherCard { Padding = new Padding(12, 6, 12, 6), Margin = new Padding(2, 7, 2, 7) };
-            var progressLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 2, BackColor = Color.Transparent };
-            progressLayout.ColumnStyles.Add(new(SizeType.Percent, 50)); progressLayout.ColumnStyles.Add(new(SizeType.Percent, 50));
-            progressLayout.RowStyles.Add(new(SizeType.Absolute, 17)); progressLayout.RowStyles.Add(new(SizeType.Percent, 82)); progressLayout.RowStyles.Add(new(SizeType.Percent, 18));
-            progressLayout.Controls.Add(new Label { Text = "진행 수량", ForeColor = Muted, Dock = DockStyle.Fill, Margin = Padding.Empty, Font = new Font("맑은 고딕", 10f) }, 0, 0);
-            progressLayout.Controls.Add(new Label { Text = "진행률", ForeColor = Muted, Dock = DockStyle.Fill, Margin = Padding.Empty, Font = new Font("맑은 고딕", 10f) }, 1, 0);
-            _progressText.Font = new Font("맑은 고딕", 22f, FontStyle.Bold); _progressText.ForeColor = Color.FromArgb(36, 195, 255);
-            _percentage.Font = new Font("맑은 고딕", 22f, FontStyle.Bold); _percentage.ForeColor = _progressText.ForeColor;
-            _percentage.Dock = DockStyle.Fill; _percentage.TextAlign = ContentAlignment.MiddleLeft;
-            progressLayout.Controls.Add(_progressText, 0, 1); progressLayout.Controls.Add(_percentage, 1, 1);
-            _progress.Dock = DockStyle.Fill; _progress.Margin = new Padding(1, 2, 1, 1);
-            _progress.Paint += (_, e) => DrawProgress(e.Graphics);
-            progressLayout.Controls.Add(_progress, 0, 2); progressLayout.SetColumnSpan(_progress, 2); progressCard.Controls.Add(progressLayout); status.Controls.Add(progressCard, 0, 2);
-            var chips = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 4, Margin = Padding.Empty };
-            chips.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            foreach (var label in new[] { _elapsed, _state, _cli, _character })
-            {
-                chips.ColumnStyles.Add(new(SizeType.Percent, 25));
-                var chip = new LauncherCard { Padding = new Padding(9, 4, 6, 4), Margin = new Padding(2, 0, 2, 2) };
-                chip.Controls.Add(label); chips.Controls.Add(chip);
-            }
-            status.Controls.Add(chips, 0, 3); status.Controls.Add(_collection, 0, 4);
-            foreach (var label in new[] { Owned, _condition, _materials, _selectedName, _progressText, _elapsed, _state, _cli, _character, _collection })
-            { label.Dock = DockStyle.Fill; label.TextAlign = ContentAlignment.MiddleLeft; label.AutoEllipsis = true; label.BackColor = Color.Transparent; }
-            _selectedName.Font = new Font("맑은 고딕", 17f, FontStyle.Bold);
-            _progressText.Margin = _percentage.Margin = Padding.Empty;
-            Owned.Font = new Font("맑은 고딕", 13f, FontStyle.Bold); Owned.ForeColor = TitleText;
-            _condition.Font = new Font("맑은 고딕", 17f, FontStyle.Bold);
-            _materials.Font = new Font("맑은 고딕", 11f); _materials.ForeColor = Muted;
-            _collection.Font = new Font("맑은 고딕", 8.5f); _collection.ForeColor = Muted;
-            _elapsed.Font = _state.Font = _cli.Font = _character.Font = new Font("맑은 고딕", 10.5f);
-            execution.Controls.Add(status); root.Controls.Add(execution, 0, 2); Controls.Add(root);
-            // ReferenceDashboard uses pixel fonts at 1448x1086, with the same
-            // minimum legible sizes below. Use its title/content hierarchy here.
-            foreach (var control in Descendants(root).Prepend(root))
-                control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
+            actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); root.Controls.Add(actions, 0, 2);
+            Controls.Add(root);
+
+            foreach (var control in Descendants(root).Prepend(root)) control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
             void Typography(Control control, float pixels) => control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
-            Typography(header.Controls[0], 36); Typography(header.Controls[1], 18);
-            Typography(settingsHeading.Controls[0], 21); Typography(status.Controls[0], 21);
-            Typography(_selectedName, 20); Typography(_condition, 20); Typography(Owned, 18);
-            Typography(_start, 22); Typography(_stop, 22);
-            Typography(_progressText, 20); Typography(_percentage, 20);
-            Typography(_materials, 17); Typography(_collection, 14); Typography(_reload, 14);
-            foreach (var label in new[] { _elapsed, _state, _cli, _character }) Typography(label, 17);
-            foreach (Control label in progressLayout.Controls) if (label is Label && label != _progressText && label != _percentage) Typography(label, 14);
-            foreach (var summary in new[] { summaries.Controls[0], summaries.Controls[1] })
-                Typography(((TableLayoutPanel)summary.Controls[0]).GetControlFromPosition(0, 0)!, 21);
-            // Match the reviewed 1200x900 preview at every supported window size.
-            // Dashboard bounds scale independently of WinForms fonts and absolute rows.
-            var metrics = Descendants(root).Prepend(root).Select(c => new PageMetric(c, c.Font.FontFamily.Name,
-                c.Font.Size, c.Font.Style, c.Padding, c.Margin)).ToArray();
-            var rows = metrics.SelectMany(m => m.Control is TableLayoutPanel t
-                ? t.RowStyles.Cast<RowStyle>().Where(s => s.SizeType == SizeType.Absolute).Select(s => (Style: s, Size: s.Height))
-                : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
-            var columns = metrics.SelectMany(m => m.Control is TableLayoutPanel t
-                ? t.ColumnStyles.Cast<ColumnStyle>().Where(s => s.SizeType == SizeType.Absolute).Select(s => (Style: s, Size: s.Width))
-                : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
-            var scaledFonts = new List<Font>();
-            var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
-            float lastScale = -1; int lastDpi = -1;
-            bool fitting = false;
+            Typography(header.Controls[0], 36); Typography(header.Controls[1], 18); Typography(settingsHeading.Controls[0], 21);
+            Typography(status.Controls[0], 21); Typography(logLayout.Controls[0], 21); Typography(_reload, 14);
+            if (_inspect is not null) Typography(_inspect, 14);
+            foreach (var tab in _facilityTabButtons.Values) Typography(tab, 17);
+            foreach (var label in new[] { _state, _condition, _elapsed, _collection, _character, _cli }) Typography(label, 17);
+            Typography(_progressText, 18); Typography(_percentage, 18); Typography(_pageLog, 15); Typography(_start, 22); Typography(_stop, 22);
+
+            var metrics = Descendants(root).Prepend(root).Select(c => new PageMetric(c, c.Font.FontFamily.Name, c.Font.Size, c.Font.Style, c.Padding, c.Margin)).ToArray();
+            var rows = metrics.SelectMany(m => m.Control is TableLayoutPanel t ? t.RowStyles.Cast<RowStyle>().Where(x => x.SizeType == SizeType.Absolute).Select(x => (Style: x, Size: x.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
+            var columns = metrics.SelectMany(m => m.Control is TableLayoutPanel t ? t.ColumnStyles.Cast<ColumnStyle>().Where(x => x.SizeType == SizeType.Absolute).Select(x => (Style: x, Size: x.Width)) : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
+            var scaledFonts = new List<Font>(); var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
+            float lastScale = -1; int lastDpi = -1; bool fitting = false;
             Disposed += (_, _) => { foreach (var font in scaledFonts) font.Dispose(); };
             void FitPage()
             {
@@ -280,38 +276,25 @@ public sealed partial class MainForm
                 float scale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
                 float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
                 if (Math.Abs(scale - lastScale) < .001f && DeviceDpi == lastDpi) return;
-                lastScale = scale; lastDpi = DeviceDpi;
-                fitting = true;
-                _layoutScale = scale;
-                root.SuspendLayout();
+                lastScale = scale; lastDpi = DeviceDpi; fitting = true; _layoutScale = scale; root.SuspendLayout();
                 foreach (var metric in metrics)
                 {
                     float size = Math.Max(metric.Size >= 18 ? 13f : 12f, MathF.Round(metric.Size * fontScale));
                     var key = (metric.Family, size, metric.Style);
-                    if (!fontCache.TryGetValue(key, out var font)) { font = new Font(metric.Family, size, metric.Style, GraphicsUnit.Pixel); fontCache.Add(key, font); scaledFonts.Add(font); }
-                    metric.Control.Font = font;
-                    metric.Control.Padding = ScalePadding(metric.Padding, scale);
-                    metric.Control.Margin = ScalePadding(metric.Margin, scale);
+                    if (!fontCache.TryGetValue(key, out var font))
+                    { font = new Font(metric.Family, size, metric.Style, GraphicsUnit.Pixel); fontCache.Add(key, font); scaledFonts.Add(font); }
+                    metric.Control.Font = font; metric.Control.Padding = ScalePadding(metric.Padding, scale); metric.Control.Margin = ScalePadding(metric.Margin, scale);
                 }
-                foreach (var row in rows) row.Style.Height = row.Size * scale;
-                progressLayout.RowStyles[0].Height = progressLayout.GetControlFromPosition(0, 0)!.Font.Height + 3;
-                foreach (var column in columns) column.Style.Width = column.Size * scale;
-                _reload.Width = Math.Max(70, (int)(110 * scale));
-                foreach (var field in Descendants(root).Where(c => c.Tag is string tag && tag == "production-field"))
-                    LayoutField(field);
-                root.ResumeLayout(true);
-                fitting = false;
+                foreach (var x in rows) x.Style.Height = x.Size * scale; foreach (var x in columns) x.Style.Width = x.Size * scale;
+                _reload.Width = Math.Max(70, (int)(110 * scale)); if (_inspect is not null) _inspect.Width = Math.Max(64, (int)(90 * scale));
+                Items.ItemHeight = Math.Max(26, Items.Font.Height + Math.Max(7, (int)(8 * scale)));
+                foreach (var field in Descendants(root).Where(c => c.Tag is string tag && tag == "production-field")) LayoutField(field);
+                root.ResumeLayout(true); fitting = false;
             }
             Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
-            _search.TextChanged += (_, _) => { if (!IsAltering) Filter(); };
-            Items.SelectedIndexChanged += (_, _) => SelectionChanged();
-            Quantity.ValueChanged += (_, _) => SelectionChanged();
-            Facility.SelectedIndexChanged += (_, _) =>
-            {
-                UpdateFacilityTabs();
-                Filter();
-            };
-            _condition.Text = "목록 확인 전"; Owned.Text = "—"; UpdateExecution();
+            _search.TextChanged += (_, _) => Filter(); Items.SelectedIndexChanged += (_, _) => SelectionChanged(); Quantity.ValueChanged += (_, _) => SelectionChanged();
+            Facility.SelectedIndexChanged += (_, _) => { UpdateFacilityTabs(); Filter(); };
+            Owned.Text = "—"; UpdateExecution();
         }
 
         private TableLayoutPanel BuildFacilityTabs()
@@ -410,6 +393,42 @@ public sealed partial class MainForm
             control.Font = new Font("맑은 고딕", 13f);
             if (control is TextBox text) text.BorderStyle = BorderStyle.None;
             if (control is NumericUpDown number) number.BorderStyle = BorderStyle.None;
+        }
+
+        private static void StyleListBox(ListBox list)
+        {
+            list.Dock = DockStyle.Fill; list.BorderStyle = BorderStyle.None; list.BackColor = CardBg2; list.ForeColor = TitleText;
+            list.IntegralHeight = false; list.DrawMode = DrawMode.OwnerDrawFixed; list.ItemHeight = 32; list.Margin = Padding.Empty;
+            list.DrawItem += (_, e) =>
+            {
+                if (e.Index < 0) return;
+                bool selected = (e.State & DrawItemState.Selected) != 0;
+                using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
+                e.Graphics.FillRectangle(background, e.Bounds);
+                TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
+                    selected ? Color.White : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
+            };
+        }
+
+        private Control BuildLabeledField(string caption, Control control, string tag)
+        {
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty }, 0, 0);
+            var field = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(0, 3, 0, 2), Tag = tag };
+            var surface = new LauncherCard { Dock = DockStyle.None, BackColor = CardBg2, Margin = Padding.Empty };
+            control.Dock = DockStyle.None; surface.Controls.Add(control); field.Controls.Add(surface);
+            field.Resize += (_, _) => LayoutField(field); layout.Controls.Add(field, 0, 1); LayoutField(field); return layout;
+        }
+
+        private Control BuildListArea(string caption)
+        {
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel) }, 0, 0);
+            var surface = new LauncherCard { Dock = DockStyle.Fill, BackColor = CardBg2, Padding = new Padding(5), Margin = new Padding(0, 2, 0, 2) };
+            surface.Controls.Add(Items); layout.Controls.Add(surface, 0, 1); return layout;
         }
 
         private Control BuildSummaryCard(string caption, bool condition)
@@ -575,6 +594,14 @@ public sealed partial class MainForm
             control.Location = new Point(inset, Math.Max(0, (surface.Height - control.Height) / 2));
         }
 
+        private void SyncPageLog()
+        {
+            if (_pageLog.IsDisposed || _owner._logBox.IsDisposed) return;
+            string text = _owner._logBox.Text; if (text.Length > 12000) text = text[^12000..];
+            if (string.Equals(_pageLog.Text, text, StringComparison.Ordinal)) return;
+            _pageLog.Text = text; _pageLog.SelectionStart = _pageLog.TextLength; _pageLog.ScrollToCaret();
+        }
+
         private sealed record PageMetric(Control Control, string Family, float Size, FontStyle Style, Padding Padding, Padding Margin);
         private static Padding ScalePadding(Padding p, float scale) => new((int)(p.Left * scale), (int)(p.Top * scale), (int)(p.Right * scale), (int)(p.Bottom * scale));
         private static IEnumerable<Control> Descendants(Control root)
@@ -676,9 +703,9 @@ public sealed partial class MainForm
             if (IsAltering && Facility.SelectedItem is string facility)
                 visible = visible.Where(x => x is RecipeChoice r &&
                     RecipeFacility(r.Recipe) == facility);
-            else if (!IsAltering)
-                visible = visible.Where(x =>
-                    x.ToString()!.Contains(_search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
+            string search = _search.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(search))
+                visible = visible.Where(x => x.ToString()!.Contains(search, StringComparison.OrdinalIgnoreCase));
 
             Items.BeginUpdate();
             Items.Items.Clear();
@@ -731,25 +758,21 @@ public sealed partial class MainForm
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
             int target = ownRun ? _owner._productionTargetQuantity : (int)Quantity.Value;
             int percent = target > 0 ? (int)Math.Clamp(current * 100 / target, 0, 100) : 0;
-            _progressText.Text = $"{current:N0} / {target:N0}"; _percentage.Text = $"{percent}%"; _percent = percent; _progress.Invalidate();
+            _progressText.Text = $"진행 수량  {current:N0} / {target:N0}";
+            _percentage.Text = $"진행률  {percent}%"; _percent = percent; _progress.Invalidate();
             _progressText.AccessibleName = $"진행 수량 {current} / {target}, 진행률 {percent}%";
-            var startedAt = _owner._dungeonStartedAt;
-            var stoppedAt = _owner._dungeonStoppedAt;
+            var startedAt = _owner._dungeonStartedAt; var stoppedAt = _owner._dungeonStoppedAt;
             var elapsed = ownRun && startedAt.HasValue ? DateTime.Now - startedAt.Value
                 : ownResult && stoppedAt.HasValue && startedAt.HasValue ? stoppedAt.Value - startedAt.Value : TimeSpan.Zero;
-            _elapsed.Text = $"진행 시간\n{elapsed:hh\\:mm\\:ss}";
-            _state.Text = "현재 상태\n" + (ownRun ? _owner._statusValue.Text : _loading ? "CLI 목록 조회 중" : ownResult && _owner._runError is not null ? _owner._runError : "대기 중");
-            _cli.Text = "CLI 상태\n" + CliStatus; _character.Text = "캐릭터\n" + CharacterStatus;
-            _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
-            _character.ForeColor = CharacterStatus == "확인됨" ? Green : Muted;
-            _collection.Text = IsAltering
-                ? ownRun && !string.IsNullOrWhiteSpace(_owner._productionProgressSummary)
-                    ? _owner._productionProgressSummary
-                    : !ownRun && !string.IsNullOrWhiteSpace(_owner._productionProgressSummary) &&
-                      _owner._productionProgressSummary.StartsWith("이어하기 대기", StringComparison.Ordinal)
-                        ? _owner._productionProgressSummary
-                        : $"완료 대기 작업 수  {CompletedWorks?.ToString() ?? "—"}   ·   완료품 자동 수령  {(ownRun ? "작동 중" : "대기")}"
-                : "목표 수량은 현재 보유량에서 추가로 수집할 수량입니다.";
+            string state = ownRun ? "실행 중" : _loading ? "목록 조회 중" : ownResult && _owner._runError is not null ? "오류" : "대기 중";
+            _state.Text = $"현재 상태  {state}";
+            _condition.Text = $"현재 단계  {(ownRun ? _owner._statusValue.Text : "—")}"; _condition.ForeColor = TitleText;
+            _elapsed.Text = $"경과 시간  {elapsed:hh\\:mm\\:ss}";
+            _collection.Text = IsAltering ? $"완료 작업  {CompletedWorks?.ToString() ?? "0"}회   ·   획득 수량  {current:N0}개" : $"획득 수량  {current:N0}개";
+            _character.Text = $"오류 횟수  {(_owner._runError is null ? 0 : 1)}회";
+            _cli.Text = $"CLI 상태  {CliStatus}"; _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
+            _character.ForeColor = _owner._runError is null ? Muted : Color.Salmon;
+            SyncPageLog();
         }
     }
     private string? _productionLastMode;

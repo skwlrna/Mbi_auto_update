@@ -23,16 +23,14 @@ internal static class Program
             var gathering = controls.Single(x => x.Name == "GatheringPage");
             var altering = controls.Single(x => x.Name == "AlteringPage");
             var crafting = controls.Single(x => x.Name == "CraftingPage");
-            static Control? craftingQuantityParentProbe(Control page)
-                => All(page).OfType<NumericUpDown>().SingleOrDefault()?.Parent;
             void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
-            Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
+            Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
             Check(!All(gathering).Any(x => x.Visible), "home to altering does not require gathering first");
             Menu("홈"); Check(!altering.Visible && !gathering.Visible, "home restores existing central content");
-            Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ComboBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
-            var gi = All(gathering).OfType<ComboBox>().Single();
+            Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ListBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
+            var gi = All(gathering).OfType<ListBox>().Single();
             var gq = All(gathering).OfType<NumericUpDown>().Single();
             Check(!gq.Controls.Cast<Control>().Any(x =>
                     x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
@@ -59,14 +57,17 @@ internal static class Program
             connector.RunFilteredQuery = (a, ct) => fake.Query(a[0], ct);
             gi.SelectedIndex = 1; gq.Value = 5;
             Menu("자동 가공"); Exclusive(true);
-            var ai = All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 제법");
+            var ai = All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법");
             var aq = All(altering).OfType<NumericUpDown>().Single();
             var facilityTabs = All(altering).OfType<Button>()
                 .Where(x => x.AccessibleName?.StartsWith("가공 시설 ", StringComparison.Ordinal) == true).ToArray();
             Check(facilityTabs.Length == 6, "automatic altering exposes six large facility tabs");
-            Check(!All(altering).OfType<Label>().Any(x => x.Text == "품목 검색") &&
-                  !All(altering).OfType<TextBox>().Any(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal)),
-                "item search field is removed from automatic altering");
+            var alterSearch = All(altering).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
+            Check(alterSearch.Visible, "automatic altering keeps facility tabs and adds item search");
+            alterSearch.Text = "강철"; Pump();
+            Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "강철괴",
+                "automatic altering search filters inside the selected facility tab");
+            alterSearch.Text = ""; Pump();
             Check(!aq.Controls.Cast<Control>().Any(x =>
                     x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
                 "target quantity hides numeric up/down arrow buttons");
@@ -106,22 +107,34 @@ internal static class Program
                   selectedAlter.TargetQuantity == 5 && !selectedAlter.AllowPaidButton && selectedAlter.MaximumWings == 0,
                 "selected facility tab and recipe map to the zero-wing altering plan");
             Check(fake.Actions.Count == 0, "production UI performs no CLI action commands while configuring plans");
+            foreach (var page in new[] { altering, gathering })
+            {
+                Check(!All(page).OfType<ComboBox>().Any(), page.Name + " has no visible execution/status combo boxes");
+                Check(!All(page).OfType<Label>().Any(x => x.Visible && x.Text.Contains("현재 보유", StringComparison.Ordinal)),
+                    page.Name + " removes current-owned quantity card");
+                Check(All(page).OfType<TextBox>().Any(x => x.AccessibleName?.EndsWith(" 로그", StringComparison.Ordinal) == true),
+                    page.Name + " shows log on the right side");
+            }
 
-            Menu("제작"); PumpUntil(() => All(crafting).OfType<ComboBox>().Single().Items.Count > 0);
+            Menu("제작"); PumpUntil(() => All(crafting).OfType<ListBox>().Single().Items.Count > 0);
             Check(crafting.Visible && !altering.Visible && !gathering.Visible,
                 "crafting opens as an independent production page");
-            var craftItems = All(crafting).OfType<ComboBox>().Single();
+            Check(!All(crafting).OfType<ComboBox>().Any(), "crafting has no visible execution/status combo boxes");
+            Check(!All(crafting).OfType<Label>().Any(x => x.Visible && x.Text.Contains("현재 보유", StringComparison.Ordinal)),
+                "crafting removes current-owned quantity card");
+            Check(All(crafting).OfType<TextBox>().Any(x => x.AccessibleName == "제작 로그"),
+                "crafting shows log on the right side");
+            var craftItems = All(crafting).OfType<ListBox>().Single();
             var craftSearch = All(crafting).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
             Check(craftItems.DrawMode == DrawMode.OwnerDrawFixed &&
-                  craftItems.FlatStyle == ai.FlatStyle &&
+                  craftItems.BorderStyle == BorderStyle.None &&
                   craftItems.BackColor == ai.BackColor &&
                   craftItems.Parent?.BackColor == ai.Parent?.BackColor,
-                "crafting item window matches automatic-altering owner-draw color surface");
+                "crafting text-only item list matches automatic-altering owner-draw color surface");
             Check(craftSearch.BorderStyle == BorderStyle.None &&
                   craftItems.Parent is Panel &&
-                  craftSearch.Parent is Panel &&
-                  craftingQuantityParentProbe(crafting) is Panel,
-                "crafting search/item/quantity fields use altering-style card surfaces");
+                  craftSearch.Parent is Panel,
+                "crafting search/item/quantity fields use dashboard card surfaces");
             var craftItemTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템");
             var craftFoodTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 음식");
             Check(craftItemTab.Left < craftFoodTab.Left &&
@@ -159,11 +172,14 @@ internal static class Program
             { Check(true, "F9 plan selection also rejects duplicate crafting names"); }
 
             foreach (string mode in new[] { "낚시", "던전", "어비스" })
-            { Menu(mode); Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved: " + mode); }
+            {
+                Menu(mode);
+                Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
+            }
             fake.Fail = true; Menu("자동 채집");
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick();
             PumpUntil(() => gi.Items.Count == 0);
-            Check(!gs.Enabled && All(gathering).OfType<Label>().Any(x => x.Text.Contains("조회 실패")), "CLI failure does not fabricate catalog or allow start");
+            Check(!gs.Enabled && gi.Items.Count == 0, "CLI failure does not fabricate catalog or allow start");
             fake.Fail = false;
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick(); PumpUntil(() => gi.Items.Count == 3);
             Check(gs.Enabled, "catalog can recover after reconnect");
@@ -206,9 +222,14 @@ internal static class Program
                         && input.Font.Unit == GraphicsUnit.Pixel && input.Font.Size == Math.Max(13f, MathF.Round(18 * referenceScale)),
                         page.Name + " title and content match abyss typography at " + size);
                     var values = All(page).OfType<Label>().Where(x => x.Visible &&
-                        (x.Text is "진행 수량" or "진행률" || x.Text.Contains(" / ") || x.Text.EndsWith("%") || x.Text.Contains("\n"))).ToArray();
-                    foreach (var value in values.Where(x => x.Height < x.Font.Height * x.Text.Split('\n').Length)) Console.WriteLine($"CLIPPED {value.Text} height={value.Height} font={value.Font.Height}");
-                    Check(values.Length >= 6 && values.All(x => x.Height >= x.Font.Height * x.Text.Split('\n').Length),
+                        (x.Text.StartsWith("현재 상태", StringComparison.Ordinal) ||
+                         x.Text.StartsWith("현재 단계", StringComparison.Ordinal) ||
+                         x.Text.StartsWith("진행 수량", StringComparison.Ordinal) ||
+                         x.Text.StartsWith("진행률", StringComparison.Ordinal) ||
+                         x.Text.StartsWith("경과 시간", StringComparison.Ordinal) ||
+                         x.Text.StartsWith("오류 횟수", StringComparison.Ordinal) ||
+                         x.Text.StartsWith("CLI 상태", StringComparison.Ordinal))).ToArray();
+                    Check(values.Length >= 6 && values.All(x => x.Height >= x.Font.Height),
                         page.Name + " progress and status text fits at " + size);
                     Check(values.All(x => FullyContained(x, page)), page.Name + " status cards do not extend beyond parent rows at " + size);
                     if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }
