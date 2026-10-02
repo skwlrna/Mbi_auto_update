@@ -1,4 +1,4 @@
-name: Check V2.0.5 Inline Production Controls
+name: Check V2.0.6 Inline Production Controls
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V2\.0\.5"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V2\.0\.6"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>2\.0\.5</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>2\.0\.6</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -367,6 +367,10 @@ jobs:
           if($crafting -notmatch 'CraftingQueries' -and $crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
           if($screen -notmatch '퀘스트 만들기' -or $screen -notmatch '제작 완료'){throw 'quest-driven crafting screen flow missing'}
           if($screen -notmatch '결과물 또는 재료 이름을 검색해 보세요' -or $screen -notmatch 'TapScanCode\(0x1C\)'){throw 'crafting search must confirm text with Enter'}
+          $openProduct = [regex]::Match($screen, 'private async Task OpenProductAsync[\s\S]*?(?=\r?\n    private async Task ClickCraftingCategoryCardAsync)').Value
+          if([string]::IsNullOrWhiteSpace($openProduct)){throw 'crafting OpenProductAsync missing'}
+          if($openProduct -match 'RefreshInputFrame\(current, new Rectangle\(Point\.Empty, current\.Size\)'){throw 'dynamic field full-frame freshness gate returned before K'}
+          if($openProduct -notmatch 'using \(var fresh = Capture\(ct\)\)[\s\S]*?TapScanCode\(0x25\)' -or $openProduct -notmatch '제작 허브 열기 · K 입력 · fresh frame'){throw 'crafting hub K must use a fresh guarded frame'}
           $hub = Get-Content source/FishingAutomation/CraftingHubLayout.cs -Raw
           if($screen -notmatch 'ClickCraftingCategoryCardAsync' -or $screen -notmatch 'FindCompactLabelAsync[\s\S]{0,140}titleArea'){throw 'crafting hub category compact OCR path missing'}
           if($screen -notmatch 'HubHeaderArea' -or $screen -notmatch 'CategoryClickPoint' -or $screen -notmatch 'OCR 미검출 → 800x1000 검증 좌표 fallback'){throw 'crafting hub OCR-miss fallback is not guarded by the verified hub'}
