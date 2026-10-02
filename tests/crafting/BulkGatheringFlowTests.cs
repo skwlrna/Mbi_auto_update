@@ -20,6 +20,39 @@ internal static class BulkGatheringFlowTests
             check(initial != 0 || waits.SequenceEqual(new long[] { 1, 100, 100 }),
                 "zero inventory seed naturally stops before switching to 100 quests");
         }
+        long lifeStock = 12;
+        int lifeCycles = 0;
+        var life = new LifeSkillBulkGatheringAutomation(
+            _ => Task.FromResult(lifeStock),
+            _ => { lifeCycles++; return Task.CompletedTask; },
+            (before, _) =>
+            {
+                lifeStock += lifeCycles == 1 ? 137 : 81;
+                return Task.CompletedTask;
+            });
+        await life.RunAsync(new("통나무", 200), CancellationToken.None);
+        check(lifeCycles == 2 && lifeStock - 12 == 218,
+            "life-skill bulk gathering repeats 100 actions without assuming 100 items per cycle");
+
+        check(LivingSkillGatheringCatalog.TryResolveBulk("물이 든 병", out var water) &&
+              water.Category == "일상 채집" && water.TargetName == "우물",
+            "water bottle prefers the confirmed well route");
+        check(LivingSkillGatheringCatalog.TryResolveBulk("상급 양털+", out var cloudWool) &&
+              cloudWool.Category == "양털 깎기" && cloudWool.TargetName == "먹구름 양",
+            "wool mapping preserves plus-tier source");
+        check(LivingSkillGatheringCatalog.TryResolveBulk("산뜻 버섯 포자", out var herbSpore) &&
+              herbSpore.Category == "약초 채집" && herbSpore.TargetName == "산뜻 버섯",
+            "herb mushroom spore strips only the spore suffix");
+        check(LivingSkillGatheringCatalog.TryResolveBulk("개암 버섯 포자", out var hoeSpore) &&
+              hoeSpore.Category == "호미질" && hoeSpore.TargetName == "개암 버섯",
+            "hoe mushroom spore stays in hoeing category");
+        check(!LivingSkillGatheringCatalog.TryResolveBulk("석양 나비", out _),
+            "insect material is not enabled for standalone bulk gathering");
+        check(AcquisitionMethodPolicy.IsLifeSkill("추천 곤충채집") &&
+              AcquisitionMethodPolicy.IsLifeSkill("호미질") &&
+              AcquisitionMethodPolicy.IsLifeSkill("양털 깎기"),
+            "quest acquisition accepts insect, hoeing and sheep-shearing life-skill rows");
+
         long missingStock = 0;
         int started = 0;
         var missingSeed = new InventoryBulkGatheringAutomation(
