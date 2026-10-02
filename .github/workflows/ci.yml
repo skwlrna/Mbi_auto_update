@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.9"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.10"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.9</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.10</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -408,8 +408,10 @@ jobs:
              $craftScreen -notmatch '재료 부족 · 퀘스트 만들기'){throw 'fixed crafting detail/direct route missing'}
           if($craftScreen -match 'for \(int i = 0; i < 9; i\+\+\)' -or
              $craftScreen -match 'CraftCountMinusPoint, ct'){throw 'crafting count must not spam minus-reset clicks'}
-          if($layout -notmatch 'CraftDetailSettleDelayMs = 250' -or
+          if($layout -notmatch 'CraftDetailSettleDelayMs = 100' -or
              $layout -notmatch 'CraftReadyPollDelayMs = 150'){throw 'crafting responsive delay constants missing'}
+          if($layout -notmatch 'new\(742, 310\)' -or
+             $layout -notmatch 'ProductionQuestPopupArea'){throw 'fixed newest production quest geometry missing'}
           if($craftScreen -match 'WaitForDirectCraftDepartureAsync' -or
              $craftScreen -match '제작하러 가기 클릭 후 화면 전환/자동이동을 확인하지 못했습니다'){throw 'direct crafting must not hard-gate transient travel'}
           if($craftScreen -notmatch 'CraftActionButtonArea' -or
@@ -428,6 +430,12 @@ jobs:
           if($craftScreen -notmatch 'FindQuestTitleCandidate' -or
              $craftScreen -notmatch '퀘스트 제목 보조 인식' -or
              $craftScreen -notmatch '준비행\+제작대행 확인'){throw 'crafting right-side quest fallback missing'}
+          if($craftScreen -match '제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다' -or
+             $craftScreen -match 'firstQuest = quest.Value' -or
+             $craftScreen -match 'freshQuest = quest.Value'){throw 'post-create quest opening must not OCR the tiny right-side title'}
+          if($craftScreen -notmatch 'ProductionQuestTopPoint' -or
+             $craftScreen -notmatch '오른쪽 최상단 고정좌표' -or
+             $craftScreen -notmatch '상세창 중복 OCR 생략'){throw 'fixed post-create quest or fast count path missing'}
           if($runtime -notmatch 'MeasureVisualChangeRatio' -or
              $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or

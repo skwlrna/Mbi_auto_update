@@ -102,9 +102,14 @@ try
     Check(CraftingHubLayout.CraftActionButtonArea.Contains(
               new System.Drawing.Point(507, 950)),
         "crafting station action button area covers the live 제작하기 button");
-    Check(CraftingHubLayout.CraftDetailSettleDelayMs <= 250 &&
+    Check(CraftingHubLayout.CraftDetailSettleDelayMs <= 100 &&
           CraftingHubLayout.CraftReadyPollDelayMs <= 200,
         "crafting detail and station-ready polling stay responsive");
+    Check(CraftingHubLayout.ProductionQuestTopPoint ==
+              new System.Drawing.Point(742, 310) &&
+          CraftingHubLayout.ProductionQuestPopupArea.Contains(
+              new System.Drawing.Point(400, 350)),
+        "newest production quest fixed point and popup ROI are preserved");
     Check(!CraftingHubLayout.CraftCompletionHeaderArea.IsEmpty &&
           !CraftingHubLayout.CraftCompletionConfirmArea.IsEmpty &&
           CraftingHubLayout.CraftCompletionConfirmArea.Bottom <= 1000,
