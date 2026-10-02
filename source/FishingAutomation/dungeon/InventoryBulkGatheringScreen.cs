@@ -307,8 +307,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                     (!sawActive &&
                      DateTime.UtcNow - startedAt >= TimeSpan.FromSeconds(20) &&
                      DateTime.UtcNow - lastProgressAt >= TimeSpan.FromSeconds(12)))
+                {
                     _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 100회 종료 · +{gain}");
                     return;
+                }
             }
             else
             {
@@ -516,7 +518,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             {
                 stableIdle++;
                 if (stableIdle >= 2)
+                {
+                    _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 보조 경로 종료 · +{gain}");
                     return;
+                }
             }
             else
             {
