@@ -402,14 +402,19 @@ jobs:
             if($layout -notmatch $point){throw "live crafting detail control missing: $point"}
           }
           if($craftScreen -match 'ReadCraftCountAsync|ReadStableCraftCountAsync'){throw 'crafting count OCR hard gate returned'}
-          if($craftScreen -notmatch '1회 리셋 후' -or
+          if($craftScreen -notmatch '기본 1회 유지' -or
+             $craftScreen -notmatch '기본 1회 기준' -or
              $craftScreen -notmatch '재료 충분 · 제작하러 가기' -or
              $craftScreen -notmatch '재료 부족 · 퀘스트 만들기'){throw 'fixed crafting detail/direct route missing'}
+          if($craftScreen -match 'for \(int i = 0; i < 9; i\+\+\)' -or
+             $craftScreen -match 'CraftCountMinusPoint, ct'){throw 'crafting count must not spam minus-reset clicks'}
+          if($layout -notmatch 'CraftDetailSettleDelayMs = 250' -or
+             $layout -notmatch 'CraftReadyPollDelayMs = 150'){throw 'crafting responsive delay constants missing'}
           if($craftScreen -match 'WaitForDirectCraftDepartureAsync' -or
              $craftScreen -match '제작하러 가기 클릭 후 화면 전환/자동이동을 확인하지 못했습니다'){throw 'direct crafting must not hard-gate transient travel'}
           if($craftScreen -notmatch 'CraftActionButtonArea' -or
-             $craftScreen -notmatch '제작대 도착 · 제작하기 확인 · 기존' -or
-             $craftScreen -notmatch 'TapFresh\(0x39, ct\)'){throw 'direct crafting must wait for 제작하기 and press Space'}
+             $craftScreen -notmatch '제작대 도착 · 제작하기 버튼 즉시 확인' -or
+             $craftScreen -notmatch 'TapFresh\(0x39, ct\)'){throw 'direct crafting must quickly wait for 제작하기 and press Space'}
           if($craftScreen -match '직접 제작대 도착 · .*회 설정'){throw 'direct crafting must not reset count again after station arrival'}
           if($craftScreen -match '제작 완료 화면의 결과물이' -or
              $craftScreen -match 'freshProduct'){throw 'craft completion must not hard-gate on product-name OCR'}
