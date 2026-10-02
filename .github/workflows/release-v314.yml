@@ -1,4 +1,5 @@
 name: Release V3.0.14 Crafting UI Parity
+# UI regression assertion corrected after source build passed
 
 on:
   push:
