@@ -419,46 +419,65 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct,
             $"부족 재료 {deficit.DisplayName}의 정확한 행을 다시 확인하지 못했습니다.",
             dimText: true);
-        await Task.Delay(450, ct);
 
-        DetectionResult? firstCandidate = null;
-        DetectionResult? freshCandidate = null;
+        await Task.Delay(CraftingHubLayout.AcquisitionMethodSettleDelayMs, ct);
+
+        bool firstReady = false;
+        bool secondReady = false;
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
             var header = await FindUniqueAsync(
-                frame, new Rectangle(45, 230, 560, 180), "구하는 방법", ct)
-                ?? throw Fail(frame, $"{deficit.DisplayName} 구하는 방법을 확인하지 못했습니다.");
-            var roi = Rectangle.Intersect(
-                new Rectangle(55, header.Bounds.Bottom + 20, 690, 520),
-                new Rectangle(Point.Empty, frame.Size));
-            var lines = await _ui.Ocr.ReadLinesAsync(frame, roi, 3, ct);
-            var candidate = lines
-                .Where(x => AcquisitionMethodPolicy.IsLifeSkill(x.ReadText))
-                .OrderByDescending(x => AcquisitionMethodPolicy.IsRecommended(x.ReadText))
-                .ThenBy(x => x.Center.Y)
-                .ThenBy(x => x.Center.X)
-                .FirstOrDefault();
-            if (!candidate.Found)
-                throw Fail(frame, $"{deficit.DisplayName} 추천 획득처를 확인하지 못했습니다.");
+                frame,
+                CraftingHubLayout.AcquisitionMethodHeaderArea,
+                "구하는 방법",
+                ct);
+
+            var lines = await _ui.Ocr.ReadLinesAsync(
+                frame,
+                CraftingHubLayout.AcquisitionMethodListArea,
+                3,
+                ct);
+
+            bool recommendedSeen = lines.Any(x =>
+                AcquisitionMethodPolicy.IsRecommended(x.ReadText));
+            bool materialSeen = lines.Any(x =>
+                CraftingHubLayout.AcquisitionMethodRecommendedRowArea.Contains(x.Center) &&
+                (x.ReadText ?? "").Replace(" ", "")
+                    .Contains(deficit.DisplayName.Replace(" ", ""), StringComparison.Ordinal));
+
+            bool ready = header is not null && (recommendedSeen || materialSeen);
+            Log?.Invoke(
+                $"[제작] 구하는 방법 팝업 확인 · pass={pass + 1} · " +
+                $"헤더={(header is not null ? "확인" : "없음")} · " +
+                $"추천={(recommendedSeen ? "확인" : "없음")} · " +
+                $"{deficit.DisplayName}={(materialSeen ? "확인" : "없음")}");
 
             if (pass == 0)
             {
-                firstCandidate = candidate;
-                await Task.Delay(140, ct);
+                firstReady = ready;
+                await Task.Delay(120, ct);
             }
             else
             {
-                freshCandidate = candidate;
-                if (firstCandidate is null ||
-                    !ProductionUiRuntime.Stable(firstCandidate.Value.Bounds, candidate.Bounds))
-                    throw Fail(frame, $"{deficit.DisplayName} 추천 획득처 행이 두 프레임에서 일치하지 않았습니다.");
+                secondReady = ready;
             }
         }
 
-        Log?.Invoke($"[제작] {deficit.DisplayName} 추천 획득처 선택 · 필요 {deficit.Required}개");
+        if (!firstReady || !secondReady)
+        {
+            using var failed = Capture(ct);
+            throw Fail(
+                failed,
+                $"{deficit.DisplayName} 구하는 방법 팝업/추천 행을 안정적으로 확인하지 못했습니다.");
+        }
+
         _stage.Move(ProductionStage.Travel, $"{deficit.DisplayName} 추천 획득처 이동/채집");
-        _ui.ClickFresh(new Point(390, freshCandidate!.Value.Center.Y), ct);
+        _ui.ClickFresh(CraftingHubLayout.AcquisitionMethodRecommendedPoint, ct);
+        Log?.Invoke(
+            $"[제작] {deficit.DisplayName} 추천 획득처 선택 · 고정좌표 " +
+            $"({CraftingHubLayout.AcquisitionMethodRecommendedPoint.X}," +
+            $"{CraftingHubLayout.AcquisitionMethodRecommendedPoint.Y}) · 필요 {deficit.Required}개");
 
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
         int stable = 0;
@@ -498,7 +517,11 @@ internal sealed class CraftingScreen : ICraftingScreen
         // ESC is idempotent for the supplied bottom/detail modals. Do not press it
         // when the persistent field/quest view is already visible.
         using var frame = Capture(ct);
-        var modalHeader = await FindUniqueAsync(frame, new Rectangle(40, 120, 720, 520), "구하는 방법", ct);
+        var modalHeader = await FindUniqueAsync(
+            frame,
+            CraftingHubLayout.AcquisitionMethodHeaderArea,
+            "구하는 방법",
+            ct);
         var cancel = await FindUniqueAsync(frame, new Rectangle(100, 350, 600, 280), "취소", ct);
         if (modalHeader is null && cancel is null)
             return;
