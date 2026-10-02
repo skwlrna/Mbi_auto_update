@@ -75,6 +75,21 @@ try
     Check(CraftingHubLayout.ProductSearchIconPoint ==
               new System.Drawing.Point(30, 118),
         "V3.0.1 live capture search magnifier center is preserved");
+    using (var searchBefore = new System.Drawing.Bitmap(800, 1000))
+    using (var searchSame = new System.Drawing.Bitmap(800, 1000))
+    using (var searchChanged = new System.Drawing.Bitmap(800, 1000))
+    {
+        using (var g = System.Drawing.Graphics.FromImage(searchChanged))
+        {
+            g.Clear(System.Drawing.Color.Black);
+            g.FillRectangle(
+                System.Drawing.Brushes.White,
+                CraftingHubLayout.ProductSearchDialogArea);
+        }
+        Check(!CraftingHubLayout.SearchDialogChanged(searchBefore, searchSame) &&
+              CraftingHubLayout.SearchDialogChanged(searchBefore, searchChanged),
+            "crafting search dialog state uses fixed ROI visual change instead of OCR");
+    }
     Check(CraftingHubLayout.IsStableTitle(
               new System.Drawing.Rectangle(370, 620, 60, 28),
               new System.Drawing.Rectangle(374, 622, 62, 28)) &&
