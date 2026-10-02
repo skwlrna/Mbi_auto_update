@@ -85,6 +85,13 @@ try
         "V3.0.4 live search first result card center is preserved");
     Check(CraftingHubLayout.ProductListSettleDelayMs >= 1000,
         "crafting item/food list settles before the magnifier is clicked");
+    Check(CraftingHubLayout.IsSafeCraftDetailGeometry() &&
+          CraftingHubLayout.CraftCountMinusPoint == new System.Drawing.Point(275, 835) &&
+          CraftingHubLayout.CraftCountCenterPoint == new System.Drawing.Point(400, 835) &&
+          CraftingHubLayout.CraftCountPlusPoint == new System.Drawing.Point(525, 835) &&
+          CraftingHubLayout.CraftQuestButtonPoint == new System.Drawing.Point(307, 950) &&
+          CraftingHubLayout.CraftGoButtonPoint == new System.Drawing.Point(507, 950),
+        "live V3.0.5 crafting detail count/quest/go controls are preserved");
     Check(CraftingHubLayout.SearchDialogOpenChangeRatio > 0 &&
           CraftingHubLayout.SearchDialogOpenChangeRatio < 0.25 &&
           CraftingHubLayout.SearchResultChangeRatio > 0 &&
