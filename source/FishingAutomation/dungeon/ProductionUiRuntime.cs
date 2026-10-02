@@ -175,15 +175,47 @@ internal sealed class ProductionUiRuntime : IDisposable
         bool dimText = true,
         int settleMs = 140)
     {
-        var found = await RequireStableExactAsync(
+        var second = await RequireStableExactAsync(
             text, roi, ct, failure, compact, dimText, settleMs);
 
-        // One final capture renews the input guard after OCR. Geometry is not
-        // compared pixel-for-pixel; the stable two-frame OCR result above is the
-        // click authorization.
+        // Renew the guard and re-read only the small target ROI immediately
+        // before the click. This replaces the old whole-screen pixel-diff gate.
         using var fresh = Capture(ct);
-        _input.ClickClientPoint(_hwnd, found.Center);
-        return found;
+        DetectionResult? current = compact
+            ? await FindCompactAsync(fresh, roi, text, ct)
+            : await FindUniqueAsync(fresh, roi, text, ct, dimText);
+
+        if (current is null || !Stable(second.Bounds, current.Value.Bounds))
+            throw Failure(
+                fresh,
+                failure + " · 클릭 직전 대상 위치가 바뀌었습니다.");
+
+        _input.ClickClientPoint(_hwnd, current.Value.Center);
+        return current.Value;
+    }
+
+    internal async Task<DetectionResult> ClickOffsetFromStableExactAsync(
+        string text,
+        Rectangle roi,
+        Func<DetectionResult, Point> clickPoint,
+        CancellationToken ct,
+        string failure,
+        bool compact = false,
+        bool dimText = true)
+    {
+        var second = await RequireStableExactAsync(
+            text, roi, ct, failure, compact, dimText);
+
+        using var fresh = Capture(ct);
+        DetectionResult? current = compact
+            ? await FindCompactAsync(fresh, roi, text, ct)
+            : await FindUniqueAsync(fresh, roi, text, ct, dimText);
+        if (current is null || !Stable(second.Bounds, current.Value.Bounds))
+            throw Failure(fresh, failure + " · 클릭 직전 기준점이 바뀌었습니다.");
+
+        Point point = clickPoint(current.Value);
+        _input.ClickClientPoint(_hwnd, point);
+        return current.Value;
     }
 
     internal async Task<DetectionResult> ClickStableExactAndPasteAsync(
