@@ -744,6 +744,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             Fail(failed, "완료 작업은 확인됐지만 왼쪽 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
         }
 
+        _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 1차 수령");
         Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 1차 Space");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -768,6 +769,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             return false;
         }
 
+        _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 2차 수령");
         Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(700, ct);
