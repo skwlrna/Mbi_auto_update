@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.4"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.5"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.4</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.5</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -397,6 +397,7 @@ jobs:
           $layout = Get-Content source/FishingAutomation/CraftingHubLayout.cs -Raw
           if($layout -notmatch 'new\(400, 862\)' -or
              $layout -notmatch 'ProductListSettleDelayMs = 1200'){throw 'live crafting search input coordinate or settle delay missing'}
+          if($layout -notmatch 'new\(218, 613\)'){throw 'live crafting first result card center missing'}
           if($runtime -notmatch 'MeasureVisualChangeRatio' -or
              $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or

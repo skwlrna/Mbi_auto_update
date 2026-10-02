@@ -39,7 +39,7 @@ internal static class CraftingHubLayout
         => new(400, 862);
 
     internal static Point ProductFirstResultPoint
-        => new(400, 460);
+        => new(218, 613);
 
     internal const double SearchDialogOpenChangeRatio = 0.08;
     internal const double SearchResultChangeRatio = 0.06;
