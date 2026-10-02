@@ -41,11 +41,21 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     public async Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
-        if (LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var source))
+        if (!LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var source))
         {
-            _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
-            Log?.Invoke(
-                $"[대량 채집] 생활 스킬 100회 우선 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+            string kind = LivingSkillGatheringCatalog.IsQuestOnlyMaterial(plan.DisplayName)
+                ? "곤충채집/제작 퀘스트 전용"
+                : "생활 스킬 직접 매핑 미확정";
+            throw new InvalidOperationException(
+                $"{plan.DisplayName}은(는) {kind} 재료라 단독/가공용 대량채집에서 임의 경로를 선택하지 않습니다.");
+        }
+
+        _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
+        Log?.Invoke(
+            $"[대량 채집] 생활 스킬 100회 우선 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+
+        try
+        {
             var automation = new LifeSkillBulkGatheringAutomation(
                 token => _data.ItemCountAsync(plan.DisplayName, token),
                 token => StartLifeSkillHundredAsync(source, token),
@@ -55,9 +65,14 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             await automation.RunAsync(plan, ct);
             return;
         }
+        catch (InvalidOperationException ex) when (CanUseInventoryFallback(ex))
+        {
+            Log?.Invoke(
+                $"[대량 채집] 생활 스킬 100회 화면 경로 확인 실패 · 가방 100개 보조 경로 시도 · {ex.Message}");
+        }
 
-        Log?.Invoke(
-            $"[대량 채집] {plan.DisplayName} 생활 스킬 직접 매핑 없음 · 가방 100개 경로를 보조 경로로 사용");
+        // Fallback is only for a material whose life-skill mapping is already known.
+        // It is never used to guess an unknown/insect category.
         var fallbackAutomation = new InventoryBulkGatheringAutomation(
             token => _data.ItemCountAsync(plan.DisplayName, token),
             token => _inventory.InventoryOnlyCountAsync(plan.DisplayName, token),
@@ -65,7 +80,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             {
                 if (plan.SourceRecipe is null)
                     throw new InvalidOperationException(
-                        $"{plan.DisplayName} 최초 확보에 필요한 생활 스킬/가공 재료 시작 제법을 찾지 못했습니다.");
+                        $"{plan.DisplayName} 가방 보유 0개이고 보조 경로용 시작 제법도 없어 안전하게 최초 1개를 확보할 수 없습니다.");
                 if (_stage.Current == ProductionStage.Idle)
                     _stage.Move(ProductionStage.AcquireMaterial, $"{plan.DisplayName} 최초 1개 확보");
                 await _fallback.StartAsync(plan with { TargetQuantity = 1 }, token);
@@ -76,6 +91,24 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 minimum == 1 ? TimeSpan.FromMinutes(3) : TimeSpan.FromMinutes(6), token));
         fallbackAutomation.Log += text => Log?.Invoke(text);
         await fallbackAutomation.RunAsync(plan, ct);
+    }
+
+    private static bool CanUseInventoryFallback(InvalidOperationException ex)
+    {
+        string message = ex.Message ?? "";
+        // Only recognition/navigation failures may change route. Never hide unsafe
+        // field state, inventory decrease, tool failures, or timeout after gathering.
+        string[] safeNavigationFailures =
+        {
+            "프로필에서 생활 스킬",
+            "생활 스킬 분류",
+            "목록에서",
+            "행의 이름/아이콘",
+            "100회 채집 상태",
+            "가까운 위치 찾기"
+        };
+        return safeNavigationFailures.Any(x =>
+            message.Contains(x, StringComparison.Ordinal));
     }
 
     private async Task StartLifeSkillHundredAsync(
