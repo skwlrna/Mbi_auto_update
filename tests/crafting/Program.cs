@@ -20,6 +20,9 @@ try
     Check(CraftingQuestText.IsStationStage("다목적 제작대에서 제작 0/10") &&
           !CraftingQuestText.IsStationStage("다목적 제작대 사용 중"),
         "station progress stage cannot match crafting-busy state");
+    Check(CraftingQuestText.IsStationStage("• 약품 제작대에서 제작") &&
+          !CraftingQuestText.IsStationStage("바로 제작 진행"),
+        "observed bandage quest omits ratio and stays separate from instant crafting");
 
     var response = MabinogiMobileCli.Parse("get_craftable_items", new CliProcessOutput(0,
         JsonSerializer.Serialize(new

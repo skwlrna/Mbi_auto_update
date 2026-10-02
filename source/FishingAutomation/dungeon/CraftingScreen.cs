@@ -210,10 +210,12 @@ internal sealed class CraftingScreen : ICraftingScreen
         await CloseOverlayAsync(ct);
         using (var field = Capture(ct))
         {
-            if (await FindQuestStageAsync(field, plan, directOnly: true, ct) is not null &&
+            if (await FindQuestStageAsync(field, plan, directOnly: true, ct) is not null)
+                throw Fail(field, "즉시 제작 퀘스트는 일반 제작대 복귀 경로로 실행하지 않습니다. 별도 화면 검증이 필요합니다.");
+            if (await FindQuestStageAsync(field, plan, directOnly: false, ct) is not null &&
                 (await _data.ExactAsync(plan.DisplayName, ct)).Craftable)
             {
-                Log?.Invoke("[제작] 대상 퀘스트 바로 제작 진행 + CLI 재료 준비 확인");
+                Log?.Invoke("[제작] 대상 제작대 단계 + CLI 재료 준비 확인");
                 return Array.Empty<CraftingQuestDeficit>();
             }
         }
@@ -385,10 +387,12 @@ internal sealed class CraftingScreen : ICraftingScreen
         await CloseOverlayAsync(ct);
         await Task.Delay(200, ct);
 
-        // Ready materials may show "바로 제작 진행" instead of a station 0/N line.
+        // The station stage may omit 0/N. Instant crafting is a separate flow.
         // Only accept a stage immediately below this exact product's quest title.
         using (var frame = Capture(ct))
         {
+            if (await FindQuestStageAsync(frame, plan, directOnly: true, ct) is not null)
+                throw Fail(frame, "즉시 제작 단계는 일반 제작대 복귀로 처리하지 않습니다.");
             var final = await FindQuestStageAsync(frame, plan, directOnly: false, ct);
             if (final is null)
                 throw Fail(frame, "제작 퀘스트의 제작대 복귀 단계를 찾지 못했습니다.");

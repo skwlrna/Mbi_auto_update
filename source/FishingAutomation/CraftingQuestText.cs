@@ -12,7 +12,6 @@ internal static class CraftingQuestText
     internal static bool IsStationStage(string text)
     {
         string compact = Compact(text);
-        return compact.Contains("제작대", StringComparison.Ordinal) &&
-            Regex.IsMatch(compact, @"제작\d+/\d+");
+        return Regex.IsMatch(compact, @"^.+제작대에서제작(?:\d+/\d+)?$");
     }
 }
