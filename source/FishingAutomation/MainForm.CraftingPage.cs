@@ -63,8 +63,8 @@ public sealed partial class MainForm
     {
         private readonly MainForm _owner;
         private readonly TextBox _search = new();
-        private readonly Button _food;
-        private readonly Button _item;
+        private Button _food = null!;
+        private Button _item = null!;
         private readonly Button _start;
         private readonly Button _stop;
         private readonly Button _reload;
@@ -108,23 +108,21 @@ public sealed partial class MainForm
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 51));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 49));
 
-            var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-            header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
-            header.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
-            header.Controls.Add(new Label
+            var header = new TableLayoutPanel
             {
-                Text = "제작",
                 Dock = DockStyle.Fill,
-                ForeColor = Color.White,
-                Font = new Font("맑은 고딕", 36f, FontStyle.Bold, GraphicsUnit.Pixel),
-                TextAlign = ContentAlignment.MiddleLeft
-            }, 0, 0);
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = Padding.Empty
+            };
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+            header.Controls.Add(owner.SectionTitle("제작", 26), 0, 0);
             header.Controls.Add(new Label
             {
-                Text = "음식·아이템을 검색하고 최대 10회 퀘스트 단위로 자동 제작합니다.",
+                Text = "아이템·음식을 나눠 원하는 품목을 자동 제작합니다.",
                 Dock = DockStyle.Fill,
                 ForeColor = Muted,
-                Font = new Font("맑은 고딕", 18f, FontStyle.Regular, GraphicsUnit.Pixel),
                 TextAlign = ContentAlignment.MiddleLeft
             }, 0, 1);
             root.Controls.Add(header, 0, 0);
@@ -140,39 +138,54 @@ public sealed partial class MainForm
             settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
             var left = Card();
+            left.Padding = new Padding(16, 9, 16, 9);
+            left.Margin = new Padding(0, 0, 9, 0);
             var form = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 5,
-                Padding = new Padding(16, 10, 16, 10)
+                BackColor = Color.Transparent
             };
-            form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 115));
+            form.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
             form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            for (int i = 0; i < 5; i++) form.RowStyles.Add(new RowStyle(SizeType.Percent, 20));
+            form.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            for (int i = 1; i < form.RowCount; i++)
+                form.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
 
-            var category = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-            category.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            category.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            _food = Button("음식", () => SetCategory(CraftingCategory.Food));
-            _item = Button("아이템", () => SetCategory(CraftingCategory.Item));
-            _food.AccessibleName = "제작 음식";
-            _item.AccessibleName = "제작 아이템";
-            category.Controls.Add(_food, 0, 0);
-            category.Controls.Add(_item, 1, 0);
-            AddRow(form, 0, "분류", category);
+            var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+            settingsHeading.Controls.Add(new Label
+            {
+                Text = "제작 설정",
+                Dock = DockStyle.Fill,
+                ForeColor = TitleText,
+                Font = new Font("맑은 고딕", 15f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            });
+            form.Controls.Add(settingsHeading, 0, 0);
+            form.SetColumnSpan(settingsHeading, 2);
+
+            _reload = Button("목록 새로고침", () => _ = LoadCatalogAsync(true));
+            _reload.AccessibleName = "제작 목록 새로고침";
+            _reload.Dock = DockStyle.Right;
+            _reload.Width = 110;
+            _reload.Margin = new Padding(2);
+            settingsHeading.Controls.Add(_reload);
+
+            var categoryTabs = BuildCategoryTabs();
+            form.Controls.Add(categoryTabs, 0, 1);
+            form.SetColumnSpan(categoryTabs, 2);
 
             _search.PlaceholderText = "품목을 검색하세요";
             StyleField(_search);
-            AddRow(form, 1, "품목 검색", _search);
+            AddRow(form, 2, "품목 검색", _search);
 
             Items.DropDownStyle = ComboBoxStyle.DropDownList;
             Items.FlatStyle = FlatStyle.Flat;
             Items.BackColor = CardBg2;
             Items.ForeColor = TitleText;
-            Items.Font = new Font("맑은 고딕", 12f);
             Items.AccessibleName = "제작 품목";
-            AddRow(form, 2, "제작 품목", Items);
+            AddRow(form, 3, "제작 품목", Items);
 
             Quantity.Minimum = 1;
             Quantity.Maximum = 1_000_000;
@@ -180,13 +193,9 @@ public sealed partial class MainForm
             Quantity.BorderStyle = BorderStyle.None;
             Quantity.BackColor = CardBg2;
             Quantity.ForeColor = TitleText;
-            Quantity.Font = new Font("맑은 고딕", 12f);
             Quantity.AccessibleName = "제작 목표 수량";
-            AddRow(form, 3, "목표 수량", Quantity);
+            AddRow(form, 4, "목표 수량", Quantity);
 
-            _reload = Button("목록 새로고침", () => _ = LoadCatalogAsync(true));
-            _reload.AccessibleName = "제작 목록 새로고침";
-            AddRow(form, 4, "목록", _reload);
             left.Controls.Add(form);
             settings.Controls.Add(left, 0, 0);
 
@@ -263,11 +272,130 @@ public sealed partial class MainForm
 
             Controls.Add(root);
 
+            // Match automatic-altering typography and responsive scaling exactly.
+            foreach (var control in Descendants(root).Prepend(root))
+                control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
+            void Typography(Control control, float pixels) =>
+                control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
+
+            Typography(header.Controls[0], 36);
+            Typography(header.Controls[1], 18);
+            Typography(settingsHeading.Controls[0], 21);
+            Typography(summaryLayout.Controls[0], 21);
+            Typography(executionLayout.Controls[0], 21);
+            Typography(_reload, 14);
+            Typography(_selected, 20);
+            Typography(Owned, 18);
+            Typography(_detail, 17);
+            Typography(_state, 17);
+            Typography(_start, 22);
+            Typography(_stop, 22);
+            Typography(_progress, 20);
+            Typography(foot, 14);
+            Typography(_item, 18);
+            Typography(_food, 18);
+
+            var metrics = Descendants(root).Prepend(root)
+                .Select(control => new CraftingPageMetric(
+                    control,
+                    control.Font.FontFamily.Name,
+                    control.Font.Size,
+                    control.Font.Style,
+                    control.Padding,
+                    control.Margin))
+                .ToArray();
+            var rows = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table
+                ? table.RowStyles.Cast<RowStyle>()
+                    .Where(style => style.SizeType == SizeType.Absolute)
+                    .Select(style => (Style: style, Size: style.Height))
+                : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
+            var columns = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table
+                ? table.ColumnStyles.Cast<ColumnStyle>()
+                    .Where(style => style.SizeType == SizeType.Absolute)
+                    .Select(style => (Style: style, Size: style.Width))
+                : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
+            var scaledFonts = new List<Font>();
+            var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
+            float lastScale = -1;
+            int lastDpi = -1;
+            bool fitting = false;
+
+            Disposed += (_, _) =>
+            {
+                foreach (var font in scaledFonts) font.Dispose();
+            };
+
+            void FitPage()
+            {
+                if (fitting || ClientSize.Width < 1 || ClientSize.Height < 1) return;
+                float scale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
+                float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
+                if (Math.Abs(scale - lastScale) < .001f && DeviceDpi == lastDpi) return;
+
+                lastScale = scale;
+                lastDpi = DeviceDpi;
+                fitting = true;
+                root.SuspendLayout();
+                foreach (var metric in metrics)
+                {
+                    float size = Math.Max(
+                        metric.Size >= 18 ? 13f : 12f,
+                        MathF.Round(metric.Size * fontScale));
+                    var key = (metric.Family, size, metric.Style);
+                    if (!fontCache.TryGetValue(key, out var font))
+                    {
+                        font = new Font(metric.Family, size, metric.Style, GraphicsUnit.Pixel);
+                        fontCache.Add(key, font);
+                        scaledFonts.Add(font);
+                    }
+
+                    metric.Control.Font = font;
+                    metric.Control.Padding = ScalePadding(metric.Padding, scale);
+                    metric.Control.Margin = ScalePadding(metric.Margin, scale);
+                }
+
+                foreach (var row in rows) row.Style.Height = row.Size * scale;
+                foreach (var column in columns) column.Style.Width = column.Size * scale;
+                _reload.Width = Math.Max(70, (int)(110 * scale));
+                root.ResumeLayout(true);
+                fitting = false;
+            }
+
+            Resize += (_, _) => FitPage();
+            DpiChangedAfterParent += (_, _) => FitPage();
+            FitPage();
+
             _search.TextChanged += (_, _) => Filter();
             Items.SelectedIndexChanged += (_, _) => SelectionChanged();
             Quantity.ValueChanged += (_, _) => SelectionChanged();
             SetCategory(CraftingCategory.Food);
             UpdateExecution();
+        }
+
+        private TableLayoutPanel BuildCategoryTabs()
+        {
+            var tabs = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0, 4, 0, 4),
+                BackColor = Color.Transparent,
+                AccessibleName = "제작 분류 탭"
+            };
+            tabs.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+
+            _item = Button("아이템", () => SetCategory(CraftingCategory.Item));
+            _food = Button("음식", () => SetCategory(CraftingCategory.Food));
+            _item.AccessibleName = "제작 아이템";
+            _food.AccessibleName = "제작 음식";
+            _item.Margin = new Padding(2);
+            _food.Margin = new Padding(2);
+            tabs.Controls.Add(_item, 0, 0);
+            tabs.Controls.Add(_food, 1, 0);
+            return tabs;
         }
 
         private static Panel Card()
@@ -454,6 +582,10 @@ public sealed partial class MainForm
             Category = category;
             _food.BackColor = category == CraftingCategory.Food ? Accent : CardBg2;
             _item.BackColor = category == CraftingCategory.Item ? Accent : CardBg2;
+            _food.ForeColor = category == CraftingCategory.Food ? Color.White : TitleText;
+            _item.ForeColor = category == CraftingCategory.Item ? Color.White : TitleText;
+            _food.Invalidate();
+            _item.Invalidate();
             Filter();
         }
 
@@ -533,6 +665,30 @@ public sealed partial class MainForm
                 : "조건 확인 필요";
             _ = _owner.RefreshCraftingStateAsync();
             UpdateExecution();
+        }
+
+        private sealed record CraftingPageMetric(
+            Control Control,
+            string Family,
+            float Size,
+            FontStyle Style,
+            Padding Padding,
+            Padding Margin);
+
+        private static Padding ScalePadding(Padding padding, float scale) => new(
+            (int)(padding.Left * scale),
+            (int)(padding.Top * scale),
+            (int)(padding.Right * scale),
+            (int)(padding.Bottom * scale));
+
+        private static IEnumerable<Control> Descendants(Control root)
+        {
+            foreach (Control child in root.Controls)
+            {
+                yield return child;
+                foreach (var nested in Descendants(child))
+                    yield return nested;
+            }
         }
 
         internal void UpdateExecution()

@@ -110,6 +110,12 @@ internal static class Program
                 "crafting opens as an independent production page");
             var craftItems = All(crafting).OfType<ComboBox>().Single();
             var craftSearch = All(crafting).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
+            var craftItemTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템");
+            var craftFoodTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 음식");
+            Check(craftItemTab.Left < craftFoodTab.Left &&
+                  craftItemTab.Parent == craftFoodTab.Parent &&
+                  craftFoodTab.BackColor == Accent,
+                "crafting uses altering-style side-by-side item and food category tabs");
             Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "야채볶음"),
                 "food crafting catalog includes CLI food item");
             All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템").PerformClick(); Pump();
@@ -153,6 +159,20 @@ internal static class Program
             {
                 form.ClientSize = size; Pump();
                 Menu("제작"); Pump();
+                float craftingScale = Math.Min(crafting.Width / 1212f, crafting.Height / 858f);
+                var craftingTitle = All(crafting).OfType<Label>().Single(x => x.Text == "제작");
+                var craftingInput = All(crafting).OfType<NumericUpDown>().Single();
+                Check(craftingTitle.Font.Unit == GraphicsUnit.Pixel &&
+                      craftingTitle.Font.Size == Math.Max(13f, MathF.Round(36 * craftingScale)) &&
+                      craftingInput.Font.Unit == GraphicsUnit.Pixel &&
+                      craftingInput.Font.Size == Math.Max(13f, MathF.Round(18 * craftingScale)),
+                    "crafting title and content match automatic-altering typography at " + size);
+                var craftingTabs = All(crafting).OfType<Button>()
+                    .Where(x => x.AccessibleName is "제작 아이템" or "제작 음식").ToArray();
+                Check(craftingTabs.Length == 2 &&
+                      craftingTabs.All(x => x.Font.Unit == GraphicsUnit.Pixel &&
+                          x.Font.Size == Math.Max(13f, MathF.Round(18 * craftingScale))),
+                    "crafting category tabs match automatic-altering font scale at " + size);
                 var craftingProgress = All(crafting).OfType<Label>().Single(x => x.Text.StartsWith("진행 수량  ", StringComparison.Ordinal));
                 Check(craftingProgress.Height >= craftingProgress.Font.Height && FullyContained(craftingProgress, crafting),
                     "crafting progress is fully visible at " + size);
