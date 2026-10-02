@@ -92,6 +92,9 @@ try
           CraftingHubLayout.CraftQuestButtonPoint == new System.Drawing.Point(307, 950) &&
           CraftingHubLayout.CraftGoButtonPoint == new System.Drawing.Point(507, 950),
         "live V3.0.5 crafting detail count/quest/go controls are preserved");
+    Check(CraftingHubLayout.CraftActionButtonArea.Contains(
+              new System.Drawing.Point(507, 950)),
+        "crafting station action button area covers the live 제작하기 button");
     Check(CraftingHubLayout.SearchDialogOpenChangeRatio > 0 &&
           CraftingHubLayout.SearchDialogOpenChangeRatio < 0.25 &&
           CraftingHubLayout.SearchResultChangeRatio > 0 &&
