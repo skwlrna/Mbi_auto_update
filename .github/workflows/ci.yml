@@ -388,7 +388,12 @@ jobs:
 
           if($search -notmatch 'TapFresh\(0x1C, ct\)' -or
              $search -notmatch 'input field -> paste -> Enter -> Apply -> exact result'){throw 'shared production search must require Enter before Apply'}
-          if($craftScreen -notmatch 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'crafting must use shared Enter-confirmed search'}
+          if($craftScreen -notmatch 'SearchDialogChangeRatio' -or
+             $craftScreen -notmatch '추가 클릭 없이 정지합니다'){throw 'crafting search must gate input on visual dialog state'}
+          if($craftScreen -match '검색 아이콘 fallback' -or
+             $craftScreen -match '돋보기만 OCR fallback'){throw 'unsafe crafting search fallback returned'}
+          if($craftScreen -notmatch 'TapFresh\(0x1C, ct\)' -or
+             $craftScreen -notmatch '검색어 입력 확정 · Enter'){throw 'crafting fixed search must still confirm text with Enter'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
              $craftScreen -match '제작 목록 복귀를 확인하지 못했습니다'){throw 'crafting fixed list navigation must not be hard-gated by header OCR'}
           if($craftScreen -notmatch '헤더 OCR 생략'){throw 'crafting fixed list OCR-skip trace missing'}
