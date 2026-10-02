@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace FishingAutomation;
 
-internal sealed record CliCommandCapability(string Command, bool RequiresConfirm);
+internal sealed record CliCommandCapability(string Command, bool RequiresConfirm, string? Description = null, string? Metadata = null);
 
 internal sealed record CliIdentityContext(
     string? CharacterId,
@@ -124,7 +124,9 @@ internal static class CliAutomationGuards
                     confirm.ValueKind == JsonValueKind.String &&
                     bool.TryParse(confirm.GetString(), out bool parsed) && parsed;
             }
-            commands[command] = new(command, requiresConfirm);
+            commands[command] = new(command, requiresConfirm,
+                Text(row, "Description") ?? Text(row, "description"),
+                TryProperty(row, "Metadata")?.GetRawText());
         }
 
         string[] missing = required.Where(x => !commands.ContainsKey(x)).Distinct(StringComparer.Ordinal).ToArray();

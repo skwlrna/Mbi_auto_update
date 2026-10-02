@@ -120,10 +120,15 @@ internal static class Program
             craftSearch.Text = "회복"; Pump();
             Check(craftItems.Items.Count == 1 && craftItems.Items[0]!.ToString() == "상급 회복 물약",
                 "crafting item search filters the complete catalog");
+            All(crafting).OfType<NumericUpDown>().Single().Value = 23;
+            var craftPlan = Invoke<CraftingPlan>(form, "SelectedCraftingPlan");
+            Check(craftPlan.Category == CraftingCategory.Item && craftPlan.TargetQuantity == 23 && craftPlan.ProducedPerCraft == 5,
+                "crafting selection preserves category, quantity and per-craft yield");
+            if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], "crafting.png")); }
             Check(fake.Actions.Count == 0, "crafting catalog and search remain read-only");
 
             foreach (string mode in new[] { "낚시", "던전", "어비스" })
-            { Menu(mode); Check(!altering.Visible && !gathering.Visible, "legacy page preserved: " + mode); }
+            { Menu(mode); Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved: " + mode); }
             fake.Fail = true; Menu("자동 채집");
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick();
             PumpUntil(() => gi.Items.Count == 0);
@@ -134,6 +139,15 @@ internal static class Program
             foreach (var size in new[] { new Size(940, 700), new Size(1200, 900) })
             {
                 form.ClientSize = size; Pump();
+                Menu("제작"); Pump();
+                var craftingProgress = All(crafting).OfType<Label>().Single(x => x.Text.StartsWith("진행 수량  ", StringComparison.Ordinal));
+                Check(craftingProgress.Height >= craftingProgress.Font.Height && FullyContained(craftingProgress, crafting),
+                    "crafting progress is fully visible at " + size);
+                Check(All(crafting).OfType<Button>().Where(x => x.AccessibleName is "제작 시작" or "제작 정지")
+                        .All(x => x.Height >= x.Font.Height && FullyContained(x, crafting)),
+                    "crafting start and stop controls fit at " + size);
+                if (args.Length > 0) Save(form, Path.Combine(args[0], "crafting-" + size.Width + ".png"));
+                Menu("자동 채집"); Pump();
                 Check(gathering.Right <= form.ClientSize.Width && gathering.Bottom < form.ClientSize.Height,
                     "production content fits at " + size);
                 Check(All(gathering).Where(x => x.Visible).All(x => x.Width > 0 && x.Height > 0), "native controls remain visible at " + size);

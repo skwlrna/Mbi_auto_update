@@ -70,6 +70,17 @@ try
     Check(decoded == "야채볶음", "craftable filter round-trips exact Korean name");
 
     int launches = 0;
+    Check(AcquisitionMethodPolicy.IsLifeSkill("추천 생활 스킬 벌목") &&
+          !AcquisitionMethodPolicy.IsLifeSkill("던전 전리품 채집") &&
+          !AcquisitionMethodPolicy.IsLifeSkill("상점 구매") &&
+          !AcquisitionMethodPolicy.IsLifeSkill("선택하세요"),
+        "acquisition requires positive life-skill evidence and rejects paid or dungeon rows");
+    foreach (string wanted in new[] { "달걀", "황금 달걀", "통나무", "단단한 통나무", "부드러운 통나무" })
+    {
+        var overlapping = new[] { "황금 달걀", "부드러운 통나무", "단단한 통나무", "달걀", "통나무" }
+            .Select(x => new CraftableItem(x, true, 1, null, Array.Empty<CraftingIngredient>(), CraftingCategory.Item)).ToArray();
+        Check(CraftingQueries.Exact(overlapping, wanted).DisplayName == wanted, "exact overlapping name: " + wanted);
+    }
     var log = new AppLog(Path.Combine(AppContext.BaseDirectory, "crafting-test.log"), 1000000);
     var cli = new MabinogiMobileCli(log, true, (_, _) =>
     {
@@ -79,6 +90,8 @@ try
     Check((await cli.QueryAsync("execute_crafting")).State == "blocked" && launches == 0,
         "execute_crafting cannot cross the read-only CLI process boundary");
 
+    await CraftingFlowTests.RunAsync(Check, log);
+    await BulkGatheringFlowTests.RunAsync(Check);
     Console.WriteLine($"PASS {checks} crafting checks");
 }
 catch (Exception ex)
