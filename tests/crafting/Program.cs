@@ -24,6 +24,30 @@ try
           !CraftingQuestText.IsStationStage("바로 제작 진행"),
         "observed bandage quest omits ratio and stays separate from instant crafting");
 
+    var stage = new ProductionStageMachine("test");
+    stage.Move(ProductionStage.OpenHub, "hub");
+    stage.Move(ProductionStage.SelectCategory, "category");
+    stage.Move(ProductionStage.Search, "search");
+    stage.Move(ProductionStage.Detail, "detail");
+    stage.Move(ProductionStage.CreateQuest, "quest");
+    stage.Move(ProductionStage.ReadQuest, "read");
+    stage.Move(ProductionStage.AcquireMaterial, "material");
+    stage.Move(ProductionStage.Travel, "travel");
+    stage.Move(ProductionStage.VerifyInventory, "inventory");
+    stage.Move(ProductionStage.ReadQuest, "read again");
+    Check(stage.Current == ProductionStage.ReadQuest,
+        "V3 production state machine supports the crafting material loop");
+    try
+    {
+        var invalid = new ProductionStageMachine("test");
+        invalid.Move(ProductionStage.Process, "illegal jump");
+        throw new Exception("illegal production stage jump accepted");
+    }
+    catch (InvalidOperationException)
+    {
+        Check(true, "V3 production state machine rejects hidden direct jumps");
+    }
+
     var itemTitle = CraftingHubLayout.CategoryTitleArea(CraftingCategory.Item);
     var foodTitle = CraftingHubLayout.CategoryTitleArea(CraftingCategory.Food);
     var itemCard = CraftingHubLayout.CategoryCardArea(CraftingCategory.Item);
