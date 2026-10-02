@@ -90,11 +90,11 @@ jobs:
             if($cli -notmatch $command){throw "missing CLI read-only query: $command"}
           }
           $g = Get-Content source/FishingAutomation/MainForm.Gathering.cs -Raw
-          if($g -notmatch 'new InventoryBulkGatheringScreen\('){throw 'gathering is not wired to zero-wing inventory bulk navigation'}
+          if($g -notmatch 'new InventoryBulkGatheringScreen\('){throw 'gathering is not wired to zero-wing bulk navigation'}
           if($g -match 'new GatheringCliScreen\('){throw 'gathering still wires paid CLI action screen'}
           $a = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
           if($a -notmatch 'new AlteringScreen\('){throw 'altering is not wired to free screen navigation'}
-          if($a -notmatch 'new InventoryBulkGatheringScreen\('){throw 'altering material resolver is not wired to 100-item inventory gathering'}
+          if($a -notmatch 'new InventoryBulkGatheringScreen\('){throw 'altering material resolver is not wired to life-skill bulk gathering'}
           if($a -match 'new AlteringCliScreen\('){throw 'altering still wires paid CLI action screen'}
           foreach($file in @($g,$a)){
             if($file -match '"execute_gathering"' -or $file -match '"execute_altering"' -or $file -match '"complete_altering_work"' -or $file -match '"stop_action"'){
@@ -194,8 +194,7 @@ jobs:
           if ($selectRecipe -notmatch 'RecipeCacheKey' -or $selectRecipe -notmatch '_cachedRecipeCenter') { throw 'confirmed recipe-coordinate reuse missing' }
           if ($selectRecipe -notmatch '고정 품목 좌표 재사용' -or $selectRecipe -notmatch '고정 품목 좌표 저장') { throw 'recipe coordinate cache diagnostics missing' }
           if ($selectRecipe -match 'DragClientPoint') { throw 'cached recipe path must never drag the UI' }
-          $travelConfirm = [regex]::Match($screen, 'private async Task<bool> ConfirmFacilityTravelAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
-          if ($travelConfirm -notmatch 'attempt < 10' -or $travelConfirm -match 'attempt < 40') { throw 'facility confirmation no-popup wait must be about two seconds' }
+          if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
@@ -219,12 +218,10 @@ jobs:
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
-          if ($screen -notmatch 'ConfirmFacilityTravelAsync') { throw 'facility travel confirmation flow missing' }
-          if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'visual popup detector missing' }
-          if ($screen -match 'HasDialogButtonAsync' -or $screen -match 'FacilityTravelConfirmButton') { throw 'travel popup must not depend on OCR labels' }
-          if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'green confirmation-button visual gate missing' }
-          if ($screen -notmatch '하단 확인 팝업 화면 감지') { throw 'visual popup confirmation log missing' }
-          if ($screen -notmatch '하단 확인 팝업 없음 · Space 입력 생략') { throw 'no-popup path must skip Space' }
+          if ($screen -notmatch '설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음') { throw 'facility travel must explicitly skip Space' }
+          if ($screen -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력' -or $screen -match '이동 확인 Space 입력 완료') { throw 'facility travel Space regression returned' }
+          if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'completion-result visual detector missing' }
+          if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'completion-result green visual gate missing' }
           if ($screen -notmatch 'p\.B >= 95' -or $screen -notmatch 'blue \* 100 >= sampled \* 2') { throw 'tolerant blue collect-button visual gate missing' }
           if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
           if ($screen -notmatch 'attempts: 20, delayMs: 250') { throw 'initial receive wait window missing' }
@@ -365,12 +362,16 @@ jobs:
           $crafting = Get-Content source/FishingAutomation/MainForm.Crafting.cs -Raw
           $screen = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
           $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
-          $bulkEngine = Get-Content source/FishingAutomation/InventoryBulkGatheringAutomation.cs -Raw
+          $bulkEngine = Get-Content source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs -Raw
+          $mapping = Get-Content source/FishingAutomation/LivingSkillGatheringCatalog.cs -Raw
           if($crafting -notmatch 'CraftingQueries' -and $crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
           if($screen -notmatch '퀘스트 만들기' -or $screen -notmatch '제작 완료'){throw 'quest-driven crafting screen flow missing'}
-          if($screen -notmatch '결과물 또는 재료 이름을 검색해 보세요'){throw 'crafting search input flow missing'}
-          if($bulk -notmatch '아이템 이름을 검색해 보세요' -or $bulkEngine -notmatch '_waitNaturalStop\(current, 100, ct\)'){throw 'inventory 100-item bulk gathering flow missing'}
-          if($bulk -notmatch 'InventoryOnlyCountAsync'){throw 'bag quantity must be verified through CLI inventory location'}
+          if($screen -notmatch '결과물 또는 재료 이름을 검색해 보세요' -or $screen -notmatch 'TapScanCode\(0x1C\)'){throw 'crafting search must confirm text with Enter'}
+          if($bulk -notmatch '생활 스킬 100회 우선' -or $bulk -notmatch '가까운 위치 찾기'){throw 'life-skill 100-action bulk gathering flow missing'}
+          if($bulk -notmatch 'TapScanCode\(0x1C\)' -or $bulk -notmatch '아이템 이름을 검색해 보세요'){throw 'inventory fallback search must confirm text with Enter'}
+          if($bulkEngine -match '100개' -or $bulkEngine -notmatch 'after <= before'){throw 'life-skill engine must verify variable inventory gain instead of fixed 100 items'}
+          foreach($required in @('우물','굵은 나무','먹구름 양','개암 버섯','동 광맥')){if($mapping -notmatch [regex]::Escape($required)){throw "life-skill mapping missing: $required"}}
+          if($bulk -notmatch 'InventoryOnlyCountAsync'){throw 'bag fallback quantity must be verified through CLI inventory location'}
           if($bulk -match 'execute_gathering'){throw 'bulk gathering must never use paid CLI gathering'}
 
       - name: Inline production UI regression tests

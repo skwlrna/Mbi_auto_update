@@ -1,3 +1,5 @@
+using System.Drawing.Drawing2D;
+
 namespace FishingAutomation;
 
 public sealed partial class MainForm
@@ -75,7 +77,7 @@ public sealed partial class MainForm
         private bool _loaded;
 
         internal readonly ComboBox Items = new();
-        internal readonly NumericUpDown Quantity = new();
+        internal readonly NumericUpDown Quantity = new ArrowlessNumericUpDown();
         internal readonly Label Owned = new();
         internal CraftingCategory Category { get; private set; } = CraftingCategory.Food;
         internal string CliStatus = "확인 전";
@@ -98,13 +100,13 @@ public sealed partial class MainForm
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 3,
-                Padding = new Padding(18, 10, 18, 12),
+                Padding = new Padding(14, 6, 14, 10),
                 Margin = Padding.Empty,
                 BackColor = WindowBg
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 51));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 49));
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
@@ -114,7 +116,7 @@ public sealed partial class MainForm
                 Text = "제작",
                 Dock = DockStyle.Fill,
                 ForeColor = Color.White,
-                Font = new Font("맑은 고딕", 28f, FontStyle.Bold, GraphicsUnit.Pixel),
+                Font = new Font("맑은 고딕", 36f, FontStyle.Bold, GraphicsUnit.Pixel),
                 TextAlign = ContentAlignment.MiddleLeft
             }, 0, 0);
             header.Controls.Add(new Label
@@ -122,7 +124,7 @@ public sealed partial class MainForm
                 Text = "음식·아이템을 검색하고 최대 10회 퀘스트 단위로 자동 제작합니다.",
                 Dock = DockStyle.Fill,
                 ForeColor = Muted,
-                Font = new Font("맑은 고딕", 16f, FontStyle.Regular, GraphicsUnit.Pixel),
+                Font = new Font("맑은 고딕", 18f, FontStyle.Regular, GraphicsUnit.Pixel),
                 TextAlign = ContentAlignment.MiddleLeft
             }, 0, 1);
             root.Controls.Add(header, 0, 0);
@@ -134,8 +136,8 @@ public sealed partial class MainForm
                 RowCount = 1,
                 Margin = new Padding(0, 0, 0, 10)
             };
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
-            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+            settings.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
             var left = Card();
             var form = new TableLayoutPanel
@@ -201,7 +203,7 @@ public sealed partial class MainForm
             summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
             summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 26));
             summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 26));
-            summaryLayout.Controls.Add(Label("선택한 제작 품목", 19, true), 0, 0);
+            summaryLayout.Controls.Add(Label("선택한 제작 품목", 21, true), 0, 0);
             foreach (var label in new[] { _selected, Owned, _detail, _state })
             {
                 label.Dock = DockStyle.Fill;
@@ -227,7 +229,7 @@ public sealed partial class MainForm
             executionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
             executionLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             executionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-            executionLayout.Controls.Add(Label("▶  실행 상태", 20, true), 0, 0);
+            executionLayout.Controls.Add(Label("▶  실행 상태", 21, true), 0, 0);
 
             var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 72));
@@ -243,7 +245,7 @@ public sealed partial class MainForm
 
             _progress.Dock = DockStyle.Fill;
             _progress.ForeColor = Color.FromArgb(36, 195, 255);
-            _progress.Font = new Font("맑은 고딕", 24f, FontStyle.Bold, GraphicsUnit.Pixel);
+            _progress.Font = new Font("맑은 고딕", 20f, FontStyle.Bold, GraphicsUnit.Pixel);
             _progress.TextAlign = ContentAlignment.MiddleLeft;
             executionLayout.Controls.Add(_progress, 0, 2);
 
@@ -269,11 +271,34 @@ public sealed partial class MainForm
         }
 
         private static Panel Card()
+            => new CraftingCard { Dock = DockStyle.Fill, Margin = new Padding(4) };
+
+        private sealed class CraftingCard : Panel
         {
-            var panel = new Panel { Dock = DockStyle.Fill, BackColor = CardBg, Margin = new Padding(4) };
-            panel.Paint += (_, e) => ControlPaint.DrawBorder(
-                e.Graphics, panel.ClientRectangle, Line, ButtonBorderStyle.Solid);
-            return panel;
+            internal CraftingCard()
+            {
+                BackColor = CardBg;
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.ResizeRedraw,
+                    true);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (Width < 3 || Height < 3) return;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.Clear(SurfaceColor(Parent));
+                var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
+                using var shape = Rounded(bounds, 12);
+                using var fill = new LinearGradientBrush(
+                    bounds, Color.FromArgb(7, 35, 61), CardBg2, 60f);
+                using var border = new Pen(Color.FromArgb(21, 77, 116));
+                e.Graphics.FillPath(fill, shape);
+                e.Graphics.DrawPath(border, shape);
+            }
         }
 
         private static Label Label(string text, float size, bool bold = false) => new()
@@ -287,20 +312,116 @@ public sealed partial class MainForm
 
         private static Button Button(string text, Action action)
         {
-            var button = new Button
+            var button = new CraftingButton
             {
                 Text = text,
                 Dock = DockStyle.Fill,
-                FlatStyle = FlatStyle.Flat,
                 BackColor = CardBg2,
                 ForeColor = TitleText,
-                Font = new Font("맑은 고딕", 16f, FontStyle.Bold, GraphicsUnit.Pixel),
+                Font = new Font("맑은 고딕", 18f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Margin = new Padding(3),
                 Cursor = Cursors.Hand
             };
-            button.FlatAppearance.BorderColor = Line;
             button.Click += (_, _) => action();
             return button;
+        }
+
+        private sealed class CraftingButton : Button
+        {
+            internal CraftingButton()
+            {
+                FlatStyle = FlatStyle.Flat;
+                FlatAppearance.BorderSize = 0;
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.AllPaintingInWmPaint,
+                    true);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (Width < 3 || Height < 3) return;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.Clear(SurfaceColor(Parent));
+                var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
+                using var shape = Rounded(bounds, 10);
+                bool primary = Enabled && BackColor == Accent;
+                using var fill = new LinearGradientBrush(
+                    bounds,
+                    primary ? Color.FromArgb(4, 165, 255) : CardBg,
+                    primary ? Color.FromArgb(0, 86, 226) : CardBg2,
+                    90f);
+                using var border = new Pen(
+                    primary ? Color.FromArgb(0, 207, 255) : Line,
+                    primary ? 1.8f : 1f);
+                e.Graphics.FillPath(fill, shape);
+                e.Graphics.DrawPath(border, shape);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    Text,
+                    Font,
+                    ClientRectangle,
+                    Enabled ? ForeColor : Muted,
+                    TextFormatFlags.HorizontalCenter |
+                    TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.EndEllipsis);
+            }
+        }
+
+        private sealed class ArrowlessNumericUpDown : NumericUpDown
+        {
+            protected override void OnCreateControl()
+            {
+                base.OnCreateControl();
+                HideArrowButtons();
+            }
+
+            protected override void OnResize(EventArgs e)
+            {
+                base.OnResize(e);
+                HideArrowButtons();
+            }
+
+            private void HideArrowButtons()
+            {
+                foreach (Control child in Controls)
+                {
+                    string typeName = child.GetType().Name;
+                    if (typeName.Contains("UpDownButtons", StringComparison.Ordinal))
+                    {
+                        child.Visible = false;
+                        child.Width = 0;
+                    }
+                    else if (typeName.Contains("UpDownEdit", StringComparison.Ordinal))
+                    {
+                        child.Dock = DockStyle.Fill;
+                        child.Width = ClientSize.Width;
+                    }
+                }
+            }
+        }
+
+        private static GraphicsPath Rounded(RectangleF bounds, float radius)
+        {
+            float d = Math.Min(Math.Min(bounds.Width, bounds.Height), radius * 2);
+            var path = new GraphicsPath();
+            path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
+            path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
+            path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+            path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static Color SurfaceColor(Control? control)
+        {
+            while (control is not null)
+            {
+                if (control.BackColor.A == 255) return control.BackColor;
+                control = control.Parent;
+            }
+            return WindowBg;
         }
 
         private static void StyleField(TextBox box)

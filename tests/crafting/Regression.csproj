@@ -10,6 +10,8 @@
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/CraftingQuestText.cs" Link="CraftingQuestText.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryBulkGatheringAutomation.cs" Link="InventoryBulkGatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs" Link="LifeSkillBulkGatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/LivingSkillGatheringCatalog.cs" Link="LivingSkillGatheringCatalog.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingAutomation.cs" Link="CraftingAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingScreenContract.cs" Link="CraftingScreenContract.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringCliData.cs" Link="GatheringCliData.cs" />
