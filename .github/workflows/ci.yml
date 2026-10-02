@@ -367,6 +367,10 @@ jobs:
           if($crafting -notmatch 'CraftingQueries' -and $crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
           if($screen -notmatch '퀘스트 만들기' -or $screen -notmatch '제작 완료'){throw 'quest-driven crafting screen flow missing'}
           if($screen -notmatch '결과물 또는 재료 이름을 검색해 보세요' -or $screen -notmatch 'TapScanCode\(0x1C\)'){throw 'crafting search must confirm text with Enter'}
+          $hub = Get-Content source/FishingAutomation/CraftingHubLayout.cs -Raw
+          if($screen -notmatch 'ClickCraftingCategoryCardAsync' -or $screen -notmatch 'acceptedBounds: titleArea'){throw 'crafting hub category must use the verified title band'}
+          if($screen -match 'new Rectangle\(25, 120, 750, 735\)[\s\S]{0,220}카드를 확인하지 못했습니다'){throw 'broad crafting hub category OCR regression returned'}
+          if($hub -notmatch 'CategoryTitleArea' -or $hub -notmatch 'CraftingCategory\.Item' -or $hub -notmatch 'CraftingCategory\.Food'){throw 'crafting hub item/food title geometry missing'}
           if($bulk -notmatch '생활 스킬 100회 우선' -or $bulk -notmatch '가까운 위치 찾기'){throw 'life-skill 100-action bulk gathering flow missing'}
           if($bulk -notmatch 'TapScanCode\(0x1C\)' -or $bulk -notmatch '아이템 이름을 검색해 보세요'){throw 'inventory fallback search must confirm text with Enter'}
           if($bulkEngine -match '100개' -or $bulkEngine -notmatch 'after <= before'){throw 'life-skill engine must verify variable inventory gain instead of fixed 100 items'}
