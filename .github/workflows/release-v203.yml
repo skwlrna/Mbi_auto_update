@@ -190,13 +190,14 @@ jobs:
           $r = @($releases | Where-Object { $_.tag_name -eq 'V2.0.3' }) | Select-Object -First 1
 
           $expected=@('MabiAuto_V2.0.3_Windows_Lite.zip','MabiAuto_V2.0.3_Windows_Lite.zip.sha256','MabiAuto_V2.0.3_Source.zip')
+          $releaseTarget='6449e926f2b5903df59640f5102b6fc31166c4ab'
 
           if(-not $r) {
             gh release create V2.0.3 `
               artifacts/MabiAuto_V2.0.3_Windows_Lite.zip `
               artifacts/MabiAuto_V2.0.3_Windows_Lite.zip.sha256 `
               artifacts/MabiAuto_V2.0.3_Source.zip `
-              --draft --target $env:GITHUB_SHA --title 'Mabi Auto V2.0.3' `
+              --draft --target $releaseTarget --title 'Mabi Auto V2.0.3' `
               --notes-file source/RELEASE_NOTES.md
             if($LASTEXITCODE-ne0){throw 'Release upload failed'}
 
@@ -206,7 +207,7 @@ jobs:
           }
 
           if(-not $r){throw 'V2.0.3 release not found'}
-          if($r.target_commitish -ne $env:GITHUB_SHA){throw "V2.0.3 target mismatch: $($r.target_commitish) != $env:GITHUB_SHA"}
+          if($r.target_commitish -ne $releaseTarget){throw "V2.0.3 target mismatch: $($r.target_commitish) != $releaseTarget"}
           foreach($name in $expected){if($name -notin $r.assets.name){throw "Missing release asset: $name"}}
 
           if($r.draft) {
