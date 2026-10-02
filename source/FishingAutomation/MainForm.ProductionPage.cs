@@ -119,7 +119,6 @@ public sealed partial class MainForm
         private int _percent;
         private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
-        private readonly TextBox _pageLog = new();
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
@@ -211,11 +210,11 @@ public sealed partial class MainForm
 
             var right = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
-                BackColor = Color.Transparent, AccessibleName = "실행 상태 및 로그"
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = Padding.Empty,
+                BackColor = Color.Transparent, AccessibleName = "실행 상태"
             };
-            right.RowStyles.Add(new RowStyle(SizeType.Percent, 56)); right.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
-            var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = new Padding(0, 0, 0, 5) };
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = Padding.Empty };
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -238,14 +237,6 @@ public sealed partial class MainForm
             status.Controls.Add(_progress, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_collection, 0, 6);
             status.Controls.Add(_character, 0, 7); status.Controls.Add(_cli, 0, 8);
             statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
-
-            var logCard = new LauncherCard { Padding = new Padding(12, 9, 12, 10), Margin = new Padding(0, 5, 0, 0) };
-            var logLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
-            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            logLayout.Controls.Add(owner.SectionTitle("로그", 15), 0, 0);
-            _pageLog.Multiline = true; _pageLog.ReadOnly = true; _pageLog.ScrollBars = ScrollBars.Vertical; _pageLog.BorderStyle = BorderStyle.None;
-            _pageLog.BackColor = CardBg2; _pageLog.ForeColor = TitleText; _pageLog.Dock = DockStyle.Fill; _pageLog.AccessibleName = AccessibleName + " 로그"; _pageLog.Margin = new Padding(2);
-            logLayout.Controls.Add(_pageLog, 0, 1); logCard.Controls.Add(logLayout); right.Controls.Add(logCard, 0, 1);
             body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
             var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 정지" };
@@ -258,11 +249,11 @@ public sealed partial class MainForm
             foreach (var control in Descendants(root).Prepend(root)) control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
             void Typography(Control control, float pixels) => control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
             Typography(header.Controls[0], 36); Typography(header.Controls[1], 18); Typography(settingsHeading.Controls[0], 21);
-            Typography(status.Controls[0], 21); Typography(logLayout.Controls[0], 21); Typography(_reload, 14);
+            Typography(status.Controls[0], 21); Typography(_reload, 14);
             if (_inspect is not null) Typography(_inspect, 14);
             foreach (var tab in _facilityTabButtons.Values) Typography(tab, 17);
             foreach (var label in new[] { _state, _condition, _elapsed, _collection, _character, _cli }) Typography(label, 17);
-            Typography(_progressText, 18); Typography(_percentage, 18); Typography(_pageLog, 15); Typography(_start, 22); Typography(_stop, 22);
+            Typography(_progressText, 18); Typography(_percentage, 18); Typography(_start, 22); Typography(_stop, 22);
 
             var metrics = Descendants(root).Prepend(root).Select(c => new PageMetric(c, c.Font.FontFamily.Name, c.Font.Size, c.Font.Style, c.Padding, c.Margin)).ToArray();
             var rows = metrics.SelectMany(m => m.Control is TableLayoutPanel t ? t.RowStyles.Cast<RowStyle>().Where(x => x.SizeType == SizeType.Absolute).Select(x => (Style: x, Size: x.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
@@ -594,14 +585,6 @@ public sealed partial class MainForm
             control.Location = new Point(inset, Math.Max(0, (surface.Height - control.Height) / 2));
         }
 
-        private void SyncPageLog()
-        {
-            if (_pageLog.IsDisposed || _owner._logBox.IsDisposed) return;
-            string text = _owner._logBox.Text; if (text.Length > 12000) text = text[^12000..];
-            if (string.Equals(_pageLog.Text, text, StringComparison.Ordinal)) return;
-            _pageLog.Text = text; _pageLog.SelectionStart = _pageLog.TextLength; _pageLog.ScrollToCaret();
-        }
-
         private sealed record PageMetric(Control Control, string Family, float Size, FontStyle Style, Padding Padding, Padding Margin);
         private static Padding ScalePadding(Padding p, float scale) => new((int)(p.Left * scale), (int)(p.Top * scale), (int)(p.Right * scale), (int)(p.Bottom * scale));
         private static IEnumerable<Control> Descendants(Control root)
@@ -772,7 +755,6 @@ public sealed partial class MainForm
             _character.Text = $"오류 횟수  {(_owner._runError is null ? 0 : 1)}회";
             _cli.Text = $"CLI 상태  {CliStatus}"; _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
             _character.ForeColor = _owner._runError is null ? Muted : Color.Salmon;
-            SyncPageLog();
         }
     }
     private string? _productionLastMode;
