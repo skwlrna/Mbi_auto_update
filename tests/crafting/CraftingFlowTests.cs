@@ -41,6 +41,33 @@ internal static class CraftingFlowTests
                     "completion screen without full inventory gain cannot confirm or repeat a batch");
             }
         }
+
+        int transientReads = 0;
+        var retryCli = new MabinogiMobileCli(log, true, (command, ct) =>
+        {
+            if (command != "get_items")
+                throw new Exception("unexpected retry-test CLI command: " + command);
+
+            transientReads++;
+            if (transientReads <= 2)
+                return Task.FromResult(new CliProcessOutput(
+                    0,
+                    "{\"status\":\"rejected\",\"reason\":\"loading\"}",
+                    ""));
+
+            return Task.FromResult(new CliProcessOutput(
+                0,
+                JsonSerializer.Serialize(new[]
+                {
+                    new { DisplayName = "감자", Location = "inventory", Count = 80L }
+                }),
+                ""));
+        });
+        var retryData = new CraftingCliData(retryCli);
+        long retriedCount = await retryData.InventoryOnlyCountWithLoadingRetryAsync(
+            "감자", CancellationToken.None, null, 5);
+        check(retriedCount == 80 && transientReads == 3,
+            "quest material inventory retries transient loading cli_rejected instead of aborting");
     }
 
     private sealed class Screen : ICraftingScreen

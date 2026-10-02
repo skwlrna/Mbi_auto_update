@@ -6,7 +6,7 @@ namespace DungeonVisionBot;
 internal sealed class CraftingScreen : ICraftingScreen
 {
     private readonly CraftingCliData _data;
-    private readonly GatheringCliData _activity;
+    private readonly MabinogiMobileCli _cli;
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("제작");
     private string? _directCraftPendingName;
@@ -19,7 +19,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         MabinogiMobileCli cli)
     {
         _data = new CraftingCliData(cli);
-        _activity = new GatheringCliData(cli);
+        _cli = cli;
         _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "crafting");
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[제작][상태] {stage} · {detail}");
@@ -481,16 +481,52 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
         int stable = 0;
+        int activityLoadingRejects = 0;
+        int polls = 0;
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            long current = await _data.InventoryOnlyCountAsync(deficit.DisplayName, ct);
-            var activity = await _activity.ActivityAsync(ct);
+            polls++;
+
+            var activityResponse = await _cli.GetActivityAsync(ct);
+            if (!activityResponse.Success)
+            {
+                if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
+                {
+                    activityLoadingRejects++;
+                    stable = 0;
+                    if (activityLoadingRejects == 1 || activityLoadingRejects % 5 == 0)
+                        Log?.Invoke(
+                            $"[제작] 지역 이동/채집 중 get_activity CLI 일시 거부 · 재시도 {activityLoadingRejects}회");
+                    await Task.Delay(1000, ct);
+                    continue;
+                }
+
+                _ = GatheringQueries.ParseActivity(activityResponse);
+            }
+
+            var activity = GatheringQueries.ParseActivity(activityResponse);
             if (!activity.IsSafeField)
                 throw new InvalidOperationException("제작 재료 채집 중 안전하지 않은 상태가 확인되어 정지합니다.");
+
             bool active = activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing ||
                           activity.MainButtonState == "Stop";
-            if (current >= deficit.Required && !active)
+            if (active)
+            {
+                stable = 0;
+                if (polls % 10 == 0)
+                    Log?.Invoke(
+                        $"[제작] {deficit.DisplayName} 이동/채집 진행 중 · 재고 CLI 조회 생략 · " +
+                        $"이동={activity.IsAutoTraveling} · 채집={activity.IsGathering || activity.IsFishing}");
+                await Task.Delay(1000, ct);
+                continue;
+            }
+
+            // Match the automatic-altering travel guard: loading-time CLI rejection is
+            // transient. Inventory is checked only after travel/gathering is no longer active.
+            long current = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                deficit.DisplayName, ct, Log);
+            if (current >= deficit.Required)
             {
                 stable++;
                 if (stable >= 2)
@@ -504,10 +540,12 @@ internal sealed class CraftingScreen : ICraftingScreen
             {
                 stable = 0;
             }
+
             await Task.Delay(1000, ct);
         }
 
-        long final = await _data.InventoryOnlyCountAsync(deficit.DisplayName, ct);
+        long final = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+            deficit.DisplayName, ct, Log);
         throw new InvalidOperationException(
             $"{deficit.DisplayName} 제작 퀘스트 채집이 필요한 수량에 도달하지 못했습니다: {final}/{deficit.Required}");
     }
