@@ -70,6 +70,46 @@ internal static class CraftingHubLayout
            ProductSearchDialogArea.Contains(ProductSearchInputPoint) &&
            ProductSearchResultArea.Contains(ProductFirstResultPoint);
 
+    internal const double SearchDialogOpenMinChange = 0.10;
+
+    internal static double SearchDialogChangeRatio(Bitmap before, Bitmap after)
+    {
+        Rectangle bounds = Rectangle.Intersect(
+            ProductSearchDialogArea,
+            new Rectangle(Point.Empty, before.Size));
+        bounds = Rectangle.Intersect(
+            bounds,
+            new Rectangle(Point.Empty, after.Size));
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return 0d;
+
+        const int step = 6;
+        const int changedThreshold = 72;
+        long sampled = 0;
+        long changed = 0;
+
+        for (int y = bounds.Top; y < bounds.Bottom; y += step)
+        {
+            for (int x = bounds.Left; x < bounds.Right; x += step)
+            {
+                Color a = before.GetPixel(x, y);
+                Color b = after.GetPixel(x, y);
+                int delta =
+                    Math.Abs(a.R - b.R) +
+                    Math.Abs(a.G - b.G) +
+                    Math.Abs(a.B - b.B);
+                sampled++;
+                if (delta >= changedThreshold)
+                    changed++;
+            }
+        }
+
+        return sampled == 0 ? 0d : changed / (double)sampled;
+    }
+
+    internal static bool SearchDialogChanged(Bitmap before, Bitmap after)
+        => SearchDialogChangeRatio(before, after) >= SearchDialogOpenMinChange;
+
     internal static bool IsStableTitle(Rectangle first, Rectangle second)
     {
         if (first.Width <= 0 || first.Height <= 0 || second.Width <= 0 || second.Height <= 0)
