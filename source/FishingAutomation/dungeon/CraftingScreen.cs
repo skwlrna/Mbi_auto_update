@@ -9,6 +9,8 @@ internal sealed class CraftingScreen : ICraftingScreen
     private readonly GatheringCliData _activity;
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("제작");
+    private string? _directCraftPendingName;
+    private int _directCraftPendingCount;
 
     internal CraftingScreen(
         nint hwnd,
@@ -32,20 +34,41 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         plan.Validate();
         if (craftCount is < 1 or > 10)
-            throw new InvalidDataException("제작 퀘스트는 한 번에 1~10회만 만들 수 있습니다.");
+            throw new InvalidDataException("제작은 한 번에 1~10회만 설정할 수 있습니다.");
+        if (!CraftingHubLayout.IsSafeCraftDetailGeometry())
+            throw new InvalidOperationException("제작 상세 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
+
+        _directCraftPendingName = null;
+        _directCraftPendingCount = 0;
 
         await OpenProductAsync(plan, ct);
-        await SetCraftCountAsync(craftCount, ct);
+        await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
+
+        var exact = await _data.ExactAsync(plan.DisplayName, ct);
+        bool canDirectCraft =
+            exact.Craftable &&
+            exact.MissingIngredients.All(x => x.Owned >= x.Required);
+
+        if (canDirectCraft)
+        {
+            _stage.Move(ProductionStage.Travel, $"{plan.DisplayName} {craftCount}회 제작하러 가기");
+            _directCraftPendingName = plan.DisplayName;
+            _directCraftPendingCount = craftCount;
+
+            _ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct);
+            Log?.Invoke(
+                $"[제작] 재료 충분 · 제작하러 가기 · 고정좌표 " +
+                $"({CraftingHubLayout.CraftGoButtonPoint.X},{CraftingHubLayout.CraftGoButtonPoint.Y})");
+            await WaitForDirectCraftDepartureAsync(plan.DisplayName, ct);
+            return;
+        }
+
         _stage.Move(ProductionStage.CreateQuest, $"{plan.DisplayName} {craftCount}회 퀘스트 생성");
-
-        await ClickExactAsync(
-            "퀘스트 만들기",
-            new Rectangle(0, 0, 800, 1000),
-            ct,
-            "제작 상세 화면의 퀘스트 만들기 버튼을 확인하지 못했습니다.");
-
+        _ui.ClickFresh(CraftingHubLayout.CraftQuestButtonPoint, ct);
+        Log?.Invoke(
+            $"[제작] 재료 부족 · 퀘스트 만들기 · 고정좌표 " +
+            $"({CraftingHubLayout.CraftQuestButtonPoint.X},{CraftingHubLayout.CraftQuestButtonPoint.Y})");
         await Task.Delay(800, ct);
-        Log?.Invoke($"[제작] {plan.DisplayName} {craftCount}회 퀘스트 생성");
     }
 
     private async Task OpenProductAsync(CraftingPlan plan, CancellationToken ct)
@@ -245,79 +268,85 @@ internal sealed class CraftingScreen : ICraftingScreen
             materials.Value.Center.Y < quest.Value.Center.Y;
     }
 
-    private async Task SetCraftCountAsync(int wanted, CancellationToken ct)
+    private async Task SetCraftCountAsync(
+        string displayName,
+        int wanted,
+        CancellationToken ct)
     {
-        for (int attempt = 0; attempt < 20; attempt++)
+        if (wanted is < 1 or > 10)
+            throw new InvalidDataException("제작 횟수는 1~10회만 설정할 수 있습니다.");
+        if (!CraftingHubLayout.IsSafeCraftDetailGeometry())
+            throw new InvalidOperationException("제작 상세 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
+
+        using (var frame = Capture(ct))
         {
-            var count = await ReadStableCraftCountAsync(ct);
-            if (count.Count == wanted)
+            if (!await IsProductDetailAsync(frame, displayName, ct))
+                throw Fail(frame, $"{displayName} 제작 상세 화면이 아니어서 횟수 입력을 중단합니다.");
+        }
+
+        await Task.Delay(CraftingHubLayout.CraftDetailSettleDelayMs, ct);
+
+        // The count is bounded to 1..10. Nine minus clicks deterministically
+        // clamp any prior value to 1 without OCR, then plus builds the target.
+        for (int i = 0; i < 9; i++)
+        {
+            _ui.ClickFresh(CraftingHubLayout.CraftCountMinusPoint, ct);
+            await Task.Delay(85, ct);
+        }
+
+        for (int i = 1; i < wanted; i++)
+        {
+            _ui.ClickFresh(CraftingHubLayout.CraftCountPlusPoint, ct);
+            await Task.Delay(95, ct);
+        }
+
+        using var verify = Capture(ct);
+        if (!await IsProductDetailAsync(verify, displayName, ct))
+            throw Fail(verify, "제작 횟수 설정 중 상세 화면이 변경되어 입력을 정지합니다.");
+
+        Log?.Invoke(
+            $"[제작] 제작 횟수 설정 · OCR 미사용 · 1회 리셋 후 {wanted}회 · " +
+            $"-({CraftingHubLayout.CraftCountMinusPoint.X},{CraftingHubLayout.CraftCountMinusPoint.Y}) · " +
+            $"+({CraftingHubLayout.CraftCountPlusPoint.X},{CraftingHubLayout.CraftCountPlusPoint.Y})");
+    }
+
+    private async Task WaitForDirectCraftDepartureAsync(
+        string displayName,
+        CancellationToken ct)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            var activity = await _activity.ActivityAsync(ct);
+            using var frame = Capture(ct);
+            bool detailOpen = await IsProductDetailAsync(frame, displayName, ct);
+
+            if (activity.IsAutoTraveling || !detailOpen)
             {
-                Log?.Invoke($"[제작] 배치 횟수 확인 · {wanted}회");
+                Log?.Invoke(activity.IsAutoTraveling
+                    ? "[제작] 제작하러 가기 입력 확인 · 자동이동 시작"
+                    : "[제작] 제작하러 가기 입력 확인 · 상세창 전환");
                 return;
             }
 
-            int direction = wanted > count.Count ? 1 : -1;
-            var click = new Point(
-                Math.Clamp(count.Center.X + direction * 125, 20, 779),
-                Math.Clamp(count.Center.Y, 20, 979));
-            _ui.ClickFresh(click, ct);
-            await Task.Delay(180, ct);
+            await Task.Delay(350, ct);
         }
 
         using var failed = Capture(ct);
-        throw Fail(failed, $"제작 횟수를 {wanted}회로 맞추지 못했습니다.");
-    }
-
-    private async Task<(int Count, Point Center)> ReadStableCraftCountAsync(CancellationToken ct)
-    {
-        (int Count, Point Center)? first;
-        using (var frame = Capture(ct))
-        {
-            first = await ReadCraftCountAsync(frame, ct);
-            if (first is null)
-                throw Fail(frame, "제작 횟수 표시를 확인하지 못했습니다.");
-        }
-
-        await Task.Delay(120, ct);
-
-        using var fresh = Capture(ct);
-        var second = await ReadCraftCountAsync(fresh, ct);
-        if (second is null ||
-            second.Value.Count != first.Value.Count ||
-            Math.Abs(second.Value.Center.X - first.Value.Center.X) > 18 ||
-            Math.Abs(second.Value.Center.Y - first.Value.Center.Y) > 18)
-            throw Fail(fresh, "제작 횟수 표시가 두 프레임에서 안정적으로 일치하지 않았습니다.");
-
-        return second.Value;
-    }
-
-    private async Task<(int Count, Point Center)?> ReadCraftCountAsync(Bitmap frame, CancellationToken ct)
-    {
-        var client = new Rectangle(Point.Empty, frame.Size);
-        var materials = await FindUniqueAsync(frame, client, "필요한 재료", ct);
-        var quest = await FindUniqueAsync(frame, client, "퀘스트 만들기", ct);
-        if (materials is null || quest is null || materials.Value.Bounds.Bottom >= quest.Value.Bounds.Top)
-            return null;
-        // Derive the count region from labels in this fresh 800x1000 client frame.
-        // Uploaded partial captures never supply an origin or a saved click point.
-        var countArea = Rectangle.FromLTRB(0, materials.Value.Bounds.Bottom,
-            frame.Width, quest.Value.Bounds.Top);
-        var lines = await _ui.Ocr.ReadLinesAsync(frame, countArea, 3, ct);
-        var candidates = new List<(int Count, Point Center)>();
-        foreach (var line in lines.OrderBy(x => x.Center.Y))
-        {
-            var match = Regex.Match((line.ReadText ?? "").Replace(" ", ""), @"^(?<n>\d{1,2})회$");
-            if (!match.Success || !int.TryParse(match.Groups["n"].Value, out int count) || count is < 1 or > 10)
-                continue;
-            candidates.Add((count, line.Center));
-        }
-        return candidates.Count == 1 ? candidates[0] : null;
+        throw Fail(failed, "제작하러 가기 클릭 후 화면 전환/자동이동을 확인하지 못했습니다.");
     }
 
     public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
         CraftingPlan plan,
         CancellationToken ct)
     {
+        if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal))
+        {
+            Log?.Invoke("[제작] 재료 충분 직접 제작 · 퀘스트 재료 확인 생략");
+            return Array.Empty<CraftingQuestDeficit>();
+        }
+
         _stage.Move(ProductionStage.ReadQuest, $"{plan.DisplayName} 부족 재료 확인");
         await CloseOverlayAsync(ct);
         using (var field = Capture(ct))
@@ -541,6 +570,13 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     public async Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
     {
+        if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal) &&
+            _directCraftPendingCount == craftCount)
+        {
+            await FinishDirectCraftAsync(plan, craftCount, ct);
+            return;
+        }
+
         _stage.Move(ProductionStage.Travel, $"{plan.DisplayName} 제작대로 이동");
         await CloseOverlayAsync(ct);
         await Task.Delay(200, ct);
@@ -581,12 +617,10 @@ internal sealed class CraftingScreen : ICraftingScreen
             using var frame = Capture(ct);
             if (await IsProductDetailAsync(frame, plan.DisplayName, ct))
             {
-                var count = await ReadCraftCountAsync(frame, ct);
-                if (count is null || count.Value.Count != craftCount)
-                    throw Fail(frame, $"제작대 도착 후 퀘스트 제작 횟수 {craftCount}회가 유지되지 않았습니다.");
+                await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 제작");
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
-                Log?.Invoke($"[제작] 제작대 도착 · {plan.DisplayName} {craftCount}회 유지 확인 · 제작 시작");
+                Log?.Invoke($"[제작] 제작대 도착 · 횟수 {craftCount}회 고정좌표 재설정 · 제작 시작");
                 await WaitForCompletionAsync(plan.DisplayName, ct);
                 return;
             }
@@ -595,6 +629,47 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         using var failed = Capture(ct);
         throw Fail(failed, "제작대로 이동 후 제작 상세 화면이 열리지 않았습니다.");
+    }
+
+    private async Task FinishDirectCraftAsync(
+        CraftingPlan plan,
+        int craftCount,
+        CancellationToken ct)
+    {
+        _stage.Move(ProductionStage.Travel, $"{plan.DisplayName} 제작대 도착 대기");
+        DateTime deadline = DateTime.UtcNow.AddMinutes(3);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            var activity = await _activity.ActivityAsync(ct);
+            if (!activity.IsSafeField)
+                throw new InvalidOperationException("직접 제작 이동 중 안전하지 않은 상태가 확인되어 정지합니다.");
+
+            if (activity.IsAutoTraveling)
+            {
+                await Task.Delay(700, ct);
+                continue;
+            }
+
+            using var frame = Capture(ct);
+            if (await IsProductDetailAsync(frame, plan.DisplayName, ct))
+            {
+                await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
+                _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
+                _ui.TapFresh(0x39, ct); // station detail: Space = 제작하기
+                Log?.Invoke($"[제작] 직접 제작대 도착 · {craftCount}회 설정 · Space 제작 시작");
+                await WaitForCompletionAsync(plan.DisplayName, ct);
+                _directCraftPendingName = null;
+                _directCraftPendingCount = 0;
+                return;
+            }
+
+            await Task.Delay(700, ct);
+        }
+
+        using var failed = Capture(ct);
+        throw Fail(failed, "제작하러 가기 후 제작대 상세 화면이 열리지 않았습니다.");
     }
 
     private async Task<DetectionResult?> FindQuestStageAsync(
