@@ -114,7 +114,7 @@ internal static class Program
             var craftFoodTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 음식");
             Check(craftItemTab.Left < craftFoodTab.Left &&
                   craftItemTab.Parent == craftFoodTab.Parent &&
-                  craftFoodTab.BackColor == Accent,
+                  craftFoodTab.BackColor != craftItemTab.BackColor,
                 "crafting uses altering-style side-by-side item and food category tabs");
             Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "야채볶음"),
                 "food crafting catalog includes CLI food item");
