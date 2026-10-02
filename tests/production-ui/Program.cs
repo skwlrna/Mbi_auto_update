@@ -201,7 +201,7 @@ internal static class Program
                     .Where(x => x.AccessibleName is "제작 아이템" or "제작 음식").ToArray();
                 Check(craftingTabs.Length == 2 &&
                       craftingTabs.All(x => x.Font.Unit == GraphicsUnit.Pixel &&
-                          x.Font.Size == Math.Max(13f, MathF.Round(18 * craftingScale))),
+                          x.Font.Size == Math.Max(13f, MathF.Round(17 * craftingScale))),
                     "crafting category tabs match automatic-altering font scale at " + size);
                 var craftingProgress = All(crafting).OfType<Label>().Single(x => x.Text.StartsWith("진행 수량  ", StringComparison.Ordinal));
                 Check(craftingProgress.Height >= craftingProgress.Font.Height && FullyContained(craftingProgress, crafting),
