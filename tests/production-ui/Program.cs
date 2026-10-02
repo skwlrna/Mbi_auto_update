@@ -114,8 +114,8 @@ internal static class Program
                 Check(!All(page).OfType<ComboBox>().Any(), page.Name + " has no visible execution/status combo boxes");
                 Check(!All(page).OfType<Label>().Any(x => x.Visible && x.Text.Contains("현재 보유", StringComparison.Ordinal)),
                     page.Name + " removes current-owned quantity card");
-                Check(All(page).OfType<TextBox>().Any(x => x.AccessibleName?.EndsWith(" 로그", StringComparison.Ordinal) == true),
-                    page.Name + " shows log on the right side");
+                Check(!All(page).OfType<TextBox>().Any(x => x.AccessibleName?.EndsWith(" 로그", StringComparison.Ordinal) == true),
+                    page.Name + " omits embedded log because detailed log already exists");
             }
 
             Menu("제작"); PumpUntil(() => All(crafting).OfType<ListBox>().Single().Items.Count > 0);
@@ -124,8 +124,8 @@ internal static class Program
             Check(!All(crafting).OfType<ComboBox>().Any(), "crafting has no visible execution/status combo boxes");
             Check(!All(crafting).OfType<Label>().Any(x => x.Visible && x.Text.Contains("현재 보유", StringComparison.Ordinal)),
                 "crafting removes current-owned quantity card");
-            Check(All(crafting).OfType<TextBox>().Any(x => x.AccessibleName == "제작 로그"),
-                "crafting shows log on the right side");
+            Check(!All(crafting).OfType<TextBox>().Any(x => x.AccessibleName == "제작 로그"),
+                "crafting omits embedded log because detailed log already exists");
             var craftItems = All(crafting).OfType<ListBox>().Single();
             var craftSearch = All(crafting).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
             Check(craftItems.DrawMode == DrawMode.OwnerDrawFixed &&
