@@ -53,6 +53,9 @@ public sealed partial class MainForm
         {
             var plan = SelectedGatheringPlan();
             plan.Validate();
+            if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(plan.DisplayName))
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName}은(는) 곤충채집 퀘스트 전용 재료라 단독 자동채집에서는 시작하지 않습니다. 제작 퀘스트의 추천 획득처에서만 처리합니다.");
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",
