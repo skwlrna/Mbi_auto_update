@@ -216,27 +216,15 @@ internal sealed class CraftingScreen : ICraftingScreen
         _ui.ClickFresh(new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y), ct);
         await Task.Delay(400, ct);
 
-        await ClickExactAsync(
+        await ProductionSearchFlow.SearchAndSelectAsync(
+            _ui,
             "결과물 또는 재료 이름을 검색해 보세요",
             new Rectangle(65, 350, 675, 360),
-            ct,
-            "제작 검색 입력칸을 확인하지 못했습니다.",
-            pasteText: displayName);
-        await Task.Delay(120, ct);
-        _ui.TapFresh(0x1C, ct); // Enter: 검색어 입력 확정
-        await Task.Delay(200, ct);
-        await ClickExactAsync(
-            "적용하기",
-            new Rectangle(65, 350, 675, 360),
-            ct,
-            "Enter 입력 후 제작 검색 적용하기 버튼을 확인하지 못했습니다.");
-        await Task.Delay(650, ct);
-
-        await ClickExactAsync(
             displayName,
             new Rectangle(35, 390, 730, 535),
             ct,
-            $"제작 검색 결과에서 정확한 {displayName} 품목을 찾지 못했습니다.");
+            "제작",
+            text => Log?.Invoke(text));
         await Task.Delay(500, ct);
 
         using var verify = Capture(ct);
