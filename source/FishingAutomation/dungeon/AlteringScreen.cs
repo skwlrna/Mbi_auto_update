@@ -458,6 +458,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         // on-site state after two fresh frames. This is generic for every processing
         // facility in AlteringPlan.Facilities.
         bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
+        if (reusedOnsite)
+            _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 현장 상태 재사용");
         if (!reusedOnsite)
         {
             _confirmedOnsiteFacility = null;
