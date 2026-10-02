@@ -67,6 +67,11 @@ try
         "live V2.0.4 crafting hub uses safe verified item/food fallback centers");
     Check(CraftingHubLayout.HubHeaderArea.Contains(new System.Drawing.Point(75, 62)),
         "crafting hub top-left 제작 header is covered for fallback authorization");
+    Check(CraftingHubLayout.IsSafeSearchGeometry() &&
+          CraftingHubLayout.ProductFilterArea.Contains(CraftingHubLayout.ProductSearchIconPoint) &&
+          CraftingHubLayout.ProductSearchDialogArea.Contains(CraftingHubLayout.ProductSearchInputPoint) &&
+          CraftingHubLayout.ProductSearchResultArea.Contains(CraftingHubLayout.ProductFirstResultPoint),
+        "fixed 800x1000 crafting search points stay inside verified UI regions");
     Check(CraftingHubLayout.IsStableTitle(
               new System.Drawing.Rectangle(370, 620, 60, 28),
               new System.Drawing.Rectangle(374, 622, 62, 28)) &&
