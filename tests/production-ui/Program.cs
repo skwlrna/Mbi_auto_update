@@ -22,7 +22,8 @@ internal static class Program
             var controls = All(form).ToArray();
             var gathering = controls.Single(x => x.Name == "GatheringPage");
             var altering = controls.Single(x => x.Name == "AlteringPage");
-            void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering)).PerformClick();
+            var crafting = controls.Single(x => x.Name == "CraftingPage");
+            void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
@@ -103,6 +104,23 @@ internal static class Program
                   selectedAlter.TargetQuantity == 5 && !selectedAlter.AllowPaidButton && selectedAlter.MaximumWings == 0,
                 "selected facility tab and recipe map to the zero-wing altering plan");
             Check(fake.Actions.Count == 0, "production UI performs no CLI action commands while configuring plans");
+
+            Menu("제작"); PumpUntil(() => All(crafting).OfType<ComboBox>().Single().Items.Count > 0);
+            Check(crafting.Visible && !altering.Visible && !gathering.Visible,
+                "crafting opens as an independent production page");
+            var craftItems = All(crafting).OfType<ComboBox>().Single();
+            var craftSearch = All(crafting).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
+            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "야채볶음"),
+                "food crafting catalog includes CLI food item");
+            All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템").PerformClick(); Pump();
+            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "상급 회복 물약"),
+                "item crafting category includes CLI item");
+            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "분류 없는 결과물"),
+                "unknown craftable category is not omitted from item UI");
+            craftSearch.Text = "회복"; Pump();
+            Check(craftItems.Items.Count == 1 && craftItems.Items[0]!.ToString() == "상급 회복 물약",
+                "crafting item search filters the complete catalog");
+            Check(fake.Actions.Count == 0, "crafting catalog and search remain read-only");
 
             foreach (string mode in new[] { "낚시", "던전", "어비스" })
             { Menu(mode); Check(!altering.Visible && !gathering.Visible, "legacy page preserved: " + mode); }
@@ -189,10 +207,16 @@ internal sealed class FakeCli
         object data = command switch
         {
             "status" => new {pipe="connected"},
-            "capabilities" => new { commands = new[]{"get_my_info","get_currencies","get_gatherable_items","get_activity","get_inventory","get_items","execute_gathering","stop_action","get_alterable_items","get_altering_works","execute_altering","complete_altering_work"}.Select(x=>new{Command=x,Metadata=new{requiresConfirm=true}}).ToArray() },
+            "capabilities" => new { commands = new[]{"get_my_info","get_currencies","get_gatherable_items","get_craftable_items","get_activity","get_inventory","get_items","execute_gathering","stop_action","get_alterable_items","get_altering_works","execute_altering","complete_altering_work"}.Select(x=>new{Command=x,Metadata=new{requiresConfirm=true}}).ToArray() },
             "get_my_info" => new {CharacterId="ui-test",CharacterName="테스트",RealmName="테스트 서버"},
             "get_currencies" => new[]{new{DisplayName="정령의 날개",Amount=105455},new{DisplayName="골드",Amount=5000}},
             "get_gatherable_items" => new {items=new[]{new{DisplayName="철 광석",ToolOk=true},new{DisplayName="상급 통나무+",ToolOk=true},new{DisplayName="가죽",ToolOk=false}}},
+            "get_craftable_items" => new {craftingUnlocked=true,items=new object[]{
+                new{DisplayName="야채볶음",Craftable=false,ProducedPerCraft=1,Category="음식 제작대",MissingIngredients=new[]{new{DisplayName="감자",Required=8L,Owned=6L}}},
+                new{DisplayName="감자 샐러드",Craftable=true,ProducedPerCraft=1,Category="음식 제작대",MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="상급 회복 물약",Craftable=true,ProducedPerCraft=5,Category="아이템",MissingIngredients=Array.Empty<object>()},
+                new{DisplayName="분류 없는 결과물",Craftable=true,ProducedPerCraft=2,MissingIngredients=Array.Empty<object>()}
+            }},
             "get_alterable_items" => new {items=new object[]{
                 new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="금속 가공 시설"},
                 new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="목재 가공 시설"},
@@ -207,7 +231,15 @@ internal sealed class FakeCli
                 new{DisplayName="면",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
                 new{DisplayName="생크림",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>()}
             }},
-            "get_items" => new[]{new{DisplayName="철 광석",Count=184L,Location="inventory"},new{DisplayName="상급 통나무+",Count=_logs,Location="inventory"},new{DisplayName="철괴",Count=_ingots,Location="inventory"},new{DisplayName="목재+",Count=_wood,Location="inventory"}},
+            "get_items" => new[]{
+                new{DisplayName="철 광석",Count=184L,Location="inventory"},
+                new{DisplayName="상급 통나무+",Count=_logs,Location="inventory"},
+                new{DisplayName="철괴",Count=_ingots,Location="inventory"},
+                new{DisplayName="목재+",Count=_wood,Location="inventory"},
+                new{DisplayName="야채볶음",Count=2L,Location="inventory"},
+                new{DisplayName="감자 샐러드",Count=1L,Location="inventory"},
+                new{DisplayName="상급 회복 물약",Count=3L,Location="inventory"},
+                new{DisplayName="분류 없는 결과물",Count=1L,Location="inventory"}},
             "get_altering_works" => new{completedCount=_work is null?0:1,works=_work is null?Array.Empty<object>():new object[]{new{DisplayName=_work,FacilityName="목재 가공 시설",State="Completed",IsCompleted=true,RemainingSeconds=0}}},
             "get_inventory" => new{CurrentInventoryWeightAsDecimal=1,MaxInventoryWeightAsDecimal=100},
             "get_activity" => new{IsDead=false,IsReviving=false,IsInCombat=false,IsAutoPlaying=false,IsAutoTraveling=false,IsDialoguePlaying=false,IsWaitingForSelection=false,Dungeon=new{State="NotInDungeon"},Battlefield=new{IsInBattleField=false},Tutorial=new{IsPlaying=false},Scenario=new{IsInScenario=false},Performance=new{IsPlaying=false},Mode=new{IsPlayingMiniGame=false,IsHousingEditMode=false,MainButtonState=_gathering?"Stop":"Compass"},Interaction=new{HasTarget=_gathering,AvailableInteractionType=_gathering?"Gathering":"None",LastRunningInteractionType=_gathering?"Gathering":"None"}},
