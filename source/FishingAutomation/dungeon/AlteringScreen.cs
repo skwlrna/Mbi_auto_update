@@ -356,11 +356,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         {
             using var frame = Capture(ct);
             bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
-            bool popupVisible = HasBottomConfirmationModal(frame);
-            bool moveVisible = facilityVisible && !popupVisible &&
+            bool moveVisible = facilityVisible &&
                 await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null;
 
-            if (!facilityVisible || popupVisible || moveVisible)
+            if (!facilityVisible || moveVisible)
             {
                 _confirmedOnsiteFacility = null;
                 return false;
@@ -511,36 +510,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
     }
 
 
-    private async Task<bool> ConfirmFacilityTravelAsync(CancellationToken ct)
-    {
-        // Do not OCR this modal. Its stable visual signal is the large green
-        // confirmation button in the lower-right area of the 800x1000 client.
-        // Press Space only after that button is actually visible.
-        for (int attempt = 0; attempt < 10; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            await Task.Delay(200, ct);
-
-            using var frame = Capture(ct);
-            if (!HasBottomConfirmationModal(frame))
-                continue;
-
-            // One fresh frame prevents acting on a single capture artifact.
-            await Task.Delay(120, ct);
-            using var fresh = Capture(ct);
-            if (!HasBottomConfirmationModal(fresh))
-                continue;
-
-            Log?.Invoke("[자동 가공] 하단 확인 팝업 화면 감지 · Space 입력");
-            _input.TapScanCode(0x39);
-            await Task.Delay(900, ct);
-            return true;
-        }
-
-        Log?.Invoke("[자동 가공] 하단 확인 팝업 없음 · Space 입력 생략");
-        return false;
-    }
-
     private static bool HasBottomConfirmationModal(Bitmap frame)
     {
         // Screenshot evidence: the modal's confirm control is a broad saturated-green
@@ -587,12 +556,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
 
-            bool popupVisible = HasBottomConfirmationModal(frame);
-            var move = popupVisible
-                ? null
-                : await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
+            var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
 
-            if (!popupVisible && move is null)
+            if (move is null)
             {
                 onsiteFrames++;
                 moveFrames = 0;
@@ -602,7 +568,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                     return;
                 }
             }
-            else if (!popupVisible && move is not null)
+            else if (move is not null)
             {
                 moveFrames++;
                 onsiteFrames = 0;
@@ -610,12 +576,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 if (moveFrames >= 2)
                     break;
             }
-            else
-            {
-                moveFrames = 0;
-                onsiteFrames = 0;
-            }
-
             await Task.Delay(180, ct);
         }
 
@@ -628,10 +588,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭");
         _input.ClickClientPoint(_hwnd, moveToClick.Value.Center);
 
-        bool confirmationPressed = await ConfirmFacilityTravelAsync(ct);
-        Log?.Invoke(confirmationPressed
-            ? $"[자동 가공] {plan.ScreenTitle} · 이동 확인 Space 입력 완료 · 실제 이동 대기"
-            : $"[자동 가공] {plan.ScreenTitle} · 확인 팝업 없음 · 직접 이동 여부 확인");
+        Log?.Invoke(
+            $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음");
 
         bool sawDeparture = false;
         bool sawTravel = false;
@@ -669,16 +627,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             }
 
             using var frame = Capture(ct);
-            bool popupVisible = HasBottomConfirmationModal(frame);
-            if (popupVisible)
-            {
-                Log?.Invoke("[자동 가공] 늦게 표시된 하단 확인 팝업 감지 · Space 입력");
-                _input.TapScanCode(0x39);
-                await Task.Delay(900, ct);
-                onsiteStableFrames = 0;
-                continue;
-            }
-
             bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
             bool moveVisible = false;
             if (facilityVisible)
