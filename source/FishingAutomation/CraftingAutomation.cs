@@ -19,6 +19,7 @@ internal sealed class CraftingAutomation
     private readonly GatheringCliData _gathering;
     private readonly ICraftingScreen _screen;
     private readonly RecursiveAlteringSupplyResolver _alteringResolver;
+    private readonly IAlteringData? _altering;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     internal event Action<string>? Log;
@@ -31,12 +32,14 @@ internal sealed class CraftingAutomation
         GatheringCliData gathering,
         ICraftingScreen screen,
         RecursiveAlteringSupplyResolver alteringResolver,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        IAlteringData? altering = null)
     {
         _data = data;
         _gathering = gathering;
         _screen = screen;
         _alteringResolver = alteringResolver;
+        _altering = altering;
         _delay = delay ?? Task.Delay;
     }
 
@@ -155,21 +158,27 @@ internal sealed class CraftingAutomation
             var gatherable = gatherableCatalog.SingleOrDefault(x =>
                 string.Equals(x.DisplayName, deficit.DisplayName, StringComparison.Ordinal));
 
-            if (gatherable is not null)
+            bool intermediate = await IsKnownAlteringOutputAsync(deficit.DisplayName, ct);
+
+            // Direct materials use the crafting quest route. Quest-only materials
+            // such as insects may not appear in get_gatherable_items, so anything
+            // that is not a known processing output also stays on the quest path.
+            if (gatherable is not null || !intermediate)
             {
-                if (!gatherable.ToolOk)
+                if (gatherable is not null && !gatherable.ToolOk)
                     throw new InvalidOperationException(
                         $"{deficit.DisplayName} 채집 도구가 없거나 내구도가 부족합니다.");
 
                 Log?.Invoke(
-                    $"[제작] 직접 채집 재료 · {deficit.DisplayName} {deficit.Current}/{deficit.Required} · " +
-                    "제작 퀘스트 추천 획득처 사용");
+                    $"[제작] 퀘스트 직접 확보 재료 · {deficit.DisplayName} {deficit.Current}/{deficit.Required} · " +
+                    (gatherable is null
+                        ? "독립 채집 미지원/퀘스트 전용 재료도 추천 획득처로 처리"
+                        : "제작 퀘스트 추천 획득처 사용"));
                 await _screen.GatherQuestDeficitAsync(deficit, ct);
                 continue;
             }
 
-            // Not a direct gathering material: close the quest sheet and ask the
-            // existing recursive zero-wing processing engine to make only the deficit.
+            // Confirmed intermediate processing output: make only the deficit.
             await _screen.CloseOverlayAsync(ct);
             Log?.Invoke(
                 $"[제작] 중간 가공 재료 · {deficit.DisplayName} 부족 {shortage}개 · 자동 가공 연결");
@@ -179,6 +188,23 @@ internal sealed class CraftingAutomation
         }
 
         throw new InvalidOperationException("제작 퀘스트 재료 해결 반복 한도를 초과했습니다.");
+    }
+
+    private async Task<bool> IsKnownAlteringOutputAsync(
+        string displayName,
+        CancellationToken ct)
+    {
+        if (_altering is null)
+            return false;
+
+        var recipes = await _altering.RecipesAsync(ct);
+        return recipes.Any(recipe =>
+            string.Equals(recipe.DisplayName, displayName, StringComparison.Ordinal) ||
+            string.Equals(
+                System.Text.RegularExpressions.Regex.Replace(
+                    recipe.DisplayName, @"\([^()]*\)$", "").Trim(),
+                displayName,
+                StringComparison.Ordinal));
     }
 
     private async Task<long> WaitForOutputIncreaseAsync(
