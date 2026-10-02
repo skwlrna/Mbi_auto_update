@@ -95,6 +95,10 @@ try
     Check(CraftingHubLayout.CraftActionButtonArea.Contains(
               new System.Drawing.Point(507, 950)),
         "crafting station action button area covers the live 제작하기 button");
+    Check(!CraftingHubLayout.CraftCompletionHeaderArea.IsEmpty &&
+          !CraftingHubLayout.CraftCompletionConfirmArea.IsEmpty &&
+          CraftingHubLayout.CraftCompletionConfirmArea.Bottom <= 1000,
+        "crafting completion header/confirm regions stay inside the 800x1000 client");
     Check(CraftingHubLayout.SearchDialogOpenChangeRatio > 0 &&
           CraftingHubLayout.SearchDialogOpenChangeRatio < 0.25 &&
           CraftingHubLayout.SearchResultChangeRatio > 0 &&
