@@ -64,6 +64,9 @@ internal static class CraftingHubLayout
     internal static Point CraftGoButtonPoint
         => new(507, 950);
 
+    internal static Rectangle CraftActionButtonArea
+        => new(385, 910, 245, 80);
+
     internal const int CraftDetailSettleDelayMs = 350;
 
     internal static bool IsSafeCraftDetailGeometry()
@@ -71,7 +74,8 @@ internal static class CraftingHubLayout
            ProductDetailPanelArea.Contains(CraftCountCenterPoint) &&
            ProductDetailPanelArea.Contains(CraftCountPlusPoint) &&
            ProductDetailPanelArea.Contains(CraftQuestButtonPoint) &&
-           ProductDetailPanelArea.Contains(CraftGoButtonPoint);
+           ProductDetailPanelArea.Contains(CraftGoButtonPoint) &&
+           CraftActionButtonArea.Contains(CraftGoButtonPoint);
 
 
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
