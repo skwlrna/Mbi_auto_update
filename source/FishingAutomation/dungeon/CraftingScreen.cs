@@ -61,7 +61,7 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         await ClickExactAsync(
             "퀘스트 만들기",
-            new Rectangle(65, 760, 390, 220),
+            new Rectangle(0, 0, 800, 1000),
             ct,
             "제작 상세 화면의 퀘스트 만들기 버튼을 확인하지 못했습니다.");
 
@@ -144,10 +144,14 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private async Task<bool> IsProductDetailAsync(Bitmap frame, string displayName, CancellationToken ct)
     {
-        var title = await FindUniqueAsync(frame, new Rectangle(55, 260, 690, 360), displayName, ct);
+        var client = new Rectangle(Point.Empty, frame.Size);
+        var title = await FindUniqueAsync(frame, client, displayName, ct);
         if (title is null) return false;
-        var quest = await FindUniqueAsync(frame, new Rectangle(45, 720, 420, 260), "퀘스트 만들기", ct);
-        return quest is not null;
+        var materials = await FindUniqueAsync(frame, client, "필요한 재료", ct);
+        var quest = await FindUniqueAsync(frame, client, "퀘스트 만들기", ct);
+        return materials is not null && quest is not null &&
+            title.Value.Center.Y < materials.Value.Center.Y &&
+            materials.Value.Center.Y < quest.Value.Center.Y;
     }
 
     private async Task SetCraftCountAsync(int wanted, CancellationToken ct)
@@ -178,15 +182,25 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private async Task<(int Count, Point Center)?> ReadCraftCountAsync(Bitmap frame, CancellationToken ct)
     {
-        var lines = await _ocr.ReadLinesAsync(frame, new Rectangle(80, 500, 650, 340), 3, ct);
+        var client = new Rectangle(Point.Empty, frame.Size);
+        var materials = await FindUniqueAsync(frame, client, "필요한 재료", ct);
+        var quest = await FindUniqueAsync(frame, client, "퀘스트 만들기", ct);
+        if (materials is null || quest is null || materials.Value.Bounds.Bottom >= quest.Value.Bounds.Top)
+            return null;
+        // Derive the count region from labels in this fresh 800x1000 client frame.
+        // Uploaded partial captures never supply an origin or a saved click point.
+        var countArea = Rectangle.FromLTRB(0, materials.Value.Bounds.Bottom,
+            frame.Width, quest.Value.Bounds.Top);
+        var lines = await _ocr.ReadLinesAsync(frame, countArea, 3, ct);
+        var candidates = new List<(int Count, Point Center)>();
         foreach (var line in lines.OrderBy(x => x.Center.Y))
         {
-            var match = Regex.Match((line.ReadText ?? "").Replace(" ", ""), @"(?<n>\d{1,2})회");
+            var match = Regex.Match((line.ReadText ?? "").Replace(" ", ""), @"^(?<n>\d{1,2})회$");
             if (!match.Success || !int.TryParse(match.Groups["n"].Value, out int count) || count is < 1 or > 10)
                 continue;
-            return (count, line.Center);
+            candidates.Add((count, line.Center));
         }
-        return null;
+        return candidates.Count == 1 ? candidates[0] : null;
     }
 
     public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
