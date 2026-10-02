@@ -55,10 +55,13 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         }
     }
 
+    internal Task ResolveExternalAsync(string itemName, long quantity, CancellationToken ct)
+        => ResolveItemAsync(itemName, quantity, null, 0, ct);
+
     private async Task ResolveItemAsync(
         string itemName,
         long quantity,
-        AlteringPlan sourceRecipe,
+        AlteringPlan? sourceRecipe,
         int depth,
         CancellationToken ct)
     {
@@ -80,6 +83,9 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                     throw new InvalidOperationException($"{itemName} 채집 도구가 없거나 내구도가 부족합니다.");
 
                 long before = await _gathering.ItemCountAsync(itemName, ct);
+                if (sourceRecipe is null)
+                    throw new InvalidOperationException(
+                        $"{itemName}은 직접 채집 재료입니다. 제작에서는 제작 퀘스트 채집 경로를 사용해야 합니다.");
                 var gatherPlan = new GatheringPlan(itemName, checked((int)quantity))
                 {
                     SourceRecipe = sourceRecipe with { AllowPaidButton = false }
