@@ -321,7 +321,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            long current = await _data.ItemCountAsync(deficit.DisplayName, ct);
+            long current = await _data.InventoryOnlyCountAsync(deficit.DisplayName, ct);
             if (current >= deficit.Required)
             {
                 stable++;
@@ -338,7 +338,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             await Task.Delay(1000, ct);
         }
 
-        long final = await _data.ItemCountAsync(deficit.DisplayName, ct);
+        long final = await _data.InventoryOnlyCountAsync(deficit.DisplayName, ct);
         throw new InvalidOperationException(
             $"{deficit.DisplayName} 제작 퀘스트 채집이 필요한 수량에 도달하지 못했습니다: {final}/{deficit.Required}");
     }
