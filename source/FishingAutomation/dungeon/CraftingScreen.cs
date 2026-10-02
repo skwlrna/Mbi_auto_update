@@ -59,7 +59,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             Log?.Invoke(
                 $"[제작] 재료 충분 · 제작하러 가기 · 고정좌표 " +
                 $"({CraftingHubLayout.CraftGoButtonPoint.X},{CraftingHubLayout.CraftGoButtonPoint.Y})");
-            await WaitForDirectCraftDepartureAsync(plan.DisplayName, ct);
+            Log?.Invoke("[제작] 이동 중간 상태 확인 생략 · 제작대 도착 후 제작하기 버튼 대기");
+            await Task.Delay(350, ct);
             return;
         }
 
@@ -308,33 +309,6 @@ internal sealed class CraftingScreen : ICraftingScreen
             $"[제작] 제작 횟수 설정 · OCR 미사용 · 1회 리셋 후 {wanted}회 · " +
             $"-({CraftingHubLayout.CraftCountMinusPoint.X},{CraftingHubLayout.CraftCountMinusPoint.Y}) · " +
             $"+({CraftingHubLayout.CraftCountPlusPoint.X},{CraftingHubLayout.CraftCountPlusPoint.Y})");
-    }
-
-    private async Task WaitForDirectCraftDepartureAsync(
-        string displayName,
-        CancellationToken ct)
-    {
-        DateTime deadline = DateTime.UtcNow.AddSeconds(15);
-        while (DateTime.UtcNow < deadline)
-        {
-            ct.ThrowIfCancellationRequested();
-            var activity = await _activity.ActivityAsync(ct);
-            using var frame = Capture(ct);
-            bool detailOpen = await IsProductDetailAsync(frame, displayName, ct);
-
-            if (activity.IsAutoTraveling || !detailOpen)
-            {
-                Log?.Invoke(activity.IsAutoTraveling
-                    ? "[제작] 제작하러 가기 입력 확인 · 자동이동 시작"
-                    : "[제작] 제작하러 가기 입력 확인 · 상세창 전환");
-                return;
-            }
-
-            await Task.Delay(350, ct);
-        }
-
-        using var failed = Capture(ct);
-        throw Fail(failed, "제작하러 가기 클릭 후 화면 전환/자동이동을 확인하지 못했습니다.");
     }
 
     public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
@@ -642,34 +616,32 @@ internal sealed class CraftingScreen : ICraftingScreen
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            var activity = await _activity.ActivityAsync(ct);
-            if (!activity.IsSafeField)
-                throw new InvalidOperationException("직접 제작 이동 중 안전하지 않은 상태가 확인되어 정지합니다.");
-
-            if (activity.IsAutoTraveling)
-            {
-                await Task.Delay(700, ct);
-                continue;
-            }
 
             using var frame = Capture(ct);
-            if (await IsProductDetailAsync(frame, plan.DisplayName, ct))
+            var craftReady = await FindUniqueAsync(
+                frame,
+                CraftingHubLayout.CraftActionButtonArea,
+                "제작하기",
+                ct);
+
+            if (craftReady is not null &&
+                await IsProductDetailAsync(frame, plan.DisplayName, ct))
             {
-                await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
-                _ui.TapFresh(0x39, ct); // station detail: Space = 제작하기
-                Log?.Invoke($"[제작] 직접 제작대 도착 · {craftCount}회 설정 · Space 제작 시작");
+                _ui.TapFresh(0x39, ct); // Space = 제작하기
+                Log?.Invoke(
+                    $"[제작] 제작대 도착 · 제작하기 확인 · 기존 {craftCount}회 유지 · Space 제작 시작");
                 await WaitForCompletionAsync(plan.DisplayName, ct);
                 _directCraftPendingName = null;
                 _directCraftPendingCount = 0;
                 return;
             }
 
-            await Task.Delay(700, ct);
+            await Task.Delay(500, ct);
         }
 
         using var failed = Capture(ct);
-        throw Fail(failed, "제작하러 가기 후 제작대 상세 화면이 열리지 않았습니다.");
+        throw Fail(failed, "제작대로 이동 후 제작하기 버튼이 열린 제작 상세 화면을 확인하지 못했습니다.");
     }
 
     private async Task<DetectionResult?> FindQuestStageAsync(
