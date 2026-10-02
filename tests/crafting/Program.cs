@@ -14,6 +14,13 @@ try
     Check(CraftingQuestText.IsTitle("◆ 캠프파이어 키트 제작", "캠프파이어 키트") &&
           !CraftingQuestText.IsTitle("숙련 캠프파이어 키트 제작", "캠프파이어 키트"),
         "quest title exact match rejects prefixed recipe names");
+    Check(CraftingQuestText.IsTitleNameOnly("야채볶음", "야채볶음") &&
+          !CraftingQuestText.IsTitleNameOnly("숙련 야채볶음", "야채볶음"),
+        "quest title fallback accepts the exact recipe name when 제작 OCR is split");
+    Check(CraftingQuestText.IsQuestProgress("감자 준비 7/80") &&
+          CraftingQuestText.IsQuestProgress("음식 제작대에서 제작 0/10") &&
+          !CraftingQuestText.IsQuestProgress("모험가 길드 퀘스트"),
+        "quest structure fallback recognizes preparation and station progress rows");
     Check(CraftingQuestText.IsDirectStage("• 바로 제작 진행") &&
           !CraftingQuestText.IsDirectStage("제작 진행"),
         "ready-material quest uses the observed direct crafting stage");
@@ -95,6 +102,9 @@ try
     Check(CraftingHubLayout.CraftActionButtonArea.Contains(
               new System.Drawing.Point(507, 950)),
         "crafting station action button area covers the live 제작하기 button");
+    Check(CraftingHubLayout.CraftDetailSettleDelayMs <= 250 &&
+          CraftingHubLayout.CraftReadyPollDelayMs <= 200,
+        "crafting detail and station-ready polling stay responsive");
     Check(!CraftingHubLayout.CraftCompletionHeaderArea.IsEmpty &&
           !CraftingHubLayout.CraftCompletionConfirmArea.IsEmpty &&
           CraftingHubLayout.CraftCompletionConfirmArea.Bottom <= 1000,
