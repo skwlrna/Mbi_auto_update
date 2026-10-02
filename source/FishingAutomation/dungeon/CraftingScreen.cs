@@ -91,14 +91,60 @@ internal sealed class CraftingScreen : ICraftingScreen
         await Task.Delay(650, ct);
 
         string category = plan.Category == CraftingCategory.Food ? "음식" : "아이템";
-        await ClickExactAsync(
-            category,
-            new Rectangle(25, 120, 750, 735),
-            ct,
-            $"제작 허브에서 {category} 카드를 확인하지 못했습니다.");
+        await ClickCraftingCategoryCardAsync(plan.Category, category, ct);
         await Task.Delay(650, ct);
 
         await SearchProductAsync(plan.DisplayName, category, ct);
+    }
+
+    private async Task ClickCraftingCategoryCardAsync(
+        CraftingCategory category,
+        string label,
+        CancellationToken ct)
+    {
+        Rectangle titleArea = CraftingHubLayout.CategoryTitleArea(category);
+        Rectangle cardArea = CraftingHubLayout.CategoryCardArea(category);
+        if (titleArea.IsEmpty || cardArea.IsEmpty)
+            throw new InvalidOperationException("지원하지 않는 제작 허브 분류입니다.");
+
+        DetectionResult? first = null;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            var found = await _ocr.FindAlteringLabelsAsync(
+                frame,
+                new Rectangle(20, 120, 760, 700),
+                label,
+                ct,
+                acceptedBounds: titleArea,
+                dimText: true);
+
+            if (found.Count != 1)
+                throw Fail(frame,
+                    $"제작 허브에서 {label} 카드 제목을 정확히 1개 확인하지 못했습니다.");
+
+            if (pass == 0)
+            {
+                first = found[0];
+                await Task.Delay(170, ct);
+                continue;
+            }
+
+            if (first is null || !CraftingHubLayout.IsStableTitle(first.Value.Bounds, found[0].Bounds))
+                throw Fail(frame,
+                    $"제작 허브의 {label} 카드 제목 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
+
+            // The 800x1000 hub is fixed, but the click is still authorized by
+            // exact OCR inside the verified card-title band. Never use the broad
+            // hub ROI because the description can contain the same word.
+            RefreshInputFrame(frame, found[0].Bounds, ct);
+            _input.ClickClientPoint(_hwnd, found[0].Center);
+            Log?.Invoke($"[제작] 제작 허브 카드 확인 · {label} · 제목 exact OCR 2프레임");
+            return;
+        }
+
+        using var failed = Capture(ct);
+        throw Fail(failed, $"제작 허브에서 {label} 카드를 확인하지 못했습니다.");
     }
 
     private async Task SearchProductAsync(string displayName, string category, CancellationToken ct)
