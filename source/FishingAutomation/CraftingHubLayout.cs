@@ -17,6 +17,30 @@ internal static class CraftingHubLayout
     internal static Rectangle HubHeaderArea
         => new(20, 22, 190, 82);
 
+    // User-confirmed 800x1000 crafting list/search geometry.
+    // These are navigation coordinates only. OCR is kept as a screen-state
+    // verifier/fallback, not as the primary source of click coordinates.
+    internal static Rectangle ProductListHeaderArea
+        => new(15, 20, 300, 100);
+
+    internal static Rectangle ProductFilterArea
+        => new(35, 75, 220, 120);
+
+    internal static Rectangle ProductSearchDialogArea
+        => new(65, 350, 675, 360);
+
+    internal static Rectangle ProductSearchResultArea
+        => new(35, 390, 730, 535);
+
+    internal static Point ProductSearchIconPoint
+        => new(55, 135);
+
+    internal static Point ProductSearchInputPoint
+        => new(400, 425);
+
+    internal static Point ProductFirstResultPoint
+        => new(400, 460);
+
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
         => category switch
         {
@@ -40,6 +64,11 @@ internal static class CraftingHubLayout
             CraftingCategory.Food => new Point(640, 632),
             _ => Point.Empty
         };
+
+    internal static bool IsSafeSearchGeometry()
+        => ProductFilterArea.Contains(ProductSearchIconPoint) &&
+           ProductSearchDialogArea.Contains(ProductSearchInputPoint) &&
+           ProductSearchResultArea.Contains(ProductFirstResultPoint);
 
     internal static bool IsStableTitle(Rectangle first, Rectangle second)
     {
