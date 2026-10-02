@@ -1,4 +1,4 @@
-name: Check V2.0.2 Inline Production Controls
+name: Check V2.0.3 Inline Production Controls
 
 on:
   push:
@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V2\.0\.2"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V2\.0\.3"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>2\.0\.2</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>2\.0\.3</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
