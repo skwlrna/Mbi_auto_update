@@ -11,6 +11,15 @@ try
         checks++;
         Console.WriteLine("PASS " + label);
     }
+    Check(CraftingQuestText.IsTitle("◆ 캠프파이어 키트 제작", "캠프파이어 키트") &&
+          !CraftingQuestText.IsTitle("숙련 캠프파이어 키트 제작", "캠프파이어 키트"),
+        "quest title exact match rejects prefixed recipe names");
+    Check(CraftingQuestText.IsDirectStage("• 바로 제작 진행") &&
+          !CraftingQuestText.IsDirectStage("제작 진행"),
+        "ready-material quest uses the observed direct crafting stage");
+    Check(CraftingQuestText.IsStationStage("다목적 제작대에서 제작 0/10") &&
+          !CraftingQuestText.IsStationStage("다목적 제작대 사용 중"),
+        "station progress stage cannot match crafting-busy state");
 
     var response = MabinogiMobileCli.Parse("get_craftable_items", new CliProcessOutput(0,
         JsonSerializer.Serialize(new

@@ -207,6 +207,16 @@ internal sealed class CraftingScreen : ICraftingScreen
         CraftingPlan plan,
         CancellationToken ct)
     {
+        await CloseOverlayAsync(ct);
+        using (var field = Capture(ct))
+        {
+            if (await FindQuestStageAsync(field, plan, directOnly: true, ct) is not null &&
+                (await _data.ExactAsync(plan.DisplayName, ct)).Craftable)
+            {
+                Log?.Invoke("[제작] 대상 퀘스트 바로 제작 진행 + CLI 재료 준비 확인");
+                return Array.Empty<CraftingQuestDeficit>();
+            }
+        }
         await OpenQuestPopupAsync(plan, ct);
         using var frame = Capture(ct);
         var roi = new Rectangle(70, 130, 670, 520);
@@ -279,14 +289,8 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         using var frame = Capture(ct);
         var lines = await _ocr.ReadLinesAsync(frame, new Rectangle(500, 140, 300, 600), 3, ct);
-        string wanted = AlteringText.Normalize(plan.DisplayName);
         var quest = lines
-            .Where(x =>
-            {
-                string text = AlteringText.Normalize(x.ReadText ?? "");
-                return text.Contains(wanted, StringComparison.Ordinal) &&
-                       text.Contains("제작", StringComparison.Ordinal);
-            })
+            .Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName))
             .OrderBy(x => x.Center.Y)
             .FirstOrDefault();
 
@@ -381,23 +385,14 @@ internal sealed class CraftingScreen : ICraftingScreen
         await CloseOverlayAsync(ct);
         await Task.Delay(200, ct);
 
-        // The final right-side quest line is facility-specific (음식/약품/다목적...)
-        // but always contains "제작대" and "제작". Select that line generically.
+        // Ready materials may show "바로 제작 진행" instead of a station 0/N line.
+        // Only accept a stage immediately below this exact product's quest title.
         using (var frame = Capture(ct))
         {
-            var lines = await _ocr.ReadLinesAsync(frame, new Rectangle(500, 145, 300, 650), 3, ct);
-            var final = lines
-                .Where(x =>
-                {
-                    string text = (x.ReadText ?? "").Replace(" ", "");
-                    return text.Contains("제작대", StringComparison.Ordinal) &&
-                           text.Contains("제작", StringComparison.Ordinal);
-                })
-                .OrderByDescending(x => x.Center.Y)
-                .FirstOrDefault();
-            if (!final.Found)
+            var final = await FindQuestStageAsync(frame, plan, directOnly: false, ct);
+            if (final is null)
                 throw Fail(frame, "제작 퀘스트의 제작대 복귀 단계를 찾지 못했습니다.");
-            _input.ClickClientPoint(_hwnd, new Point(Math.Clamp(final.Center.X, 535, 760), final.Center.Y));
+            _input.ClickClientPoint(_hwnd, final.Value.Center);
         }
 
         DateTime stationDeadline = DateTime.UtcNow.AddMinutes(3);
@@ -420,6 +415,19 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         using var failed = Capture(ct);
         throw Fail(failed, "제작대로 이동 후 제작 상세 화면이 열리지 않았습니다.");
+    }
+
+    private async Task<DetectionResult?> FindQuestStageAsync(
+        Bitmap frame, CraftingPlan plan, bool directOnly, CancellationToken ct)
+    {
+        var lines = await _ocr.ReadLinesAsync(frame, new Rectangle(500, 140, 300, 650), 3, ct);
+        var titles = lines.Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName)).ToArray();
+        if (titles.Length != 1) return null;
+        var title = titles[0];
+        var stages = lines.Where(x => x.Center.Y > title.Center.Y && x.Center.Y <= title.Bounds.Bottom + 70)
+            .Where(x => CraftingQuestText.IsDirectStage(x.ReadText ?? "") ||
+                (!directOnly && CraftingQuestText.IsStationStage(x.ReadText ?? ""))).ToArray();
+        return stages.Length == 1 ? stages[0] : null;
     }
 
     private async Task WaitForCompletionAsync(string displayName, CancellationToken ct)
