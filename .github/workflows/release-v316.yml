@@ -1,5 +1,5 @@
 name: Release V3.0.16 Production UI Unification
-# Rerun after updating legacy UI regression expectations for shared processing search.
+# Rerun after updating shared processing search and 17px production-tab typography regressions.
 # Unified production UI regressions aligned with the 17px category-tab typography
 
 on:
