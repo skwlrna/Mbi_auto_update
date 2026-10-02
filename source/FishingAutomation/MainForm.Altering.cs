@@ -122,7 +122,7 @@ public sealed partial class MainForm
             var visualAltering = new AlteringScreen(
                 windows[0].Handle, settings,
                 Path.Combine(AppContext.BaseDirectory, "debug", "altering"), _cli);
-            var visualGathering = new GatheringScreen(
+            var visualGathering = new InventoryBulkGatheringScreen(
                 windows[0].Handle, settings,
                 Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, gatheringData);
             var screen = new ZeroWingAlteringScreen(visualAltering, _cli, identity);

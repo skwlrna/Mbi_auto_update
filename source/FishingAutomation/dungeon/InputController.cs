@@ -8,6 +8,7 @@ internal interface IInputController : IDisposable
     void ClickClientPoint(nint hwnd, Point clientPoint);
     void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs);
     void TapScanCode(ushort scanCode);
+    void PasteText(string text);
 }
 
 internal sealed class InterceptionInput : IInputController
@@ -166,6 +167,47 @@ internal sealed class InterceptionInput : IInputController
         {
             TapScanCodeCore(scanCode);
         }
+    }
+
+    public void PasteText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 256 || text.Any(char.IsControl))
+            throw new InvalidOperationException("붙여넣을 검색어가 올바르지 않습니다.");
+
+        lock (_inputGate)
+        {
+            SetClipboardText(text);
+            var ctrlDown = new InterceptionKeyStroke { code = 0x1D, state = 0 };
+            var vDown = new InterceptionKeyStroke { code = 0x2F, state = 0 };
+            var vUp = new InterceptionKeyStroke { code = 0x2F, state = KEY_UP };
+            var ctrlUp = new InterceptionKeyStroke { code = 0x1D, state = KEY_UP };
+
+            int a = interception_send(_context, _keyboardDevice, ref ctrlDown, 1);
+            Thread.Sleep(30);
+            int b = interception_send(_context, _keyboardDevice, ref vDown, 1);
+            Thread.Sleep(30);
+            int d = interception_send(_context, _keyboardDevice, ref vUp, 1);
+            Thread.Sleep(30);
+            int e = interception_send(_context, _keyboardDevice, ref ctrlUp, 1);
+            if (a <= 0 || b <= 0 || d <= 0 || e <= 0)
+                throw new InvalidOperationException("Interception Ctrl+V 입력 전송 실패");
+            Thread.Sleep(80);
+        }
+    }
+
+    private static void SetClipboardText(string text)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try { System.Windows.Forms.Clipboard.SetText(text); }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null)
+            throw new InvalidOperationException("검색어를 클립보드에 준비하지 못했습니다.", failure);
     }
 
     private void TapScanCodeCore(ushort scanCode)
@@ -411,6 +453,12 @@ internal sealed class SendInputFallback : IInputController
     }
 
     public void TapScanCode(ushort scanCode)
+    {
+        throw new InvalidOperationException(
+            "SendInput fallback은 비활성화되어 있습니다.");
+    }
+
+    public void PasteText(string text)
     {
         throw new InvalidOperationException(
             "SendInput fallback은 비활성화되어 있습니다.");

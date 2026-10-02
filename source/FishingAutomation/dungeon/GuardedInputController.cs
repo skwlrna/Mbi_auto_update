@@ -79,6 +79,7 @@ internal sealed class GuardedInputController : IInputController
         lock (Gate) { Verify(hwnd); CheckPoint(start); CheckPoint(end); _inner.DragClientPoint(hwnd, start, end, durationMs); }
     }
     public void TapScanCode(ushort code) { lock (Gate) { Verify(_window); _inner.TapScanCode(code); } }
+    public void PasteText(string text) { lock (Gate) { Verify(_window); _inner.PasteText(text); } }
     private static void CheckPoint(Point p)
     {
         if (p.X < 0 || p.Y < 0 || p.X >= 800 || p.Y >= 1000)

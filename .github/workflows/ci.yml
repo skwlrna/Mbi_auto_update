@@ -86,14 +86,15 @@ jobs:
           if($appLog -notmatch 'WriteBackground' -or $appLog -notmatch 'publishToScreen'){throw 'file-only background logging path missing'}
           if($cli -notmatch 'backgroundOnly = result\.Success' -or $cli -notmatch 'WriteBackground\(line\)'){throw 'successful CLI polling is not hidden from screen'}
           if($cli -notmatch 'result\.Command is not \("status" or "capabilities"\)'){throw 'startup CLI status/capabilities must remain visible'}
-          foreach($command in @('capabilities','get_my_info','get_currencies','get_items','get_activity','get_alterable_items','get_altering_works','get_gatherable_items','get_inventory')){
+          foreach($command in @('capabilities','get_my_info','get_currencies','get_items','get_activity','get_alterable_items','get_altering_works','get_gatherable_items','get_craftable_items','get_inventory')){
             if($cli -notmatch $command){throw "missing CLI read-only query: $command"}
           }
           $g = Get-Content source/FishingAutomation/MainForm.Gathering.cs -Raw
-          if($g -notmatch 'new GatheringScreen\('){throw 'gathering is not wired to free screen navigation'}
+          if($g -notmatch 'new InventoryBulkGatheringScreen\('){throw 'gathering is not wired to zero-wing inventory bulk navigation'}
           if($g -match 'new GatheringCliScreen\('){throw 'gathering still wires paid CLI action screen'}
           $a = Get-Content source/FishingAutomation/MainForm.Altering.cs -Raw
           if($a -notmatch 'new AlteringScreen\('){throw 'altering is not wired to free screen navigation'}
+          if($a -notmatch 'new InventoryBulkGatheringScreen\('){throw 'altering material resolver is not wired to 100-item inventory gathering'}
           if($a -match 'new AlteringCliScreen\('){throw 'altering still wires paid CLI action screen'}
           foreach($file in @($g,$a)){
             if($file -match '"execute_gathering"' -or $file -match '"execute_altering"' -or $file -match '"complete_altering_work"' -or $file -match '"stop_action"'){
@@ -124,7 +125,7 @@ jobs:
           if($wingGuard -notmatch 'actionFailure' -or $wingGuard -notmatch 'verificationFailure'){throw 'post-failure Spirit Wings verification missing'}
           if($wingGuard -notmatch 'VerifyWithLoadingRetryAsync' -or $wingGuard -notmatch 'CurrencySnapshotWithLoadingRetryAsync'){throw 'post-loading wing verification retry missing'}
           if($wingGuard -notmatch 'TimeSpan.FromSeconds\(20\)'){throw 'post-loading wing verification retry window missing'}
-          if($wingGuard -notmatch 'ZeroWingAlteringScreen' -or $wingGuard -notmatch 'ZeroWingGatheringScreen'){throw 'screen wing guards missing'}
+          if($wingGuard -notmatch 'ZeroWingAlteringScreen' -or $wingGuard -notmatch 'ZeroWingGatheringScreen' -or $wingGuard -notmatch 'ZeroWingCraftingScreen'){throw 'screen wing guards missing'}
           $settings = Get-Content source/FishingAutomation/AlteringSettingsDialog.cs -Raw
           if($settings -match 'Checked = true' -and $settings -match '정령의 날개'){throw 'paid Spirit Wings option remains enabled'}
           $production = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
@@ -148,18 +149,20 @@ jobs:
           if($state -match 'class ProductionDashboard'){throw 'separate production overlay must stay removed'}
           $layout = Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw
           if($layout -match 'new ProductionDashboard\(this\)'){throw 'separate production dashboard is still attached'}
-          foreach($text in @('자동 가공','자동 채집','작업 대상','진행 수량')){
+          foreach($text in @('자동 가공','자동 채집','제작','작업 대상','진행 수량')){
             if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
           }
           if($layout -notmatch 'AddButton\("자동 가공",[\s\S]*?SelectMode\(4\)'){throw 'home to automatic altering one-click route missing'}
           if($layout -notmatch 'AddButton\("자동 채집",[\s\S]*?SelectMode\(5\)'){throw 'home to automatic gathering one-click route missing'}
+          if($layout -notmatch 'AddButton\("제작",[\s\S]*?SelectMode\(6\)'){throw 'home to crafting one-click route missing'}
           if($layout -match '자동채집'){throw 'automatic gathering spacing is inconsistent in reference UI'}
           $main = Get-Content source/FishingAutomation/MainForm.cs -Raw
           if($main -notmatch 'DisplayModeName'){throw 'display mode normalization missing'}
-          if($main -notmatch 'mode is "가공" or "채집"'){throw 'production statistics branch missing'}
+          if($main -notmatch 'mode is "가공" or "채집" or "제작"'){throw 'production statistics branch missing'}
           $dashboard = Get-Content source/FishingAutomation/MainForm.Dashboard.cs -Raw
           if($dashboard -notmatch '자동 가공 설정 / 시작'){throw 'altering action caption missing'}
           if($dashboard -notmatch '자동 채집 설정 / 시작'){throw 'gathering action caption missing'}
+          if($dashboard -notmatch '제작 설정 / 시작'){throw 'crafting action caption missing'}
 
       - name: Inventory loot regression tests
         shell: pwsh
@@ -353,6 +356,21 @@ jobs:
           if ($queries -match 'IsSafeField[\s\S]{0,300}!IsInBattlefield') { throw 'Battlefield flag must not be an unsafe-field gate' }
           $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
           if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
+
+      - name: Crafting regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Crafting regressions failed' }
+          $crafting = Get-Content source/FishingAutomation/MainForm.Crafting.cs -Raw
+          $screen = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          if($crafting -notmatch 'CraftingQueries' -and $crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
+          if($screen -notmatch '퀘스트 만들기' -or $screen -notmatch '제작 완료'){throw 'quest-driven crafting screen flow missing'}
+          if($screen -notmatch '결과물 또는 재료 이름을 검색해 보세요'){throw 'crafting search input flow missing'}
+          if($bulk -notmatch '아이템 이름을 검색해 보세요' -or $bulk -notmatch 'minimumGain: 100'){throw 'inventory 100-item bulk gathering flow missing'}
+          if($bulk -notmatch 'InventoryOnlyCountAsync'){throw 'bag quantity must be verified through CLI inventory location'}
+          if($bulk -match 'execute_gathering'){throw 'bulk gathering must never use paid CLI gathering'}
 
       - name: Inline production UI regression tests
         shell: pwsh

@@ -86,7 +86,7 @@ public sealed partial class MainForm
             await Task.Delay(500);
             if (_cancelStart || IsDisposed) return;
 
-            var visual = new GatheringScreen(
+            var visual = new InventoryBulkGatheringScreen(
                 windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, data);
             var screen = new ZeroWingGatheringScreen(visual, _cli, identity);
             var automation = new GatheringAutomation(data, screen);

@@ -10,7 +10,7 @@ public sealed partial class MainForm
 
     private void BuildLayout()
     {
-        _mode.Items.AddRange(new object[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집" });
+        _mode.Items.AddRange(new object[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집", "제작" });
         _mode.SelectedIndex = 0;
         _dungeonDestination.Items.AddRange(new object[] { "현재 위치" });
         _dungeonDestination.SelectedIndex = 0;
@@ -96,7 +96,7 @@ public sealed partial class MainForm
         private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";
         private bool ShouldShowAbyssDungeonPicker =>
             string.Equals(EffectiveMode, "어비스", StringComparison.Ordinal);
-        private bool ShouldShowProductionPage => _owner._productionPageMode is "가공" or "채집";
+        private bool ShouldShowProductionPage => _owner._productionPageMode is "가공" or "채집" or "제작";
 
         public ReferenceDashboard(MainForm owner)
         {
@@ -217,13 +217,14 @@ public sealed partial class MainForm
             AddButton("어비스", new(18, 301, 170, 59), () => SelectMode(2), "abyss", "nav");
             AddButton("자동 가공", new(18, 371, 170, 59), () => SelectMode(4), "game", "nav");
             AddButton("자동 채집", new(18, 441, 170, 59), () => SelectMode(5), "leaf", "nav");
-            AddButton("설정", new(18, 511, 170, 59), () => ShowMenu(
+            AddButton("제작", new(18, 511, 170, 59), () => SelectMode(6), "game", "nav");
+            AddButton("설정", new(18, 581, 170, 59), () => ShowMenu(
                 new[] { "텔레그램", "에러 전송", "인식" }, i =>
                 {
                     if (i == 0) owner.ShowTelegramSettings();
                     else if (i == 1) owner.ShowErrorUploadSettings();
                     else owner.ShowVisualRecognitionTest();
-                }, 195, 511), "list", "nav");
+                }, 195, 581), "list", "nav");
             AddButton("미니 모드", new(18, 991, 170, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
@@ -254,7 +255,8 @@ public sealed partial class MainForm
             _positions.Add((owner._logView, new(220, 634, 1210, 305)));
             owner._alteringPage = new ProductionPage(owner, true);
             owner._gatheringPage = new ProductionPage(owner, false);
-            foreach (var page in new[] { owner._alteringPage, owner._gatheringPage })
+            owner._craftingPage = new CraftingPage(owner);
+            foreach (Control page in new Control[] { owner._alteringPage, owner._gatheringPage, owner._craftingPage })
             {
                 Controls.Add(page);
                 var bounds = new RectangleF(219, 81, 1212, 858);
@@ -271,11 +273,15 @@ public sealed partial class MainForm
             {
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
-                _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : null;
+                _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : null;
                 _owner._mode.SelectedIndex = mode;
                 UpdateAbyssDungeonPickerVisibility();
-                if (_owner._productionPageMode is not null)
-                    _ = (mode == 4 ? _owner._alteringPage : _owner._gatheringPage).LoadCatalogAsync();
+                if (_owner._productionPageMode == "가공")
+                    _ = _owner._alteringPage.LoadCatalogAsync();
+                else if (_owner._productionPageMode == "채집")
+                    _ = _owner._gatheringPage.LoadCatalogAsync();
+                else if (_owner._productionPageMode == "제작")
+                    _ = _owner._craftingPage.LoadCatalogAsync();
                 _owner.UpdateDashboard();
             });
         }
@@ -307,7 +313,7 @@ public sealed partial class MainForm
         private void ShowModeMenu()
         {
             if (_owner.AnyRunning || _owner._activeMode is not null) return;
-            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "자동 가공", "자동 채집" }, SelectMode, 418, 312);
+            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "자동 가공", "자동 채집", "제작" }, SelectMode, 418, 312);
         }
 
         private void ShowDungeonMenu()
@@ -395,9 +401,10 @@ public sealed partial class MainForm
                 bool production = ShouldShowProductionPage;
                 _owner._alteringPage.Visible = production && _owner._productionPageMode == "가공";
                 _owner._gatheringPage.Visible = production && _owner._productionPageMode == "채집";
+                _owner._craftingPage.Visible = production && _owner._productionPageMode == "제작";
                 foreach (var (control, bounds) in _positions)
                 {
-                    if (control is ProductionPage || control == _owner._logView || control == _owner._logToggle || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
+                    if (control is ProductionPage || control is CraftingPage || control == _owner._logView || control == _owner._logToggle || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
                     if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !production;
                 }
                 if (_owner._logExpanded) _owner._logView.BringToFront();

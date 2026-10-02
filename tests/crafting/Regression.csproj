@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>CraftingRegression</AssemblyName>
+    <UseAppHost>false</UseAppHost>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../source/FishingAutomation/CraftingQueries.cs" Link="CraftingQueries.cs" />
+    <Compile Include="../../source/FishingAutomation/CraftingCliData.cs" Link="CraftingCliData.cs" />
+    <Compile Include="../../source/FishingAutomation/CraftingPlan.cs" Link="CraftingPlan.cs" />
+    <Compile Include="../../source/FishingAutomation/InventoryLootTracker.cs" Link="InventoryLootTracker.cs" />
+    <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
+    <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />
+  </ItemGroup>
+</Project>

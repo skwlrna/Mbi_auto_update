@@ -19,9 +19,17 @@ public sealed partial class MainForm
     {
         UpdateDashboard();
         _referenceDashboard?.Invalidate();
-        if (_gatheringPage is null || _alteringPage is null) return;
-        _gatheringPage.UpdateExecution(); _alteringPage.UpdateExecution();
-        if (_productionPageMode is not null && !_productionPolling && DateTime.UtcNow >= _productionNextPoll)
+        if (_gatheringPage is null || _alteringPage is null || _craftingPage is null) return;
+        _gatheringPage.UpdateExecution();
+        _alteringPage.UpdateExecution();
+        _craftingPage.UpdateExecution();
+        if (_productionPageMode == "제작")
+        {
+            _ = RefreshCraftingStateAsync();
+        }
+        else if (_productionPageMode is not null && !_productionPolling && DateTime.UtcNow >= _productionNextPoll)
+        {
             _ = RefreshProductionStateAsync(_productionPageMode == "가공" ? _alteringPage : _gatheringPage);
+        }
     }
 }

@@ -650,7 +650,7 @@ public sealed partial class MainForm
         string displayMode = _activeMode ?? SelectedMode;
         bool abyss = displayMode == "어비스";
         bool dungeon = displayMode == "던전";
-        bool production = displayMode is "가공" or "채집";
+        bool production = displayMode is "가공" or "채집" or "제작";
         string displayModeText = DisplayModeName(displayMode);
         _currentModeValue.Text = displayModeText;
         _currentDungeonValue.Text = abyss ? SelectedAbyssDungeon
@@ -658,6 +658,7 @@ public sealed partial class MainForm
             : displayMode == "페카 심층" ? SelectedPeacaDestination
             : displayMode == "가공" ? _alteringDisplay
             : displayMode == "채집" ? _gatheringDisplay
+            : displayMode == "제작" ? _craftingDisplay
             : "—";
         string currentStepText = string.IsNullOrWhiteSpace(_statusValue.Text) ? "준비" : _statusValue.Text;
         if (abyss && currentStepText.StartsWith("어비스 준비 완료", StringComparison.Ordinal))
@@ -701,6 +702,7 @@ public sealed partial class MainForm
                 ? "■  자동 실행 정지"
                 : displayMode == "가공" ? "▶  자동 가공 설정 / 시작"
                 : displayMode == "채집" ? "▶  자동 채집 설정 / 시작"
+                : displayMode == "제작" ? "▶  제작 설정 / 시작"
                 : "▶  자동 실행 시작";
             _mainActionButton.BackColor = AnyRunning ? Color.FromArgb(130, 41, 57) : Accent;
         }
