@@ -75,6 +75,12 @@ try
     Check(CraftingHubLayout.ProductSearchIconPoint ==
               new System.Drawing.Point(30, 118),
         "V3.0.1 live capture search magnifier center is preserved");
+    Check(CraftingHubLayout.ProductSearchInputPoint ==
+              new System.Drawing.Point(400, 862) &&
+          CraftingHubLayout.ProductSearchDialogArea.Contains(CraftingHubLayout.ProductSearchInputPoint),
+        "uploaded live search popup input center is preserved");
+    Check(CraftingHubLayout.ProductListSettleDelayMs >= 1000,
+        "crafting item/food list settles before the magnifier is clicked");
     Check(CraftingHubLayout.SearchDialogOpenChangeRatio > 0 &&
           CraftingHubLayout.SearchDialogOpenChangeRatio < 0.25 &&
           CraftingHubLayout.SearchResultChangeRatio > 0 &&
