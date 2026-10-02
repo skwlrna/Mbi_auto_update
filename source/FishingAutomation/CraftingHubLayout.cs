@@ -86,6 +86,11 @@ internal static class CraftingHubLayout
     internal static Rectangle ProductionQuestPopupArea
         => new(70, 130, 670, 520);
 
+    // Live V3.0.10 missing-material popup:
+    // rows are centered around y=710/777/843, not in the upper quest ROI.
+    internal static Rectangle ProductionQuestMaterialArea
+        => new(160, 640, 480, 270);
+
     internal const int ProductionQuestListSettleDelayMs = 100;
     internal const int ProductionQuestOpenDelayMs = 300;
 

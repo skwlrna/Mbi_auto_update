@@ -317,7 +317,10 @@ internal sealed class CraftingScreen : ICraftingScreen
         // the small orange title before opening it.
         await OpenQuestPopupAsync(plan, ct);
         using var frame = Capture(ct);
-        var roi = new Rectangle(70, 130, 670, 520);
+        var roi = CraftingHubLayout.ProductionQuestMaterialArea;
+        Log?.Invoke(
+            $"[제작] 퀘스트 재료 OCR 영역 · ({roi.X},{roi.Y},{roi.Width},{roi.Height}) · " +
+            "실제 하단 재료행 기준");
         var lines = (await _ui.Ocr.ReadLinesAsync(frame, roi, 3, ct))
             .OrderBy(x => x.Center.Y)
             .ThenBy(x => x.Center.X)

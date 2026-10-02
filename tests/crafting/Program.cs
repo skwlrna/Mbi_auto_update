@@ -110,6 +110,13 @@ try
           CraftingHubLayout.ProductionQuestPopupArea.Contains(
               new System.Drawing.Point(400, 350)),
         "newest production quest fixed point and popup ROI are preserved");
+    Check(CraftingHubLayout.ProductionQuestMaterialArea.Contains(
+              new System.Drawing.Point(260, 710)) &&
+          CraftingHubLayout.ProductionQuestMaterialArea.Contains(
+              new System.Drawing.Point(560, 843)) &&
+          !CraftingHubLayout.ProductionQuestMaterialArea.Contains(
+              new System.Drawing.Point(400, 350)),
+        "live quest material ROI covers potato/onion/cabbage rows and excludes upper quest list");
     Check(!CraftingHubLayout.CraftCompletionHeaderArea.IsEmpty &&
           !CraftingHubLayout.CraftCompletionConfirmArea.IsEmpty &&
           CraftingHubLayout.CraftCompletionConfirmArea.Bottom <= 1000,
