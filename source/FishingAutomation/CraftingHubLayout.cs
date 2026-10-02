@@ -45,6 +45,35 @@ internal static class CraftingHubLayout
     internal const double SearchResultChangeRatio = 0.06;
     internal const int ProductListSettleDelayMs = 1200;
 
+    // Live 800x1000 crafting detail sheet controls.
+    internal static Rectangle ProductDetailPanelArea
+        => new(145, 465, 510, 530);
+
+    internal static Point CraftCountMinusPoint
+        => new(275, 835);
+
+    internal static Point CraftCountCenterPoint
+        => new(400, 835);
+
+    internal static Point CraftCountPlusPoint
+        => new(525, 835);
+
+    internal static Point CraftQuestButtonPoint
+        => new(307, 950);
+
+    internal static Point CraftGoButtonPoint
+        => new(507, 950);
+
+    internal const int CraftDetailSettleDelayMs = 350;
+
+    internal static bool IsSafeCraftDetailGeometry()
+        => ProductDetailPanelArea.Contains(CraftCountMinusPoint) &&
+           ProductDetailPanelArea.Contains(CraftCountCenterPoint) &&
+           ProductDetailPanelArea.Contains(CraftCountPlusPoint) &&
+           ProductDetailPanelArea.Contains(CraftQuestButtonPoint) &&
+           ProductDetailPanelArea.Contains(CraftGoButtonPoint);
+
+
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
         => category switch
         {

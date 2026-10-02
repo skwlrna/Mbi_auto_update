@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.5"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.6"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.5</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.6</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -398,6 +398,13 @@ jobs:
           if($layout -notmatch 'new\(400, 862\)' -or
              $layout -notmatch 'ProductListSettleDelayMs = 1200'){throw 'live crafting search input coordinate or settle delay missing'}
           if($layout -notmatch 'new\(218, 613\)'){throw 'live crafting first result card center missing'}
+          foreach($point in @('new\(275, 835\)','new\(400, 835\)','new\(525, 835\)','new\(307, 950\)','new\(507, 950\)')){
+            if($layout -notmatch $point){throw "live crafting detail control missing: $point"}
+          }
+          if($craftScreen -match 'ReadCraftCountAsync|ReadStableCraftCountAsync'){throw 'crafting count OCR hard gate returned'}
+          if($craftScreen -notmatch '1회 리셋 후' -or
+             $craftScreen -notmatch '재료 충분 · 제작하러 가기' -or
+             $craftScreen -notmatch '재료 부족 · 퀘스트 만들기'){throw 'fixed crafting detail/direct route missing'}
           if($runtime -notmatch 'MeasureVisualChangeRatio' -or
              $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
