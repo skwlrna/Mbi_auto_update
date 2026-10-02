@@ -121,7 +121,13 @@ internal sealed class CraftingScreen : ICraftingScreen
             pasteText: displayName);
         await Task.Delay(120, ct);
         using (var frame = Capture(ct))
-            _input.TapScanCode(0x39); // Space = 적용하기
+            _input.TapScanCode(0x1C); // Enter: 검색어 입력 확정
+        await Task.Delay(200, ct);
+        await ClickExactAsync(
+            "적용하기",
+            new Rectangle(65, 350, 675, 360),
+            ct,
+            "Enter 입력 후 제작 검색 적용하기 버튼을 확인하지 못했습니다.");
         await Task.Delay(650, ct);
 
         await ClickExactAsync(
