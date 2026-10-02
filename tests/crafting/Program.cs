@@ -117,6 +117,13 @@ try
           !CraftingHubLayout.ProductionQuestMaterialArea.Contains(
               new System.Drawing.Point(400, 350)),
         "live quest material ROI covers potato/onion/cabbage rows and excludes upper quest list");
+    Check(CraftingHubLayout.AcquisitionMethodHeaderArea.Contains(
+              new System.Drawing.Point(175, 560)) &&
+          CraftingHubLayout.AcquisitionMethodRecommendedRowArea.Contains(
+              CraftingHubLayout.AcquisitionMethodRecommendedPoint) &&
+          CraftingHubLayout.AcquisitionMethodRecommendedPoint ==
+              new System.Drawing.Point(400, 650),
+        "live 구하는 방법 header and recommended first-row geometry are preserved");
     Check(!CraftingHubLayout.CraftCompletionHeaderArea.IsEmpty &&
           !CraftingHubLayout.CraftCompletionConfirmArea.IsEmpty &&
           CraftingHubLayout.CraftCompletionConfirmArea.Bottom <= 1000,
