@@ -362,14 +362,13 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 throw Fail(frame, "가방 아이템 탭의 주황색 활성 표시를 확인하지 못했습니다.");
         }
 
-        DetectionResult all;
-        using (var frame = Capture(ct))
-        {
-            all = await FindUniqueAsync(frame, new Rectangle(25, 470, 300, 180), "전체", ct)
-                ?? throw Fail(frame, "가방 아이템 탭의 전체 필터를 확인하지 못했습니다.");
-            var search = new Point(Math.Max(22, all.Bounds.Left - 45), all.Center.Y);
-            _ui.ClickFresh(search, ct);
-        }
+        _ = await _ui.ClickOffsetFromStableExactAsync(
+            "전체",
+            new Rectangle(25, 470, 300, 180),
+            all => new Point(Math.Max(22, all.Bounds.Left - 45), all.Center.Y),
+            ct,
+            "가방 아이템 탭의 전체 필터/검색 아이콘 기준점을 확인하지 못했습니다.",
+            dimText: true);
         await Task.Delay(400, ct);
 
         _stage.Move(ProductionStage.Search, displayName);
