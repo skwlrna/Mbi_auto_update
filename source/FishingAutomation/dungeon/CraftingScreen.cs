@@ -279,25 +279,19 @@ internal sealed class CraftingScreen : ICraftingScreen
         if (!CraftingHubLayout.IsSafeCraftDetailGeometry())
             throw new InvalidOperationException("제작 상세 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
-        using (var frame = Capture(ct))
-        {
-            if (!await IsProductDetailAsync(frame, displayName, ct))
-                throw Fail(frame, $"{displayName} 제작 상세 화면이 아니어서 횟수 입력을 중단합니다.");
-        }
-
+        // The caller has already verified the product detail screen immediately
+        // before this method. Re-running three full-screen OCR passes here caused
+        // a live 17.8s delay before the first + click.
         await Task.Delay(CraftingHubLayout.CraftDetailSettleDelayMs, ct);
+        Log?.Invoke(
+            $"[제작] 제작 횟수 입력 시작 · 상세창 중복 OCR 생략 · 기본 1회 · 목표 {wanted}회");
 
-        // Live crafting detail opens at 1회. Do not spam the minus button.
-        // Only add the required increments from the default 1회 state.
+        // Live crafting detail opens at 1회. Only add the required increments.
         for (int i = 1; i < wanted; i++)
         {
             _ui.ClickFresh(CraftingHubLayout.CraftCountPlusPoint, ct);
-            await Task.Delay(85, ct);
+            await Task.Delay(70, ct);
         }
-
-        using var verify = Capture(ct);
-        if (!await IsProductDetailAsync(verify, displayName, ct))
-            throw Fail(verify, "제작 횟수 설정 중 상세 화면이 변경되어 입력을 정지합니다.");
 
         Log?.Invoke(
             wanted == 1
@@ -317,18 +311,10 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
 
         _stage.Move(ProductionStage.ReadQuest, $"{plan.DisplayName} 부족 재료 확인");
-        await CloseOverlayAsync(ct);
-        using (var field = Capture(ct))
-        {
-            if (await FindQuestStageAsync(field, plan, directOnly: true, ct) is not null)
-                throw Fail(field, "즉시 제작 퀘스트는 일반 제작대 복귀 경로로 실행하지 않습니다. 별도 화면 검증이 필요합니다.");
-            if (await FindQuestStageAsync(field, plan, directOnly: false, ct) is not null &&
-                (await _data.ExactAsync(plan.DisplayName, ct)).Craftable)
-            {
-                Log?.Invoke("[제작] 대상 제작대 단계 + CLI 재료 준비 확인");
-                return Array.Empty<CraftingQuestDeficit>();
-            }
-        }
+        // This method is entered immediately after creating the production quest.
+        // The new quest is pinned at the top of the right quest list in the live
+        // 800x1000 UI, so do not spend multiple OCR passes trying to rediscover
+        // the small orange title before opening it.
         await OpenQuestPopupAsync(plan, ct);
         using var frame = Capture(ct);
         var roi = new Rectangle(70, 130, 670, 520);
@@ -394,42 +380,24 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private async Task OpenQuestPopupAsync(CraftingPlan plan, CancellationToken ct)
     {
-        // Ensure overlays from a previous acquisition are closed before reading the
-        // persistent right-side production quest.
         await CloseOverlayAsync(ct);
-        await Task.Delay(180, ct);
+        await Task.Delay(CraftingHubLayout.ProductionQuestListSettleDelayMs, ct);
 
-        DetectionResult? firstQuest = null;
-        DetectionResult? freshQuest = null;
-        for (int pass = 0; pass < 2; pass++)
-        {
-            using var frame = Capture(ct);
-            var lines = await _ui.Ocr.ReadLinesAsync(
-                frame, new Rectangle(500, 140, 300, 600), 3, ct);
-            var quest = FindQuestTitleCandidate(lines, plan);
-            if (quest is null)
-                throw Fail(frame,
-                    $"{plan.DisplayName} 제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다. " +
-                    "제목/품목명/준비행 구조를 모두 확인하지 못했습니다.");
+        using var before = Capture(ct);
+        _ui.ClickFresh(CraftingHubLayout.ProductionQuestTopPoint, ct);
+        Log?.Invoke(
+            $"[제작] 새 제작 퀘스트 열기 · 오른쪽 최상단 고정좌표 " +
+            $"({CraftingHubLayout.ProductionQuestTopPoint.X},{CraftingHubLayout.ProductionQuestTopPoint.Y}) · " +
+            $"제목 OCR 생략 · {plan.DisplayName}");
 
-            if (pass == 0)
-            {
-                firstQuest = quest.Value;
-                await Task.Delay(140, ct);
-            }
-            else
-            {
-                freshQuest = quest.Value;
-                if (firstQuest is null ||
-                    !ProductionUiRuntime.Stable(firstQuest.Value.Bounds, quest.Value.Bounds))
-                    throw Fail(frame, $"{plan.DisplayName} 제작 퀘스트 위치가 안정적으로 일치하지 않았습니다.");
-            }
-        }
+        await Task.Delay(CraftingHubLayout.ProductionQuestOpenDelayMs, ct);
 
-        _ui.ClickFresh(
-            new Point(Math.Clamp(freshQuest!.Value.Center.X, 535, 760), freshQuest.Value.Center.Y),
-            ct);
-        await Task.Delay(450, ct);
+        using var after = Capture(ct);
+        double ratio = ProductionUiRuntime.MeasureVisualChangeRatio(
+            before,
+            after,
+            CraftingHubLayout.ProductionQuestPopupArea);
+        Log?.Invoke($"[제작] 제작 퀘스트 팝업 전환 · 화면 변화 {ratio:P1} · 후속 재료행 OCR 진행");
     }
 
     public async Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
