@@ -98,9 +98,9 @@ public sealed partial class MainForm
                 Margin = Padding.Empty,
                 BackColor = WindowBg
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 86));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 310));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
@@ -400,7 +400,7 @@ public sealed partial class MainForm
             }
 
             _selected.Text = choice.Item.DisplayName;
-            _detail.Text = $"1회 {choice.Item.ProducedPerCraft}개 · 최대 10회 퀘스트";
+            _detail.Text = $"1회 {choice.Item.ProducedPerCraft}개 · 배치 최대 10회";
             _state.Text = choice.Item.Craftable || choice.Item.MissingIngredients.Count > 0
                 ? "제작 가능/재료 해결 가능"
                 : "조건 확인 필요";

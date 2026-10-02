@@ -3,23 +3,11 @@ using System.Text.RegularExpressions;
 
 namespace DungeonVisionBot;
 
-internal sealed record CraftingQuestDeficit(string DisplayName, long Current, long Required, int RowY);
-
-internal interface ICraftingScreen : IDisposable
-{
-    string InputMode { get; }
-    event Action<string>? Log;
-    Task CreateQuestAsync(CraftingPlan plan, int craftCount, CancellationToken ct);
-    Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(CraftingPlan plan, CancellationToken ct);
-    Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct);
-    Task CloseOverlayAsync(CancellationToken ct);
-    Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct);
-}
-
 internal sealed class CraftingScreen : ICraftingScreen
 {
     private readonly nint _hwnd;
     private readonly CraftingCliData _data;
+    private readonly GatheringCliData _activity;
     private readonly GuardedInputController _input;
     private readonly WindowCapture _capture = new();
     private readonly OcrRecognizer _ocr = new();
@@ -33,6 +21,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         _hwnd = hwnd;
         _data = new CraftingCliData(cli);
+        _activity = new GatheringCliData(cli);
         _debugDir = debugDir;
         _input = new GuardedInputController(
             new InterceptionInput(settings.InterceptionMouseDevice, settings.InterceptionKeyboardDevice));
@@ -220,8 +209,13 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
 
         var deficits = new List<CraftingQuestDeficit>();
+        if (ratios.Count == 0)
+            throw Fail(frame, "제작 퀘스트 재료 수량을 읽지 못했습니다. 재료 준비 완료로 간주하지 않습니다.");
         foreach (var ratio in ratios)
         {
+            // The final station step also has 0/N; it is not a material row.
+            if (ratio.Text.Replace(" ", "").Contains("제작대", StringComparison.Ordinal))
+                continue;
             string inline = Regex.Replace(ratio.Text, @"\d+\s*/\s*\d+.*$", "").Trim();
             string? name = CleanName(inline);
             if (string.IsNullOrWhiteSpace(name))
@@ -233,7 +227,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                     .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
             }
             if (string.IsNullOrWhiteSpace(name))
-                continue;
+                throw Fail(frame, "제작 퀘스트 재료 이름을 확인하지 못했습니다.");
             if (ratio.Current < ratio.Required)
                 deficits.Add(new(name!, ratio.Current, ratio.Required, ratio.Y));
         }
@@ -290,8 +284,9 @@ internal sealed class CraftingScreen : ICraftingScreen
         {
             var exact = await FindUniqueAsync(frame, new Rectangle(80, Math.Max(120, deficit.RowY - 45), 600, 90),
                 deficit.DisplayName, ct);
-            var point = exact?.Center ?? new Point(300, deficit.RowY);
-            _input.ClickClientPoint(_hwnd, point);
+            if (exact is null)
+                throw Fail(frame, $"부족 재료 {deficit.DisplayName}의 정확한 행을 다시 확인하지 못했습니다.");
+            _input.ClickClientPoint(_hwnd, exact.Value.Center);
         }
         await Task.Delay(450, ct);
 
@@ -304,9 +299,9 @@ internal sealed class CraftingScreen : ICraftingScreen
                 new Rectangle(Point.Empty, frame.Size));
             var lines = await _ocr.ReadLinesAsync(frame, roi, 3, ct);
             var candidate = lines
-                .Where(x => Regex.IsMatch(x.ReadText ?? "", "[가-힣]", RegexOptions.CultureInvariant))
-                .Where(x => !(x.ReadText ?? "").Contains("전리품", StringComparison.Ordinal))
-                .OrderBy(x => x.Center.Y)
+                .Where(x => AcquisitionMethodPolicy.IsLifeSkill(x.ReadText))
+                .OrderByDescending(x => AcquisitionMethodPolicy.IsRecommended(x.ReadText))
+                .ThenBy(x => x.Center.Y)
                 .ThenBy(x => x.Center.X)
                 .FirstOrDefault();
             if (!candidate.Found)
@@ -322,7 +317,12 @@ internal sealed class CraftingScreen : ICraftingScreen
         {
             ct.ThrowIfCancellationRequested();
             long current = await _data.InventoryOnlyCountAsync(deficit.DisplayName, ct);
-            if (current >= deficit.Required)
+            var activity = await _activity.ActivityAsync(ct);
+            if (!activity.IsSafeField)
+                throw new InvalidOperationException("제작 재료 채집 중 안전하지 않은 상태가 확인되어 정지합니다.");
+            bool active = activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing ||
+                          activity.MainButtonState == "Stop";
+            if (current >= deficit.Required && !active)
             {
                 stable++;
                 if (stable >= 2)
@@ -405,21 +405,35 @@ internal sealed class CraftingScreen : ICraftingScreen
     private async Task WaitForCompletionAsync(string displayName, CancellationToken ct)
     {
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
+        int stableCompletion = 0;
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
             using var frame = Capture(ct);
+            var busy = await _ocr.ReadLinesAsync(frame, new Rectangle(100, 35, 650, 400), 3, ct);
+            if (busy.Any(x => (x.ReadText ?? "").Replace(" ", "").Contains("제작대사용중", StringComparison.Ordinal)))
+            {
+                stableCompletion = 0;
+                await Task.Delay(700, ct);
+                continue;
+            }
             var complete = await FindUniqueAsync(frame, new Rectangle(150, 35, 520, 260), "제작 완료", ct);
             if (complete is not null)
             {
                 var product = await FindUniqueAsync(frame, new Rectangle(140, 300, 520, 420), displayName, ct);
                 if (product is null)
                     throw Fail(frame, $"제작 완료 화면의 결과물이 {displayName}과 일치하지 않습니다.");
+                if (++stableCompletion < 2)
+                {
+                    await Task.Delay(250, ct);
+                    continue;
+                }
                 Log?.Invoke($"[제작] 제작 완료 화면 확인 · {displayName}");
                 _input.TapScanCode(0x39); // Space = 확인
                 await Task.Delay(500, ct);
                 return;
             }
+            stableCompletion = 0;
             await Task.Delay(700, ct);
         }
 

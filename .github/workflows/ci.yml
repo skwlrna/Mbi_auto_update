@@ -365,10 +365,11 @@ jobs:
           $crafting = Get-Content source/FishingAutomation/MainForm.Crafting.cs -Raw
           $screen = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
           $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $bulkEngine = Get-Content source/FishingAutomation/InventoryBulkGatheringAutomation.cs -Raw
           if($crafting -notmatch 'CraftingQueries' -and $crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
           if($screen -notmatch '퀘스트 만들기' -or $screen -notmatch '제작 완료'){throw 'quest-driven crafting screen flow missing'}
           if($screen -notmatch '결과물 또는 재료 이름을 검색해 보세요'){throw 'crafting search input flow missing'}
-          if($bulk -notmatch '아이템 이름을 검색해 보세요' -or $bulk -notmatch 'minimumGain: 100'){throw 'inventory 100-item bulk gathering flow missing'}
+          if($bulk -notmatch '아이템 이름을 검색해 보세요' -or $bulkEngine -notmatch '_waitNaturalStop\(current, 100, ct\)'){throw 'inventory 100-item bulk gathering flow missing'}
           if($bulk -notmatch 'InventoryOnlyCountAsync'){throw 'bag quantity must be verified through CLI inventory location'}
           if($bulk -match 'execute_gathering'){throw 'bulk gathering must never use paid CLI gathering'}
 

@@ -63,56 +63,23 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     public async Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
-        plan.Validate();
-        long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
-        long bag = await _inventory.InventoryOnlyCountAsync(plan.DisplayName, ct);
-
-        if (bag == 0)
-        {
-            Log?.Invoke($"[대량 채집] {plan.DisplayName} 가방 보유 0개 · 최초 확보 1회 시작");
-            if (plan.SourceRecipe is null)
-                throw new InvalidOperationException(
-                    $"{plan.DisplayName}이 가방에 없어 100개 채집 검색을 시작할 수 없습니다. " +
-                    "생활 스킬/가공 재료 경로로 먼저 1개 이상 확보할 수 있는 시작 제법을 찾지 못했습니다.");
-
-            long beforeSeed = await _data.ItemCountAsync(plan.DisplayName, ct);
-            var seed = plan with { TargetQuantity = 1 };
-            await _fallback.StartAsync(seed, ct);
-            await WaitForNaturalStopAndInventoryAsync(
-                plan.DisplayName, beforeSeed, minimumGain: 1, timeout: TimeSpan.FromMinutes(3), ct);
-
-            bag = await _inventory.InventoryOnlyCountAsync(plan.DisplayName, ct);
-            if (bag <= 0)
-                throw new InvalidOperationException($"{plan.DisplayName} 최초 확보 후에도 가방 수량이 0개입니다.");
-            Log?.Invoke($"[대량 채집] 최초 확보 확인 · {plan.DisplayName} 가방 {bag}개 · 100개 채집으로 전환");
-        }
-
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            long current = await _data.ItemCountAsync(plan.DisplayName, ct);
-            long gained = current - baseline;
-            if (gained >= plan.TargetQuantity)
+        var automation = new InventoryBulkGatheringAutomation(
+            token => _data.ItemCountAsync(plan.DisplayName, token),
+            token => _inventory.InventoryOnlyCountAsync(plan.DisplayName, token),
+            async token =>
             {
-                Log?.Invoke($"[대량 채집] 목표 확보 · {plan.DisplayName} +{gained}/{plan.TargetQuantity}");
-                return;
-            }
-
-            long cycleBefore = current;
-            await StartInventoryHundredQuestAsync(plan.DisplayName, ct);
-            Log?.Invoke($"[대량 채집] {plan.DisplayName} 100개 채집 퀘스트 시작 · 현재 +{gained}/{plan.TargetQuantity}");
-
-            // The inventory acquisition route always creates a 100-target gathering
-            // quest. Never interrupt at the caller's remainder; let the game finish the
-            // current 100 quest naturally, then accept any overshoot.
-            await WaitForNaturalStopAndInventoryAsync(
-                plan.DisplayName, cycleBefore, minimumGain: 100, timeout: TimeSpan.FromMinutes(6), ct);
-
-            long after = await _data.ItemCountAsync(plan.DisplayName, ct);
-            Log?.Invoke($"[대량 채집] 100개 채집 자연 종료 확인 · {plan.DisplayName} {cycleBefore}→{after} · 전체 +{after - baseline}/{plan.TargetQuantity}");
-        }
+                if (plan.SourceRecipe is null)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName} 최초 확보에 필요한 생활 스킬/가공 재료 시작 제법을 찾지 못했습니다.");
+                await _fallback.StartAsync(plan with { TargetQuantity = 1 }, token);
+            },
+            token => StartInventoryHundredQuestAsync(plan.DisplayName, token),
+            (before, minimum, token) => WaitForNaturalStopAndInventoryAsync(
+                plan.DisplayName, before, minimum,
+                minimum == 1 ? TimeSpan.FromMinutes(3) : TimeSpan.FromMinutes(6), token));
+        automation.Log += text => Log?.Invoke(text);
+        await automation.RunAsync(plan, ct);
     }
-
     private async Task StartInventoryHundredQuestAsync(string displayName, CancellationToken ct)
     {
         // I: inventory. The user-confirmed flow requires the orange "아이템" tab
@@ -126,6 +93,23 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await ClickExactAsync("아이템", new Rectangle(210, 810, 390, 175), ct,
             "가방 하단 아이템 탭을 확인하지 못했습니다.");
         await Task.Delay(350, ct);
+
+        using (var frame = Capture(ct))
+        {
+            var tab = await FindUniqueAsync(frame, new Rectangle(210, 810, 390, 175), "아이템", ct)
+                ?? throw Fail(frame, "아이템 탭 활성 상태를 확인하지 못했습니다.");
+            var roi = Rectangle.Intersect(Rectangle.Inflate(tab.Bounds, 12, 12), new Rectangle(Point.Empty, frame.Size));
+            int orange = 0;
+            for (int y = roi.Top; y < roi.Bottom; y += 2)
+            for (int x = roi.Left; x < roi.Right; x += 2)
+            {
+                var color = frame.GetPixel(x, y);
+                if (color.R >= 170 && color.G >= 65 && color.G < color.R - 25 && color.B < color.G - 20)
+                    orange++;
+            }
+            if (orange < 12)
+                throw Fail(frame, "가방 아이템 탭의 주황색 활성 표시를 확인하지 못했습니다.");
+        }
 
         DetectionResult all;
         using (var frame = Capture(ct))
@@ -192,7 +176,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
         var candidate = lines
             .Where(x => x.Center.Y > roi.Top + 10)
-            .Where(x => Regex.IsMatch(x.ReadText ?? "", "[가-힣]", RegexOptions.CultureInvariant))
+            .Where(x => AcquisitionMethodPolicy.IsLifeSkill(x.ReadText))
             .Where(x =>
             {
                 string normalized = (x.ReadText ?? "").Replace(" ", "");
