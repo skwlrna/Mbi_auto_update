@@ -64,10 +64,6 @@ internal static class Program
             Check(facilityTabs.Length == 6, "automatic altering exposes six large facility tabs");
             var alterSearch = All(altering).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
             Check(alterSearch.Visible, "automatic altering keeps facility tabs and adds item search");
-            alterSearch.Text = "강철"; Pump();
-            Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "강철괴",
-                "automatic altering search filters inside the selected facility tab");
-            alterSearch.Text = ""; Pump();
             Check(!aq.Controls.Cast<Control>().Any(x =>
                     x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
                 "target quantity hides numeric up/down arrow buttons");
@@ -76,7 +72,13 @@ internal static class Program
                 "default wood facility tab shows only wood recipes");
             facilityTabs.Single(x => x.Text == "금속").PerformClick(); Pump();
             Check(ai.Items.Count == 2 && ai.Items.Cast<object>().All(x => x.ToString() is "철괴" or "강철괴"),
-                "metal facility tab filters recipe dropdown to metal recipes");
+                "metal facility tab filters recipe list to metal recipes");
+            alterSearch.Text = "강철"; Pump();
+            Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "강철괴",
+                "automatic altering search filters inside the selected facility tab");
+            alterSearch.Text = ""; Pump();
+            Check(ai.Items.Count == 2 && ai.Items.Cast<object>().All(x => x.ToString() is "철괴" or "강철괴"),
+                "clearing altering search restores the selected facility list");
             ai.SelectedIndex = 1;
             Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
                 "missing-material recipe remains startable for recursive resolution");

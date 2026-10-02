@@ -279,9 +279,9 @@ jobs:
           if ($productionPage -notmatch 'AlteringMaterialEstimate\.Describe') { throw 'material estimate preview is not shown on quantity/recipe selection' }
           if ($productionPage -notmatch '_productionProgressSummary') { throw 'production page does not display live progress summary' }
           if ($productionPage -notmatch '_search\.PlaceholderText = "품목을 검색하세요"' -or
-              $productionPage -notmatch 'AddRow\(form, 1, "품목 검색", _search\)') { throw 'gathering-only item search wiring missing' }
-          $alteringSettings = [regex]::Match($productionPage, 'if \(altering\)\s*\{[\s\S]*?\}\s*else').Value
-          if ([string]::IsNullOrWhiteSpace($alteringSettings) -or $alteringSettings -match '품목 검색') { throw 'automatic altering must not render an item search field' }
+              $productionPage -notmatch 'BuildLabeledField\("품목 검색", _search, "production-field"\)') { throw 'shared altering/gathering item search wiring missing' }
+          if ($productionPage -notmatch '_search\.TextChanged \+= \(_, _\) => Filter\(\)' -or
+              $productionPage -notmatch 'if \(!string\.IsNullOrWhiteSpace\(search\)\)') { throw 'shared production search filter missing' }
           if ($productionPage -notmatch 'FacilityUiOrder' -or $productionPage -notmatch 'BuildFacilityTabs' -or $productionPage -notmatch 'RecipeFacility') { throw 'facility-tab recipe filtering UI missing' }
           foreach($facilityTab in @('목재 가공 시설','금속 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
             if($productionPage -notmatch [regex]::Escape($facilityTab)){throw "facility tab missing: $facilityTab"}
