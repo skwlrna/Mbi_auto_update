@@ -67,6 +67,14 @@ internal static class CraftingHubLayout
     internal static Rectangle CraftActionButtonArea
         => new(385, 910, 245, 80);
 
+    // Craft result popup uses a centered modal. Keep these intentionally broad:
+    // completion text can shift slightly with product/result layout.
+    internal static Rectangle CraftCompletionHeaderArea
+        => new(80, 35, 640, 310);
+
+    internal static Rectangle CraftCompletionConfirmArea
+        => new(110, 650, 580, 345);
+
     internal const int CraftDetailSettleDelayMs = 350;
 
     internal static bool IsSafeCraftDetailGeometry()

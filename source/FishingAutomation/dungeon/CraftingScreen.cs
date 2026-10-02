@@ -592,10 +592,11 @@ internal sealed class CraftingScreen : ICraftingScreen
             if (await IsProductDetailAsync(frame, plan.DisplayName, ct))
             {
                 await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
+                long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 제작");
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
-                Log?.Invoke($"[제작] 제작대 도착 · 횟수 {craftCount}회 고정좌표 재설정 · 제작 시작");
-                await WaitForCompletionAsync(plan.DisplayName, ct);
+                Log?.Invoke($"[제작] 제작대 도착 · 횟수 {craftCount}회 고정좌표 재설정 · 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
                 return;
             }
             await Task.Delay(800, ct);
@@ -627,11 +628,12 @@ internal sealed class CraftingScreen : ICraftingScreen
             if (craftReady is not null &&
                 await IsProductDetailAsync(frame, plan.DisplayName, ct))
             {
+                long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
                 Log?.Invoke(
-                    $"[제작] 제작대 도착 · 제작하기 확인 · 기존 {craftCount}회 유지 · Space 제작 시작");
-                await WaitForCompletionAsync(plan.DisplayName, ct);
+                    $"[제작] 제작대 도착 · 제작하기 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
                 _directCraftPendingName = null;
                 _directCraftPendingCount = 0;
                 return;
@@ -657,54 +659,127 @@ internal sealed class CraftingScreen : ICraftingScreen
         return stages.Length == 1 ? stages[0] : null;
     }
 
-    private async Task WaitForCompletionAsync(string displayName, CancellationToken ct)
+    private async Task WaitForCompletionAsync(
+        string displayName,
+        long inventoryBefore,
+        CancellationToken ct)
     {
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
+        DateTime nextInventoryCheck = DateTime.MinValue;
+        long latestInventory = inventoryBefore;
         int stableCompletion = 0;
+        bool sawBusy = false;
+
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
+
+            if (DateTime.UtcNow >= nextInventoryCheck)
+            {
+                try
+                {
+                    latestInventory = await _data.InventoryOnlyCountAsync(displayName, ct);
+                }
+                catch (Exception ex) when (ex is InvalidDataException or IOException)
+                {
+                    Log?.Invoke($"[제작] 완료 재고 확인 보조 실패 · {ex.Message}");
+                }
+                nextInventoryCheck = DateTime.UtcNow.AddSeconds(1);
+            }
+
             using var frame = Capture(ct);
-            var busy = await _ui.Ocr.ReadLinesAsync(frame, new Rectangle(100, 35, 650, 400), 3, ct);
-            if (busy.Any(x => (x.ReadText ?? "").Replace(" ", "").Contains("제작대사용중", StringComparison.Ordinal)))
+            var busyLines = await _ui.Ocr.ReadLinesAsync(
+                frame,
+                new Rectangle(60, 20, 700, 430),
+                3,
+                ct);
+            bool busy = busyLines.Any(x =>
+                (x.ReadText ?? "").Replace(" ", "")
+                    .Contains("제작대사용중", StringComparison.Ordinal));
+            if (busy)
+                sawBusy = true;
+
+            var complete = await FindUniqueAsync(
+                frame,
+                CraftingHubLayout.CraftCompletionHeaderArea,
+                "제작 완료",
+                ct);
+            var confirm = await FindUniqueAsync(
+                frame,
+                CraftingHubLayout.CraftCompletionConfirmArea,
+                "확인",
+                ct);
+
+            bool inventoryIncreased = latestInventory > inventoryBefore;
+            bool completionCue =
+                complete is not null ||
+                confirm is not null ||
+                inventoryIncreased ||
+                (sawBusy && !busy);
+
+            if (!completionCue)
             {
                 stableCompletion = 0;
-                await Task.Delay(700, ct);
+                await Task.Delay(600, ct);
                 continue;
             }
-            var complete = await FindUniqueAsync(frame, new Rectangle(150, 35, 520, 260), "제작 완료", ct);
-            if (complete is not null)
+
+            stableCompletion++;
+            Log?.Invoke(
+                $"[제작] 완료 후보 · 제작완료OCR={(complete is not null ? "확인" : "없음")} · " +
+                $"확인OCR={(confirm is not null ? "확인" : "없음")} · " +
+                $"재고={inventoryBefore}->{latestInventory} · busySeen={sawBusy} · stable={stableCompletion}/2");
+
+            if (stableCompletion < 2)
             {
-                var product = await FindUniqueAsync(frame, new Rectangle(140, 300, 520, 420), displayName, ct);
-                if (product is null)
-                    throw Fail(frame, $"제작 완료 화면의 결과물이 {displayName}과 일치하지 않습니다.");
-                if (++stableCompletion < 2)
+                await Task.Delay(350, ct);
+                continue;
+            }
+
+            // Product-name OCR is deliberately not a hard gate. The V3.0.7 live
+            // result popup was already visible but completion handling kept
+            // waiting. A stable result cue, exact inventory increase, or the
+            // observed busy->not-busy transition is enough to confirm completion.
+            using (var fresh = Capture(ct))
+            {
+                var freshComplete = await FindUniqueAsync(
+                    fresh,
+                    CraftingHubLayout.CraftCompletionHeaderArea,
+                    "제작 완료",
+                    ct);
+                var freshConfirm = await FindUniqueAsync(
+                    fresh,
+                    CraftingHubLayout.CraftCompletionConfirmArea,
+                    "확인",
+                    ct);
+
+                bool freshCue =
+                    freshComplete is not null ||
+                    freshConfirm is not null ||
+                    latestInventory > inventoryBefore ||
+                    (sawBusy && !busy);
+
+                if (!freshCue)
                 {
-                    await Task.Delay(250, ct);
+                    stableCompletion = 0;
+                    await Task.Delay(450, ct);
                     continue;
                 }
-                using (var fresh = Capture(ct))
-                {
-                    var freshComplete = await FindUniqueAsync(
-                        fresh, new Rectangle(150, 35, 520, 260), "제작 완료", ct);
-                    var freshProduct = await FindUniqueAsync(
-                        fresh, new Rectangle(140, 300, 520, 420), displayName, ct);
-                    if (freshComplete is null || freshProduct is null)
-                        throw Fail(fresh, "제작 완료 확인 직전 결과 화면이 변경되었습니다.");
-                }
-
-                Log?.Invoke($"[제작] 제작 완료 화면 확인 · {displayName}");
-                _stage.Move(ProductionStage.Complete, $"{displayName} 제작 완료");
-                _ui.TapFresh(0x39, ct); // Space = 확인
-                await Task.Delay(500, ct);
-                return;
             }
-            stableCompletion = 0;
-            await Task.Delay(700, ct);
+
+            _stage.Move(ProductionStage.Complete, $"{displayName} 제작 완료");
+            _ui.TapFresh(0x39, ct); // Space = 결과창 확인
+            Log?.Invoke(
+                $"[제작] 제작 완료 결과창 확인 · 품목명 OCR 비필수 · Space 확인 · 재고 {inventoryBefore}->{latestInventory}");
+            await Task.Delay(600, ct);
+            return;
         }
 
         using var failed = Capture(ct);
-        throw Fail(failed, $"{displayName} 제작 완료 화면을 제한 시간 안에 확인하지 못했습니다.");
+        throw Fail(
+            failed,
+            $"{displayName} 제작 완료 결과창을 제한 시간 안에 확인하지 못했습니다. " +
+            $"재고={inventoryBefore}->{latestInventory}");
     }
 
     private async Task ClickExactAsync(
