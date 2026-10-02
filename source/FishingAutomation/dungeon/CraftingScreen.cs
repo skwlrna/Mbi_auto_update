@@ -104,47 +104,110 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         Rectangle titleArea = CraftingHubLayout.CategoryTitleArea(category);
         Rectangle cardArea = CraftingHubLayout.CategoryCardArea(category);
-        if (titleArea.IsEmpty || cardArea.IsEmpty)
+        Point fallbackPoint = CraftingHubLayout.CategoryClickPoint(category);
+        if (titleArea.IsEmpty || cardArea.IsEmpty ||
+            !CraftingHubLayout.IsSafeFallbackPoint(category))
             throw new InvalidOperationException("지원하지 않는 제작 허브 분류입니다.");
 
-        DetectionResult? first = null;
+        DetectionResult? firstHeader = null;
+        DetectionResult? firstCategory = null;
+        bool firstTitleSignal = false;
+
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
-            var found = await _ocr.FindAlteringLabelsAsync(
-                frame,
-                new Rectangle(20, 120, 760, 700),
-                label,
-                ct,
-                acceptedBounds: titleArea,
-                dimText: true);
 
-            if (found.Count != 1)
-                throw Fail(frame,
-                    $"제작 허브에서 {label} 카드 제목을 정확히 1개 확인하지 못했습니다.");
+            var header = await _ocr.FindCompactLabelAsync(
+                frame, CraftingHubLayout.HubHeaderArea, "제작", ct);
+            if (!header.Found)
+            {
+                var headerExact = await _ocr.FindAlteringLabelsAsync(
+                    frame,
+                    CraftingHubLayout.HubHeaderArea,
+                    "제작",
+                    ct,
+                    acceptedBounds: CraftingHubLayout.HubHeaderArea,
+                    dimText: true);
+                if (headerExact.Count != 1)
+                    throw Fail(frame,
+                        "제작 허브 상단 제목을 확인하지 못해 카드 클릭을 중단합니다.");
+                header = headerExact[0];
+            }
+
+            var compact = await _ocr.FindCompactLabelAsync(
+                frame, titleArea, label, ct);
+            DetectionResult? categoryFound = compact.Found ? compact : null;
+            bool titleSignal = HasBrightTitleSignal(frame, titleArea);
 
             if (pass == 0)
             {
-                first = found[0];
+                firstHeader = header;
+                firstCategory = categoryFound;
+                firstTitleSignal = titleSignal;
                 await Task.Delay(170, ct);
                 continue;
             }
 
-            if (first is null || !CraftingHubLayout.IsStableTitle(first.Value.Bounds, found[0].Bounds))
+            if (firstHeader is null ||
+                !CraftingHubLayout.IsStableTitle(firstHeader.Value.Bounds, header.Bounds))
                 throw Fail(frame,
-                    $"제작 허브의 {label} 카드 제목 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
+                    "제작 허브 상단 제목 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
 
-            // The 800x1000 hub is fixed, but the click is still authorized by
-            // exact OCR inside the verified card-title band. Never use the broad
-            // hub ROI because the description can contain the same word.
-            RefreshInputFrame(frame, found[0].Bounds, ct);
-            _input.ClickClientPoint(_hwnd, found[0].Center);
-            Log?.Invoke($"[제작] 제작 허브 카드 확인 · {label} · 제목 exact OCR 2프레임");
+            // Preferred path: exact compact OCR on the small title band in both frames.
+            if (firstCategory is not null && categoryFound is not null &&
+                CraftingHubLayout.IsStableTitle(
+                    firstCategory.Value.Bounds, categoryFound.Value.Bounds))
+            {
+                RefreshInputFrame(frame, categoryFound.Value.Bounds, ct);
+                _input.ClickClientPoint(_hwnd, categoryFound.Value.Center);
+                Log?.Invoke(
+                    $"[제작] 제작 허브 카드 확인 · {label} · 제목 compact OCR 2프레임");
+                return;
+            }
+
+            // Live V2.0.4 evidence: Windows OCR can miss the clearly visible
+            // 아이템 title even though the fixed 800x1000 hub is correct. For this
+            // navigation-only click, a stable 제작 header plus visible bright title
+            // signal authorizes the user-confirmed card center. No crafting or paid
+            // action happens on this click.
+            if (!firstTitleSignal || !titleSignal)
+                throw Fail(frame,
+                    $"제작 허브의 {label} 카드 제목 OCR이 실패했고 제목 시각 신호도 확인하지 못했습니다.");
+
+            var guardArea = Rectangle.Intersect(
+                Rectangle.Inflate(titleArea, 12, 12),
+                new Rectangle(Point.Empty, frame.Size));
+            RefreshInputFrame(frame, guardArea, ct);
+            _input.ClickClientPoint(_hwnd, fallbackPoint);
+            Log?.Invoke(
+                $"[제작] 제작 허브 카드 확인 · {label} · OCR 미검출 → 800x1000 검증 좌표 fallback ({fallbackPoint.X},{fallbackPoint.Y})");
             return;
         }
 
         using var failed = Capture(ct);
         throw Fail(failed, $"제작 허브에서 {label} 카드를 확인하지 못했습니다.");
+    }
+
+    private static bool HasBrightTitleSignal(Bitmap frame, Rectangle area)
+    {
+        area = Rectangle.Intersect(area, new Rectangle(Point.Empty, frame.Size));
+        if (area.Width < 20 || area.Height < 20)
+            return false;
+
+        int brightNeutral = 0;
+        int sampled = 0;
+        for (int y = area.Top; y < area.Bottom; y += 2)
+        for (int x = area.Left; x < area.Right; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            int max = Math.Max(p.R, Math.Max(p.G, p.B));
+            int min = Math.Min(p.R, Math.Min(p.G, p.B));
+            if (p.R >= 175 && p.G >= 175 && p.B >= 175 && max - min <= 55)
+                brightNeutral++;
+        }
+
+        return sampled > 0 && brightNeutral >= 24;
     }
 
     private async Task SearchProductAsync(string displayName, string category, CancellationToken ct)

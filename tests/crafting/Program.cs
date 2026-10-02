@@ -34,6 +34,15 @@ try
     Check(itemTitle.Contains(new System.Drawing.Point(400, 633)) &&
           foodTitle.Contains(new System.Drawing.Point(640, 633)),
         "uploaded 800x1000 crafting hub item/food titles are covered");
+    Check(CraftingHubLayout.CategoryClickPoint(CraftingCategory.Item) ==
+              new System.Drawing.Point(400, 632) &&
+          CraftingHubLayout.CategoryClickPoint(CraftingCategory.Food) ==
+              new System.Drawing.Point(640, 632) &&
+          CraftingHubLayout.IsSafeFallbackPoint(CraftingCategory.Item) &&
+          CraftingHubLayout.IsSafeFallbackPoint(CraftingCategory.Food),
+        "live V2.0.4 crafting hub uses safe verified item/food fallback centers");
+    Check(CraftingHubLayout.HubHeaderArea.Contains(new System.Drawing.Point(75, 62)),
+        "crafting hub top-left 제작 header is covered for fallback authorization");
     Check(CraftingHubLayout.IsStableTitle(
               new System.Drawing.Rectangle(370, 620, 60, 28),
               new System.Drawing.Rectangle(374, 622, 62, 28)) &&

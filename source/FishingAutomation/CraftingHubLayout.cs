@@ -7,9 +7,16 @@ internal static class CraftingHubLayout
     // User-confirmed 800x1000 crafting hub:
     // row 1: 무기 / 방어구 / 장신구
     // row 2: 도구 / 아이템 / 음식
-    // Only the large title band is accepted for OCR authorization so the
-    // descriptive sentence below (for example "아이템을 만든다") cannot create
-    // a second false match.
+    //
+    // Category OCR is helpful but not reliable enough to be the only gate: the
+    // V2.0.4 live failure showed the correct hub with a clearly visible 아이템
+    // title that Windows OCR still failed to return. Navigation clicks are
+    // therefore authorized by a stable 제작 hub header first, then use exact
+    // category OCR when available and a verified fixed card-center fallback when
+    // it is not.
+    internal static Rectangle HubHeaderArea
+        => new(20, 22, 190, 82);
+
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
         => category switch
         {
@@ -26,16 +33,34 @@ internal static class CraftingHubLayout
             _ => Rectangle.Empty
         };
 
+    internal static Point CategoryClickPoint(CraftingCategory category)
+        => category switch
+        {
+            CraftingCategory.Item => new Point(400, 632),
+            CraftingCategory.Food => new Point(640, 632),
+            _ => Point.Empty
+        };
+
     internal static bool IsStableTitle(Rectangle first, Rectangle second)
     {
         if (first.Width <= 0 || first.Height <= 0 || second.Width <= 0 || second.Height <= 0)
             return false;
 
-        var a = new Point(first.Left + first.Width / 2, first.Top + first.Height / 2);
-        var b = new Point(second.Left + second.Width / 2, second.Top + second.Height / 2);
+        var a = Center(first);
+        var b = Center(second);
         return Math.Abs(a.X - b.X) <= 14 &&
                Math.Abs(a.Y - b.Y) <= 14 &&
                Math.Abs(first.Width - second.Width) <= 18 &&
                Math.Abs(first.Height - second.Height) <= 14;
     }
+
+    internal static bool IsSafeFallbackPoint(CraftingCategory category)
+    {
+        var card = CategoryCardArea(category);
+        var point = CategoryClickPoint(category);
+        return !card.IsEmpty && !point.IsEmpty && card.Contains(point);
+    }
+
+    private static Point Center(Rectangle rect)
+        => new(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
 }
