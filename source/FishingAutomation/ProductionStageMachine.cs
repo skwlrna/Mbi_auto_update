@@ -60,7 +60,7 @@ internal sealed class ProductionStageMachine
             ProductionStage.Idle =>
                 to is ProductionStage.OpenHub or ProductionStage.AcquireMaterial,
             ProductionStage.OpenHub =>
-                to is ProductionStage.SelectCategory or ProductionStage.Detail,
+                to is ProductionStage.SelectCategory or ProductionStage.Search or ProductionStage.Detail,
             ProductionStage.SelectCategory =>
                 to is ProductionStage.Search or ProductionStage.Detail,
             ProductionStage.Search =>
@@ -89,7 +89,7 @@ internal sealed class ProductionStageMachine
                     ProductionStage.AcquireMaterial or ProductionStage.ResolveIntermediate or
                     ProductionStage.Travel or ProductionStage.Process or ProductionStage.Complete,
             ProductionStage.Complete =>
-                to is ProductionStage.OpenHub or ProductionStage.Idle,
+                to is ProductionStage.VerifyInventory or ProductionStage.OpenHub or ProductionStage.Idle,
             _ => false
         };
     }
