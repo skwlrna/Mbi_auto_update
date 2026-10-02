@@ -147,9 +147,20 @@ public sealed partial class MainForm
                             RefreshProductionDashboard();
                         });
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException ex)
                     {
-                        Ui(() => _log.Write("[제작] 정지되었습니다."));
+                        Ui(() =>
+                        {
+                            if (token.IsCancellationRequested)
+                                _log.Write("[제작] 정지되었습니다. · 정지 요청 수신");
+                            else
+                            {
+                                _runError = ex.Message;
+                                _logExpanded = true;
+                                ApplyLogVisibility();
+                                _log.Write("[제작] 안전 정지: " + ex.Message);
+                            }
+                        });
                     }
                     catch (Exception ex)
                     {
