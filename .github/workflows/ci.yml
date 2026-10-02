@@ -411,6 +411,12 @@ jobs:
              $craftScreen -notmatch '제작대 도착 · 제작하기 확인 · 기존' -or
              $craftScreen -notmatch 'TapFresh\(0x39, ct\)'){throw 'direct crafting must wait for 제작하기 and press Space'}
           if($craftScreen -match '직접 제작대 도착 · .*회 설정'){throw 'direct crafting must not reset count again after station arrival'}
+          if($craftScreen -match '제작 완료 화면의 결과물이' -or
+             $craftScreen -match 'freshProduct'){throw 'craft completion must not hard-gate on product-name OCR'}
+          if($craftScreen -notmatch 'InventoryOnlyCountAsync\(displayName' -or
+             $craftScreen -notmatch 'CraftCompletionConfirmArea' -or
+             $craftScreen -notmatch '품목명 OCR 비필수' -or
+             $craftScreen -notmatch 'Space = 결과창 확인'){throw 'craft completion inventory/confirm fallback missing'}
           if($runtime -notmatch 'MeasureVisualChangeRatio' -or
              $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
