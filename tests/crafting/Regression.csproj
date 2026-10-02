@@ -8,6 +8,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../source/FishingAutomation/CraftingQuestText.cs" Link="CraftingQuestText.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryBulkGatheringAutomation.cs" Link="InventoryBulkGatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingAutomation.cs" Link="CraftingAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingScreenContract.cs" Link="CraftingScreenContract.cs" />
