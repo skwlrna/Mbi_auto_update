@@ -4,31 +4,24 @@ namespace DungeonVisionBot;
 
 internal sealed class GatheringScreen : IGatheringScreen
 {
-    private readonly nint _hwnd;
     private readonly AppSettings _settings;
     private readonly string _debugDir;
     private readonly MabinogiMobileCli _cli;
     private readonly IGatheringData _data;
-    private readonly GuardedInputController _input;
-    private readonly WindowCapture _capture = new();
     private readonly GatheringVision _vision = new();
-    internal string InputMode => _input.ModeName;
+    private readonly ProductionUiRuntime _ui;
+    private readonly ProductionStageMachine _stage = new("채집-보조");
+    internal string InputMode => _ui.InputMode;
     internal event Action<string>? Log;
 
     internal GatheringScreen(nint hwnd, AppSettings settings, string debugDir, MabinogiMobileCli cli, IGatheringData data)
     {
-        _hwnd=hwnd; _settings=settings; _debugDir=debugDir; _cli=cli; _data=data;
-        _input=new GuardedInputController(new InterceptionInput(settings.InterceptionMouseDevice,settings.InterceptionKeyboardDevice));
+        _settings=settings; _debugDir=debugDir; _cli=cli; _data=data;
+        _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "gathering");
+        _stage.Changed += (stage, detail) =>
+            Log?.Invoke($"[자동채집][상태] {stage} · {detail}");
     }
-    private Bitmap Capture(CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested(); _input.SetCancellation(ct);
-        if(!WindowTools.IsRequiredGameWindow(_hwnd)) throw new InvalidOperationException("게임 창이 변경되어 채집 입력을 정지합니다.");
-        NativeMethods.SetForegroundWindow(_hwnd);
-        var frame=_capture.CaptureClient(_hwnd);
-        try { _input.ObserveFrame(_hwnd,frame.Size); return frame; }
-        catch { frame.Dispose(); throw; }
-    }
+    private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
     private async Task<bool> AtMaterialAsync(GatheringPlan plan,CancellationToken ct)
     {
         using var frame=Capture(ct);
@@ -37,6 +30,7 @@ internal sealed class GatheringScreen : IGatheringScreen
     public async Task StartAsync(GatheringPlan plan,CancellationToken ct)
     {
         plan.Validate();
+        _stage.Move(ProductionStage.OpenHub, $"{plan.DisplayName} 획득 경로 준비");
         if(!await AtMaterialAsync(plan,ct) && plan.SourceRecipe is AlteringPlan source)
         {
             var recipes=AlteringQueries.ParseRecipes(await _cli.GetAlterableItemsAsync(ct));
@@ -44,7 +38,8 @@ internal sealed class GatheringScreen : IGatheringScreen
             if(selected.Length<source.RecipeOrdinal) throw new InvalidOperationException("시작 가공 품목을 목록에서 확인하지 못했습니다.");
             source=source with { ProducedPerWork=selected[source.RecipeOrdinal-1].ProducedPerWork,RecipeCount=selected.Length,
                 VerifiedOcrAlias=AlteringText.UniqueOcrAlias(source.DisplayName,recipes.Select(x=>x.DisplayName)),AllowPaidButton=false };
-            using(var navigator=new AlteringScreen(_hwnd,_settings,_debugDir)) await navigator.OpenRecipeAsync(source,ct);
+            _stage.Move(ProductionStage.Search, $"{source.DisplayName}의 {plan.DisplayName} 재료");
+            using(var navigator=new AlteringScreen(_ui.WindowHandle,_settings,_debugDir)) await navigator.OpenRecipeAsync(source,ct);
             await ClickIngredientAsync(plan,ct);
         }
         if(!await AtMaterialAsync(plan,ct))
@@ -52,11 +47,13 @@ internal sealed class GatheringScreen : IGatheringScreen
             using var frame=Capture(ct);
             Fail(frame,"선택한 채집 재료의 상세 화면을 확인하지 못했습니다. 재료 상세/구하는 방법을 열거나 시작 가공 품목을 설정하세요.");
         }
+        _stage.Move(ProductionStage.Detail, plan.DisplayName);
         using(var frame=Capture(ct))
         {
             if(await _vision.FirstPlaceAsync(frame,ct) is null) await ClickMethodAsync(plan,ct);
         }
         long beforeCount=await _data.ItemCountAsync(plan.DisplayName,ct);
+        _stage.Move(ProductionStage.Travel, $"{plan.DisplayName} 첫 획득처 이동");
         await ClickFirstPlaceAsync(plan,ct);
 
         long lastCount=beforeCount;
@@ -81,6 +78,7 @@ internal sealed class GatheringScreen : IGatheringScreen
             if(gained>=plan.TargetQuantity)
             {
                 Log?.Invoke($"[자동채집] 목표 수량 확보 확인 · {plan.DisplayName} +{gained} · activity 상태와 무관하게 성공 처리");
+                _stage.Move(ProductionStage.VerifyInventory, $"{plan.DisplayName} +{gained}");
                 return;
             }
 
@@ -128,7 +126,7 @@ internal sealed class GatheringScreen : IGatheringScreen
             }
 
             Log?.Invoke($"[자동채집] 필요한 재료 확인 · {plan.DisplayName} · 어두운 재료명 OCR 2프레임 확인");
-            _input.ClickClientPoint(_hwnd,label.Value.Center);
+            _ui.ClickFresh(label.Value.Center, ct);
         }
         await Task.Delay(350,ct);
     }
@@ -141,7 +139,7 @@ internal sealed class GatheringScreen : IGatheringScreen
             if(link is null || await _vision.FindMaterialAsync(frame,plan.DisplayName,ct) is null)
                 Fail(frame,"선택한 재료의 구하는 방법 버튼을 확인하지 못했습니다.");
             if(pass==0){await Task.Delay(180,ct);continue;}
-            _input.ClickClientPoint(_hwnd,link!.Value.Center);
+            _ui.ClickFresh(link!.Value.Center, ct);
         }
         await Task.Delay(350,ct);
     }
@@ -176,9 +174,9 @@ internal sealed class GatheringScreen : IGatheringScreen
 
             // Always click the second, freshest frame. The recommendation badge,
             // place-name OCR string and displayed distance do not affect selection.
-            _input.ClickClientPoint(_hwnd,new(
+            _ui.ClickFresh(new(
                 first.Value.Bounds.Left+first.Value.Bounds.Width/2,
-                first.Value.Bounds.Top+first.Value.Bounds.Height/2));
+                first.Value.Bounds.Top+first.Value.Bounds.Height/2), ct);
         }
     }
     public async Task StopAsync(CancellationToken ct)
@@ -191,15 +189,11 @@ internal sealed class GatheringScreen : IGatheringScreen
             if(state.MainButtonState!="Stop" || !GatheringVision.HasStopButton(frame))
                 Fail(frame,"채집/이동 정지 버튼을 확인하지 못했습니다. 게임에서 직접 정지하세요.");
             if(pass==0){await Task.Delay(150,ct);continue;}
-            _input.TapScanCode(0x39); // Space, as shown on the supplied stop control.
+            _ui.TapFresh(0x39, ct); // Space, as shown on the supplied stop control.
         }
     }
     private void Fail(Bitmap frame,string message)
-    {
-        Directory.CreateDirectory(_debugDir);
-        string path=Path.Combine(_debugDir,"gathering-last-failure.png");
-        frame.Save(path,System.Drawing.Imaging.ImageFormat.Png);
-        throw new InvalidOperationException(message+" 진단: "+path);
-    }
-    public void Dispose()=>_input.Dispose();
+        => throw _ui.Failure(frame, message);
+
+    public void Dispose()=>_ui.Dispose();
 }
