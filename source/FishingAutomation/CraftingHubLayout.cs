@@ -24,7 +24,7 @@ internal static class CraftingHubLayout
         => new(15, 20, 300, 100);
 
     internal static Rectangle ProductFilterArea
-        => new(35, 75, 220, 120);
+        => new(10, 75, 245, 120);
 
     internal static Rectangle ProductSearchDialogArea
         => new(65, 350, 675, 360);
@@ -33,7 +33,7 @@ internal static class CraftingHubLayout
         => new(35, 390, 730, 535);
 
     internal static Point ProductSearchIconPoint
-        => new(55, 135);
+        => new(30, 118);
 
     internal static Point ProductSearchInputPoint
         => new(400, 425);

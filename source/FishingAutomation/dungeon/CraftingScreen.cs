@@ -149,12 +149,10 @@ internal sealed class CraftingScreen : ICraftingScreen
         if (!CraftingHubLayout.IsSafeSearchGeometry())
             throw new InvalidOperationException("제작 검색 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
-        _ = await _ui.RequireStableExactAsync(
-            category,
-            CraftingHubLayout.ProductListHeaderArea,
-            ct,
-            $"{category} 제작 목록 화면을 확인하지 못했습니다.",
-            dimText: true);
+        // The item/food card click already came from a verified 800x1000 crafting hub.
+        // Do not re-gate the fixed product list by OCR here: live V3.0.1 evidence
+        // showed the correct 아이템 list while Windows OCR missed the header.
+        Log?.Invoke($"[제작] {category} 제작 목록 · 고정 UI 경로 진입 · 헤더 OCR 생략");
 
         const string placeholder = "결과물 또는 재료 이름을 검색해 보세요";
 
@@ -235,12 +233,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         _ui.TapFresh(0x01, ct); // Escape: detail/search overlay -> list
         await Task.Delay(350, ct);
 
-        _ = await _ui.RequireStableExactAsync(
-            category,
-            CraftingHubLayout.ProductListHeaderArea,
-            ct,
-            $"{category} 제작 목록 복귀를 확인하지 못했습니다.",
-            dimText: true);
+        Log?.Invoke($"[제작] {category} 제작 목록 복귀 · 헤더 OCR 생략 · 검색 아이콘 fallback 진행");
 
         _ = await _ui.ClickOffsetFromStableExactAsync(
             "전체",

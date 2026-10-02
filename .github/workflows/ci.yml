@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.1"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.2"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.1</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.2</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -389,6 +389,9 @@ jobs:
           if($search -notmatch 'TapFresh\(0x1C, ct\)' -or
              $search -notmatch 'input field -> paste -> Enter -> Apply -> exact result'){throw 'shared production search must require Enter before Apply'}
           if($craftScreen -notmatch 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'crafting must use shared Enter-confirmed search'}
+          if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
+             $craftScreen -match '제작 목록 복귀를 확인하지 못했습니다'){throw 'crafting fixed list navigation must not be hard-gated by header OCR'}
+          if($craftScreen -notmatch '헤더 OCR 생략'){throw 'crafting fixed list OCR-skip trace missing'}
           if($bulkScreen -notmatch 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'inventory fallback must use shared Enter-confirmed search'}
 
           if($stages -notmatch 'enum ProductionStage' -or
