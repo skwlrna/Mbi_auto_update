@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.8"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.9"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.8</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.9</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -417,6 +417,12 @@ jobs:
              $craftScreen -notmatch 'CraftCompletionConfirmArea' -or
              $craftScreen -notmatch '품목명 OCR 비필수' -or
              $craftScreen -notmatch 'Space = 결과창 확인'){throw 'craft completion inventory/confirm fallback missing'}
+          $questText = Get-Content source/FishingAutomation/CraftingQuestText.cs -Raw
+          if($questText -notmatch 'IsTitleNameOnly' -or
+             $questText -notmatch 'IsQuestProgress'){throw 'crafting quest split-title/structure helpers missing'}
+          if($craftScreen -notmatch 'FindQuestTitleCandidate' -or
+             $craftScreen -notmatch '퀘스트 제목 보조 인식' -or
+             $craftScreen -notmatch '준비행\+제작대행 확인'){throw 'crafting right-side quest fallback missing'}
           if($runtime -notmatch 'MeasureVisualChangeRatio' -or
              $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
