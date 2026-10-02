@@ -1,3 +1,5 @@
+using DungeonVisionBot;
+
 namespace FishingAutomation;
 
 internal static class SpiritWingSafety
@@ -203,6 +205,72 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen
 
     private async Task<decimal> CurrentWingsAsync(CancellationToken ct)
         => SpiritWingSafety.Read(await CliAutomationGuards.CurrencySnapshotWithLoadingRetryAsync(_cli, ct).ConfigureAwait(false));
+
+    public void Dispose() => _inner.Dispose();
+}
+
+
+internal sealed class ZeroWingCraftingScreen : ICraftingScreen
+{
+    private readonly ICraftingScreen _inner;
+    private readonly MabinogiMobileCli _cli;
+    private readonly CliIdentityGuard _identity;
+    internal event Action<string>? Log;
+    public string InputMode => _inner.InputMode;
+
+    internal ZeroWingCraftingScreen(ICraftingScreen inner, MabinogiMobileCli cli, CliIdentityGuard identity)
+    {
+        _inner = inner;
+        _cli = cli;
+        _identity = identity;
+        _inner.Log += text => Log?.Invoke(text);
+    }
+
+    public Task CreateQuestAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
+        => GuardAsync("[제작] 퀘스트 생성", () => _inner.CreateQuestAsync(plan, craftCount, ct), ct);
+
+    public Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(CraftingPlan plan, CancellationToken ct)
+        => _inner.ReadQuestDeficitsAsync(plan, ct);
+
+    public Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
+        => GuardAsync("[제작] 퀘스트 재료 채집", () => _inner.GatherQuestDeficitAsync(deficit, ct), ct);
+
+    public Task CloseOverlayAsync(CancellationToken ct)
+        => _inner.CloseOverlayAsync(ct);
+
+    public Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
+        => GuardAsync("[제작] 제작대 복귀 및 제작", () => _inner.ReturnToStationAndCraftAsync(plan, craftCount, ct), ct);
+
+    private async Task GuardAsync(string action, Func<Task> run, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        await _identity.VerifyAsync(ct).ConfigureAwait(false);
+        var before = await CliAutomationGuards.CurrencySnapshotAsync(_cli, ct).ConfigureAwait(false);
+        decimal wingsBefore = SpiritWingSafety.Read(before);
+
+        Exception? actionFailure = null;
+        try { await run().ConfigureAwait(false); }
+        catch (Exception ex) { actionFailure = ex; }
+
+        Exception? verificationFailure = null;
+        try
+        {
+            using var verifyCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await _identity.VerifyWithLoadingRetryAsync(verifyCts.Token).ConfigureAwait(false);
+            var after = await CliAutomationGuards.CurrencySnapshotWithLoadingRetryAsync(_cli, verifyCts.Token).ConfigureAwait(false);
+            decimal wingsAfter = SpiritWingSafety.Read(after);
+            SpiritWingSafety.EnsureNotSpent(wingsBefore, wingsAfter, action);
+            Log?.Invoke($"{action} · 정령의 날개 변화 없음 ({wingsAfter})");
+        }
+        catch (Exception ex) { verificationFailure = ex; }
+
+        if (verificationFailure is not null)
+        {
+            if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
+            throw verificationFailure;
+        }
+        if (actionFailure is not null) throw actionFailure;
+    }
 
     public void Dispose() => _inner.Dispose();
 }
