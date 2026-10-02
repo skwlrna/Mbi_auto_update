@@ -69,7 +69,7 @@ public sealed partial class MainForm
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData, gatheringData, alteringScreen, gatheringScreen);
             var automation = new CraftingAutomation(
-                craftingData, gatheringData, craftingScreen, resolver);
+                craftingData, gatheringData, craftingScreen, resolver, altering: rawAlteringData);
 
             rawAltering.Log += text => Ui(() => _log.Write(text));
             rawGathering.Log += text => Ui(() => _log.Write(text));
