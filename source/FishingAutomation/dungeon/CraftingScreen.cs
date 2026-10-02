@@ -71,13 +71,20 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private async Task OpenProductAsync(CraftingPlan plan, CancellationToken ct)
     {
-        // If a matching detail sheet is already open, reuse it.
+        // If a matching detail sheet is already open, reuse it. The detail OCR
+        // can take long enough for animated field pixels/players/chat to change.
+        // Never compare the entire field frame after that OCR: K is a harmless
+        // navigation shortcut and only needs a fresh 800x1000/window guard.
         using (var current = Capture(ct))
         {
             if (await IsProductDetailAsync(current, plan.DisplayName, ct))
                 return;
-            RefreshInputFrame(current, new Rectangle(Point.Empty, current.Size), ct);
+        }
+
+        using (var fresh = Capture(ct))
+        {
             _input.TapScanCode(0x25); // K: 가공/제작 허브
+            Log?.Invoke("[제작] 제작 허브 열기 · K 입력 · fresh frame");
         }
         await Task.Delay(750, ct);
 
