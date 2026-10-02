@@ -389,6 +389,9 @@ jobs:
           if($search -notmatch 'TapFresh\(0x1C, ct\)' -or
              $search -notmatch 'input field -> paste -> Enter -> Apply -> exact result'){throw 'shared production search must require Enter before Apply'}
           if($craftScreen -notmatch 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'crafting must use shared Enter-confirmed search'}
+          if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
+             $craftScreen -match '제작 목록 복귀를 확인하지 못했습니다'){throw 'crafting fixed list navigation must not be hard-gated by header OCR'}
+          if($craftScreen -notmatch '헤더 OCR 생략'){throw 'crafting fixed list OCR-skip trace missing'}
           if($bulkScreen -notmatch 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'inventory fallback must use shared Enter-confirmed search'}
 
           if($stages -notmatch 'enum ProductionStage' -or
