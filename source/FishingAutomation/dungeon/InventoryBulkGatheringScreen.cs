@@ -154,17 +154,23 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
         using (var frame = Capture(ct))
         {
-            if (await FindUniqueAsync(frame, new Rectangle(90, 120, 620, 330), displayName, ct) is null)
-                throw Fail(frame, $"선택한 가방 상세 제목이 {displayName}과 일치하지 않습니다.");
+            var detailTitle = await FindUniqueAsync(frame, new Rectangle(70, 90, 660, 390), displayName, ct)
+                ?? throw Fail(frame, $"선택한 가방 상세 제목이 {displayName}과 일치하지 않습니다.");
 
-            // The detail sheet shows the bag stack count at the upper-right. This is a
-            // second guard against partial-name search collisions.
+            // The detail sheet shows the bag stack count on the same upper row as the
+            // item title/icon. Derive the numeric ROI from the confirmed title instead
+            // of relying on an uploaded screenshot's pixel size.
             string countText = bagCount.ToString();
-            var count = await _ocr.FindCompactLabelAsync(frame, new Rectangle(405, 170, 150, 150), countText, ct);
+            int countLeft = Math.Clamp(detailTitle.Bounds.Right + 80, 20, Math.Max(20, frame.Width - 180));
+            int countTop = Math.Clamp(detailTitle.Bounds.Top - 35, 20, Math.Max(20, frame.Height - 150));
+            var countRoi = Rectangle.Intersect(
+                new Rectangle(countLeft, countTop, frame.Width - countLeft - 20, 150),
+                new Rectangle(Point.Empty, frame.Size));
+            var count = await _ocr.FindCompactLabelAsync(frame, countRoi, countText, ct);
             if (!count.Found)
                 throw Fail(frame, $"가방 화면 수량과 CLI 수량({bagCount})을 함께 확인하지 못했습니다.");
 
-            var method = await FindUniqueAsync(frame, new Rectangle(90, 300, 530, 210), "구하는 방법", ct)
+            var method = await FindUniqueAsync(frame, new Rectangle(70, 250, 600, 300), "구하는 방법", ct)
                 ?? throw Fail(frame, "가방 상세의 구하는 방법을 확인하지 못했습니다.");
             _input.ClickClientPoint(_hwnd, method.Center);
         }
