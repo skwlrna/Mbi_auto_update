@@ -85,6 +85,12 @@ internal sealed class ProductionUiRuntime : IDisposable
         _input.ClickClientPoint(_hwnd, point);
     }
 
+    internal void DragFresh(Point start, Point end, int durationMs, CancellationToken ct)
+    {
+        using var frame = Capture(ct);
+        _input.DragClientPoint(_hwnd, start, end, durationMs);
+    }
+
     internal async Task<DetectionResult?> FindUniqueAsync(
         Bitmap frame,
         Rectangle roi,
