@@ -75,8 +75,19 @@ internal static class CraftingHubLayout
     internal static Rectangle CraftCompletionConfirmArea
         => new(110, 650, 580, 345);
 
-    internal const int CraftDetailSettleDelayMs = 250;
+    internal const int CraftDetailSettleDelayMs = 100;
     internal const int CraftReadyPollDelayMs = 150;
+
+    // Live 800x1000 right-side quest list: newly created production quest is
+    // pinned as the first entry directly below the 퀘스트 header.
+    internal static Point ProductionQuestTopPoint
+        => new(742, 310);
+
+    internal static Rectangle ProductionQuestPopupArea
+        => new(70, 130, 670, 520);
+
+    internal const int ProductionQuestListSettleDelayMs = 100;
+    internal const int ProductionQuestOpenDelayMs = 300;
 
     internal static bool IsSafeCraftDetailGeometry()
         => ProductDetailPanelArea.Contains(CraftCountMinusPoint) &&
@@ -84,7 +95,9 @@ internal static class CraftingHubLayout
            ProductDetailPanelArea.Contains(CraftCountPlusPoint) &&
            ProductDetailPanelArea.Contains(CraftQuestButtonPoint) &&
            ProductDetailPanelArea.Contains(CraftGoButtonPoint) &&
-           CraftActionButtonArea.Contains(CraftGoButtonPoint);
+           CraftActionButtonArea.Contains(CraftGoButtonPoint) &&
+           ProductionQuestTopPoint.X is >= 500 and < 800 &&
+           ProductionQuestTopPoint.Y is >= 140 and < 740;
 
 
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
