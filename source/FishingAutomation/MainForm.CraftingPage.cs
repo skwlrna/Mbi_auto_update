@@ -75,8 +75,9 @@ public sealed partial class MainForm
         private CraftableItem[] _choices = Array.Empty<CraftableItem>();
         private bool _loading;
         private bool _loaded;
+        private float _layoutScale = 1;
 
-        internal readonly ComboBox Items = new();
+        internal readonly ComboBox Items = new CraftingCombo();
         internal readonly NumericUpDown Quantity = new ArrowlessNumericUpDown();
         internal readonly Label Owned = new();
         internal CraftingCategory Category { get; private set; } = CraftingCategory.Food;
@@ -181,18 +182,15 @@ public sealed partial class MainForm
             AddRow(form, 2, "품목 검색", _search);
 
             Items.DropDownStyle = ComboBoxStyle.DropDownList;
-            Items.FlatStyle = FlatStyle.Flat;
-            Items.BackColor = CardBg2;
-            Items.ForeColor = TitleText;
+            StyleField(Items);
+            StyleCombo(Items);
             Items.AccessibleName = "제작 품목";
             AddRow(form, 3, "제작 품목", Items);
 
             Quantity.Minimum = 1;
             Quantity.Maximum = 1_000_000;
             Quantity.Value = 100;
-            Quantity.BorderStyle = BorderStyle.None;
-            Quantity.BackColor = CardBg2;
-            Quantity.ForeColor = TitleText;
+            StyleField(Quantity);
             Quantity.AccessibleName = "제작 목표 수량";
             AddRow(form, 4, "목표 수량", Quantity);
 
@@ -335,6 +333,7 @@ public sealed partial class MainForm
                 lastScale = scale;
                 lastDpi = DeviceDpi;
                 fitting = true;
+                _layoutScale = scale;
                 root.SuspendLayout();
                 foreach (var metric in metrics)
                 {
@@ -357,6 +356,9 @@ public sealed partial class MainForm
                 foreach (var row in rows) row.Style.Height = row.Size * scale;
                 foreach (var column in columns) column.Style.Width = column.Size * scale;
                 _reload.Width = Math.Max(70, (int)(110 * scale));
+                foreach (var field in Descendants(root)
+                    .Where(control => control.Tag is string tag && tag == "crafting-field"))
+                    LayoutField(field);
                 root.ResumeLayout(true);
                 fitting = false;
             }
@@ -494,6 +496,51 @@ public sealed partial class MainForm
                     TextFormatFlags.HorizontalCenter |
                     TextFormatFlags.VerticalCenter |
                     TextFormatFlags.EndEllipsis);
+                if (Focused && ShowFocusCues)
+                    ControlPaint.DrawFocusRectangle(
+                        e.Graphics,
+                        Rectangle.Inflate(ClientRectangle, -4, -4));
+            }
+        }
+
+        private sealed class CraftingCombo : ComboBox
+        {
+            internal CraftingCombo()
+            {
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer,
+                    true);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                e.Graphics.Clear(CardBg2);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    Text,
+                    Font,
+                    new Rectangle(4, 0, Math.Max(1, Width - 32), Height),
+                    Enabled ? TitleText : Muted,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    "⌄",
+                    Font,
+                    new Rectangle(Width - 28, 0, 24, Height),
+                    Muted,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                if (Focused)
+                    ControlPaint.DrawFocusRectangle(
+                        e.Graphics,
+                        Rectangle.Inflate(ClientRectangle, -2, -2));
+            }
+
+            protected override void OnSelectedIndexChanged(EventArgs e)
+            {
+                base.OnSelectedIndexChanged(e);
+                Invalidate();
             }
         }
 
@@ -552,29 +599,87 @@ public sealed partial class MainForm
             return WindowBg;
         }
 
-        private static void StyleField(TextBox box)
+        private static void StyleField(Control control)
         {
-            box.Dock = DockStyle.Fill;
-            box.BorderStyle = BorderStyle.FixedSingle;
-            box.BackColor = CardBg2;
-            box.ForeColor = TitleText;
-            box.Font = new Font("맑은 고딕", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
-            box.Margin = new Padding(3, 6, 3, 6);
+            control.Dock = DockStyle.Fill;
+            control.BackColor = CardBg2;
+            control.ForeColor = TitleText;
+            control.Margin = new Padding(3, 5, 3, 5);
+            control.Font = new Font("맑은 고딕", 13f);
+            if (control is TextBox text) text.BorderStyle = BorderStyle.None;
+            if (control is NumericUpDown number) number.BorderStyle = BorderStyle.None;
         }
 
-        private static void AddRow(TableLayoutPanel form, int row, string caption, Control control)
+        private static void StyleCombo(ComboBox combo)
+        {
+            combo.FlatStyle = FlatStyle.Flat;
+            combo.DrawMode = DrawMode.OwnerDrawFixed;
+            combo.DrawItem += (_, e) =>
+            {
+                using var background = new SolidBrush(
+                    (e.State & DrawItemState.Selected) != 0 ? AccentSoft : CardBg2);
+                e.Graphics.FillRectangle(background, e.Bounds);
+                string text = e.Index >= 0
+                    ? combo.Items[e.Index]?.ToString() ?? ""
+                    : "품목을 선택하세요";
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    text,
+                    combo.Font,
+                    Rectangle.Inflate(e.Bounds, -5, 0),
+                    combo.Enabled ? TitleText : Muted,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
+        }
+
+        private void AddRow(TableLayoutPanel form, int row, string caption, Control control)
         {
             form.Controls.Add(new Label
             {
                 Text = caption,
                 Dock = DockStyle.Fill,
                 ForeColor = Muted,
-                Font = new Font("맑은 고딕", 15f, FontStyle.Regular, GraphicsUnit.Pixel),
                 TextAlign = ContentAlignment.MiddleLeft
             }, 0, row);
-            control.Dock = DockStyle.Fill;
-            control.Margin = new Padding(3, 6, 3, 6);
-            form.Controls.Add(control, 1, row);
+
+            var field = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                Margin = new Padding(3, 5, 3, 5),
+                Tag = "crafting-field"
+            };
+            var surface = new CraftingCard
+            {
+                Dock = DockStyle.None,
+                BackColor = CardBg2,
+                Margin = Padding.Empty
+            };
+            control.Dock = DockStyle.None;
+            surface.Controls.Add(control);
+            field.Controls.Add(surface);
+            field.Resize += (_, _) => LayoutField(field);
+            form.Controls.Add(field, 1, row);
+            LayoutField(field);
+        }
+
+        private void LayoutField(Control field)
+        {
+            var surface = field.Controls[0];
+            var control = surface.Controls[0];
+            int height = Math.Min(
+                field.Height,
+                Math.Max(control.Font.Height + 8, (int)(44 * _layoutScale)));
+            int inset = Math.Max(4, (int)(11 * _layoutScale));
+            surface.Bounds = new Rectangle(
+                0,
+                Math.Max(0, (field.Height - height) / 2),
+                field.Width,
+                height);
+            control.Width = Math.Max(1, surface.Width - inset * 2);
+            control.Location = new Point(
+                inset,
+                Math.Max(0, (surface.Height - control.Height) / 2));
         }
 
         private void SetCategory(CraftingCategory category)

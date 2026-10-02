@@ -23,6 +23,8 @@ internal static class Program
             var gathering = controls.Single(x => x.Name == "GatheringPage");
             var altering = controls.Single(x => x.Name == "AlteringPage");
             var crafting = controls.Single(x => x.Name == "CraftingPage");
+            static Control? craftingQuantityParentProbe(Control page)
+                => All(page).OfType<NumericUpDown>().SingleOrDefault()?.Parent;
             void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ComboBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
@@ -110,6 +112,16 @@ internal static class Program
                 "crafting opens as an independent production page");
             var craftItems = All(crafting).OfType<ComboBox>().Single();
             var craftSearch = All(crafting).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
+            Check(craftItems.DrawMode == DrawMode.OwnerDrawFixed &&
+                  craftItems.FlatStyle == ai.FlatStyle &&
+                  craftItems.BackColor == ai.BackColor &&
+                  craftItems.Parent?.BackColor == ai.Parent?.BackColor,
+                "crafting item window matches automatic-altering owner-draw color surface");
+            Check(craftSearch.BorderStyle == BorderStyle.None &&
+                  craftItems.Parent is Panel &&
+                  craftSearch.Parent is Panel &&
+                  craftingQuantityParentProbe(crafting) is Panel,
+                "crafting search/item/quantity fields use altering-style card surfaces");
             var craftItemTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템");
             var craftFoodTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 음식");
             Check(craftItemTab.Left < craftFoodTab.Left &&
