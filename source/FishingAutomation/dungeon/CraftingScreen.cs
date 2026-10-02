@@ -58,14 +58,14 @@ internal sealed class CraftingScreen : ICraftingScreen
         using (var current = Capture(ct))
         {
             if (await IsProductDetailAsync(current, plan.DisplayName, ct))
+            {
+                _stage.Move(ProductionStage.Detail, $"{plan.DisplayName} 상세 화면 재사용");
                 return;
+            }
         }
 
-        using (var fresh = Capture(ct))
-        {
-            _ui.TapFresh(0x25, ct); // K: 가공/제작 허브
-            Log?.Invoke("[제작] 제작 허브 열기 · K 입력 · fresh frame");
-        }
+        _ui.TapFresh(0x25, ct); // K: 가공/제작 허브
+        Log?.Invoke("[제작] 제작 허브 열기 · K 입력 · fresh frame");
         await Task.Delay(750, ct);
 
         // The user-confirmed layout keeps 제작 immediately to the right of 가공.
@@ -200,15 +200,20 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private async Task SearchProductAsync(string displayName, string category, CancellationToken ct)
     {
-        using (var frame = Capture(ct))
-        {
-            if (await FindUniqueAsync(frame, new Rectangle(15, 20, 300, 100), category, ct) is null)
-                throw Fail(frame, $"{category} 제작 목록 화면을 확인하지 못했습니다.");
+        _ = await _ui.RequireStableExactAsync(
+            category,
+            new Rectangle(15, 20, 300, 100),
+            ct,
+            $"{category} 제작 목록 화면을 확인하지 못했습니다.",
+            dimText: true);
 
-            var all = await FindUniqueAsync(frame, new Rectangle(35, 75, 220, 120), "전체", ct)
-                ?? throw Fail(frame, "제작 목록의 전체 필터를 확인하지 못했습니다.");
-            _ui.ClickFresh(new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y), ct);
-        }
+        var all = await _ui.RequireStableExactAsync(
+            "전체",
+            new Rectangle(35, 75, 220, 120),
+            ct,
+            "제작 목록의 전체 필터를 확인하지 못했습니다.",
+            dimText: true);
+        _ui.ClickFresh(new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y), ct);
         await Task.Delay(400, ct);
 
         await ClickExactAsync(
@@ -218,8 +223,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             "제작 검색 입력칸을 확인하지 못했습니다.",
             pasteText: displayName);
         await Task.Delay(120, ct);
-        using (var frame = Capture(ct))
-            _ui.TapFresh(0x1C, ct); // Enter: 검색어 입력 확정
+        _ui.TapFresh(0x1C, ct); // Enter: 검색어 입력 확정
         await Task.Delay(200, ct);
         await ClickExactAsync(
             "적용하기",
@@ -256,26 +260,46 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         for (int attempt = 0; attempt < 20; attempt++)
         {
-            using var frame = Capture(ct);
-            var count = await ReadCraftCountAsync(frame, ct);
-            if (count is null)
-                throw Fail(frame, "제작 횟수 표시를 확인하지 못했습니다.");
-            if (count.Value.Count == wanted)
+            var count = await ReadStableCraftCountAsync(ct);
+            if (count.Count == wanted)
             {
                 Log?.Invoke($"[제작] 배치 횟수 확인 · {wanted}회");
                 return;
             }
 
-            int direction = wanted > count.Value.Count ? 1 : -1;
+            int direction = wanted > count.Count ? 1 : -1;
             var click = new Point(
-                Math.Clamp(count.Value.Center.X + direction * 125, 20, 779),
-                Math.Clamp(count.Value.Center.Y, 20, 979));
+                Math.Clamp(count.Center.X + direction * 125, 20, 779),
+                Math.Clamp(count.Center.Y, 20, 979));
             _ui.ClickFresh(click, ct);
             await Task.Delay(180, ct);
         }
 
         using var failed = Capture(ct);
         throw Fail(failed, $"제작 횟수를 {wanted}회로 맞추지 못했습니다.");
+    }
+
+    private async Task<(int Count, Point Center)> ReadStableCraftCountAsync(CancellationToken ct)
+    {
+        (int Count, Point Center)? first;
+        using (var frame = Capture(ct))
+        {
+            first = await ReadCraftCountAsync(frame, ct);
+            if (first is null)
+                throw Fail(frame, "제작 횟수 표시를 확인하지 못했습니다.");
+        }
+
+        await Task.Delay(120, ct);
+
+        using var fresh = Capture(ct);
+        var second = await ReadCraftCountAsync(fresh, ct);
+        if (second is null ||
+            second.Value.Count != first.Value.Count ||
+            Math.Abs(second.Value.Center.X - first.Value.Center.X) > 18 ||
+            Math.Abs(second.Value.Center.Y - first.Value.Center.Y) > 18)
+            throw Fail(fresh, "제작 횟수 표시가 두 프레임에서 안정적으로 일치하지 않았습니다.");
+
+        return second.Value;
     }
 
     private async Task<(int Count, Point Center)?> ReadCraftCountAsync(Bitmap frame, CancellationToken ct)
@@ -388,37 +412,66 @@ internal sealed class CraftingScreen : ICraftingScreen
         await CloseOverlayAsync(ct);
         await Task.Delay(180, ct);
 
-        using var frame = Capture(ct);
-        var lines = await _ui.Ocr.ReadLinesAsync(frame, new Rectangle(500, 140, 300, 600), 3, ct);
-        var quest = lines
-            .Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName))
-            .OrderBy(x => x.Center.Y)
-            .FirstOrDefault();
+        DetectionResult? firstQuest = null;
+        DetectionResult? freshQuest = null;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            var lines = await _ui.Ocr.ReadLinesAsync(
+                frame, new Rectangle(500, 140, 300, 600), 3, ct);
+            var quest = lines
+                .Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName))
+                .OrderBy(x => x.Center.Y)
+                .FirstOrDefault();
 
-        if (!quest.Found)
-            throw Fail(frame, $"{plan.DisplayName} 제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다.");
+            if (!quest.Found)
+                throw Fail(frame, $"{plan.DisplayName} 제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다.");
 
-        _ui.ClickFresh(new Point(Math.Clamp(quest.Center.X, 535, 760), quest.Center.Y), ct);
+            if (pass == 0)
+            {
+                firstQuest = quest;
+                await Task.Delay(140, ct);
+            }
+            else
+            {
+                freshQuest = quest;
+                if (firstQuest is null ||
+                    !ProductionUiRuntime.Stable(firstQuest.Value.Bounds, quest.Bounds))
+                    throw Fail(frame, $"{plan.DisplayName} 제작 퀘스트 위치가 안정적으로 일치하지 않았습니다.");
+            }
+        }
+
+        _ui.ClickFresh(
+            new Point(Math.Clamp(freshQuest!.Value.Center.X, 535, 760), freshQuest.Value.Center.Y),
+            ct);
         await Task.Delay(450, ct);
     }
 
     public async Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
     {
         _stage.Move(ProductionStage.AcquireMaterial, deficit.DisplayName);
-        // The deficit popup is already open. Select the exact row by its paired OCR Y.
-        using (var frame = Capture(ct))
-        {
-            var exact = await FindUniqueAsync(frame, new Rectangle(80, Math.Max(120, deficit.RowY - 45), 600, 90),
-                deficit.DisplayName, ct);
-            if (exact is null)
-                throw Fail(frame, $"부족 재료 {deficit.DisplayName}의 정확한 행을 다시 확인하지 못했습니다.");
-            _ui.ClickFresh(exact.Value.Center, ct);
-        }
+        // Re-read the exact material on two fresh popup frames. RowY is only a
+        // narrowing hint; it is never a saved click coordinate.
+        var deficitRoi = new Rectangle(
+            70,
+            Math.Max(120, deficit.RowY - 70),
+            650,
+            140);
+        _ = await _ui.ClickStableExactAsync(
+            deficit.DisplayName,
+            deficitRoi,
+            ct,
+            $"부족 재료 {deficit.DisplayName}의 정확한 행을 다시 확인하지 못했습니다.",
+            dimText: true);
         await Task.Delay(450, ct);
 
-        using (var frame = Capture(ct))
+        DetectionResult? firstCandidate = null;
+        DetectionResult? freshCandidate = null;
+        for (int pass = 0; pass < 2; pass++)
         {
-            var header = await FindUniqueAsync(frame, new Rectangle(45, 230, 560, 180), "구하는 방법", ct)
+            using var frame = Capture(ct);
+            var header = await FindUniqueAsync(
+                frame, new Rectangle(45, 230, 560, 180), "구하는 방법", ct)
                 ?? throw Fail(frame, $"{deficit.DisplayName} 구하는 방법을 확인하지 못했습니다.");
             var roi = Rectangle.Intersect(
                 new Rectangle(55, header.Bounds.Bottom + 20, 690, 520),
@@ -433,10 +486,23 @@ internal sealed class CraftingScreen : ICraftingScreen
             if (!candidate.Found)
                 throw Fail(frame, $"{deficit.DisplayName} 추천 획득처를 확인하지 못했습니다.");
 
-            Log?.Invoke($"[제작] {deficit.DisplayName} 추천 획득처 선택 · 필요 {deficit.Required}개");
-            _stage.Move(ProductionStage.Travel, $"{deficit.DisplayName} 추천 획득처 이동/채집");
-            _ui.ClickFresh(new Point(390, candidate.Center.Y), ct);
+            if (pass == 0)
+            {
+                firstCandidate = candidate;
+                await Task.Delay(140, ct);
+            }
+            else
+            {
+                freshCandidate = candidate;
+                if (firstCandidate is null ||
+                    !ProductionUiRuntime.Stable(firstCandidate.Value.Bounds, candidate.Bounds))
+                    throw Fail(frame, $"{deficit.DisplayName} 추천 획득처 행이 두 프레임에서 일치하지 않았습니다.");
+            }
         }
+
+        Log?.Invoke($"[제작] {deficit.DisplayName} 추천 획득처 선택 · 필요 {deficit.Required}개");
+        _stage.Move(ProductionStage.Travel, $"{deficit.DisplayName} 추천 획득처 이동/채집");
+        _ui.ClickFresh(new Point(390, freshCandidate!.Value.Center.Y), ct);
 
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
         int stable = 0;
@@ -492,15 +558,32 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         // The station stage may omit 0/N. Instant crafting is a separate flow.
         // Only accept a stage immediately below this exact product's quest title.
-        using (var frame = Capture(ct))
+        DetectionResult? firstStation = null;
+        DetectionResult? freshStation = null;
+        for (int pass = 0; pass < 2; pass++)
         {
+            using var frame = Capture(ct);
             if (await FindQuestStageAsync(frame, plan, directOnly: true, ct) is not null)
                 throw Fail(frame, "즉시 제작 단계는 일반 제작대 복귀로 처리하지 않습니다.");
+
             var final = await FindQuestStageAsync(frame, plan, directOnly: false, ct);
             if (final is null)
                 throw Fail(frame, "제작 퀘스트의 제작대 복귀 단계를 찾지 못했습니다.");
-            _ui.ClickFresh(final.Value.Center, ct);
+
+            if (pass == 0)
+            {
+                firstStation = final;
+                await Task.Delay(140, ct);
+            }
+            else
+            {
+                freshStation = final;
+                if (firstStation is null ||
+                    !ProductionUiRuntime.Stable(firstStation.Value.Bounds, final.Value.Bounds))
+                    throw Fail(frame, "제작대 복귀 단계 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
+            }
         }
+        _ui.ClickFresh(freshStation!.Value.Center, ct);
 
         DateTime stationDeadline = DateTime.UtcNow.AddMinutes(3);
         while (DateTime.UtcNow < stationDeadline)
@@ -564,6 +647,16 @@ internal sealed class CraftingScreen : ICraftingScreen
                     await Task.Delay(250, ct);
                     continue;
                 }
+                using (var fresh = Capture(ct))
+                {
+                    var freshComplete = await FindUniqueAsync(
+                        fresh, new Rectangle(150, 35, 520, 260), "제작 완료", ct);
+                    var freshProduct = await FindUniqueAsync(
+                        fresh, new Rectangle(140, 300, 520, 420), displayName, ct);
+                    if (freshComplete is null || freshProduct is null)
+                        throw Fail(fresh, "제작 완료 확인 직전 결과 화면이 변경되었습니다.");
+                }
+
                 Log?.Invoke($"[제작] 제작 완료 화면 확인 · {displayName}");
                 _stage.Move(ProductionStage.Complete, $"{displayName} 제작 완료");
                 _ui.TapFresh(0x39, ct); // Space = 확인
