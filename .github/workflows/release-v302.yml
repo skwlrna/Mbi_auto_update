@@ -1,0 +1,249 @@
+name: Release V3.0.2 Crafting List Gate Fix
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/release-v302.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v302-crafting-list
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify release source and versions
+        shell: pwsh
+        run: |
+          git fetch origin main
+          if ($LASTEXITCODE -ne 0) { throw 'main fetch failed' }
+          if ((git rev-parse HEAD) -ne (git rev-parse origin/main)) { throw 'release must use latest main' }
+          $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.2"') { throw 'version constant mismatch' }
+          $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          foreach ($field in @('Version','AssemblyVersion','FileVersion')) {
+            $expected = if ($field -eq 'Version') { '3.0.2' } else { '3.0.2.0' }
+            if ($p -notmatch [regex]::Escape("<$field>$expected</$field>")) { throw "$field mismatch" }
+          }
+      - name: Restore and test
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet restore changes/tests/stability/Regression.csproj
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+      - name: Updater rollback regression tests
+        shell: pwsh
+        run: ./changes/tests/stability/Updater.Tests.ps1 -Updater ./source/tools/ApplyUpdate.ps1
+
+      - name: Loot and retry regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/loot-retry/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Loot/retry regressions failed' }
+          dotnet run --project tests/retry-flow/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Retry flow regressions failed' }
+
+      - name: Read-only CLI regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/cli-readonly/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'CLI regressions failed' }
+      - name: Inventory loot regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/inventory-loot/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Inventory loot regressions failed' }
+      - name: Automatic altering regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering regressions failed' }
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering visual harness build failed' }
+
+      - name: Diagnostic-only regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/gathering-diagnostic/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic regressions failed' }
+
+      - name: Automatic gathering regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/gathering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Gathering regressions failed' }
+
+      - name: Crafting regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Crafting regressions failed' }
+
+      - name: V3 production architecture checks
+        shell: pwsh
+        run: |
+          $craft = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $gather = Get-Content source/FishingAutomation/dungeon/GatheringScreen.cs -Raw
+          $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $alter = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          $runtime = Get-Content source/FishingAutomation/dungeon/ProductionUiRuntime.cs -Raw
+          $search = Get-Content source/FishingAutomation/dungeon/ProductionSearchFlow.cs -Raw
+          $states = Get-Content source/FishingAutomation/ProductionStageMachine.cs -Raw
+          foreach($screen in @($craft,$gather,$bulk,$alter)){
+            if($screen -notmatch 'ProductionUiRuntime'){throw 'production screen bypasses V3 runtime'}
+            if($screen -match 'RefreshInputFrame'){throw 'legacy whole-frame freshness code returned'}
+            if($screen -match 'GuardedInputController _input' -or $screen -match 'WindowCapture _capture'){throw 'legacy screen-owned input/capture returned'}
+            if($screen -notmatch 'ProductionStageMachine'){throw 'production screen state tracking missing'}
+          }
+          if($runtime -match 'changed > sampled' -or $runtime -match 'sampled \* 0\.02'){throw 'whole-frame pixel diff returned'}
+          if($runtime -notmatch '클릭 직전 대상 위치가 바뀌었습니다'){throw 'target ROI final re-read missing'}
+          if($search -notmatch 'TapFresh\(0x1C, ct\)'){throw 'mandatory Enter search confirmation missing'}
+          if($craft -match '제작 목록 화면을 확인하지 못했습니다' -or
+             $craft -match '제작 목록 복귀를 확인하지 못했습니다'){throw 'crafting fixed list navigation must not be hard-gated by header OCR'}
+          if($craft -notmatch '헤더 OCR 생략'){throw 'crafting fixed list OCR-skip trace missing'}
+          if($states -notmatch 'enum ProductionStage'){throw 'V3 state machine missing'}
+          if($alter -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력' -or $alter -match '이동 확인 Space 입력 완료'){throw 'facility travel Space regression returned'}
+          if($alter -notmatch '추가 Space 입력 없음'){throw 'passive facility travel rule missing'}
+
+      - name: Inline production UI regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/production-ui/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Production UI regressions failed' }
+
+      - name: Publish Windows binaries
+        shell: pwsh
+        run: |
+          New-Item artifacts/app,artifacts/watchdog -ItemType Directory -Force | Out-Null
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/app
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          if ((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.0.2.0') { throw 'EXE version mismatch' }
+      - name: Smoke test published app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path artifacts/app/FishingAutomation.exe).Path
+          $process=Start-Process $exe -WorkingDirectory (Resolve-Path artifacts/app).Path -WindowStyle Hidden -PassThru
+          Start-Sleep 5
+          $process.Refresh()
+          if($process.HasExited){throw "App exited early: $($process.ExitCode)"}
+          Stop-Process $process.Id -Force
+          Get-Process MacroWatchdog -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg = Join-Path $PWD 'artifacts/package'
+          $release = Join-Path $pkg 'release'
+          $tools = Join-Path $pkg 'tools'
+          $compat = Join-Path $pkg 'FishingAutomation'
+          New-Item $release,$tools,$compat -ItemType Directory -Force | Out-Null
+          Copy-Item artifacts/app/* $release -Recurse -Force
+          Copy-Item source/FishingAutomation/interception.dll (Join-Path $release 'interception.dll') -Force
+          Copy-Item artifacts/watchdog/MacroWatchdog.exe (Join-Path $release 'MacroWatchdog.exe') -Force
+          Copy-Item source/tools/ApplyUpdate.ps1 (Join-Path $tools 'ApplyUpdate.ps1') -Force
+          Copy-Item source/tools/RollbackPrevious.ps1 (Join-Path $tools 'RollbackPrevious.ps1') -Force
+          Copy-Item source/ROLLBACK_PREVIOUS.cmd (Join-Path $pkg 'ROLLBACK_PREVIOUS.cmd') -Force
+          Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
+          Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
+          'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
+          'MABI AUTO V3.0.2 Windows Lite - user ZIP UI, free gathering and read-only CLI diagnostics' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          $required = @(
+            'release/FishingAutomation.exe','release/MacroWatchdog.exe',
+            'release/abyss/config/targets.json','release/abyss/config/scenario.json',
+            'release/abyss/templates/loot_v173/loot_hallucination_stone.png',
+            'release/abyss/templates/loot_v173/loot_mor_corsair_tricorne.png',
+            'release/interception.dll','START.cmd','tools/ApplyUpdate.ps1',
+            'ROLLBACK_PREVIOUS.cmd','tools/RollbackPrevious.ps1')
+          foreach($r in $required){ if(-not (Test-Path (Join-Path $pkg $r))){ throw "missing $r" } }
+          git rev-parse HEAD | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          $winZip = Join-Path $PWD 'artifacts/MabiAuto_V3.0.2_Windows_Lite.zip'
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($pkg,$winZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
+          $sha = (Get-FileHash $winZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  MabiAuto_V3.0.2_Windows_Lite.zip" | Set-Content "$winZip.sha256" -Encoding ASCII
+          $srcStage = Join-Path $PWD 'artifacts/source-package'
+          New-Item $srcStage -ItemType Directory -Force | Out-Null
+          Copy-Item source (Join-Path $srcStage 'source') -Recurse -Force
+          Copy-Item changes (Join-Path $srcStage 'changes') -Recurse -Force
+          Copy-Item BUILD_VERIFY.ps1,README.txt,GITHUB_MIGRATION.md $srcStage -Force
+          Copy-Item tests (Join-Path $srcStage 'tests') -Recurse -Force
+          Copy-Item .github (Join-Path $srcStage '.github') -Recurse -Force
+          git rev-parse HEAD | Set-Content (Join-Path $srcStage 'BUILD_COMMIT.txt') -Encoding ASCII
+          $buildDirs = @(Get-ChildItem $srcStage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') })
+          foreach ($dir in ($buildDirs | Sort-Object { $_.FullName.Length } -Descending)) { if(Test-Path -LiteralPath $dir.FullName){ $resolved=(Resolve-Path -LiteralPath $dir.FullName).Path; if(-not $resolved.StartsWith($srcStage + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe cleanup path'}; Remove-Item -LiteralPath $resolved -Recurse -Force } }
+          $srcZip = Join-Path $PWD 'artifacts/MabiAuto_V3.0.2_Source.zip'
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($srcStage,$srcZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
+      - name: Upload verified release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: V3.0.2-release-packages
+          path: |
+            artifacts/MabiAuto_V3.0.2_Windows_Lite.zip
+            artifacts/MabiAuto_V3.0.2_Windows_Lite.zip.sha256
+            artifacts/MabiAuto_V3.0.2_Source.zip
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list failed'}
+          $r = @($releases | Where-Object { $_.tag_name -eq 'V3.0.2' }) | Select-Object -First 1
+
+          $expected=@('MabiAuto_V3.0.2_Windows_Lite.zip','MabiAuto_V3.0.2_Windows_Lite.zip.sha256','MabiAuto_V3.0.2_Source.zip')
+          $releaseTarget=$env:GITHUB_SHA
+
+          if(-not $r) {
+            gh release create V3.0.2 `
+              artifacts/MabiAuto_V3.0.2_Windows_Lite.zip `
+              artifacts/MabiAuto_V3.0.2_Windows_Lite.zip.sha256 `
+              artifacts/MabiAuto_V3.0.2_Source.zip `
+              --draft --target $releaseTarget --title 'Mabi Auto V3.0.2' `
+              --notes-file source/RELEASE_NOTES.md
+            if($LASTEXITCODE-ne0){throw 'Release upload failed'}
+
+            $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+            if($LASTEXITCODE-ne0){throw 'Release list after upload failed'}
+            $r = @($releases | Where-Object { $_.tag_name -eq 'V3.0.2' }) | Select-Object -First 1
+          }
+
+          if(-not $r){throw 'V3.0.2 release not found'}
+          if($r.target_commitish -ne $releaseTarget){throw "V3.0.2 target mismatch: $($r.target_commitish) != $releaseTarget"}
+          foreach($name in $expected){if($name -notin $r.assets.name){throw "Missing release asset: $name"}}
+
+          if($r.draft) {
+            gh release edit V3.0.2 --draft=false
+            if($LASTEXITCODE-ne0){throw 'V3.0.2 publish failed'}
+          }
+
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list after publish failed'}
+          $published = @($published | Where-Object { $_.tag_name -eq 'V3.0.2' }) | Select-Object -First 1
+          if(-not $published -or $published.draft -or $published.prerelease){throw 'V3.0.2 is not public after publish step'}
+          foreach($name in $expected){if($name -notin $published.assets.name){throw "Published release asset missing: $name"}}
+
