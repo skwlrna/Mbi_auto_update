@@ -77,7 +77,6 @@ public sealed partial class MainForm
         private readonly Label _elapsed = new();
         private readonly Label _errors = new();
         private readonly Panel _progressBar = new();
-        private readonly TextBox _pageLog = new();
         private int _percent;
         private CraftableItem[] _choices = Array.Empty<CraftableItem>();
         private bool _loading;
@@ -150,12 +149,12 @@ public sealed partial class MainForm
 
             var right = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
-                BackColor = Color.Transparent, AccessibleName = "제작 실행 상태 및 로그"
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = Padding.Empty,
+                BackColor = Color.Transparent, AccessibleName = "제작 실행 상태"
             };
-            right.RowStyles.Add(new RowStyle(SizeType.Percent, 56)); right.RowStyles.Add(new RowStyle(SizeType.Percent, 44));
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            var statusCard = Card(); statusCard.Padding = new Padding(14, 10, 14, 10); statusCard.Margin = new Padding(0, 0, 0, 5);
+            var statusCard = Card(); statusCard.Padding = new Padding(14, 10, 14, 10); statusCard.Margin = Padding.Empty;
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -177,14 +176,6 @@ public sealed partial class MainForm
             status.Controls.Add(_state, 0, 1); status.Controls.Add(_stage, 0, 2); status.Controls.Add(progressLine, 0, 3);
             status.Controls.Add(_progressBar, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_errors, 0, 6); status.Controls.Add(_detail, 0, 7);
             statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
-
-            var logCard = Card(); logCard.Padding = new Padding(12, 9, 12, 10); logCard.Margin = new Padding(0, 5, 0, 0);
-            var logLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty, BackColor = Color.Transparent };
-            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            logLayout.Controls.Add(Label("로그", 21, true), 0, 0);
-            _pageLog.Multiline = true; _pageLog.ReadOnly = true; _pageLog.ScrollBars = ScrollBars.Vertical; _pageLog.BorderStyle = BorderStyle.None;
-            _pageLog.BackColor = CardBg2; _pageLog.ForeColor = TitleText; _pageLog.Dock = DockStyle.Fill; _pageLog.AccessibleName = "제작 로그"; _pageLog.Margin = new Padding(2);
-            logLayout.Controls.Add(_pageLog, 0, 1); logCard.Controls.Add(logLayout); right.Controls.Add(logCard, 0, 1);
             body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
             var actions = new TableLayoutPanel
@@ -201,10 +192,10 @@ public sealed partial class MainForm
             foreach (var control in Descendants(root).Prepend(root)) control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
             void Typography(Control control, float pixels) => control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
             Typography(header.Controls[0], 36); Typography(header.Controls[1], 18); Typography(settingsHeading.Controls[0], 21);
-            Typography(status.Controls[0], 21); Typography(logLayout.Controls[0], 21); Typography(_reload, 14);
+            Typography(status.Controls[0], 21); Typography(_reload, 14);
             Typography(_item, 17); Typography(_food, 17);
             foreach (var label in new[] { _state, _stage, _elapsed, _errors, _detail }) Typography(label, 17);
-            Typography(_progress, 18); Typography(_percentage, 18); Typography(_pageLog, 15); Typography(_start, 22); Typography(_stop, 22);
+            Typography(_progress, 18); Typography(_percentage, 18); Typography(_start, 22); Typography(_stop, 22);
 
             var metrics = Descendants(root).Prepend(root).Select(control => new CraftingPageMetric(control, control.Font.FontFamily.Name, control.Font.Size, control.Font.Style, control.Padding, control.Margin)).ToArray();
             var rows = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table ? table.RowStyles.Cast<RowStyle>().Where(style => style.SizeType == SizeType.Absolute).Select(style => (Style: style, Size: style.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
@@ -684,14 +675,6 @@ public sealed partial class MainForm
             UpdateExecution();
         }
 
-        private void SyncPageLog()
-        {
-            if (_pageLog.IsDisposed || _owner._logBox.IsDisposed) return;
-            string text = _owner._logBox.Text; if (text.Length > 12000) text = text[^12000..];
-            if (string.Equals(_pageLog.Text, text, StringComparison.Ordinal)) return;
-            _pageLog.Text = text; _pageLog.SelectionStart = _pageLog.TextLength; _pageLog.ScrollToCaret();
-        }
-
         private sealed record CraftingPageMetric(
             Control Control,
             string Family,
@@ -741,7 +724,6 @@ public sealed partial class MainForm
             _progress.Text = $"진행 수량  {current:N0} / {target:N0}"; _percentage.Text = $"진행률  {percent}%";
             _elapsed.Text = $"경과 시간  {elapsed:hh\\:mm\\:ss}"; _errors.Text = $"오류 횟수  {(_owner._runError is null ? 0 : 1)}회";
             _detail.Text = $"CLI 상태  {CliStatus}"; _detail.ForeColor = CliStatus == "정상" ? Green : Muted;
-            SyncPageLog();
         }
     }
 }
