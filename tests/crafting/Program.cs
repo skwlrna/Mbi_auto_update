@@ -24,6 +24,24 @@ try
           !CraftingQuestText.IsStationStage("바로 제작 진행"),
         "observed bandage quest omits ratio and stays separate from instant crafting");
 
+    var itemTitle = CraftingHubLayout.CategoryTitleArea(CraftingCategory.Item);
+    var foodTitle = CraftingHubLayout.CategoryTitleArea(CraftingCategory.Food);
+    var itemCard = CraftingHubLayout.CategoryCardArea(CraftingCategory.Item);
+    var foodCard = CraftingHubLayout.CategoryCardArea(CraftingCategory.Food);
+    Check(itemCard.Contains(itemTitle) && foodCard.Contains(foodTitle) &&
+          !itemTitle.IntersectsWith(foodTitle),
+        "crafting hub item/food OCR title bands stay inside separate verified cards");
+    Check(itemTitle.Contains(new System.Drawing.Point(400, 633)) &&
+          foodTitle.Contains(new System.Drawing.Point(640, 633)),
+        "uploaded 800x1000 crafting hub item/food titles are covered");
+    Check(CraftingHubLayout.IsStableTitle(
+              new System.Drawing.Rectangle(370, 620, 60, 28),
+              new System.Drawing.Rectangle(374, 622, 62, 28)) &&
+          !CraftingHubLayout.IsStableTitle(
+              new System.Drawing.Rectangle(370, 620, 60, 28),
+              new System.Drawing.Rectangle(610, 620, 55, 28)),
+        "crafting hub category requires same-card two-frame title stability");
+
     var response = MabinogiMobileCli.Parse("get_craftable_items", new CliProcessOutput(0,
         JsonSerializer.Serialize(new
         {
