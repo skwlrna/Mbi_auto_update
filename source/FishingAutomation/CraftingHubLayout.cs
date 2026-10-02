@@ -41,6 +41,9 @@ internal static class CraftingHubLayout
     internal static Point ProductFirstResultPoint
         => new(400, 460);
 
+    internal const double SearchDialogOpenChangeRatio = 0.08;
+    internal const double SearchResultChangeRatio = 0.06;
+
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
         => category switch
         {

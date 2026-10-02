@@ -75,6 +75,11 @@ try
     Check(CraftingHubLayout.ProductSearchIconPoint ==
               new System.Drawing.Point(30, 118),
         "V3.0.1 live capture search magnifier center is preserved");
+    Check(CraftingHubLayout.SearchDialogOpenChangeRatio > 0 &&
+          CraftingHubLayout.SearchDialogOpenChangeRatio < 0.25 &&
+          CraftingHubLayout.SearchResultChangeRatio > 0 &&
+          CraftingHubLayout.SearchResultChangeRatio < 0.25,
+        "crafting search state transitions use bounded fixed-ROI visual thresholds");
     Check(CraftingHubLayout.IsStableTitle(
               new System.Drawing.Rectangle(370, 620, 60, 28),
               new System.Drawing.Rectangle(374, 622, 62, 28)) &&

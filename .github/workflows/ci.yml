@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.2"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.3"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.2</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.3</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -388,7 +388,14 @@ jobs:
 
           if($search -notmatch 'TapFresh\(0x1C, ct\)' -or
              $search -notmatch 'input field -> paste -> Enter -> Apply -> exact result'){throw 'shared production search must require Enter before Apply'}
-          if($craftScreen -notmatch 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'crafting must use shared Enter-confirmed search'}
+          if($craftScreen -match 'ProductionSearchFlow\.SearchAndSelectAsync'){throw 'crafting must not re-enter OCR search fallback after fixed-state search'}
+          if($craftScreen -match 'ClickOffsetFromStableExactAsync' -or
+             $craftScreen -match '검색창 확인 실패 · 돋보기만 OCR fallback'){throw 'crafting search must never click an OCR-derived fallback location'}
+          if($craftScreen -notmatch 'MeasureVisualChangeRatio' -or
+             $craftScreen -notmatch '검색창 열림 확인 · OCR 미사용' -or
+             $craftScreen -notmatch '추가 클릭 없이 정지'){throw 'crafting search visual-state stop guards missing'}
+          if($runtime -notmatch 'MeasureVisualChangeRatio' -or
+             $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
              $craftScreen -match '제작 목록 복귀를 확인하지 못했습니다'){throw 'crafting fixed list navigation must not be hard-gated by header OCR'}
           if($craftScreen -notmatch '헤더 OCR 생략'){throw 'crafting fixed list OCR-skip trace missing'}
