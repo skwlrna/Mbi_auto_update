@@ -10,6 +10,13 @@ public sealed partial class MainForm
     {
         if (plan.SourceRecipe is not null) return plan;
 
+        if (LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var direct))
+        {
+            _log.Write(
+                $"[자동 채집] 생활 스킬 100회 직접 경로 · {direct.Category} > {direct.TargetName}");
+            return plan;
+        }
+
         var recipes = await new AlteringCliData(_cli).RecipesAsync(ct);
         var candidateRows = recipes
             .Select((recipe, index) => new { recipe, index })
@@ -17,7 +24,7 @@ public sealed partial class MainForm
             .ToArray();
         if (candidateRows.Length == 0)
         {
-            _log.Write("[자동 채집] 대상 재료를 포함한 가공 제법을 CLI에서 찾지 못했습니다. 재료 상세/구하는 방법 화면에서 시작합니다.");
+            _log.Write("[자동 채집] 생활 스킬 직접 매핑 없음 · 가방/재료 상세 보조 경로를 사용합니다.");
             return plan;
         }
 
