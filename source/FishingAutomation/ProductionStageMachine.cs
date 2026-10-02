@@ -50,6 +50,8 @@ internal sealed class ProductionStageMachine
     {
         if (to == ProductionStage.Idle)
             return true;
+        if (to == ProductionStage.OpenHub)
+            return true; // bounded recovery/navigation may return to a known hub from any stage.
         if (from == to)
             return true;
 
