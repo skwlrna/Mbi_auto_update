@@ -10,12 +10,10 @@ public sealed partial class MainForm
     {
         if (plan.SourceRecipe is not null) return plan;
 
-        if (LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var direct))
-        {
+        bool hasDirect = LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var direct);
+        if (hasDirect)
             _log.Write(
-                $"[자동 채집] 생활 스킬 100회 직접 경로 · {direct.Category} > {direct.TargetName}");
-            return plan;
-        }
+                $"[자동 채집] 생활 스킬 100회 직접 경로 · {direct.Category} > {direct.TargetName} · 가방 보조 경로용 시작 제법도 조회");
 
         var recipes = await new AlteringCliData(_cli).RecipesAsync(ct);
         var candidateRows = recipes
@@ -24,7 +22,10 @@ public sealed partial class MainForm
             .ToArray();
         if (candidateRows.Length == 0)
         {
-            _log.Write("[자동 채집] 생활 스킬 직접 매핑 없음 · 가방/재료 상세 보조 경로를 사용합니다.");
+            if (hasDirect)
+                _log.Write("[자동 채집] 가방 보조 경로용 시작 제법 없음 · 생활 스킬 100회 직접 경로만 사용");
+            else
+                _log.Write("[자동 채집] 생활 스킬 직접 매핑/보조 시작 제법 없음");
             return plan;
         }
 
@@ -42,7 +43,9 @@ public sealed partial class MainForm
         int ordinal = recipes.Take(chosen.index + 1).Count(x => x.DisplayName == chosen.recipe.DisplayName);
         var source = new AlteringPlan(
             facility, chosen.recipe.DisplayName, 1, chosen.recipe.ProducedPerWork, false, ordinal);
-        _log.Write($"[자동 채집] 무료 시작 경로 · {source.ScreenTitle} > {source.DisplayName} > {plan.DisplayName}");
+        _log.Write(hasDirect
+            ? $"[자동 채집] 보조 시작 경로 준비 · {source.ScreenTitle} > {source.DisplayName} > {plan.DisplayName}"
+            : $"[자동 채집] 무료 시작 경로 · {source.ScreenTitle} > {source.DisplayName} > {plan.DisplayName}");
         return plan with { SourceRecipe = source };
     }
 
@@ -53,6 +56,12 @@ public sealed partial class MainForm
         {
             var plan = SelectedGatheringPlan();
             plan.Validate();
+            if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(plan.DisplayName))
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName}은(는) 곤충채집 퀘스트 전용 재료라 단독 자동채집에서는 시작하지 않습니다. 제작 퀘스트의 추천 획득처에서만 처리합니다.");
+            if (!LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out _))
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName}은(는) 생활 스킬 대량채집 매핑이 아직 확정되지 않아 단독 자동채집에서 임의 경로를 선택하지 않습니다.");
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",

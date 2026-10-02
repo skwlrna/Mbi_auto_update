@@ -8,6 +8,18 @@ internal sealed record LivingSkillGatheringSource(
 
 internal static class LivingSkillGatheringCatalog
 {
+    // Insect gathering is intentionally quest-only. These confirmed insect names
+    // are never exposed to standalone/bulk navigation; crafting may still acquire
+    // them through its quest -> 구하는 방법 -> 추천 route.
+    private static readonly HashSet<string> QuestOnlyMaterials = new(StringComparer.Ordinal)
+    {
+        "유령 반딧불이",
+        "석양 나비",
+        "흰얼음풍뎅이",
+        "낙엽나방",
+        "황혼잠자리"
+    };
+
     private static readonly Dictionary<string, LivingSkillGatheringSource> Exact =
         new(StringComparer.Ordinal)
         {
@@ -111,6 +123,9 @@ internal static class LivingSkillGatheringCatalog
 
     internal static bool IsQuestOnlyCategory(string category)
         => string.Equals(category, "곤충채집", StringComparison.Ordinal);
+
+    internal static bool IsQuestOnlyMaterial(string materialName)
+        => QuestOnlyMaterials.Contains((materialName ?? "").Trim());
 
     private static LivingSkillGatheringSource Source(string category, string target)
         => new(category, target, TemplateKey(category, target));

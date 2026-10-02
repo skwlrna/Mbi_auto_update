@@ -48,6 +48,19 @@ internal static class BulkGatheringFlowTests
             "hoe mushroom spore stays in hoeing category");
         check(!LivingSkillGatheringCatalog.TryResolveBulk("석양 나비", out _),
             "insect material is not enabled for standalone bulk gathering");
+        check(LivingSkillGatheringCatalog.IsQuestOnlyMaterial("석양 나비") &&
+              LivingSkillGatheringCatalog.IsQuestOnlyMaterial("유령 반딧불이") &&
+              LivingSkillGatheringCatalog.IsQuestOnlyMaterial("황혼잠자리"),
+            "confirmed insect materials stay crafting-quest only");
+        check(LivingSkillGatheringCatalog.TryResolveBulk("밀", out var wheat) &&
+              wheat.Category == "추수" && wheat.TargetName == "밀",
+            "harvest material maps to same-name target");
+        check(LivingSkillGatheringCatalog.TryResolveBulk("감자", out var potato) &&
+              potato.Category == "호미질" && potato.TargetName == "감자",
+            "hoeing material maps to same-name target");
+        check(LivingSkillGatheringCatalog.TryResolveBulk("최상급 양털", out var darkSheep) &&
+              darkSheep.Category == "양털 깎기" && darkSheep.TargetName == "먹구름 양",
+            "one sheep source can provide multiple confirmed wool tiers");
         check(AcquisitionMethodPolicy.IsLifeSkill("추천 곤충채집") &&
               AcquisitionMethodPolicy.IsLifeSkill("호미질") &&
               AcquisitionMethodPolicy.IsLifeSkill("양털 깎기"),

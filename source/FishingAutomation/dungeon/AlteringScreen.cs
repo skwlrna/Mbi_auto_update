@@ -4,12 +4,10 @@ namespace DungeonVisionBot;
 
 internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
 {
-    private readonly GuardedInputController _input;
-    private readonly WindowCapture _capture = new();
-    private readonly OcrRecognizer _ocr = new();
+    private readonly ProductionUiRuntime _ui;
+    private readonly ProductionStageMachine _stage = new("가공");
     private readonly string _debugDir;
     private readonly MabinogiMobileCli? _cli;
-    private nint _hwnd;
     private string? _confirmedOnsiteFacility;
     private string? _cachedRecipeKey;
     private Point _cachedRecipeCenter;
@@ -24,36 +22,28 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
-    internal string InputMode => _input.ModeName;
+    internal string InputMode => _ui.InputMode;
     internal event Action<string>? Log;
 
     internal AlteringScreen(nint hwnd, AppSettings settings, string debugDir, MabinogiMobileCli? cli = null)
     {
-        _hwnd = hwnd; _debugDir = debugDir; _cli = cli;
-        _input = new GuardedInputController(new InterceptionInput(settings.InterceptionMouseDevice, settings.InterceptionKeyboardDevice));
+        _debugDir = debugDir; _cli = cli;
+        _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "altering");
+        _stage.Changed += (stage, detail) =>
+            Log?.Invoke($"[자동 가공][상태] {stage} · {detail}");
     }
 
-    private Bitmap Capture(CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        _input.SetCancellation(ct);
-        if (!WindowTools.IsRequiredGameWindow(_hwnd)) _hwnd = WindowTools.FindRequiredGameWindow();
-        if (_hwnd == 0) throw new InvalidOperationException("마비노기 모바일 창이 없습니다.");
-        NativeMethods.SetForegroundWindow(_hwnd);
-        var frame = _capture.CaptureClient(_hwnd);
-        try { _input.ObserveFrame(_hwnd, frame.Size); return frame; }
-        catch { frame.Dispose(); throw; }
-    }
+    private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
 
     private async Task<DetectionResult?> FindAsync(Bitmap frame, Rectangle roi, string text, CancellationToken ct, bool facilityTitle = false)
     {
-        var found = facilityTitle ? await _ocr.FindAlteringFacilityTitlesAsync(frame, text, ct) :
-            await _ocr.FindAlteringLabelsAsync(frame, roi, text, ct);
+        var found = facilityTitle ? await _ui.Ocr.FindAlteringFacilityTitlesAsync(frame, text, ct) :
+            await _ui.Ocr.FindAlteringLabelsAsync(frame, roi, text, ct);
         return found.Count == 1 ? found[0] : null;
     }
 
     private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
-        => _ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
+        => _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
 
     private async Task<bool> HasCollectPromptAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
@@ -242,13 +232,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         if (header is not null && await FindFacilityHeaderAsync(second, header, ct) is null) return false;
         var found = await FindAsync(second, roi, text, ct, facilityTitle);
         if (found is null) return false;
-        _input.ClickClientPoint(_hwnd, found.Value.Center);
+        _ui.ClickFresh(found.Value.Center, ct);
         await Task.Delay(550, ct);
         return true;
     }
 
     private async Task EnterFacilityAsync(AlteringPlan plan, CancellationToken ct)
     {
+        _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -265,7 +256,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 if (await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null)
                 {
                     Log?.Invoke("[자동 가공] 현재 화면=품목 상세 · 닫고 시설 화면을 다시 확인합니다.");
-                    _input.TapScanCode(0x01);
+                    _ui.TapFresh(0x01, ct);
                     await Task.Delay(700, ct);
                     continue;
                 }
@@ -284,7 +275,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 if (otherFacility is not null)
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다.");
-                    _input.ClickClientPoint(_hwnd, new(33, 55));
+                    _ui.ClickFresh(new(33, 55), ct);
                     await Task.Delay(900, ct);
                     continue;
                 }
@@ -315,7 +306,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 // Unknown after collection can be a transient reward/result screen or the
                 // ordinary field. Do one bounded K re-entry only; never spam keys blindly.
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
-                _input.TapScanCode(0x25);
+                _ui.TapFresh(0x25, ct);
             }
 
             await Task.Delay(1000, ct);
@@ -375,6 +366,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
 
     private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
     {
+        _stage.Move(ProductionStage.Search, plan.DisplayName);
         string cacheKey = RecipeCacheKey(plan);
 
         // The live UI positions are stable until a game patch. After the first exact
@@ -393,13 +385,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                     Fail(frame, "연속 등록 중 원격 가공 화면이 감지되어 고정 품목 좌표 입력을 차단했습니다.");
             }
 
-            _input.ClickClientPoint(_hwnd, _cachedRecipeCenter);
+            _ui.ClickFresh(_cachedRecipeCenter, ct);
             await Task.Delay(250, ct);
 
             using var popup = Capture(ct);
             if (!await IsRecipeDetailAsync(popup, plan, ct))
                 Fail(popup, "저장된 고정 품목 좌표에서 선택한 품목 상세 화면을 확인하지 못했습니다.");
 
+            _stage.Move(ProductionStage.Detail, plan.DisplayName);
             Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 고정 품목 좌표 재사용");
             return;
         }
@@ -412,7 +405,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, "가공 목록이 사라졌습니다.");
 
-            var labels = await _ocr.FindAlteringLabelsAsync(
+            var labels = await _ui.Ocr.FindAlteringLabelsAsync(
                 frame, Cards, plan.DisplayName, ct, cardCandidate: true);
             if (labels.Count == plan.RecipeCount && labels.Count >= plan.RecipeOrdinal)
             {
@@ -420,7 +413,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
 
                 await Task.Delay(120, ct);
                 using var fresh = Capture(ct);
-                var confirmed = await _ocr.FindAlteringLabelsAsync(
+                var confirmed = await _ui.Ocr.FindAlteringLabelsAsync(
                     fresh, Cards, plan.DisplayName, ct, cardCandidate: true);
 
                 if (confirmed.Count != plan.RecipeCount ||
@@ -436,12 +429,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 _cachedRecipeCenter = selected.Center;
                 _hasCachedRecipeCenter = true;
 
-                _input.ClickClientPoint(_hwnd, selected.Center);
+                _ui.ClickFresh(selected.Center, ct);
                 await Task.Delay(350, ct);
                 using var popup = Capture(ct);
                 if (!await IsRecipeDetailAsync(popup, plan, ct))
                     Fail(popup, "선택한 품목의 상세 화면을 확인하지 못했습니다.");
 
+                _stage.Move(ProductionStage.Detail, plan.DisplayName);
                 Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 고정 품목 좌표 저장");
                 return;
             }
@@ -464,6 +458,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         // on-site state after two fresh frames. This is generic for every processing
         // facility in AlteringPlan.Facilities.
         bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
+        if (reusedOnsite)
+            _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 현장 상태 재사용");
         if (!reusedOnsite)
         {
             _confirmedOnsiteFacility = null;
@@ -504,8 +500,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 continue;
             }
 
+            _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 작업 등록");
             Log?.Invoke("[자동 가공] 설비 도착 후 현장 가공 버튼 화면 확인 · 숫자/아이콘 무시 · 정령의 날개 버튼 입력 없음");
-            _input.ClickClientPoint(_hwnd, visualActionCenter);
+            _ui.ClickFresh(visualActionCenter, ct);
         }
     }
 
@@ -585,8 +582,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             Fail(failed, "설비 이동 상태를 안정적으로 확인하지 못했습니다.");
         }
 
+        _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭");
-        _input.ClickClientPoint(_hwnd, moveToClick.Value.Center);
+        _ui.ClickFresh(moveToClick.Value.Center, ct);
 
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음");
@@ -691,8 +689,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 if (stableFrames < 2)
                     continue;
 
+                _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
                 Log?.Invoke("[자동 가공] 가공 완료 결과창 확인 · Space 입력");
-                _input.TapScanCode(0x39);
+                _ui.TapFresh(0x39, ct);
 
                 // The user-confirmed game flow returns to the same processing facility
                 // window after closing the result screen. Do not continue until that
@@ -709,6 +708,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                         if (facilityFrames >= 2)
                         {
                             _confirmedOnsiteFacility = plan.FacilityName;
+                            _stage.Move(ProductionStage.VerifyInventory, $"{plan.DisplayName} 수령 후 시설 복귀");
                             Log?.Invoke($"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 확인");
                             return true;
                         }
@@ -744,8 +744,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             Fail(failed, "완료 작업은 확인됐지만 왼쪽 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
         }
 
+        _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 1차 수령");
         Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 1차 Space");
-        _input.TapScanCode(0x39);
+        _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
         // If the first Space actually collected the jobs, close the result screen and
@@ -768,8 +769,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             return false;
         }
 
+        _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 2차 수령");
         Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space");
-        _input.TapScanCode(0x39);
+        _ui.TapFresh(0x39, ct);
         await Task.Delay(700, ct);
 
         // At the bench this should be the real receipt. Close "가공 완료" and wait
@@ -814,7 +816,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             if (detailVisible)
             {
                 Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재=품목 상세 · Esc로 시설창 복귀");
-                _input.TapScanCode(0x01);
+                _ui.TapFresh(0x01, ct);
                 await Task.Delay(500, ct);
             }
             else if (sameFacility)
@@ -833,7 +835,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 }
 
                 Log?.Invoke($"[자동 가공] 정체 화면 재판정 {attempt}회 · 현재={plan.ScreenTitle} + 하단 확인 팝업 · 확인하지 않고 Esc로 닫기");
-                _input.TapScanCode(0x01);
+                _ui.TapFresh(0x01, ct);
                 await Task.Delay(400, ct);
             }
             else
@@ -856,11 +858,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
     }
 
     private void Fail(Bitmap frame, string message)
-    {
-        Directory.CreateDirectory(_debugDir);
-        string path = Path.Combine(_debugDir, "altering-last-failure.png");
-        frame.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-        throw new InvalidOperationException(message + " 추가 입력 없이 정지합니다. 진단: " + path);
-    }
-    public void Dispose() => _input.Dispose();
+        => throw _ui.Failure(frame, message + " 추가 입력 없이 정지합니다.");
+
+    public void Dispose() => _ui.Dispose();
 }

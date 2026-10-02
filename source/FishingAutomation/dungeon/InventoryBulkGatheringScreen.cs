@@ -10,17 +10,14 @@ namespace DungeonVisionBot;
 /// </summary>
 internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 {
-    private readonly nint _hwnd;
     private readonly MabinogiMobileCli _cli;
     private readonly GatheringCliData _data;
     private readonly CraftingCliData _inventory;
     private readonly GatheringScreen _fallback;
-    private readonly GuardedInputController _input;
-    private readonly WindowCapture _capture = new();
-    private readonly OcrRecognizer _ocr = new();
-    private readonly string _debugDir;
+    private readonly ProductionUiRuntime _ui;
+    private readonly ProductionStageMachine _stage = new("채집");
 
-    internal string InputMode => _input.ModeName;
+    internal string InputMode => _ui.InputMode;
     internal event Action<string>? Log;
 
     internal InventoryBulkGatheringScreen(
@@ -30,43 +27,35 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         MabinogiMobileCli cli,
         GatheringCliData data)
     {
-        _hwnd = hwnd;
         _cli = cli;
         _data = data;
         _inventory = new CraftingCliData(cli);
-        _debugDir = debugDir;
         _fallback = new GatheringScreen(hwnd, settings, debugDir, cli, data);
         _fallback.Log += text => Log?.Invoke(text);
-        _input = new GuardedInputController(
-            new InterceptionInput(settings.InterceptionMouseDevice, settings.InterceptionKeyboardDevice));
+        _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "bulk-gathering");
+        _stage.Changed += (stage, detail) =>
+            Log?.Invoke($"[대량 채집][상태] {stage} · {detail}");
     }
 
-    private Bitmap Capture(CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        _input.SetCancellation(ct);
-        if (!WindowTools.IsRequiredGameWindow(_hwnd))
-            throw new InvalidOperationException("게임 창이 변경되어 대량 채집 입력을 정지합니다.");
-        NativeMethods.SetForegroundWindow(_hwnd);
-        var frame = _capture.CaptureClient(_hwnd);
-        try
-        {
-            _input.ObserveFrame(_hwnd, frame.Size);
-            return frame;
-        }
-        catch
-        {
-            frame.Dispose();
-            throw;
-        }
-    }
+    private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
 
     public async Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
-        if (LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var source))
+        if (!LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out var source))
         {
-            Log?.Invoke(
-                $"[대량 채집] 생활 스킬 100회 우선 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+            string kind = LivingSkillGatheringCatalog.IsQuestOnlyMaterial(plan.DisplayName)
+                ? "곤충채집/제작 퀘스트 전용"
+                : "생활 스킬 직접 매핑 미확정";
+            throw new InvalidOperationException(
+                $"{plan.DisplayName}은(는) {kind} 재료라 단독/가공용 대량채집에서 임의 경로를 선택하지 않습니다.");
+        }
+
+        _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
+        Log?.Invoke(
+            $"[대량 채집] 생활 스킬 100회 우선 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+
+        try
+        {
             var automation = new LifeSkillBulkGatheringAutomation(
                 token => _data.ItemCountAsync(plan.DisplayName, token),
                 token => StartLifeSkillHundredAsync(source, token),
@@ -76,9 +65,14 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             await automation.RunAsync(plan, ct);
             return;
         }
+        catch (InvalidOperationException ex) when (CanUseInventoryFallback(ex))
+        {
+            Log?.Invoke(
+                $"[대량 채집] 생활 스킬 100회 화면 경로 확인 실패 · 가방 100개 보조 경로 시도 · {ex.Message}");
+        }
 
-        Log?.Invoke(
-            $"[대량 채집] {plan.DisplayName} 생활 스킬 직접 매핑 없음 · 가방 100개 경로를 보조 경로로 사용");
+        // Fallback is only for a material whose life-skill mapping is already known.
+        // It is never used to guess an unknown/insect category.
         var fallbackAutomation = new InventoryBulkGatheringAutomation(
             token => _data.ItemCountAsync(plan.DisplayName, token),
             token => _inventory.InventoryOnlyCountAsync(plan.DisplayName, token),
@@ -86,7 +80,9 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             {
                 if (plan.SourceRecipe is null)
                     throw new InvalidOperationException(
-                        $"{plan.DisplayName} 최초 확보에 필요한 생활 스킬/가공 재료 시작 제법을 찾지 못했습니다.");
+                        $"{plan.DisplayName} 가방 보유 0개이고 보조 경로용 시작 제법도 없어 안전하게 최초 1개를 확보할 수 없습니다.");
+                if (_stage.Current == ProductionStage.Idle)
+                    _stage.Move(ProductionStage.AcquireMaterial, $"{plan.DisplayName} 최초 1개 확보");
                 await _fallback.StartAsync(plan with { TargetQuantity = 1 }, token);
             },
             token => StartInventoryHundredQuestAsync(plan.DisplayName, token),
@@ -97,13 +93,34 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await fallbackAutomation.RunAsync(plan, ct);
     }
 
+    private static bool CanUseInventoryFallback(InvalidOperationException ex)
+    {
+        string message = ex.Message ?? "";
+        // Only recognition/navigation failures may change route. Never hide unsafe
+        // field state, inventory decrease, tool failures, or timeout after gathering.
+        string[] safeNavigationFailures =
+        {
+            "프로필에서 생활 스킬",
+            "생활 스킬 분류",
+            "목록에서",
+            "행의 이름/아이콘",
+            "100회 채집 상태",
+            "가까운 위치 찾기"
+        };
+        return safeNavigationFailures.Any(x =>
+            message.Contains(x, StringComparison.Ordinal));
+    }
+
     private async Task StartLifeSkillHundredAsync(
         LivingSkillGatheringSource source,
         CancellationToken ct)
     {
+        if (_stage.Current is not ProductionStage.OpenHub and not ProductionStage.VerifyInventory)
+            _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
+        else if (_stage.Current == ProductionStage.VerifyInventory)
+            _stage.Move(ProductionStage.OpenHub, $"생활 스킬 반복 · {source.Category}");
         // C = profile. No fixed list-row Y is used after this shortcut.
-        using (var frame = Capture(ct))
-            _input.TapScanCode(0x2E);
+        _ui.TapFresh(0x2E, ct);
         await Task.Delay(700, ct);
 
         await ClickExactAsync(
@@ -113,6 +130,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             "프로필에서 생활 스킬 메뉴를 확인하지 못했습니다.");
         await Task.Delay(550, ct);
 
+        _stage.Move(ProductionStage.SelectCategory, source.Category);
         await ClickExactAsync(
             source.Category,
             new Rectangle(20, 100, 760, 820),
@@ -120,6 +138,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             $"생활 스킬 분류 {source.Category}을(를) 확인하지 못했습니다.");
         await Task.Delay(450, ct);
 
+        _stage.Move(ProductionStage.Search, source.TargetName);
         var row = await FindStableLifeSkillRowAsync(source, ct);
         if (row is null)
         {
@@ -143,11 +162,9 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 throw Fail(frame,
                     $"{source.TargetName} 행의 이름/아이콘 2차 확인에 실패해 클릭하지 않습니다.");
 
-            _input.ClickClientPoint(
-                _hwnd,
-                new Point(
+            _ui.ClickFresh(new Point(
                     Math.Clamp(exact.Value.Center.X, 180, 740),
-                    exact.Value.Center.Y));
+                    exact.Value.Center.Y), ct);
         }
         await Task.Delay(500, ct);
 
@@ -160,12 +177,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 frame, new Rectangle(60, 160, 680, 700), "100회 채집", ct);
             if (hundred is not null)
             {
-                _input.ClickClientPoint(_hwnd, hundred.Value.Center);
+                _ui.ClickFresh(hundred.Value.Center, ct);
                 hundredConfirmed = true;
             }
             else
             {
-                var lines = await _ocr.ReadLinesAsync(
+                var lines = await _ui.Ocr.ReadLinesAsync(
                     frame, new Rectangle(40, 120, 720, 760), 3, ct);
                 hundredConfirmed = lines.Any(x =>
                     (x.ReadText ?? "").Replace(" ", "")
@@ -180,7 +197,9 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 $"{source.TargetName} 생활 스킬에서 100회 채집 상태를 확인하지 못했습니다.");
         }
 
+        _stage.Move(ProductionStage.Detail, source.TargetName);
         await Task.Delay(350, ct);
+        _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
         await ClickExactAsync(
             "가까운 위치 찾기",
             new Rectangle(50, 180, 700, 760),
@@ -206,7 +225,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             DetectionResult? first = null;
             using (var frame = Capture(ct))
             {
-                var found = await _ocr.FindAlteringLabelsAsync(
+                var found = await _ui.Ocr.FindAlteringLabelsAsync(
                     frame, listRoi, source.TargetName, ct, dimText: true);
                 if (found.Count == 1 && HasRowIconVisual(frame, found[0].Bounds))
                     first = found[0];
@@ -216,7 +235,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             {
                 await Task.Delay(160, ct);
                 using var fresh = Capture(ct);
-                var found = await _ocr.FindAlteringLabelsAsync(
+                var found = await _ui.Ocr.FindAlteringLabelsAsync(
                     fresh, listRoi, source.TargetName, ct, dimText: true);
                 if (found.Count == 1 &&
                     GatheringNavigationPolicy.IsStableFirstRow(first.Value.Bounds, found[0].Bounds) &&
@@ -233,11 +252,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
             using (var frame = Capture(ct))
             {
-                _input.DragClientPoint(
-                    _hwnd,
+                _ui.DragFresh(
                     new Point(715, 765),
                     new Point(715, 345),
-                    450);
+                    450,
+                    ct);
             }
             await Task.Delay(420, ct);
         }
@@ -323,7 +342,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                     (!sawActive &&
                      DateTime.UtcNow - startedAt >= TimeSpan.FromSeconds(20) &&
                      DateTime.UtcNow - lastProgressAt >= TimeSpan.FromSeconds(12)))
+                {
+                    _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 100회 종료 · +{gain}");
                     return;
+                }
             }
             else
             {
@@ -340,10 +362,13 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     private async Task StartInventoryHundredQuestAsync(string displayName, CancellationToken ct)
     {
+        if (_stage.Current == ProductionStage.VerifyInventory)
+            _stage.Move(ProductionStage.OpenHub, $"가방 보조 경로 반복 · {displayName}");
+        else if (_stage.Current != ProductionStage.OpenHub)
+            _stage.Move(ProductionStage.OpenHub, $"가방 보조 경로 · {displayName}");
         // Fallback only. I: inventory. Search always follows the shared rule:
         // magnifier -> input -> text -> Enter -> Apply -> exact result.
-        using (var frame = Capture(ct))
-            _input.TapScanCode(0x17);
+        _ui.TapFresh(0x17, ct);
         await Task.Delay(700, ct);
 
         await ClickExactAsync("아이템", new Rectangle(210, 810, 390, 175), ct,
@@ -370,54 +395,26 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 throw Fail(frame, "가방 아이템 탭의 주황색 활성 표시를 확인하지 못했습니다.");
         }
 
-        DetectionResult all;
-        using (var frame = Capture(ct))
-        {
-            all = await FindUniqueAsync(frame, new Rectangle(25, 470, 300, 180), "전체", ct)
-                ?? throw Fail(frame, "가방 아이템 탭의 전체 필터를 확인하지 못했습니다.");
-            var search = new Point(Math.Max(22, all.Bounds.Left - 45), all.Center.Y);
-            _input.ClickClientPoint(_hwnd, search);
-        }
+        _ = await _ui.ClickOffsetFromStableExactAsync(
+            "전체",
+            new Rectangle(25, 470, 300, 180),
+            all => new Point(Math.Max(22, all.Bounds.Left - 45), all.Center.Y),
+            ct,
+            "가방 아이템 탭의 전체 필터/검색 아이콘 기준점을 확인하지 못했습니다.",
+            dimText: true);
         await Task.Delay(400, ct);
 
-        await ClickExactAsync(
+        _stage.Move(ProductionStage.Search, displayName);
+        await ProductionSearchFlow.SearchAndSelectAsync(
+            _ui,
             "아이템 이름을 검색해 보세요",
-            new Rectangle(80, 470, 650, 170),
+            new Rectangle(80, 470, 650, 220),
+            displayName,
+            new Rectangle(45, 535, 710, 310),
             ct,
-            "가방 검색 입력칸을 확인하지 못했습니다.",
-            pasteText: displayName);
-        await Task.Delay(120, ct);
-
-        // Every item/material/product search confirms typed text with Enter first.
-        using (var frame = Capture(ct))
-            _input.TapScanCode(0x1C);
-        await Task.Delay(220, ct);
-
-        bool applied = false;
-        for (int pass = 0; pass < 2 && !applied; pass++)
-        {
-            using var frame = Capture(ct);
-            var apply = await FindUniqueAsync(
-                frame, new Rectangle(80, 470, 650, 220), "적용하기", ct);
-            if (apply is null)
-                break;
-            if (pass == 0)
-            {
-                await Task.Delay(130, ct);
-                continue;
-            }
-            _input.ClickClientPoint(_hwnd, apply.Value.Center);
-            applied = true;
-        }
-        if (!applied)
-        {
-            using var frame = Capture(ct);
-            _input.TapScanCode(0x39); // Enter confirmed; Space applies the active button.
-        }
-        await Task.Delay(650, ct);
-
-        await ClickExactAsync(displayName, new Rectangle(45, 535, 710, 310), ct,
-            $"가방 검색 결과에서 정확한 {displayName} 항목을 찾지 못했습니다.");
+            "가방",
+            text => Log?.Invoke(text));
+        _stage.Move(ProductionStage.Detail, displayName);
         await Task.Delay(450, ct);
 
         long bagCount = await _inventory.InventoryOnlyCountAsync(displayName, ct);
@@ -440,7 +437,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             var countRoi = Rectangle.Intersect(
                 new Rectangle(countLeft, countTop, frame.Width - countLeft - 20, 150),
                 new Rectangle(Point.Empty, frame.Size));
-            var count = await _ocr.FindCompactLabelAsync(frame, countRoi, countText, ct);
+            var count = await _ui.Ocr.FindCompactLabelAsync(frame, countRoi, countText, ct);
             if (!count.Found)
                 throw Fail(frame,
                     $"가방 화면 수량과 CLI 수량({bagCount})을 함께 확인하지 못했습니다.");
@@ -448,10 +445,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             var method = await FindUniqueAsync(
                 frame, new Rectangle(70, 250, 600, 300), "구하는 방법", ct)
                 ?? throw Fail(frame, "가방 상세의 구하는 방법을 확인하지 못했습니다.");
-            _input.ClickClientPoint(_hwnd, method.Center);
+            _ui.ClickFresh(method.Center, ct);
         }
         await Task.Delay(450, ct);
 
+        _stage.Move(ProductionStage.Travel, $"{displayName} 보조 획득처");
         await ClickFirstLifeSkillMethodAsync(ct);
     }
 
@@ -465,7 +463,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         var roi = Rectangle.Intersect(
             new Rectangle(55, header.Bounds.Bottom + 25, 690, 500),
             new Rectangle(Point.Empty, frame.Size));
-        var lines = await _ocr.ReadLinesAsync(frame, roi, 3, ct);
+        var lines = await _ui.Ocr.ReadLinesAsync(frame, roi, 3, ct);
         var blocked = new[]
         {
             "던전", "전리품", "임무", "레이드", "구하는방법", "선택하세요"
@@ -491,7 +489,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         Log?.Invoke(
             "[대량 채집] 보조 경로 · 생활 스킬 획득처 선택 · " +
             (candidate.ReadText ?? "첫 항목"));
-        _input.ClickClientPoint(_hwnd, new Point(390, candidate.Center.Y));
+        _ui.ClickFresh(new Point(390, candidate.Center.Y), ct);
         await Task.Delay(700, ct);
     }
 
@@ -526,7 +524,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             {
                 stableIdle++;
                 if (stableIdle >= 2)
+                {
+                    _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 보조 경로 종료 · +{gain}");
                     return;
+                }
             }
             else
             {
@@ -552,37 +553,24 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         string failure,
         string? pasteText = null)
     {
-        for (int pass = 0; pass < 2; pass++)
+        if (pasteText is null)
         {
-            using var frame = Capture(ct);
-            var found = await FindUniqueAsync(frame, roi, text, ct);
-            if (found is null)
-                throw Fail(frame, failure);
-            if (pass == 0)
-            {
-                await Task.Delay(160, ct);
-                continue;
-            }
-
-            _input.ClickClientPoint(_hwnd, found.Value.Center);
-            if (pasteText is not null)
-            {
-                await Task.Delay(120, ct);
-                _input.PasteText(pasteText);
-            }
+            _ = await _ui.ClickStableExactAsync(
+                text, roi, ct, failure, dimText: true);
+        }
+        else
+        {
+            _ = await _ui.ClickStableExactAndPasteAsync(
+                text, roi, pasteText, ct, failure, dimText: true);
         }
     }
 
-    private async Task<DetectionResult?> FindUniqueAsync(
+    private Task<DetectionResult?> FindUniqueAsync(
         Bitmap frame,
         Rectangle roi,
         string text,
         CancellationToken ct)
-    {
-        var found = await _ocr.FindAlteringLabelsAsync(
-            frame, roi, text, ct, dimText: true);
-        return found.Count == 1 ? found[0] : null;
-    }
+        => _ui.FindUniqueAsync(frame, roi, text, ct, dimText: true);
 
     public async Task StopAsync(CancellationToken ct)
     {
@@ -594,21 +582,15 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         if (state.MainButtonState != "Stop" || !GatheringVision.HasStopButton(frame))
             throw Fail(frame,
                 "대량 채집 정지 버튼을 확인하지 못했습니다. 게임에서 직접 정지하세요.");
-        _input.TapScanCode(0x39);
+        _ui.TapFresh(0x39, ct);
     }
 
     private InvalidOperationException Fail(Bitmap frame, string message)
-    {
-        Directory.CreateDirectory(_debugDir);
-        string path = Path.Combine(
-            _debugDir, "bulk-gathering-last-failure.png");
-        frame.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-        return new InvalidOperationException(message + " 진단: " + path);
-    }
+        => _ui.Failure(frame, message);
 
     public void Dispose()
     {
         _fallback.Dispose();
-        _input.Dispose();
+        _ui.Dispose();
     }
 }

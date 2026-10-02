@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/CraftingQuestText.cs" Link="CraftingQuestText.cs" />
+    <Compile Include="../../source/FishingAutomation/ProductionStageMachine.cs" Link="ProductionStageMachine.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingHubLayout.cs" Link="CraftingHubLayout.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryBulkGatheringAutomation.cs" Link="InventoryBulkGatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs" Link="LifeSkillBulkGatheringAutomation.cs" />
