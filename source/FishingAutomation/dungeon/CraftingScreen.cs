@@ -287,18 +287,12 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         await Task.Delay(CraftingHubLayout.CraftDetailSettleDelayMs, ct);
 
-        // The count is bounded to 1..10. Nine minus clicks deterministically
-        // clamp any prior value to 1 without OCR, then plus builds the target.
-        for (int i = 0; i < 9; i++)
-        {
-            _ui.ClickFresh(CraftingHubLayout.CraftCountMinusPoint, ct);
-            await Task.Delay(85, ct);
-        }
-
+        // Live crafting detail opens at 1회. Do not spam the minus button.
+        // Only add the required increments from the default 1회 state.
         for (int i = 1; i < wanted; i++)
         {
             _ui.ClickFresh(CraftingHubLayout.CraftCountPlusPoint, ct);
-            await Task.Delay(95, ct);
+            await Task.Delay(85, ct);
         }
 
         using var verify = Capture(ct);
@@ -306,9 +300,10 @@ internal sealed class CraftingScreen : ICraftingScreen
             throw Fail(verify, "제작 횟수 설정 중 상세 화면이 변경되어 입력을 정지합니다.");
 
         Log?.Invoke(
-            $"[제작] 제작 횟수 설정 · OCR 미사용 · 1회 리셋 후 {wanted}회 · " +
-            $"-({CraftingHubLayout.CraftCountMinusPoint.X},{CraftingHubLayout.CraftCountMinusPoint.Y}) · " +
-            $"+({CraftingHubLayout.CraftCountPlusPoint.X},{CraftingHubLayout.CraftCountPlusPoint.Y})");
+            wanted == 1
+                ? "[제작] 제작 횟수 설정 · 기본 1회 유지 · 횟수 버튼 입력 없음"
+                : $"[제작] 제작 횟수 설정 · 기본 1회 기준 · + {wanted - 1}회 · " +
+                  $"({CraftingHubLayout.CraftCountPlusPoint.X},{CraftingHubLayout.CraftCountPlusPoint.Y})");
     }
 
     public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
@@ -623,21 +618,20 @@ internal sealed class CraftingScreen : ICraftingScreen
                 "제작하기",
                 ct);
 
-            if (craftReady is not null &&
-                await IsProductDetailAsync(frame, plan.DisplayName, ct))
+            if (craftReady is not null)
             {
                 long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
                 Log?.Invoke(
-                    $"[제작] 제작대 도착 · 제작하기 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                    $"[제작] 제작대 도착 · 제작하기 버튼 즉시 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
                 _directCraftPendingName = null;
                 _directCraftPendingCount = 0;
                 return;
             }
 
-            await Task.Delay(500, ct);
+            await Task.Delay(CraftingHubLayout.CraftReadyPollDelayMs, ct);
         }
 
         using var failed = Capture(ct);
