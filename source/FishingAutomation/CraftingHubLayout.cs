@@ -75,7 +75,8 @@ internal static class CraftingHubLayout
     internal static Rectangle CraftCompletionConfirmArea
         => new(110, 650, 580, 345);
 
-    internal const int CraftDetailSettleDelayMs = 350;
+    internal const int CraftDetailSettleDelayMs = 250;
+    internal const int CraftReadyPollDelayMs = 150;
 
     internal static bool IsSafeCraftDetailGeometry()
         => ProductDetailPanelArea.Contains(CraftCountMinusPoint) &&
