@@ -232,7 +232,7 @@ jobs:
           if ($screen -notmatch '가공 완료 확인창 닫기 완료') { throw 'completion result facility-return log missing' }
           if ($screen -notmatch 'greenConfirm && !facilityVisible') { throw 'completion result must be distinguished from facility popup' }
           if ($screen -notmatch 'facilityFrames >= 2') { throw 'facility return must be stable before continuing' }
-          if ($screen -notmatch '_input\.TapScanCode\(0x39\)') { throw 'facility travel popup Space confirmation missing' }
+          if ($screen -notmatch '_ui\.TapFresh\(0x39, ct\)') { throw 'verified completion/receipt Space path missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
           $guards = Get-Content source/FishingAutomation/CliAutomationGuards.cs -Raw
           if ($guards -notmatch 'IsTransientLoadingRejection' -or $guards -notmatch 'VerifyWithLoadingRetryAsync' -or $guards -notmatch 'CurrencySnapshotWithLoadingRetryAsync') { throw 'bounded loading retry helpers missing' }
@@ -314,7 +314,7 @@ jobs:
           if ($recovery -notmatch '_cachedRecipeKey = null' -or $recovery -notmatch '_hasCachedRecipeCenter = false') { throw 'stall recovery must clear fast-path recipe assumptions' }
           if ($recovery -notmatch 'EnterFacilityAsync\(plan, ct\)') { throw 'stall recovery must safely re-evaluate the requested facility' }
           if ($recovery -match 'TravelToFacilityAsync\(' -or $recovery -match 'SelectRecipeAsync\(' -or $recovery -match 'QueueAsync\(') { throw 'stall recovery must not travel, select recipe, or register work' }
-          if ($recovery -notmatch 'TapScanCode\(0x01\)' -or $recovery -match 'TapScanCode\(0x39\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
+          if ($recovery -notmatch 'TapFresh\(0x01, ct\)' -or $recovery -match 'TapFresh\(0x39, ct\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
 
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose guarded stall recovery' }
