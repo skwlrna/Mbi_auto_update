@@ -91,6 +91,21 @@ internal static class CraftingHubLayout
     internal static Rectangle ProductionQuestMaterialArea
         => new(160, 640, 480, 270);
 
+    // Live V3.0.11 acquisition popup after clicking a missing material.
+    internal static Rectangle AcquisitionMethodHeaderArea
+        => new(135, 505, 530, 115);
+
+    internal static Rectangle AcquisitionMethodRecommendedRowArea
+        => new(155, 610, 500, 95);
+
+    internal static Rectangle AcquisitionMethodListArea
+        => new(150, 600, 510, 190);
+
+    internal static Point AcquisitionMethodRecommendedPoint
+        => new(400, 650);
+
+    internal const int AcquisitionMethodSettleDelayMs = 250;
+
     internal const int ProductionQuestListSettleDelayMs = 100;
     internal const int ProductionQuestOpenDelayMs = 300;
 
@@ -102,7 +117,9 @@ internal static class CraftingHubLayout
            ProductDetailPanelArea.Contains(CraftGoButtonPoint) &&
            CraftActionButtonArea.Contains(CraftGoButtonPoint) &&
            ProductionQuestTopPoint.X is >= 500 and < 800 &&
-           ProductionQuestTopPoint.Y is >= 140 and < 740;
+           ProductionQuestTopPoint.Y is >= 140 and < 740 &&
+           AcquisitionMethodHeaderArea.Contains(new Point(175, 560)) &&
+           AcquisitionMethodRecommendedRowArea.Contains(AcquisitionMethodRecommendedPoint);
 
 
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
