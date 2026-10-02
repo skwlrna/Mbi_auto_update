@@ -11,8 +11,8 @@ internal static class CraftingQuestText
         string name = Compact(displayName);
         if (string.IsNullOrWhiteSpace(name)) return false;
         return compact.Equals(name + "제작", StringComparison.Ordinal) ||
-               (compact.Contains(name, StringComparison.Ordinal) &&
-                compact.Contains("제작", StringComparison.Ordinal));
+               (compact.StartsWith(name, StringComparison.Ordinal) &&
+                compact.EndsWith("제작", StringComparison.Ordinal));
     }
 
     internal static bool IsTitleNameOnly(string text, string displayName)
@@ -20,7 +20,7 @@ internal static class CraftingQuestText
         string compact = Compact(text);
         string name = Compact(displayName);
         return !string.IsNullOrWhiteSpace(name) &&
-               compact.Contains(name, StringComparison.Ordinal);
+               compact.Equals(name, StringComparison.Ordinal);
     }
 
     internal static bool IsQuestProgress(string text)
