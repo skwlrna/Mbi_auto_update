@@ -207,13 +207,13 @@ internal sealed class CraftingScreen : ICraftingScreen
             $"{category} 제작 목록 화면을 확인하지 못했습니다.",
             dimText: true);
 
-        var all = await _ui.RequireStableExactAsync(
+        _ = await _ui.ClickOffsetFromStableExactAsync(
             "전체",
             new Rectangle(35, 75, 220, 120),
+            all => new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y),
             ct,
-            "제작 목록의 전체 필터를 확인하지 못했습니다.",
+            "제작 목록의 전체 필터/검색 아이콘 기준점을 확인하지 못했습니다.",
             dimText: true);
-        _ui.ClickFresh(new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y), ct);
         await Task.Delay(400, ct);
 
         await ProductionSearchFlow.SearchAndSelectAsync(
