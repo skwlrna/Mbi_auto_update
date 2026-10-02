@@ -208,6 +208,7 @@ public sealed partial class MainForm : Form
     {
         "가공" => "자동 가공",
         "채집" => "자동 채집",
+        "제작" => "제작",
         _ => mode
     };
     private string SelectedDungeonDestination => "현재 위치";
@@ -309,6 +310,7 @@ public sealed partial class MainForm : Form
         else if (SelectedMode == "페카 심층") _ = StartScenarioAsync("페카 심층", "dungeon");
         else if (SelectedMode == "가공") _ = StartAlteringAsync();
         else if (SelectedMode == "채집") _ = StartGatheringAsync();
+        else if (SelectedMode == "제작") _ = StartCraftingAsync();
         else _ = StartScenarioAsync("어비스", "abyss");
     }
 
@@ -627,7 +629,7 @@ public sealed partial class MainForm : Form
     {
         UpdateDashboard();
         string mode = _activeMode ?? SelectedMode;
-        if (mode is "가공" or "채집")
+        if (mode is "가공" or "채집" or "제작")
         {
             var elapsed = _dungeonStartedAt.HasValue ? (_dungeonStoppedAt ?? DateTime.Now) - _dungeonStartedAt.Value : TimeSpan.Zero;
             long current = Math.Max(0, _productionCurrentQuantity);
