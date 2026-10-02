@@ -215,7 +215,7 @@ internal sealed class ZeroWingCraftingScreen : ICraftingScreen
     private readonly ICraftingScreen _inner;
     private readonly MabinogiMobileCli _cli;
     private readonly CliIdentityGuard _identity;
-    internal event Action<string>? Log;
+    public event Action<string>? Log;
     public string InputMode => _inner.InputMode;
 
     internal ZeroWingCraftingScreen(ICraftingScreen inner, MabinogiMobileCli cli, CliIdentityGuard identity)
