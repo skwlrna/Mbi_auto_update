@@ -149,46 +149,37 @@ internal sealed class CraftingScreen : ICraftingScreen
         if (!CraftingHubLayout.IsSafeSearchGeometry())
             throw new InvalidOperationException("제작 검색 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
-        // The item/food card click already came from a verified 800x1000 crafting hub.
-        // Do not re-gate the fixed product list by OCR here: live V3.0.1 evidence
-        // showed the correct 아이템 list while Windows OCR missed the header.
         Log?.Invoke($"[제작] {category} 제작 목록 · 고정 UI 경로 진입 · 헤더 OCR 생략");
 
-        const string placeholder = "결과물 또는 재료 이름을 검색해 보세요";
+        // V3.0.2 live evidence: the magnifier click really opened the search
+        // dialog, but placeholder OCR missed it. That false negative caused an
+        // OCR fallback click on an unrelated location and every later input was
+        // then applied to the wrong screen. From V3.0.3 onward, state changes
+        // are authorized only by the fixed search ROI transition.
+        using var beforeSearch = Capture(ct);
 
-        // Normal path: the 800x1000 crafting UI is fixed. Do not OCR-search for
-        // the magnifier, input field, Apply button, or filtered first result.
         _ui.ClickFresh(CraftingHubLayout.ProductSearchIconPoint, ct);
         Log?.Invoke(
             $"[제작] 검색 돋보기 · 고정좌표 ({CraftingHubLayout.ProductSearchIconPoint.X},{CraftingHubLayout.ProductSearchIconPoint.Y})");
-        await Task.Delay(400, ct);
+        await Task.Delay(450, ct);
 
-        bool dialogVisible;
-        using (var dialogFrame = Capture(ct))
-        {
-            dialogVisible = await FindUniqueAsync(
-                dialogFrame,
-                CraftingHubLayout.ProductSearchDialogArea,
-                placeholder,
-                ct) is not null;
-        }
+        using var searchDialog = Capture(ct);
+        double openRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
+            beforeSearch,
+            searchDialog,
+            CraftingHubLayout.ProductSearchDialogArea);
+        Log?.Invoke($"[제작] 검색창 화면 변화 확인 · {openRatio:P1}");
 
-        // If the fixed magnifier point did not open the dialog, recover through
-        // the previous OCR anchor once. This is fallback only.
-        if (!dialogVisible)
-        {
-            Log?.Invoke("[제작] 검색창 확인 실패 · 돋보기만 OCR fallback 1회");
-            _ = await _ui.ClickOffsetFromStableExactAsync(
-                "전체",
-                CraftingHubLayout.ProductFilterArea,
-                all => new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y),
-                ct,
-                "제작 목록의 전체 필터/검색 아이콘 기준점을 확인하지 못했습니다.",
-                dimText: true);
-            await Task.Delay(400, ct);
-        }
+        if (openRatio < CraftingHubLayout.SearchDialogOpenChangeRatio)
+            throw Fail(
+                searchDialog,
+                $"검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1} · 추가 클릭 없이 정지");
+
+        Log?.Invoke("[제작] 검색창 열림 확인 · OCR 미사용 · 다음 입력 허용");
 
         _ui.ClickFresh(CraftingHubLayout.ProductSearchInputPoint, ct);
+        Log?.Invoke(
+            $"[제작] 검색 입력칸 · 고정좌표 ({CraftingHubLayout.ProductSearchInputPoint.X},{CraftingHubLayout.ProductSearchInputPoint.Y})");
         _ui.PasteFresh(displayName, ct);
         await Task.Delay(120, ct);
 
@@ -196,68 +187,49 @@ internal sealed class CraftingScreen : ICraftingScreen
         Log?.Invoke($"[제작] 검색어 입력 확정 · Enter · {displayName}");
         await Task.Delay(220, ct);
 
-        // The fixed search dialog accepts Space as Apply after Enter. This avoids
-        // another OCR lookup for the Apply label.
+        using var beforeApply = Capture(ct);
+
         _ui.TapFresh(0x39, ct); // Space = 적용
         Log?.Invoke("[제작] 검색 적용 · Space · 고정 UI");
-        await Task.Delay(650, ct);
+        await Task.Delay(700, ct);
 
-        // OCR is now diagnostic only. Exact filtered searches select the fixed
-        // first result row even when Windows OCR misses the visible item name.
-        using (var resultFrame = Capture(ct))
-        {
-            var exact = await FindUniqueAsync(
+        using var resultFrame = Capture(ct);
+        double resultRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
+            beforeApply,
+            resultFrame,
+            CraftingHubLayout.ProductSearchResultArea);
+        var exact = await FindUniqueAsync(
+            resultFrame,
+            CraftingHubLayout.ProductSearchResultArea,
+            displayName,
+            ct);
+
+        Log?.Invoke(
+            exact is null
+                ? $"[제작] 검색 적용 후 결과 확인 · OCR 미검출 · 화면 변화 {resultRatio:P1}"
+                : $"[제작] 검색 적용 후 결과 확인 · exact OCR 확인 · 화면 변화 {resultRatio:P1}");
+
+        if (exact is null &&
+            resultRatio < CraftingHubLayout.SearchResultChangeRatio)
+            throw Fail(
                 resultFrame,
-                CraftingHubLayout.ProductSearchResultArea,
-                displayName,
-                ct);
-            Log?.Invoke(exact is null
-                ? $"[제작] 결과 OCR 미검출 · {displayName} · 첫 결과 고정좌표 사용"
-                : $"[제작] 결과 exact OCR 확인 · {displayName} · 클릭은 고정좌표 사용");
-        }
+                $"검색 적용 후 결과 화면 전환을 확인하지 못했습니다. 변화율={resultRatio:P1} · 첫 결과 클릭 없이 정지");
 
         _ui.ClickFresh(CraftingHubLayout.ProductFirstResultPoint, ct);
         Log?.Invoke(
             $"[제작] 검색 첫 결과 선택 · 고정좌표 ({CraftingHubLayout.ProductFirstResultPoint.X},{CraftingHubLayout.ProductFirstResultPoint.Y})");
-        await Task.Delay(500, ct);
+        await Task.Delay(550, ct);
 
-        using (var verify = Capture(ct))
+        using var verify = Capture(ct);
+        if (await IsProductDetailAsync(verify, displayName, ct))
         {
-            if (await IsProductDetailAsync(verify, displayName, ct))
-                return;
+            Log?.Invoke($"[제작] {displayName} 상세 화면 확인 · 검색 단계 완료");
+            return;
         }
 
-        // A layout mismatch must not silently continue. Return to the list and
-        // run the old OCR-driven flow once as a recovery path.
-        Log?.Invoke("[제작] 고정좌표 검색 결과 검증 실패 · 기존 OCR 검색 fallback 1회");
-        _ui.TapFresh(0x01, ct); // Escape: detail/search overlay -> list
-        await Task.Delay(350, ct);
-
-        Log?.Invoke($"[제작] {category} 제작 목록 복귀 · 헤더 OCR 생략 · 검색 아이콘 fallback 진행");
-
-        _ = await _ui.ClickOffsetFromStableExactAsync(
-            "전체",
-            CraftingHubLayout.ProductFilterArea,
-            all => new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y),
-            ct,
-            "제작 목록의 전체 필터/검색 아이콘 fallback 기준점을 확인하지 못했습니다.",
-            dimText: true);
-        await Task.Delay(400, ct);
-
-        await ProductionSearchFlow.SearchAndSelectAsync(
-            _ui,
-            placeholder,
-            CraftingHubLayout.ProductSearchDialogArea,
-            displayName,
-            CraftingHubLayout.ProductSearchResultArea,
-            ct,
-            "제작 fallback",
-            text => Log?.Invoke(text));
-        await Task.Delay(500, ct);
-
-        using var finalVerify = Capture(ct);
-        if (!await IsProductDetailAsync(finalVerify, displayName, ct))
-            throw Fail(finalVerify, $"선택 후 {displayName} 제작 상세 화면을 확인하지 못했습니다.");
+        throw Fail(
+            verify,
+            $"첫 결과 클릭 후 {displayName} 제작 상세 화면을 확인하지 못했습니다. 추가 fallback 클릭 없이 정지");
     }
 
     private async Task<bool> IsProductDetailAsync(Bitmap frame, string displayName, CancellationToken ct)
