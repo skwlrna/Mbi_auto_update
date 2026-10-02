@@ -246,6 +246,51 @@ internal sealed class ProductionUiRuntime : IDisposable
             text, roi, ct, failure, compact, dimText);
     }
 
+    internal static double MeasureVisualChangeRatio(
+        Bitmap before,
+        Bitmap after,
+        Rectangle roi,
+        int sampleStep = 8,
+        int channelDelta = 24)
+    {
+        if (before.Width != after.Width || before.Height != after.Height)
+            return 1.0;
+
+        roi = Rectangle.Intersect(
+            roi,
+            new Rectangle(0, 0, Math.Min(before.Width, after.Width), Math.Min(before.Height, after.Height)));
+        if (roi.Width <= 0 || roi.Height <= 0)
+            return 0.0;
+
+        int step = Math.Max(2, sampleStep);
+        int changed = 0;
+        int sampled = 0;
+
+        for (int y = roi.Top; y < roi.Bottom; y += step)
+        {
+            for (int x = roi.Left; x < roi.Right; x += step)
+            {
+                Color a = before.GetPixel(x, y);
+                Color b = after.GetPixel(x, y);
+                int maxDelta = Math.Max(
+                    Math.Abs(a.R - b.R),
+                    Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
+                if (maxDelta >= channelDelta)
+                    changed++;
+                sampled++;
+            }
+        }
+
+        return sampled == 0 ? 0.0 : (double)changed / sampled;
+    }
+
+    internal static bool HasMeaningfulVisualChange(
+        Bitmap before,
+        Bitmap after,
+        Rectangle roi,
+        double requiredRatio = 0.08)
+        => MeasureVisualChangeRatio(before, after, roi) >= requiredRatio;
+
     internal InvalidOperationException Failure(Bitmap frame, string message)
     {
         Directory.CreateDirectory(_debugDir);
