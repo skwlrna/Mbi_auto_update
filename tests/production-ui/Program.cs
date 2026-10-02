@@ -120,7 +120,11 @@ internal static class Program
             craftSearch.Text = "회복"; Pump();
             Check(craftItems.Items.Count == 1 && craftItems.Items[0]!.ToString() == "상급 회복 물약",
                 "crafting item search filters the complete catalog");
-            All(crafting).OfType<NumericUpDown>().Single().Value = 23;
+            var craftingQuantity = All(crafting).OfType<NumericUpDown>().Single();
+            Check(!craftingQuantity.Controls.Cast<Control>().Any(x =>
+                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
+                "crafting target quantity matches production UI without arrow buttons");
+            craftingQuantity.Value = 23;
             var craftPlan = Invoke<CraftingPlan>(form, "SelectedCraftingPlan");
             Check(craftPlan.Category == CraftingCategory.Item && craftPlan.TargetQuantity == 23 && craftPlan.ProducedPerCraft == 5,
                 "crafting selection preserves category, quantity and per-craft yield");
