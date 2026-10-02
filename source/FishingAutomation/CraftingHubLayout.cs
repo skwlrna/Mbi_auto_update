@@ -27,7 +27,7 @@ internal static class CraftingHubLayout
         => new(10, 75, 245, 120);
 
     internal static Rectangle ProductSearchDialogArea
-        => new(65, 350, 675, 360);
+        => new(140, 760, 520, 235);
 
     internal static Rectangle ProductSearchResultArea
         => new(35, 390, 730, 535);
@@ -36,13 +36,14 @@ internal static class CraftingHubLayout
         => new(30, 118);
 
     internal static Point ProductSearchInputPoint
-        => new(400, 425);
+        => new(400, 862);
 
     internal static Point ProductFirstResultPoint
         => new(400, 460);
 
     internal const double SearchDialogOpenChangeRatio = 0.08;
     internal const double SearchResultChangeRatio = 0.06;
+    internal const int ProductListSettleDelayMs = 1200;
 
     internal static Rectangle CategoryTitleArea(CraftingCategory category)
         => category switch
