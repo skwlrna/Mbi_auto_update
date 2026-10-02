@@ -29,15 +29,12 @@ internal static class CraftingQueries
             throw new InvalidDataException("제작 품목 목록 형식이 올바르지 않습니다.");
 
         var result = new List<CraftableItem>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var row in items.EnumerateArray())
         {
             if (row.ValueKind != JsonValueKind.Object)
                 throw new InvalidDataException("제작 품목 행 형식이 올바르지 않습니다.");
 
             string name = RequiredString(row, "DisplayName");
-            if (!seen.Add(name))
-                continue;
 
             bool craftable = OptionalBool(row, "Craftable") ?? OptionalBool(row, "Available") ?? true;
             int produced = OptionalInt(row, "ProducedPerCraft") ?? OptionalInt(row, "Produced") ?? 1;

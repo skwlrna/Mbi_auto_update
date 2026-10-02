@@ -26,6 +26,7 @@ public sealed partial class MainForm
             if (capabilities.TryGetValue("execute_crafting", out var craftingCapability))
                 _log.Write("[제작] execute_crafting 설명/비용 조회만 수행 · " +
                     (craftingCapability.Description ?? "설명 없음") + " · " +
+                    (craftingCapability.Note ?? "비용 안내 Note 없음") + " · " +
                     (craftingCapability.Metadata ?? "비용 메타데이터 없음") + " · 실제 실행 차단 유지");
             else
                 _log.Write("[제작] execute_crafting capability 없음 · 화면 제작 경로 사용");

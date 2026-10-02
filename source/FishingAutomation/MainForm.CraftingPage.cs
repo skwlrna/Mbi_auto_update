@@ -15,6 +15,8 @@ public sealed partial class MainForm
     {
         if (_craftingPage.Items.SelectedItem is not CraftingChoice choice)
             throw new InvalidOperationException("제작 품목 목록을 불러온 뒤 품목을 선택하세요.");
+        if (_craftingPage.SelectedAmbiguous)
+            throw new InvalidOperationException("동일 이름 제작 제법이 여러 개라 자동 선택할 수 없습니다.");
         return new(
             _craftingPage.Category,
             choice.Item.DisplayName,
@@ -79,6 +81,8 @@ public sealed partial class MainForm
         internal string CliStatus = "확인 전";
         internal string? SelectedName => Items.SelectedItem is CraftingChoice choice
             ? choice.Item.DisplayName : null;
+        internal bool SelectedAmbiguous => SelectedName is string selected &&
+            _choices.Count(x => string.Equals(x.DisplayName, selected, StringComparison.Ordinal)) > 1;
 
         internal CraftingPage(MainForm owner)
         {
@@ -400,7 +404,9 @@ public sealed partial class MainForm
             }
 
             _selected.Text = choice.Item.DisplayName;
-            _detail.Text = $"1회 {choice.Item.ProducedPerCraft}개 · 배치 최대 10회";
+            _detail.Text = SelectedAmbiguous
+                ? "동일 이름 제법 여러 개 · 자동 선택 불가"
+                : $"1회 {choice.Item.ProducedPerCraft}개 · 배치 최대 10회";
             _state.Text = choice.Item.Craftable || choice.Item.MissingIngredients.Count > 0
                 ? "제작 가능/재료 해결 가능"
                 : "조건 확인 필요";
@@ -415,7 +421,7 @@ public sealed partial class MainForm
             bool selected = Items.SelectedItem is CraftingChoice;
             foreach (Control control in new Control[] { Items, Quantity, _search, _reload, _food, _item })
                 control.Enabled = !busy && !_loading;
-            _start.Enabled = !busy && !_loading && selected;
+            _start.Enabled = !busy && !_loading && selected && !SelectedAmbiguous;
             _stop.Enabled = ownRun && _owner.AnyRunning;
 
             long current = ownRun ||

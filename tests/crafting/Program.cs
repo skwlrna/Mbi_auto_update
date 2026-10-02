@@ -28,6 +28,12 @@ try
         }), ""));
 
     var items = CraftingQueries.ParseCatalog(response);
+    var duplicateResponse = MabinogiMobileCli.Parse("get_craftable_items", new CliProcessOutput(0,
+        "{\"items\":[{\"DisplayName\":\"동일 이름\",\"Craftable\":false,\"ProducedPerCraft\":1},{\"DisplayName\":\"동일 이름\",\"Craftable\":true,\"ProducedPerCraft\":1}]}", ""));
+    var duplicateItems = CraftingQueries.ParseCatalog(duplicateResponse);
+    Check(duplicateItems.Count == 2, "different recipes with the same display name are not silently discarded");
+    try { CraftingQueries.Exact(duplicateItems, "동일 이름"); throw new Exception("ambiguous recipe accepted"); }
+    catch (InvalidOperationException) { Check(true, "ambiguous same-name recipes cannot authorize screen crafting"); }
     Check(items.Count == 3, "craftable catalog parses every item");
     Check(items[0].Category == CraftingCategory.Food && items[1].Category == CraftingCategory.Item,
         "food and item category hints are recognized");
@@ -82,6 +88,12 @@ try
         Check(CraftingQueries.Exact(overlapping, wanted).DisplayName == wanted, "exact overlapping name: " + wanted);
     }
     var log = new AppLog(Path.Combine(AppContext.BaseDirectory, "crafting-test.log"), 1000000);
+    var noteCli = new MabinogiMobileCli(log, true, (command, ct) => Task.FromResult(new CliProcessOutput(0,
+        command == "status" ? "{\"pipe\":\"connected\"}" :
+        "{\"commands\":[{\"Command\":\"execute_crafting\",\"Description\":\"Craft a recipe\",\"Note\":\"Running this command consumes 5 정령의 날개.\"}]}", "")));
+    var noteCapabilities = await CliAutomationGuards.EnsureCapabilitiesAsync(noteCli, Array.Empty<string>());
+    Check(noteCapabilities["execute_crafting"].Note?.Contains("consumes 5", StringComparison.Ordinal) == true,
+        "cost Note is preserved even when Metadata is absent");
     var cli = new MabinogiMobileCli(log, true, (_, _) =>
     {
         launches++;
@@ -92,6 +104,8 @@ try
 
     await CraftingFlowTests.RunAsync(Check, log);
     await BulkGatheringFlowTests.RunAsync(Check);
+    if (args.Length == 1 && args[0] == "--live-readonly") await LiveReadOnlyTests.RunAsync(Check, log);
+    else if (args.Length == 1) await LiveSnapshotTests.RunAsync(args[0], Check, log);
     Console.WriteLine($"PASS {checks} crafting checks");
 }
 catch (Exception ex)

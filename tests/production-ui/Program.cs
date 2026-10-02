@@ -126,6 +126,15 @@ internal static class Program
                 "crafting selection preserves category, quantity and per-craft yield");
             if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], "crafting.png")); }
             Check(fake.Actions.Count == 0, "crafting catalog and search remain read-only");
+            fake.DuplicateCrafting = true;
+            craftSearch.Text = "";
+            All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 목록 새로고침").PerformClick();
+            PumpUntil(() => craftItems.Items.Count == 2);
+            Check(!All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 시작").Enabled,
+                "duplicate crafting names remain listed but disable automatic start");
+            try { Invoke<CraftingPlan>(form, "SelectedCraftingPlan"); throw new Exception("duplicate crafting selection accepted"); }
+            catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+            { Check(true, "F9 plan selection also rejects duplicate crafting names"); }
 
             foreach (string mode in new[] { "낚시", "던전", "어비스" })
             { Menu(mode); Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved: " + mode); }
@@ -210,6 +219,7 @@ internal sealed class FakeCli
 {
     internal readonly List<(string Command,string? Name)> Actions = new();
     internal bool Fail, Gain = true;
+    internal bool DuplicateCrafting;
     private bool _gathering;
     private long _logs = 38, _ingots = 12, _wood = 20;
     private string? _work;
@@ -217,6 +227,9 @@ internal sealed class FakeCli
     {
         ct.ThrowIfCancellationRequested();
         if(Fail) return Task.FromResult(new CliProcessOutput(5,"{\"pipe\":\"disconnected\"}",""));
+        if(command == "get_craftable_items" && DuplicateCrafting)
+            return Task.FromResult(new CliProcessOutput(0,
+                "{\"items\":[{\"DisplayName\":\"동일 이름\",\"Craftable\":true},{\"DisplayName\":\"동일 이름\",\"Craftable\":false}]}", ""));
         if(command=="get_items" && _gathering && Gain) _logs+=3;
         object data = command switch
         {
