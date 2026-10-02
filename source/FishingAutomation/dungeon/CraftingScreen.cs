@@ -92,17 +92,13 @@ internal sealed class CraftingScreen : ICraftingScreen
         string label,
         CancellationToken ct)
     {
-        Rectangle titleArea = CraftingHubLayout.CategoryTitleArea(category);
         Rectangle cardArea = CraftingHubLayout.CategoryCardArea(category);
-        Point fallbackPoint = CraftingHubLayout.CategoryClickPoint(category);
-        if (titleArea.IsEmpty || cardArea.IsEmpty ||
+        Point fixedPoint = CraftingHubLayout.CategoryClickPoint(category);
+        if (cardArea.IsEmpty || fixedPoint.IsEmpty ||
             !CraftingHubLayout.IsSafeFallbackPoint(category))
             throw new InvalidOperationException("지원하지 않는 제작 허브 분류입니다.");
 
         DetectionResult? firstHeader = null;
-        DetectionResult? firstCategory = null;
-        bool firstTitleSignal = false;
-
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
@@ -111,30 +107,23 @@ internal sealed class CraftingScreen : ICraftingScreen
                 frame, CraftingHubLayout.HubHeaderArea, "제작", ct);
             if (!header.Found)
             {
-                var headerExact = await _ui.Ocr.FindAlteringLabelsAsync(
+                var exact = await _ui.Ocr.FindAlteringLabelsAsync(
                     frame,
                     CraftingHubLayout.HubHeaderArea,
                     "제작",
                     ct,
                     acceptedBounds: CraftingHubLayout.HubHeaderArea,
                     dimText: true);
-                if (headerExact.Count != 1)
+                if (exact.Count != 1)
                     throw Fail(frame,
-                        "제작 허브 상단 제목을 확인하지 못해 카드 클릭을 중단합니다.");
-                header = headerExact[0];
+                        "제작 허브 상단 제목을 확인하지 못해 고정 카드 좌표 클릭을 중단합니다.");
+                header = exact[0];
             }
-
-            var compact = await _ui.Ocr.FindCompactLabelAsync(
-                frame, titleArea, label, ct);
-            DetectionResult? categoryFound = compact.Found ? compact : null;
-            bool titleSignal = HasBrightTitleSignal(frame, titleArea);
 
             if (pass == 0)
             {
                 firstHeader = header;
-                firstCategory = categoryFound;
-                firstTitleSignal = titleSignal;
-                await Task.Delay(170, ct);
+                await Task.Delay(150, ct);
                 continue;
             }
 
@@ -143,93 +132,139 @@ internal sealed class CraftingScreen : ICraftingScreen
                 throw Fail(frame,
                     "제작 허브 상단 제목 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
 
-            // Preferred path: exact compact OCR on the small title band in both frames.
-            if (firstCategory is not null && categoryFound is not null &&
-                CraftingHubLayout.IsStableTitle(
-                    firstCategory.Value.Bounds, categoryFound.Value.Bounds))
-            {
-                _ui.ClickFresh(categoryFound.Value.Center, ct);
-                Log?.Invoke(
-                    $"[제작] 제작 허브 카드 확인 · {label} · 제목 compact OCR 2프레임");
-                return;
-            }
-
-            // Live V2.0.4 evidence: Windows OCR can miss the clearly visible
-            // 아이템 title even though the fixed 800x1000 hub is correct. For this
-            // navigation-only click, a stable 제작 header plus visible bright title
-            // signal authorizes the user-confirmed card center. No crafting or paid
-            // action happens on this click.
-            if (!firstTitleSignal || !titleSignal)
-                throw Fail(frame,
-                    $"제작 허브의 {label} 카드 제목 OCR이 실패했고 제목 시각 신호도 확인하지 못했습니다.");
-
-            var guardArea = Rectangle.Intersect(
-                Rectangle.Inflate(titleArea, 12, 12),
-                new Rectangle(Point.Empty, frame.Size));
-            _ui.ClickFresh(fallbackPoint, ct);
+            // 800x1000 제작 허브는 카드 위치가 고정이다. OCR은 허브 상태
+            // 확인에만 사용하고 음식/아이템 선택 좌표는 저장된 카드 중심을 쓴다.
+            _ui.ClickFresh(fixedPoint, ct);
             Log?.Invoke(
-                $"[제작] 제작 허브 카드 확인 · {label} · OCR 미검출 → 800x1000 검증 좌표 fallback ({fallbackPoint.X},{fallbackPoint.Y})");
+                $"[제작] 제작 허브 카드 선택 · {label} · 고정좌표 ({fixedPoint.X},{fixedPoint.Y})");
             return;
         }
 
         using var failed = Capture(ct);
-        throw Fail(failed, $"제작 허브에서 {label} 카드를 확인하지 못했습니다.");
-    }
-
-    private static bool HasBrightTitleSignal(Bitmap frame, Rectangle area)
-    {
-        area = Rectangle.Intersect(area, new Rectangle(Point.Empty, frame.Size));
-        if (area.Width < 20 || area.Height < 20)
-            return false;
-
-        int brightNeutral = 0;
-        int sampled = 0;
-        for (int y = area.Top; y < area.Bottom; y += 2)
-        for (int x = area.Left; x < area.Right; x += 2)
-        {
-            Color p = frame.GetPixel(x, y);
-            sampled++;
-            int max = Math.Max(p.R, Math.Max(p.G, p.B));
-            int min = Math.Min(p.R, Math.Min(p.G, p.B));
-            if (p.R >= 175 && p.G >= 175 && p.B >= 175 && max - min <= 55)
-                brightNeutral++;
-        }
-
-        return sampled > 0 && brightNeutral >= 24;
+        throw Fail(failed, $"제작 허브에서 {label} 카드를 선택하지 못했습니다.");
     }
 
     private async Task SearchProductAsync(string displayName, string category, CancellationToken ct)
     {
+        if (!CraftingHubLayout.IsSafeSearchGeometry())
+            throw new InvalidOperationException("제작 검색 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
+
         _ = await _ui.RequireStableExactAsync(
             category,
-            new Rectangle(15, 20, 300, 100),
+            CraftingHubLayout.ProductListHeaderArea,
             ct,
             $"{category} 제작 목록 화면을 확인하지 못했습니다.",
             dimText: true);
 
+        const string placeholder = "결과물 또는 재료 이름을 검색해 보세요";
+
+        // Normal path: the 800x1000 crafting UI is fixed. Do not OCR-search for
+        // the magnifier, input field, Apply button, or filtered first result.
+        _ui.ClickFresh(CraftingHubLayout.ProductSearchIconPoint, ct);
+        Log?.Invoke(
+            $"[제작] 검색 돋보기 · 고정좌표 ({CraftingHubLayout.ProductSearchIconPoint.X},{CraftingHubLayout.ProductSearchIconPoint.Y})");
+        await Task.Delay(400, ct);
+
+        bool dialogVisible;
+        using (var dialogFrame = Capture(ct))
+        {
+            dialogVisible = await FindUniqueAsync(
+                dialogFrame,
+                CraftingHubLayout.ProductSearchDialogArea,
+                placeholder,
+                ct) is not null;
+        }
+
+        // If the fixed magnifier point did not open the dialog, recover through
+        // the previous OCR anchor once. This is fallback only.
+        if (!dialogVisible)
+        {
+            Log?.Invoke("[제작] 검색창 확인 실패 · 돋보기만 OCR fallback 1회");
+            _ = await _ui.ClickOffsetFromStableExactAsync(
+                "전체",
+                CraftingHubLayout.ProductFilterArea,
+                all => new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y),
+                ct,
+                "제작 목록의 전체 필터/검색 아이콘 기준점을 확인하지 못했습니다.",
+                dimText: true);
+            await Task.Delay(400, ct);
+        }
+
+        _ui.ClickFresh(CraftingHubLayout.ProductSearchInputPoint, ct);
+        _ui.PasteFresh(displayName, ct);
+        await Task.Delay(120, ct);
+
+        _ui.TapFresh(0x1C, ct); // Enter: typed text commit is mandatory.
+        Log?.Invoke($"[제작] 검색어 입력 확정 · Enter · {displayName}");
+        await Task.Delay(220, ct);
+
+        // The fixed search dialog accepts Space as Apply after Enter. This avoids
+        // another OCR lookup for the Apply label.
+        _ui.TapFresh(0x39, ct); // Space = 적용
+        Log?.Invoke("[제작] 검색 적용 · Space · 고정 UI");
+        await Task.Delay(650, ct);
+
+        // OCR is now diagnostic only. Exact filtered searches select the fixed
+        // first result row even when Windows OCR misses the visible item name.
+        using (var resultFrame = Capture(ct))
+        {
+            var exact = await FindUniqueAsync(
+                resultFrame,
+                CraftingHubLayout.ProductSearchResultArea,
+                displayName,
+                ct);
+            Log?.Invoke(exact is null
+                ? $"[제작] 결과 OCR 미검출 · {displayName} · 첫 결과 고정좌표 사용"
+                : $"[제작] 결과 exact OCR 확인 · {displayName} · 클릭은 고정좌표 사용");
+        }
+
+        _ui.ClickFresh(CraftingHubLayout.ProductFirstResultPoint, ct);
+        Log?.Invoke(
+            $"[제작] 검색 첫 결과 선택 · 고정좌표 ({CraftingHubLayout.ProductFirstResultPoint.X},{CraftingHubLayout.ProductFirstResultPoint.Y})");
+        await Task.Delay(500, ct);
+
+        using (var verify = Capture(ct))
+        {
+            if (await IsProductDetailAsync(verify, displayName, ct))
+                return;
+        }
+
+        // A layout mismatch must not silently continue. Return to the list and
+        // run the old OCR-driven flow once as a recovery path.
+        Log?.Invoke("[제작] 고정좌표 검색 결과 검증 실패 · 기존 OCR 검색 fallback 1회");
+        _ui.TapFresh(0x01, ct); // Escape: detail/search overlay -> list
+        await Task.Delay(350, ct);
+
+        _ = await _ui.RequireStableExactAsync(
+            category,
+            CraftingHubLayout.ProductListHeaderArea,
+            ct,
+            $"{category} 제작 목록 복귀를 확인하지 못했습니다.",
+            dimText: true);
+
         _ = await _ui.ClickOffsetFromStableExactAsync(
             "전체",
-            new Rectangle(35, 75, 220, 120),
+            CraftingHubLayout.ProductFilterArea,
             all => new Point(Math.Max(18, all.Bounds.Left - 42), all.Center.Y),
             ct,
-            "제작 목록의 전체 필터/검색 아이콘 기준점을 확인하지 못했습니다.",
+            "제작 목록의 전체 필터/검색 아이콘 fallback 기준점을 확인하지 못했습니다.",
             dimText: true);
         await Task.Delay(400, ct);
 
         await ProductionSearchFlow.SearchAndSelectAsync(
             _ui,
-            "결과물 또는 재료 이름을 검색해 보세요",
-            new Rectangle(65, 350, 675, 360),
+            placeholder,
+            CraftingHubLayout.ProductSearchDialogArea,
             displayName,
-            new Rectangle(35, 390, 730, 535),
+            CraftingHubLayout.ProductSearchResultArea,
             ct,
-            "제작",
+            "제작 fallback",
             text => Log?.Invoke(text));
         await Task.Delay(500, ct);
 
-        using var verify = Capture(ct);
-        if (!await IsProductDetailAsync(verify, displayName, ct))
-            throw Fail(verify, $"선택 후 {displayName} 제작 상세 화면을 확인하지 못했습니다.");
+        using var finalVerify = Capture(ct);
+        if (!await IsProductDetailAsync(finalVerify, displayName, ct))
+            throw Fail(finalVerify, $"선택 후 {displayName} 제작 상세 화면을 확인하지 못했습니다.");
     }
 
     private async Task<bool> IsProductDetailAsync(Bitmap frame, string displayName, CancellationToken ct)
