@@ -411,24 +411,22 @@ internal sealed class CraftingScreen : ICraftingScreen
             using var frame = Capture(ct);
             var lines = await _ui.Ocr.ReadLinesAsync(
                 frame, new Rectangle(500, 140, 300, 600), 3, ct);
-            var quest = lines
-                .Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName))
-                .OrderBy(x => x.Center.Y)
-                .FirstOrDefault();
-
-            if (!quest.Found)
-                throw Fail(frame, $"{plan.DisplayName} 제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다.");
+            var quest = FindQuestTitleCandidate(lines, plan);
+            if (quest is null)
+                throw Fail(frame,
+                    $"{plan.DisplayName} 제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다. " +
+                    "제목/품목명/준비행 구조를 모두 확인하지 못했습니다.");
 
             if (pass == 0)
             {
-                firstQuest = quest;
+                firstQuest = quest.Value;
                 await Task.Delay(140, ct);
             }
             else
             {
-                freshQuest = quest;
+                freshQuest = quest.Value;
                 if (firstQuest is null ||
-                    !ProductionUiRuntime.Stable(firstQuest.Value.Bounds, quest.Bounds))
+                    !ProductionUiRuntime.Stable(firstQuest.Value.Bounds, quest.Value.Bounds))
                     throw Fail(frame, $"{plan.DisplayName} 제작 퀘스트 위치가 안정적으로 일치하지 않았습니다.");
             }
         }
@@ -646,16 +644,82 @@ internal sealed class CraftingScreen : ICraftingScreen
         throw Fail(failed, "제작대로 이동 후 제작하기 버튼이 열린 제작 상세 화면을 확인하지 못했습니다.");
     }
 
+    private DetectionResult? FindQuestTitleCandidate(
+        IReadOnlyList<DetectionResult> lines,
+        CraftingPlan plan)
+    {
+        var exact = lines
+            .Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName))
+            .OrderBy(x => x.Center.Y)
+            .FirstOrDefault();
+        if (exact.Found)
+            return exact;
+
+        // V3.0.8 live food quest: the orange right-side title was visible but
+        // Windows OCR did not return the whole "야채볶음 제작" line. Within the
+        // fixed quest list, the recipe name alone is sufficient and safer than
+        // failing the already-created quest.
+        var nameOnly = lines
+            .Where(x => CraftingQuestText.IsTitleNameOnly(x.ReadText ?? "", plan.DisplayName))
+            .OrderBy(x => x.Center.Y)
+            .FirstOrDefault();
+        if (nameOnly.Found)
+        {
+            Log?.Invoke(
+                $"[제작] 퀘스트 제목 보조 인식 · 품목명만 확인 · {plan.DisplayName} · " +
+                $"y={nameOnly.Center.Y}");
+            return nameOnly;
+        }
+
+        // Final fallback uses the visible quest structure, not an arbitrary click:
+        // one or more ingredient "준비 n/N" rows plus the facility "제작대에서 제작 n/N"
+        // row means the newly-created production quest is present. Infer the title
+        // immediately above the first progress row and still require two-frame
+        // position stability before clicking it.
+        var progress = lines
+            .Where(x => CraftingQuestText.IsQuestProgress(x.ReadText ?? ""))
+            .OrderBy(x => x.Center.Y)
+            .ToArray();
+        bool hasStation = progress.Any(x =>
+            CraftingQuestText.IsStationStage(x.ReadText ?? ""));
+        bool hasPreparation = progress.Any(x =>
+            CraftingQuestText.Compact(x.ReadText ?? "").Contains("준비", StringComparison.Ordinal));
+
+        if (hasPreparation && hasStation)
+        {
+            int inferredCenterY = Math.Max(165, progress[0].Bounds.Top - 26);
+            var bounds = new Rectangle(680, inferredCenterY - 14, 110, 28);
+            Log?.Invoke(
+                $"[제작] 퀘스트 제목 구조 보조 인식 · 준비행+제작대행 확인 · " +
+                $"추정 클릭 ({bounds.Left + bounds.Width / 2},{bounds.Top + bounds.Height / 2})");
+            return new DetectionResult(
+                true,
+                bounds,
+                0.5,
+                plan.DisplayName + " 제작[구조]");
+        }
+
+        return null;
+    }
+
     private async Task<DetectionResult?> FindQuestStageAsync(
         Bitmap frame, CraftingPlan plan, bool directOnly, CancellationToken ct)
     {
-        var lines = await _ui.Ocr.ReadLinesAsync(frame, new Rectangle(500, 140, 300, 650), 3, ct);
-        var titles = lines.Where(x => CraftingQuestText.IsTitle(x.ReadText ?? "", plan.DisplayName)).ToArray();
-        if (titles.Length != 1) return null;
-        var title = titles[0];
-        var stages = lines.Where(x => x.Center.Y > title.Center.Y && x.Center.Y <= title.Bounds.Bottom + 70)
+        var lines = await _ui.Ocr.ReadLinesAsync(
+            frame,
+            new Rectangle(500, 140, 300, 650),
+            3,
+            ct);
+        var title = FindQuestTitleCandidate(lines, plan);
+        if (title is null)
+            return null;
+
+        var stages = lines
+            .Where(x => x.Center.Y > title.Value.Center.Y &&
+                        x.Center.Y <= title.Value.Bounds.Bottom + 150)
             .Where(x => CraftingQuestText.IsDirectStage(x.ReadText ?? "") ||
-                (!directOnly && CraftingQuestText.IsStationStage(x.ReadText ?? ""))).ToArray();
+                (!directOnly && CraftingQuestText.IsStationStage(x.ReadText ?? "")))
+            .ToArray();
         return stages.Length == 1 ? stages[0] : null;
     }
 
