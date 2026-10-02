@@ -371,43 +371,15 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(400, ct);
 
         _stage.Move(ProductionStage.Search, displayName);
-        await ClickExactAsync(
+        await ProductionSearchFlow.SearchAndSelectAsync(
+            _ui,
             "아이템 이름을 검색해 보세요",
-            new Rectangle(80, 470, 650, 170),
+            new Rectangle(80, 470, 650, 220),
+            displayName,
+            new Rectangle(45, 535, 710, 310),
             ct,
-            "가방 검색 입력칸을 확인하지 못했습니다.",
-            pasteText: displayName);
-        await Task.Delay(120, ct);
-
-        // Every item/material/product search confirms typed text with Enter first.
-        _ui.TapFresh(0x1C, ct);
-        await Task.Delay(220, ct);
-
-        bool applied = false;
-        for (int pass = 0; pass < 2 && !applied; pass++)
-        {
-            using var frame = Capture(ct);
-            var apply = await FindUniqueAsync(
-                frame, new Rectangle(80, 470, 650, 220), "적용하기", ct);
-            if (apply is null)
-                break;
-            if (pass == 0)
-            {
-                await Task.Delay(130, ct);
-                continue;
-            }
-            _ui.ClickFresh(apply.Value.Center, ct);
-            applied = true;
-        }
-        if (!applied)
-        {
-            using var frame = Capture(ct);
-            _ui.TapFresh(0x39, ct); // Enter confirmed; Space applies the active button.
-        }
-        await Task.Delay(650, ct);
-
-        await ClickExactAsync(displayName, new Rectangle(45, 535, 710, 310), ct,
-            $"가방 검색 결과에서 정확한 {displayName} 항목을 찾지 못했습니다.");
+            "가방",
+            text => Log?.Invoke(text));
         _stage.Move(ProductionStage.Detail, displayName);
         await Task.Delay(450, ct);
 
