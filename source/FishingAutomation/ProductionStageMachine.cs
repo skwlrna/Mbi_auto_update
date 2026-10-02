@@ -60,7 +60,8 @@ internal sealed class ProductionStageMachine
             ProductionStage.Idle =>
                 to is ProductionStage.OpenHub or ProductionStage.AcquireMaterial,
             ProductionStage.OpenHub =>
-                to is ProductionStage.SelectCategory or ProductionStage.Search or ProductionStage.Detail,
+                to is ProductionStage.SelectCategory or ProductionStage.Search or ProductionStage.Detail or
+                    ProductionStage.Travel or ProductionStage.Process,
             ProductionStage.SelectCategory =>
                 to is ProductionStage.Search or ProductionStage.Detail,
             ProductionStage.Search =>
