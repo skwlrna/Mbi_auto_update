@@ -60,6 +60,9 @@ public sealed class MabinogiMobileCli
     public Task<MabinogiCliResult> GetGatherableItemsAsync(CancellationToken token = default) => QueryAsync("get_gatherable_items", token);
     public Task<MabinogiCliResult> GetGatherableItemsAsync(string filterName, CancellationToken token = default)
         => FilteredQueryAsync("get_gatherable_items", filterName, token);
+    public Task<MabinogiCliResult> GetCraftableItemsAsync(CancellationToken token = default) => QueryAsync("get_craftable_items", token);
+    public Task<MabinogiCliResult> GetCraftableItemsAsync(string filterName, CancellationToken token = default)
+        => FilteredQueryAsync("get_craftable_items", filterName, token);
     public Task<MabinogiCliResult> GetInventoryAsync(CancellationToken token = default) => QueryAsync("get_inventory", token);
     public Task<MabinogiCliResult> CapabilitiesAsync(CancellationToken token = default) => QueryAsync("capabilities", token);
     public Task<MabinogiCliResult> GetMyInfoAsync(CancellationToken token = default) => QueryAsync("get_my_info", token);
@@ -115,7 +118,8 @@ public sealed class MabinogiMobileCli
 
     internal static IReadOnlyList<string> BuildFilteredQueryArguments(string command, string filterName)
     {
-        if (command != "get_gatherable_items") throw new InvalidOperationException("command_not_allowed");
+        if (command is not ("get_gatherable_items" or "get_craftable_items"))
+            throw new InvalidOperationException("command_not_allowed");
         string filter = filterName?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(filter) || filter.Length > 256 || filter.Any(char.IsControl))
             throw new InvalidOperationException("invalid_body");
@@ -126,7 +130,7 @@ public sealed class MabinogiMobileCli
     private async Task<MabinogiCliResult> FilteredQueryAsync(
         string command, string filterName, CancellationToken token)
     {
-        if (command != "get_gatherable_items")
+        if (command is not ("get_gatherable_items" or "get_craftable_items"))
             return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
         if (string.IsNullOrWhiteSpace(filterName) || filterName.Length > 256 || filterName.Any(char.IsControl))
             return Finish(new(command, false, "blocked", null, null, "invalid_body"));
@@ -309,7 +313,8 @@ public sealed class MabinogiMobileCli
     private static bool IsAllowedQuery(string command)
         => command is "status" or "capabilities" or "get_my_info" or "get_currencies"
             or "get_items" or "get_activity" or "get_current_environment"
-            or "get_alterable_items" or "get_altering_works" or "get_gatherable_items" or "get_inventory";
+            or "get_alterable_items" or "get_altering_works" or "get_gatherable_items"
+            or "get_craftable_items" or "get_inventory";
 
     // execute_gathering consumes five spirit wings. The ZIP's free screen paths
     // must never launch it, even if ZeroWingMode is false or requiresConfirm is false.
