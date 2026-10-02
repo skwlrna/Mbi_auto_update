@@ -66,6 +66,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 if (plan.SourceRecipe is null)
                     throw new InvalidOperationException(
                         $"{plan.DisplayName} 최초 확보에 필요한 생활 스킬/가공 재료 시작 제법을 찾지 못했습니다.");
+                if (_stage.Current == ProductionStage.Idle)
+                    _stage.Move(ProductionStage.AcquireMaterial, $"{plan.DisplayName} 최초 1개 확보");
                 await _fallback.StartAsync(plan with { TargetQuantity = 1 }, token);
             },
             token => StartInventoryHundredQuestAsync(plan.DisplayName, token),
