@@ -63,10 +63,10 @@ try
           CraftingQueries.NextBatchCrafts(7) == 7,
         "batch is capped at ten and remainder stays exact");
 
-    var args = MabinogiMobileCli.BuildFilteredQueryArguments("get_craftable_items", "야채볶음");
-    Check(args.Count == 2 && args[0] == "get_craftable_items" && args[1].StartsWith("base64:"),
+    var queryArgs = MabinogiMobileCli.BuildFilteredQueryArguments("get_craftable_items", "야채볶음");
+    Check(queryArgs.Count == 2 && queryArgs[0] == "get_craftable_items" && queryArgs[1].StartsWith("base64:"),
         "Korean craftable filter uses guarded base64 query");
-    string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(args[1][7..]));
+    string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(queryArgs[1][7..]));
     Check(decoded == "야채볶음", "craftable filter round-trips exact Korean name");
 
     int launches = 0;
