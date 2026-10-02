@@ -79,6 +79,9 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             var gatherable = catalog.SingleOrDefault(x => x.DisplayName == itemName);
             if (gatherable is not null)
             {
+                if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(itemName))
+                    throw new InvalidOperationException(
+                        $"{itemName}은(는) 곤충채집 퀘스트 전용 재료라 자동가공의 대량채집에서 직접 처리하지 않습니다. 제작 퀘스트 경로에서만 처리합니다.");
                 if (!gatherable.ToolOk)
                     throw new InvalidOperationException($"{itemName} 채집 도구가 없거나 내구도가 부족합니다.");
 
