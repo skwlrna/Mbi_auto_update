@@ -47,50 +47,30 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 ? "곤충채집/제작 퀘스트 전용"
                 : "생활 스킬 직접 매핑 미확정";
             throw new InvalidOperationException(
-                $"{plan.DisplayName}은(는) {kind} 재료라 단독/가공용 대량채집에서 임의 경로를 선택하지 않습니다.");
+                $"{plan.DisplayName}은(는) {kind} 재료라 생활 스킬 자동 채집을 시작할 수 없습니다.");
         }
 
         _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
         Log?.Invoke(
-            $"[대량 채집] 생활 스킬 100회 우선 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+            $"[대량 채집] 생활 스킬 100회 전용 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+
+        var automation = new LifeSkillBulkGatheringAutomation(
+            token => _data.ItemCountAsync(plan.DisplayName, token),
+            token => StartLifeSkillHundredAsync(source, token),
+            (before, token) => WaitForLifeSkillHundredStopAndInventoryAsync(
+                plan.DisplayName, before, TimeSpan.FromMinutes(10), token));
+        automation.Log += text => Log?.Invoke(text);
 
         try
         {
-            var automation = new LifeSkillBulkGatheringAutomation(
-                token => _data.ItemCountAsync(plan.DisplayName, token),
-                token => StartLifeSkillHundredAsync(source, token),
-                (before, token) => WaitForLifeSkillHundredStopAndInventoryAsync(
-                    plan.DisplayName, before, TimeSpan.FromMinutes(10), token));
-            automation.Log += text => Log?.Invoke(text);
             await automation.RunAsync(plan, ct);
-            return;
         }
-        catch (InvalidOperationException ex) when (CanUseInventoryFallback(ex))
+        catch (InvalidOperationException ex)
         {
             Log?.Invoke(
-                $"[대량 채집] 생활 스킬 100회 화면 경로 확인 실패 · 가방 100개 보조 경로 시도 · {ex.Message}");
+                $"[대량 채집] 생활 스킬 경로 실패 · 가방/재료상세 경로로 우회하지 않음 · {ex.Message}");
+            throw;
         }
-
-        // Fallback is only for a material whose life-skill mapping is already known.
-        // It is never used to guess an unknown/insect category.
-        var fallbackAutomation = new InventoryBulkGatheringAutomation(
-            token => _data.ItemCountAsync(plan.DisplayName, token),
-            token => _inventory.InventoryOnlyCountAsync(plan.DisplayName, token),
-            async token =>
-            {
-                if (plan.SourceRecipe is null)
-                    throw new InvalidOperationException(
-                        $"{plan.DisplayName} 가방 보유 0개이고 보조 경로용 시작 제법도 없어 안전하게 최초 1개를 확보할 수 없습니다.");
-                if (_stage.Current == ProductionStage.Idle)
-                    _stage.Move(ProductionStage.AcquireMaterial, $"{plan.DisplayName} 최초 1개 확보");
-                await _fallback.StartAsync(plan with { TargetQuantity = 1 }, token);
-            },
-            token => StartInventoryHundredQuestAsync(plan.DisplayName, token),
-            (before, minimum, token) => WaitForNaturalStopAndInventoryAsync(
-                plan.DisplayName, before, minimum,
-                minimum == 1 ? TimeSpan.FromMinutes(3) : TimeSpan.FromMinutes(6), token));
-        fallbackAutomation.Log += text => Log?.Invoke(text);
-        await fallbackAutomation.RunAsync(plan, ct);
     }
 
     private static bool CanUseInventoryFallback(InvalidOperationException ex)
@@ -119,15 +99,42 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
         else if (_stage.Current == ProductionStage.VerifyInventory)
             _stage.Move(ProductionStage.OpenHub, $"생활 스킬 반복 · {source.Category}");
-        // C = profile. No fixed list-row Y is used after this shortcut.
+        // C = profile. Confirm that the profile/life-skill menu is really visible
+        // before allowing the next input. Never fall back to inventory/material detail.
+        var lifeSkillArea = new Rectangle(20, 70, 760, 860);
+        Log?.Invoke("[대량 채집] 프로필 열기 · C 입력");
         _ui.TapFresh(0x2E, ct);
-        await Task.Delay(700, ct);
+
+        DateTime profileDeadline = DateTime.UtcNow.AddSeconds(4);
+        bool profileConfirmed = false;
+        while (DateTime.UtcNow < profileDeadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+            var lifeSkill = await FindUniqueAsync(frame, lifeSkillArea, "생활 스킬", ct);
+            if (lifeSkill is not null)
+            {
+                profileConfirmed = true;
+                Log?.Invoke("[대량 채집] 프로필 열림 확인 · 생활 스킬 메뉴 확인");
+                break;
+            }
+            await Task.Delay(250, ct);
+        }
+
+        if (!profileConfirmed)
+        {
+            using var failed = Capture(ct);
+            throw Fail(
+                failed,
+                "C 입력 후 프로필/생활 스킬 메뉴를 확인하지 못했습니다. 다른 획득 경로로 우회하지 않습니다.");
+        }
 
         await ClickExactAsync(
             "생활 스킬",
-            new Rectangle(20, 70, 760, 860),
+            lifeSkillArea,
             ct,
-            "프로필에서 생활 스킬 메뉴를 확인하지 못했습니다.");
+            "프로필에서 생활 스킬 메뉴를 안정적으로 확인하지 못했습니다.");
+        Log?.Invoke("[대량 채집] 생활 스킬 진입 클릭 완료");
         await Task.Delay(550, ct);
 
         _stage.Move(ProductionStage.SelectCategory, source.Category);
