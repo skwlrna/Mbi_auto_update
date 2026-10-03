@@ -220,6 +220,26 @@ try
           CraftingQueries.NextBatchCrafts(7) == 7,
         "batch is capped at ten and remainder stays exact");
 
+    var cabbageDecision = QuestMaterialNameMatcher.Decide(
+        "양배",
+        new[] { "면", "밀", "밥", "쌀", "양배추", "양털", "양파", "콩" });
+    Check(cabbageDecision.Name == "양배추" &&
+          cabbageDecision.AmbiguousCandidates.Count == 0,
+        "full-string quest material matching corrects 양배 to 양배추 without substring false positives");
+
+    var potatoDecision = QuestMaterialNameMatcher.Decide(
+        "감사",
+        new[] { "감자", "양파", "허브" });
+    Check(potatoDecision.Name == "감자",
+        "full-string quest material matching corrects 감사 to 감자");
+
+    var ambiguousDecision = QuestMaterialNameMatcher.Decide(
+        "감사",
+        new[] { "감자", "감초" });
+    Check(ambiguousDecision.Name is null &&
+          ambiguousDecision.AmbiguousCandidates.Count == 2,
+        "quest material matching refuses true full-string ties");
+
     var queryArgs = MabinogiMobileCli.BuildFilteredQueryArguments("get_craftable_items", "야채볶음");
     Check(queryArgs.Count == 2 && queryArgs[0] == "get_craftable_items" && queryArgs[1].StartsWith("base64:"),
         "Korean craftable filter uses guarded base64 query");
