@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.20"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.0\.21"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.20</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.0\.21</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -480,6 +480,20 @@ jobs:
           }
 
           if($bulkScreen -notmatch '생활 스킬 100회 우선' -or $bulkScreen -notmatch '가까운 위치 찾기'){throw 'life-skill 100-action primary route missing'}
+          $bulkStart = [regex]::Match($bulkScreen, 'public async Task StartAsync[\s\S]*?(?=\r?\n    private static bool CanUseInventoryFallback)').Value
+          if([string]::IsNullOrWhiteSpace($bulkStart)){throw 'bulk gathering StartAsync block missing'}
+          if($bulkStart -match 'InventoryBulkGatheringAutomation|StartInventoryHundredQuestAsync|_fallback\.StartAsync'){throw 'bulk gathering must not fall back to inventory/material-detail acquisition'}
+          if($bulkStart -notmatch '가방/재료상세 경로로 우회하지 않음'){throw 'life-skill-only failure trace missing'}
+          if($bulkScreen -notmatch '프로필 열기 · C 입력' -or
+             $bulkScreen -notmatch '프로필 열림 확인 · 생활 스킬 메뉴 확인' -or
+             $bulkScreen -notmatch '생활 스킬 진입 클릭 완료'){throw 'life-skill profile/menu confirmation trace missing'}
+
+          $craftReturn = [regex]::Match($craftScreen, 'public async Task ReturnToStationAndCraftAsync[\s\S]*?(?=\r?\n    private async Task FinishDirectCraftAsync)').Value
+          if([string]::IsNullOrWhiteSpace($craftReturn)){throw 'crafting station-return block missing'}
+          if($craftReturn -match 'FindQuestStageAsync|SetCraftCountAsync|CloseOverlayAsync'){throw 'completed quest must not re-find station stage, close quest, or reset count'}
+          if($craftReturn -notmatch '제작대 자동 복귀 대기' -or
+             $craftReturn -notmatch '추가 퀘스트/ESC/Space 입력 없음' -or
+             $craftReturn -notmatch '수량 재설정 없음'){throw 'passive crafting auto-return trace missing'}
           if($bulkEngine -match '100개' -or $bulkEngine -notmatch 'after <= before'){throw 'life-skill engine must verify variable inventory gain'}
           foreach($required in @('우물','굵은 나무','먹구름 양','개암 버섯','동 광맥','밀','감자')){
             if($mapping -notmatch [regex]::Escape($required)){throw "life-skill mapping missing: $required"}
