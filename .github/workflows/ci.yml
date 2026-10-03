@@ -524,6 +524,11 @@ jobs:
              $bulkScreen -notmatch 'ProfileLifeSkillPoint = new\(400, 944\)' -or
              $bulkScreen -notmatch '생활 스킬 고정좌표 클릭' -or
              $bulkScreen -notmatch '생활 스킬 화면 진입 확인 · 상단 제목 2프레임 안정'){throw 'fixed life-skill profile navigation missing'}
+          if($bulkScreen -notmatch 'WaitForProfileOpenAsync' -or
+             $bulkScreen -notmatch 'LifeSkillProfilePolicy\.MayRetryToggle' -or
+             $bulkScreen -notmatch 'C 추가 입력 없음' -or
+             $bulkScreen -notmatch '토글키 C를 다시 누르지 않고 안전하게 정지'){throw 'safe profile-toggle recovery missing'}
+          if($bulkScreen -match 'attempt <= 3'){throw 'profile recognition must not blindly toggle C three times'}
           foreach($fixedCategory in @(
             '"일상 채집" => new Point\(222, 206\)',
             '"나무 베기" => new Point\(341, 206\)',
