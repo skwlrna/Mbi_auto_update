@@ -242,7 +242,7 @@ jobs:
           if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
           if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
           if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
-          if ($screen -notmatch 'resultAttempts: 8') { throw 'first receive completion-result wait must be short' }
+          if ($screen -notmatch 'resultAttempts: 24') { throw 'on-site receipt completion-result wait missing' }
           if ($screen -notmatch 'return collected;') { throw 'first receive must return collection/travel result' }
           if ($screen -notmatch '가공 완료 결과창 확인 · Space 입력') { throw 'completion result Space confirmation log missing' }
           if ($screen -notmatch '가공 완료 확인창 닫기 완료') { throw 'completion result facility-return log missing' }
