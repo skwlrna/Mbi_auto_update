@@ -389,6 +389,8 @@ jobs:
           $bulkEngine = Get-Content source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs -Raw
           $mapping = Get-Content source/FishingAutomation/LivingSkillGatheringCatalog.cs -Raw
           $resolver = Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
+          $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
 
           if($crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
           if($craftScreen -notmatch '퀘스트 만들기' -or $craftScreen -notmatch '제작 완료'){throw 'quest-driven crafting flow missing'}
@@ -502,6 +504,26 @@ jobs:
             if($mapping -notmatch [regex]::Escape($insect)){throw "quest-only insect missing: $insect"}
           }
           if($resolver -notmatch 'IsQuestOnlyMaterial'){throw 'recursive altering must not bulk-gather quest-only insects'}
+
+          if($alteringPlan -notmatch 'interface IAlteringFieldExitScreen'){throw 'altering field-exit contract missing'}
+          if($alterScreen -notmatch 'IAlteringFieldExitScreen' -or
+             $alterScreen -notmatch 'ExitToFieldAsync' -or
+             $alterScreen -notmatch '채집 전 가공 UI 종료 확인 · 일반 필드 2프레임 확인' -or
+             $alterScreen -notmatch 'stableFieldFrames >= 2'){throw 'altering UI field-exit implementation missing'}
+          $fieldExit = [regex]::Match($alterScreen, 'public async Task ExitToFieldAsync[\s\S]*?(?=\r?\n    public async Task RecoverStallAsync)').Value
+          if([string]::IsNullOrWhiteSpace($fieldExit)){throw 'altering field-exit method block missing'}
+          if($fieldExit -match 'TapFresh\(0x39'){throw 'altering field-exit must never press Space'}
+          if($fieldExit -notmatch 'ClickFresh\(new Point\(33, 55\), ct\)' -or
+             $fieldExit -notmatch 'TapFresh\(0x01, ct\)'){throw 'altering field-exit must unwind facility and hub'}
+          if($zeroWing -notmatch 'IAlteringFieldExitScreen' -or
+             $zeroWing -notmatch '채집 전 가공 UI 종료'){throw 'zero-wing field-exit guard missing'}
+
+          $resolverGather = [regex]::Match($resolver, 'var gatherPlan = new GatheringPlan[\s\S]*?await gathering\.RunAsync\(gatherPlan, ct\);').Value
+          if([string]::IsNullOrWhiteSpace($resolverGather)){throw 'recursive gathering transition block missing'}
+          $exitIndex = $resolverGather.IndexOf('await fieldExit.ExitToFieldAsync(ct)')
+          $gatherIndex = $resolverGather.IndexOf('await gathering.RunAsync(gatherPlan, ct)')
+          if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'recursive gathering must exit altering UI before opening life skill'}
+          if($resolverGather -notmatch '자동 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'recursive gathering field-exit trace missing'}
 
           if($alterScreen -match '이동 확인 Space 입력 완료' -or
              $alterScreen -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력'){throw 'facility travel Space regression returned'}
