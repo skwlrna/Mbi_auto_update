@@ -94,6 +94,11 @@ internal static class CraftingQueries
              FallbackCategory(x) == category));
     }
 
+    internal static CraftingCategory ResolveUiCategory(CraftableItem item)
+        => item.Category != CraftingCategory.Unknown
+            ? item.Category
+            : FallbackCategory(item);
+
     internal static (int Food, int Item, int Unknown, bool UsesFallback) CategoryCoverage(
         IEnumerable<CraftableItem> items)
     {
