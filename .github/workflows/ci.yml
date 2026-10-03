@@ -476,6 +476,13 @@ jobs:
              $craftScreen -notmatch 'AcquisitionMethodHeaderArea' -or
              $craftScreen -notmatch 'AcquisitionMethodRecommendedPoint' -or
              $craftScreen -notmatch '추천 획득처 선택 · 고정좌표'){throw 'acquisition popup must use live header and fixed recommended row'}
+          $acquire = [regex]::Match($craftScreen, 'public async Task GatherQuestDeficitAsync[\s\S]*?(?=\r?\n    public async Task CloseOverlayAsync)').Value
+          if([string]::IsNullOrWhiteSpace($acquire)){throw 'crafting acquisition block missing'}
+          if($acquire -notmatch 'anyHeaderSeen' -or
+             $acquire -notmatch 'firstMaterialSeen' -or
+             $acquire -notmatch 'secondMaterialSeen' -or
+             $acquire -notmatch '추천 글자 OCR은 클릭 조건에서 제외'){throw 'acquisition popup must gate fixed click on stable material row, not decorative 추천 OCR'}
+          if($acquire -match 'firstReady|secondReady|bool ready = header is not null'){throw 'decorative 추천/header must not be required on both acquisition frames'}
           if($runtime -notmatch 'MeasureVisualChangeRatio' -or
              $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'shared fixed-ROI visual transition helper missing'}
           if($craftScreen -match '제작 목록 화면을 확인하지 못했습니다' -or
