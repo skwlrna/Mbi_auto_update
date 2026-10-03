@@ -286,8 +286,9 @@ jobs:
           foreach($facilityTab in @('목재 가공 시설','금속 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
             if($productionPage -notmatch [regex]::Escape($facilityTab)){throw "facility tab missing: $facilityTab"}
           }
-          if ($productionPage -notmatch 'ArrowlessNumericUpDown' -or $productionPage -notmatch 'UpDownButtons' -or $productionPage -notmatch 'child\.Visible = false') { throw 'arrowless target quantity input missing' }
-          if ($productionPage -notmatch 'Quantity = new ArrowlessNumericUpDown') { throw 'gathering and altering must both use arrowless target quantity input' }
+          $productionUi = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
+          if ($productionUi -notmatch 'class QuantityTextBox : TextBox') { throw 'plain target quantity input missing' }
+          if ($productionPage -notmatch 'Quantity = new QuantityTextBox' -or $productionPage -match 'ArrowlessNumericUpDown|UpDownButtons') { throw 'gathering and altering must use the artifact-free quantity text input' }
           if ($productionPage -match 'AddRow\(form, 4, "가공 시설", Facility\)') { throw 'old altering facility dropdown returned to visible UI' }
           if ($altering -notmatch 'int freeSlots = Math\.Max\(0, 7 - facilityCount\)') { throw 'seven-slot free-capacity calculation missing' }
           if ($altering -notmatch 'int batchGoal = Math\.Min\(freeSlots, plan\.RequiredWorks - QueuedWorks\)') { throw 'batch size must be capped by free slots and remaining works' }
