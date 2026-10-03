@@ -52,7 +52,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
         _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
         Log?.Invoke(
-            $"[대량 채집] 생활 스킬 100회 전용 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
+            $"[대량 채집] 생활 스킬 100회 우선 · 생활 스킬 전용 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
 
         var automation = new LifeSkillBulkGatheringAutomation(
             token => _data.ItemCountAsync(plan.DisplayName, token),
