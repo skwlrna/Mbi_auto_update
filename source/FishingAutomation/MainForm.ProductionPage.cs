@@ -102,7 +102,7 @@ public sealed partial class MainForm
         private readonly Button? _inspect;
         internal readonly ListBox Items = new();
         internal readonly ComboBox Facility = new LauncherCombo();
-        internal readonly NumericUpDown Quantity;
+        internal readonly QuantityTextBox Quantity;
         internal readonly Label Owned = new();
         private readonly TextBox _search = new();
         private readonly Dictionary<string, Button> _facilityTabButtons = new(StringComparer.Ordinal);
@@ -131,7 +131,7 @@ public sealed partial class MainForm
         internal ProductionPage(MainForm owner, bool altering)
         {
             _owner = owner; IsAltering = altering;
-            Quantity = new ArrowlessNumericUpDown
+            Quantity = new QuantityTextBox
             {
                 Minimum = 1,
                 Maximum = 1000000,
@@ -344,46 +344,12 @@ public sealed partial class MainForm
         private static string? RecipeFacility(AlteringRecipe recipe)
             => AlteringFacilityResolver.Resolve(recipe);
 
-        private sealed class ArrowlessNumericUpDown : NumericUpDown
-        {
-            protected override void OnCreateControl()
-            {
-                base.OnCreateControl();
-                HideArrowButtons();
-            }
-
-            protected override void OnResize(EventArgs e)
-            {
-                base.OnResize(e);
-                HideArrowButtons();
-            }
-
-            private void HideArrowButtons()
-            {
-                foreach (Control child in Controls)
-                {
-                    string typeName = child.GetType().Name;
-                    if (typeName.Contains("UpDownButtons", StringComparison.Ordinal))
-                    {
-                        child.Visible = false;
-                        child.Width = 0;
-                    }
-                    else if (typeName.Contains("UpDownEdit", StringComparison.Ordinal))
-                    {
-                        child.Dock = DockStyle.Fill;
-                        child.Width = ClientSize.Width;
-                    }
-                }
-            }
-        }
-
         private static void StyleField(Control control)
         {
             control.Dock = DockStyle.Fill; control.BackColor = CardBg2; control.ForeColor = TitleText;
             control.Margin = new Padding(3, 5, 3, 5);
             control.Font = new Font("맑은 고딕", 13f);
             if (control is TextBox text) text.BorderStyle = BorderStyle.None;
-            if (control is NumericUpDown number) number.BorderStyle = BorderStyle.None;
         }
 
         private static void StyleListBox(ListBox list)
@@ -666,7 +632,7 @@ public sealed partial class MainForm
                 if (recipeIndex < 0) return;
 
                 Items.SelectedIndex = recipeIndex;
-                Quantity.Value = Math.Clamp(saved.TargetQuantity, (int)Quantity.Minimum, (int)Quantity.Maximum);
+                Quantity.Value = Math.Clamp(saved.TargetQuantity, Quantity.Minimum, Quantity.Maximum);
                 _owner._productionProgressSummary =
                     $"이어하기 대기 · {saved.DisplayName} · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 마지막 단계 {saved.Stage}";
                 _owner._log.Write(
