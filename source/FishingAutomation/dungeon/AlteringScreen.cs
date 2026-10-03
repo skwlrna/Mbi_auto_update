@@ -666,6 +666,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         await SelectRecipeAsync(plan, ct);
     }
 
+    private async Task<int?> TryFacilityWorkCountAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        if (_cli is null)
+            return null;
+
+        var response = await _cli.GetAlteringWorksAsync(ct);
+        if (!response.Success)
+        {
+            if (CliAutomationGuards.IsTransientLoadingRejection(response))
+                return null;
+            _ = AlteringQueries.ParseWorks(response);
+        }
+
+        return AlteringQueries.ParseWorks(response)
+            .Count(x => x.FacilityName == plan.FacilityName);
+    }
+
     private async Task<bool> ConfirmCompletionResultAsync(
         AlteringPlan plan, CancellationToken ct, int resultAttempts = 24)
     {
@@ -689,15 +708,20 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                 if (stableFrames < 2)
                     continue;
 
+                int? workCountBefore = await TryFacilityWorkCountAsync(plan, ct);
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
-                Log?.Invoke("[자동 가공] 가공 완료 결과창 확인 · Space 입력");
+                Log?.Invoke(
+                    "[자동 가공] 가공 완료 결과창 확인 · Space 입력 · " +
+                    $"수령 전 시설 작업수={(workCountBefore?.ToString() ?? "확인불가")}");
                 _ui.TapFresh(0x39, ct);
 
-                // The user-confirmed game flow returns to the same processing facility
-                // window after closing the result screen. Do not continue until that
-                // facility window is stably back.
+                // V3.0.17 required the same facility title to return twice within six
+                // seconds. The game can stay in a transition/result-dismiss state longer
+                // even though the completed work has already been received. Match the
+                // crafting path: visual return is preferred, but verified CLI queue
+                // decrease is also authoritative completion evidence.
                 int facilityFrames = 0;
-                for (int wait = 0; wait < 30; wait++)
+                for (int wait = 0; wait < 60; wait++)
                 {
                     ct.ThrowIfCancellationRequested();
                     await Task.Delay(200, ct);
@@ -717,10 +741,27 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
                     {
                         facilityFrames = 0;
                     }
+
+                    if (workCountBefore is int before)
+                    {
+                        int? current = await TryFacilityWorkCountAsync(plan, ct);
+                        if (current is int now && now < before)
+                        {
+                            _confirmedOnsiteFacility = null;
+                            _stage.Move(
+                                ProductionStage.VerifyInventory,
+                                $"{plan.DisplayName} 수령 후 CLI 작업 감소 확인");
+                            Log?.Invoke(
+                                $"[자동 가공] 시설 화면 전환 중이지만 CLI 작업 감소로 수령 확정 · {before}->{now} · " +
+                                "다음 가공 진입에서 시설 화면 재검증");
+                            return true;
+                        }
+                    }
                 }
 
                 using var failed = Capture(ct);
-                Fail(failed, "가공 완료 확인 후 가공 시설 화면 복귀를 확인하지 못했습니다.");
+                Fail(failed,
+                    "가공 완료 확인 후 시설 화면 복귀와 CLI 작업 감소를 모두 확인하지 못했습니다.");
             }
             else
             {
