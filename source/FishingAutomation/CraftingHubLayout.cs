@@ -101,8 +101,18 @@ internal static class CraftingHubLayout
     internal static Rectangle AcquisitionMethodListArea
         => new(150, 600, 510, 190);
 
+    internal static Rectangle AcquisitionMethodPopupArea
+        => new(120, 490, 560, 330);
+
     internal static Point AcquisitionMethodRecommendedPoint
         => new(400, 650);
+
+    // Quest material rows are clickable across the center-left name area. The
+    // Y coordinate comes from the stable n/N ratio row, so material-name OCR is
+    // not required to authorize the click.
+    internal const int QuestMaterialRowClickX = 320;
+    internal const int QuestMaterialRowStableTolerance = 18;
+    internal const double AcquisitionMethodOpenChangeRatio = 0.06;
 
     internal const int AcquisitionMethodSettleDelayMs = 250;
 
