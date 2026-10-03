@@ -84,8 +84,7 @@ internal sealed class CraftingAutomation
                 Gained, plan.TargetQuantity, CompletedCrafts, requiredCrafts,
                 $"다음 {batchCrafts}회 퀘스트 준비"));
 
-            await _screen.CreateQuestAsync(plan, batchCrafts, ct);
-            await ResolveQuestMaterialsAsync(plan, ct);
+            await PrepareBatchWithRecoveryAsync(plan, batchCrafts, requiredCrafts, ct);
 
             long beforeCraft = await _data.ItemCountAsync(plan.DisplayName, ct);
             await _screen.ReturnToStationAndCraftAsync(plan, batchCrafts, ct);
@@ -124,6 +123,69 @@ internal sealed class CraftingAutomation
         Log?.Invoke($"[제작] 목표 완료 · {plan.DisplayName} +{finalGain}개 · 초과 생산 허용");
     }
 
+    private async Task PrepareBatchWithRecoveryAsync(
+        CraftingPlan plan,
+        int batchCrafts,
+        int requiredCrafts,
+        CancellationToken ct)
+    {
+        const int maxRecoveries = 3;
+        int recoveries = 0;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await _screen.CreateQuestAsync(plan, batchCrafts, ct);
+                await ResolveQuestMaterialsAsync(plan, ct);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException or InvalidDataException or IOException)
+            {
+                if (recoveries >= maxRecoveries)
+                    throw new InvalidOperationException(
+                        $"제작 퀘스트 자동복구를 {maxRecoveries}회 시도했지만 현재 배치를 복구하지 못했습니다. " +
+                        $"완료 확정된 이전 제작 {CompletedCrafts}/{requiredCrafts}회는 유지합니다.",
+                        ex);
+
+                recoveries++;
+                Log?.Invoke(
+                    $"[제작][자동복구] 현재 {batchCrafts}회 배치 준비 중 오류 · " +
+                    $"{recoveries}/{maxRecoveries}차 복구 · 완료 확정 {CompletedCrafts}/{requiredCrafts}회 유지 · " +
+                    $"{ex.Message}");
+                Progress?.Invoke(new(
+                    Gained,
+                    plan.TargetQuantity,
+                    CompletedCrafts,
+                    requiredCrafts,
+                    $"현재 {batchCrafts}회 배치 자동복구 {recoveries}/{maxRecoveries}"));
+
+                try
+                {
+                    await _screen.CloseOverlayAsync(ct);
+                }
+                catch (Exception closeEx) when (
+                    closeEx is InvalidOperationException or InvalidDataException or IOException)
+                {
+                    Log?.Invoke(
+                        $"[제작][자동복구] 오버레이 정리 보조 실패 · 새 퀘스트 재생성으로 계속 · " +
+                        closeEx.Message);
+                }
+
+                await _delay(TimeSpan.FromMilliseconds(500), ct);
+                Log?.Invoke(
+                    $"[제작][자동복구] {plan.DisplayName} {batchCrafts}회 퀘스트를 다시 생성해 " +
+                    "현재 인벤토리 기준 부족 재료만 다시 확인합니다.");
+            }
+        }
+    }
+
     private async Task ResolveQuestMaterialsAsync(CraftingPlan plan, CancellationToken ct)
     {
         string? previousSignature = null;
@@ -141,7 +203,7 @@ internal sealed class CraftingAutomation
             }
 
             string signature = string.Join("|", deficits.Select(x =>
-                $"{x.DisplayName}:{x.Current}/{x.Required}"));
+                $"{(string.IsNullOrWhiteSpace(x.DisplayName) ? "[행]" : x.DisplayName)}:{x.Current}/{x.Required}@{x.RowY}"));
             if (signature == previousSignature) unchanged++;
             else unchanged = 0;
             previousSignature = signature;
@@ -153,6 +215,15 @@ internal sealed class CraftingAutomation
             long shortage = Math.Max(0, deficit.Required - deficit.Current);
             if (shortage == 0)
                 continue;
+
+            if (string.IsNullOrWhiteSpace(deficit.DisplayName))
+            {
+                Log?.Invoke(
+                    $"[제작] 재료명 OCR 미확인 · 부족 행 {deficit.Current}/{deficit.Required} · " +
+                    $"행Y={deficit.RowY} · 이름은 보조정보로만 사용하고 해당 부족 행 자체를 처리");
+                await _screen.GatherQuestDeficitAsync(deficit, ct);
+                continue;
+            }
 
             var gatherableCatalog = await _gathering.CatalogAsync(ct);
             var gatherable = gatherableCatalog.SingleOrDefault(x =>
