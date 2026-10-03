@@ -524,11 +524,13 @@ jobs:
              $completionWait -notmatch '실제 제작 완료창 확인'){throw 'crafting completion must wait for the real result popup'}
           if($completionWait -notmatch '재고 증가는 완료 판정에 사용하지 않음'){throw 'crafting in-progress inventory trace missing'}
 
-          if($craftEngine -match 'WaitForOutputIncreaseAsync' -or
-             $craftEngine -match 'expectedMinimum' -or
-             $craftEngine -match '최소 \+'){throw 'post-completion inventory threshold regression returned'}
-          if($craftEngine -notmatch 'WaitForOutputRefreshAfterCompletionAsync' -or
-             $craftEngine -notmatch '수량은 결과 기록용이며 완료 판정에는 사용하지 않음'){throw 'post-popup inventory must remain diagnostic-only'}
+          if($craftEngine -notmatch 'WaitForOutputIncreaseAfterCompletionAsync' -or
+             $craftEngine -notmatch '완료 판정은 완료창 기준'){throw 'post-popup inventory validation guard missing'}
+          $postPopup = [regex]::Match($craftEngine, 'long beforeCraft = await _data\.ItemCountAsync[\s\S]*?CompletedCrafts \+= batchCrafts;').Value
+          if([string]::IsNullOrWhiteSpace($postPopup)){throw 'post-popup crafting validation block missing'}
+          $popupIndex = $postPopup.IndexOf('await _screen.ReturnToStationAndCraftAsync')
+          $inventoryIndex = $postPopup.IndexOf('WaitForOutputIncreaseAfterCompletionAsync')
+          if($popupIndex -lt 0 -or $inventoryIndex -lt 0 -or $popupIndex -gt $inventoryIndex){throw 'inventory threshold must run only after real completion popup handling'}
           if($bulkEngine -match '100개' -or $bulkEngine -notmatch 'after <= before'){throw 'life-skill engine must verify variable inventory gain'}
           foreach($required in @('우물','굵은 나무','먹구름 양','개암 버섯','동 광맥','밀','감자')){
             if($mapping -notmatch [regex]::Escape($required)){throw "life-skill mapping missing: $required"}
