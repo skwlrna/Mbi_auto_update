@@ -966,8 +966,25 @@ internal sealed class CraftingScreen : ICraftingScreen
         CraftingQuestDeficit deficit,
         CancellationToken ct)
     {
-        DetectionResult? first = null;
+        int clickY = deficit.RowY;
+        int? firstFreshY = null;
+        int? secondFreshY = null;
 
+        if (!CraftingHubLayout.ProductionQuestMaterialArea.Contains(
+                new Point(CraftingHubLayout.QuestMaterialRowClickX, clickY)))
+        {
+            using var failed = Capture(ct);
+            throw Fail(
+                failed,
+                $"저장된 부족 재료 행 좌표가 안전 영역을 벗어났습니다. " +
+                $"{deficit.Current}/{deficit.Required} · 행Y={deficit.RowY}");
+        }
+
+        // The quest reader already established the shortage row. A fresh ratio OCR
+        // is useful to refine its Y coordinate, but it must not become a second hard
+        // gate: the live V3.0.32 failure read 감자 6/80 correctly, then omitted the
+        // exact same ratio milliseconds later. If fresh OCR disappears, keep the
+        // previously confirmed row Y and validate the resulting popup instead.
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
@@ -982,39 +999,56 @@ internal sealed class CraftingScreen : ICraftingScreen
                 .OrderBy(line => Math.Abs(line.Center.Y - deficit.RowY))
                 .ToArray();
 
-            if (matches.Length != 1)
-                throw Fail(
-                    frame,
-                    $"부족 재료 행 {deficit.Current}/{deficit.Required}을 안정적으로 다시 찾지 못했습니다. " +
-                    $"행Y={deficit.RowY} · 후보={matches.Length}");
-
-            var current = matches[0];
-            if (pass == 0)
+            if (matches.Length == 1)
             {
-                first = current;
-                await Task.Delay(120, ct);
-                continue;
+                int freshY = matches[0].Center.Y;
+                if (pass == 0) firstFreshY = freshY;
+                else secondFreshY = freshY;
+            }
+            else
+            {
+                Log?.Invoke(
+                    $"[제작] 부족 재료 행 클릭 직전 OCR 보조 미확인 · " +
+                    $"{deficit.Current}/{deficit.Required} · 행Y={deficit.RowY} · " +
+                    $"pass={pass + 1} · 후보={matches.Length} · 저장 행 위치 사용");
             }
 
-            if (first is null ||
-                Math.Abs(first.Value.Center.Y - current.Center.Y) >
-                    CraftingHubLayout.QuestMaterialRowStableTolerance)
-                throw Fail(
-                    frame,
-                    $"부족 재료 행 {deficit.Current}/{deficit.Required} 위치가 두 프레임에서 안정적이지 않습니다.");
-
-            var click = new Point(
-                CraftingHubLayout.QuestMaterialRowClickX,
-                current.Center.Y);
-            if (!CraftingHubLayout.ProductionQuestMaterialArea.Contains(click))
-                throw Fail(frame, "부족 재료 행 클릭 좌표가 안전 영역을 벗어났습니다.");
-
-            _ui.ClickFresh(click, ct);
-            Log?.Invoke(
-                $"[제작] 부족 재료 행 선택 · {deficit.Current}/{deficit.Required} · " +
-                $"행Y={current.Center.Y} · 재료명=" +
-                $"{(string.IsNullOrWhiteSpace(deficit.DisplayName) ? "OCR 미확인" : deficit.DisplayName)}");
+            if (pass == 0)
+                await Task.Delay(120, ct);
         }
+
+        string source = "저장행";
+        if (firstFreshY is int first && secondFreshY is int second &&
+            Math.Abs(first - second) <= CraftingHubLayout.QuestMaterialRowStableTolerance)
+        {
+            clickY = second;
+            source = "fresh 2프레임";
+        }
+        else if (secondFreshY is int latest)
+        {
+            clickY = latest;
+            source = "fresh 보조 1프레임";
+        }
+        else if (firstFreshY is int firstOnly)
+        {
+            clickY = firstOnly;
+            source = "fresh 보조 1프레임";
+        }
+
+        var click = new Point(
+            CraftingHubLayout.QuestMaterialRowClickX,
+            clickY);
+        if (!CraftingHubLayout.ProductionQuestMaterialArea.Contains(click))
+        {
+            using var failed = Capture(ct);
+            throw Fail(frame: failed, "부족 재료 행 클릭 좌표가 안전 영역을 벗어났습니다.");
+        }
+
+        _ui.ClickFresh(click, ct);
+        Log?.Invoke(
+            $"[제작] 부족 재료 행 선택 · {deficit.Current}/{deficit.Required} · " +
+            $"행Y={clickY} · 기준={source} · 재료명=" +
+            $"{(string.IsNullOrWhiteSpace(deficit.DisplayName) ? "OCR 미확인" : deficit.DisplayName)}");
     }
 
     private static bool QuestRatioMatches(
@@ -1034,6 +1068,138 @@ internal sealed class CraftingScreen : ICraftingScreen
                long.TryParse(match.Groups["req"].Value, out long required) &&
                current == deficit.Current &&
                required == deficit.Required;
+    }
+
+    public async Task RecoverBatchPreparationAsync(
+        CraftingPlan plan,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        _directCraftPendingName = null;
+        _directCraftPendingCount = 0;
+        _lastSingleQuestDeficit = null;
+
+        int stableNeutralFrames = 0;
+        for (int attempt = 1; attempt <= 12; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+
+            var acquisitionHeader = await FindUniqueAsync(
+                frame,
+                CraftingHubLayout.AcquisitionMethodHeaderArea,
+                "구하는 방법",
+                ct);
+            var cancel = await FindUniqueAsync(
+                frame,
+                new Rectangle(100, 350, 600, 280),
+                "취소",
+                ct);
+            if (acquisitionHeader is not null || cancel is not null)
+            {
+                stableNeutralFrames = 0;
+                Log?.Invoke(
+                    $"[제작][자동복구] 화면 정리 {attempt}/12 · 구하는 방법/모달 확인 · Esc");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(450, ct);
+                continue;
+            }
+
+            if (await IsQuestMaterialPopupAsync(frame, ct))
+            {
+                stableNeutralFrames = 0;
+                Log?.Invoke(
+                    $"[제작][자동복구] 화면 정리 {attempt}/12 · 제작 퀘스트 재료 팝업 확인 · Esc");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(500, ct);
+                continue;
+            }
+
+            if (await IsProductDetailAsync(frame, plan.DisplayName, ct))
+            {
+                stableNeutralFrames = 0;
+                Log?.Invoke(
+                    $"[제작][자동복구] 화면 정리 {attempt}/12 · {plan.DisplayName} 제작 상세 확인 · Esc");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(500, ct);
+                continue;
+            }
+
+            // K opens the common 가공/제작 hub on its processing tab first. A failed
+            // bottom 제작-tab OCR can therefore leave either 가공 or 제작 visible.
+            // Close either known hub/list state before attempting a fresh K entry.
+            var craftingHeader = await _ui.Ocr.FindCompactLabelAsync(
+                frame,
+                CraftingHubLayout.HubHeaderArea,
+                "제작",
+                ct);
+            var processingHeader = await _ui.Ocr.FindCompactLabelAsync(
+                frame,
+                CraftingHubLayout.HubHeaderArea,
+                "가공",
+                ct);
+            var bottomCrafting = await FindUniqueAsync(
+                frame,
+                new Rectangle(285, 850, 320, 145),
+                "제작",
+                ct);
+
+            if (craftingHeader.Found || processingHeader.Found || bottomCrafting is not null)
+            {
+                stableNeutralFrames = 0;
+                string visible = craftingHeader.Found ? "제작" :
+                    processingHeader.Found ? "가공" : "하단 제작 탭";
+                Log?.Invoke(
+                    $"[제작][자동복구] 화면 정리 {attempt}/12 · {visible} 허브/목록 확인 · Esc");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(600, ct);
+                continue;
+            }
+
+            // Unknown transition frames receive no input. Two consecutive neutral
+            // frames are required before a fresh K navigation is allowed.
+            stableNeutralFrames++;
+            if (stableNeutralFrames >= 2)
+            {
+                Log?.Invoke(
+                    "[제작][자동복구] 기준 화면 복귀 확인 · 알려진 제작/퀘스트 모달 없음 2프레임 · " +
+                    "다음 K 입력 허용");
+                return;
+            }
+
+            Log?.Invoke(
+                $"[제작][자동복구] 화면 정리 {attempt}/12 · 전환/일반 화면 재확인 · 입력 없음");
+            await Task.Delay(350, ct);
+        }
+
+        using var failed = Capture(ct);
+        throw Fail(
+            failed,
+            "자동복구 전 제작/퀘스트 화면을 안전한 기준 상태로 정리하지 못했습니다.");
+    }
+
+    private async Task<bool> IsQuestMaterialPopupAsync(
+        Bitmap frame,
+        CancellationToken ct)
+    {
+        var lines = await _ui.Ocr.ReadLinesAsync(
+            frame,
+            CraftingHubLayout.ProductionQuestMaterialArea,
+            3,
+            ct);
+        if (lines.Any(line =>
+            Regex.IsMatch(
+                (line.ReadText ?? "").Replace(" ", ""),
+                @"\d+\s*/\s*\d+")))
+            return true;
+
+        var itemHeader = await FindUniqueAsync(
+            frame,
+            CraftingHubLayout.ProductionQuestPopupArea,
+            "필요한 아이템",
+            ct);
+        return itemHeader is not null;
     }
 
     public async Task CloseOverlayAsync(CancellationToken ct)
