@@ -456,8 +456,42 @@ internal sealed class CraftingScreen : ICraftingScreen
                     .Select(x => CleanName(x.ReadText ?? ""))
                     .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
             }
+
             if (string.IsNullOrWhiteSpace(name))
-                throw Fail(frame, "제작 퀘스트 재료 이름을 확인하지 못했습니다.");
+            {
+                // Live V3.0.26 evidence: Windows OCR can read the bright 1/80
+                // counter but omit the dim-gray material name on the same row.
+                // Re-read only the left name cell with low-threshold/high-contrast
+                // OCR. The later material click still re-verifies this exact name
+                // on two fresh frames before any input is sent.
+                var nameRoi = Rectangle.Intersect(
+                    new Rectangle(215, Math.Max(610, ratio.Y - 34), 255, 68),
+                    new Rectangle(Point.Empty, frame.Size));
+                var dimLines = await _ui.Ocr.ReadDimLinesAsync(frame, nameRoi, ct);
+                var candidates = dimLines
+                    .Select(x => CleanName(x.ReadText ?? ""))
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .GroupBy(x => x, StringComparer.Ordinal)
+                    .Select(g => new { Name = g.Key, Count = g.Count() })
+                    .OrderByDescending(x => x.Count)
+                    .ThenBy(x => x.Name, StringComparer.Ordinal)
+                    .ToArray();
+
+                if (candidates.Length > 0 &&
+                    (candidates.Length == 1 || candidates[0].Count > candidates[1].Count))
+                {
+                    name = candidates[0].Name;
+                    Log?.Invoke(
+                        $"[제작] 퀘스트 재료명 회색글씨 보강 OCR · {name} · " +
+                        $"행Y={ratio.Y} · 후보={candidates[0].Count}회");
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+                throw Fail(
+                    frame,
+                    $"제작 퀘스트 재료 이름을 확인하지 못했습니다. 수량={ratio.Current}/{ratio.Required} · 행Y={ratio.Y}");
             if (ratio.Current < ratio.Required)
                 deficits.Add(new(name!, ratio.Current, ratio.Required, ratio.Y));
         }
