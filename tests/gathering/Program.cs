@@ -72,6 +72,16 @@ Check(!GatheringNavigationPolicy.IsStableFirstRow(
         new System.Drawing.Rectangle(176,620,465,66),
         new System.Drawing.Rectangle(310,620,300,66)),
     "first gathering row rejects a large horizontal/layout change");
+Check(LifeSkillProfilePolicy.IsConfirmed(true, false, 0, 0),
+    "profile opens from stable stat OCR without visual fallback");
+Check(LifeSkillProfilePolicy.IsConfirmed(false, true, 0.24, 0.02),
+    "profile accepts bottom life-skill label plus large body transition when stat OCR misses");
+Check(LifeSkillProfilePolicy.IsConfirmed(false, false, 0.36, 0.12),
+    "profile accepts strong fixed-screen transition when all profile OCR misses");
+Check(!LifeSkillProfilePolicy.MayRetryToggle(0.20, 0.10),
+    "C toggle is never retried after a meaningful profile-like screen transition");
+Check(LifeSkillProfilePolicy.MayRetryToggle(0.01, 0.01),
+    "C may retry only when both profile regions remain effectively unchanged");
 long bulkOwned = 0;
 int bulkStarts = 0;
 int bulkWaits = 0;
