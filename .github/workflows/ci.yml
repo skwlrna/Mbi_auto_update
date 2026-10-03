@@ -243,10 +243,11 @@ jobs:
           if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
           if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
           if ($screen -notmatch 'resultAttempts: 24') { throw 'on-site receipt completion-result wait missing' }
-          if ($screen -notmatch 'return collected;') { throw 'first receive must return collection/travel result' }
-          if ($screen -notmatch '가공 완료 결과창 확인 · Space 입력') { throw 'completion result Space confirmation log missing' }
+          $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
+          if ($collectFlow -notmatch 'return true;') { throw 'on-site receive must return only after confirmed collection' }
+          if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · Space 입력') { throw 'safe completion result Space confirmation log missing' }
           if ($screen -notmatch '가공 완료 확인창 닫기 완료') { throw 'completion result facility-return log missing' }
-          if ($screen -notmatch 'greenConfirm && !facilityVisible') { throw 'completion result must be distinguished from facility popup' }
+          if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion') { throw 'completion result must use travel-safe receipt policy' }
           if ($screen -notmatch 'facilityFrames >= 2') { throw 'facility return must be stable before continuing' }
           if ($screen -notmatch '_ui\.TapFresh\(0x39, ct\)') { throw 'verified completion/receipt Space path missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
