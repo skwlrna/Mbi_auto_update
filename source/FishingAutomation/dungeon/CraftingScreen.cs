@@ -43,6 +43,7 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
+        _questRecipeMaterialNames = Array.Empty<string>();
 
         await OpenProductAsync(plan, ct);
         await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
@@ -53,6 +54,48 @@ internal sealed class CraftingScreen : ICraftingScreen
         // requirement to the selected count (e.g. 65/80 for a 10-craft batch).
         var exact = await _data.ExactAsync(plan.DisplayName, ct);
         var materialState = await ReadSelectedBatchMaterialStateAsync(craftCount, ct);
+
+        // Seed the quest-name matcher before the quest is created. The CLI gives
+        // canonical names for currently missing one-craft ingredients, while the
+        // selected batch detail can reveal additional ingredients that become short
+        // only after the count is raised (for example 10 crafts). Accept detail OCR
+        // names only when they exactly normalize to one known real item; fuzzy
+        // correction is intentionally deferred until the quest row is read.
+        _questMaterialNameCatalog ??= await LoadQuestMaterialNameCatalogAsync(
+            plan.DisplayName, ct);
+        var detailCanonicalNames = materialState.MaterialNames
+            .Select(name =>
+            {
+                string normalized = FuzzyText.Normalize(name);
+                var matches = _questMaterialNameCatalog
+                    .Where(candidate =>
+                        string.Equals(
+                            FuzzyText.Normalize(candidate),
+                            normalized,
+                            StringComparison.Ordinal))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                return matches.Length == 1 ? matches[0] : null;
+            })
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .ToArray();
+
+        _questRecipeMaterialNames = _questRecipeMaterialNames
+            .Concat(detailCanonicalNames)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        if (_questRecipeMaterialNames.Count > 0)
+            Log?.Invoke(
+                $"[제작] 퀘스트 생성 전 레시피 재료 후보 확정 · " +
+                string.Join(", ", _questRecipeMaterialNames));
+        else
+            Log?.Invoke(
+                "[제작] 퀘스트 생성 전 레시피 재료 후보를 확정하지 못함 · " +
+                "기존 전체 카탈로그 안전 보정 경로 유지");
+
         bool canDirectCraft =
             exact.Craftable &&
             materialState.Parsed &&
@@ -85,7 +128,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         await Task.Delay(800, ct);
     }
 
-    private async Task<(bool Parsed, bool AllEnough, string Summary)> ReadSelectedBatchMaterialStateAsync(
+    private async Task<(bool Parsed, bool AllEnough, string Summary, IReadOnlyList<string> MaterialNames)> ReadSelectedBatchMaterialStateAsync(
         int craftCount,
         CancellationToken ct)
     {
@@ -109,6 +152,36 @@ internal sealed class CraftingScreen : ICraftingScreen
             return ratios;
         }
 
+        static IReadOnlyList<string> ParseMaterialNames(IReadOnlyList<DetectionResult> lines)
+        {
+            var names = new List<string>();
+            foreach (var line in lines)
+            {
+                string text = line.ReadText ?? "";
+                var ratio = Regex.Match(text, @"\d+\s*/\s*\d+");
+                if (!ratio.Success)
+                    continue;
+
+                string inline = Regex.Replace(text, @"\d+\s*/\s*\d+.*$", "").Trim();
+                string? name = CleanName(inline);
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    name = lines
+                        .Where(candidate => Math.Abs(candidate.Center.Y - line.Center.Y) <= 35)
+                        .Where(candidate => candidate.Center.X < 470)
+                        .Select(candidate => CleanName(candidate.ReadText ?? ""))
+                        .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+                }
+
+                if (!string.IsNullOrWhiteSpace(name))
+                    names.Add(name);
+            }
+
+            return names
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+        }
+
         List<(long Owned, long Required)>? first = null;
         for (int pass = 0; pass < 2; pass++)
         {
@@ -124,7 +197,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             {
                 Log?.Invoke(
                     $"[제작] 선택 {craftCount}회 상세 재료 수량 OCR 없음 · 안전하게 퀘스트 경로 사용");
-                return (false, false, "재료 비율 OCR 없음");
+                return (false, false, "재료 비율 OCR 없음", Array.Empty<string>());
             }
 
             if (first is null)
@@ -139,15 +212,20 @@ internal sealed class CraftingScreen : ICraftingScreen
             {
                 Log?.Invoke(
                     $"[제작] 선택 {craftCount}회 상세 재료 수량 2프레임 불일치 · 안전하게 퀘스트 경로 사용");
-                return (false, false, "재료 비율 2프레임 불일치");
+                return (false, false, "재료 비율 2프레임 불일치", Array.Empty<string>());
             }
 
             bool allEnough = ratios.All(x => x.Owned >= x.Required);
             string summary = string.Join(", ", ratios.Select(x => $"{x.Owned}/{x.Required}"));
-            return (true, allEnough, summary);
+            var materialNames = ParseMaterialNames(lines);
+            if (materialNames.Count > 0)
+                Log?.Invoke(
+                    $"[제작] 선택 {craftCount}회 상세 레시피 재료명 선판독 · " +
+                    string.Join(", ", materialNames));
+            return (true, allEnough, summary, materialNames);
         }
 
-        return (false, false, "재료 비율 확인 실패");
+        return (false, false, "재료 비율 확인 실패", Array.Empty<string>());
     }
 
     private async Task OpenProductAsync(CraftingPlan plan, CancellationToken ct)
@@ -519,20 +597,12 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         _questMaterialNameCatalog ??= await LoadQuestMaterialNameCatalogAsync(recipeName, ct);
 
-        var exact = _questMaterialNameCatalog
-            .Where(x => string.Equals(FuzzyText.Normalize(x), normalizedOcr, StringComparison.Ordinal))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        if (exact.Length == 1)
-            return exact[0];
-        if (exact.Length > 1)
-            throw new InvalidOperationException(
-                $"제작 퀘스트 재료명 '{ocrName}'과 정확히 일치하는 실제 품목명이 여러 개라 자동 선택하지 않습니다.");
-
-        // Korean quest material OCR commonly substitutes or drops one syllable
-        // on the dim-gray row text (live examples: 감사->감자, 양배->양배추).
-        // Never use substring fuzzy matching here: a short OCR token such as "양배"
-        // otherwise matches unrelated one/two-syllable catalog entries.
+        // The recipe candidates were collected before quest creation from the
+        // filtered CLI recipe and the selected-count detail screen. They must win
+        // even over an exact global-catalog OCR hit, because dim quest text can turn
+        // one recipe ingredient into the exact name of an unrelated real item.
+        // Example: a bad OCR read of 양파 must not become 양털 merely because 양털
+        // exists globally.
         var recipeDecision = QuestMaterialNameMatcher.Decide(
             ocrName,
             _questRecipeMaterialNames);
@@ -547,6 +617,16 @@ internal sealed class CraftingScreen : ICraftingScreen
             throw new InvalidOperationException(
                 $"제작 퀘스트 재료명 '{ocrName}'의 현재 레시피 후보가 여러 개라 자동 보정하지 않습니다: " +
                 string.Join(", ", recipeDecision.AmbiguousCandidates));
+
+        var exact = _questMaterialNameCatalog
+            .Where(x => string.Equals(FuzzyText.Normalize(x), normalizedOcr, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (exact.Length == 1)
+            return exact[0];
+        if (exact.Length > 1)
+            throw new InvalidOperationException(
+                $"제작 퀘스트 재료명 '{ocrName}'과 정확히 일치하는 실제 품목명이 여러 개라 자동 선택하지 않습니다.");
 
         var catalogDecision = QuestMaterialNameMatcher.Decide(
             ocrName,
@@ -596,10 +676,15 @@ internal sealed class CraftingScreen : ICraftingScreen
         // the highest-priority correction set. This is narrower than the global
         // catalog and resolves live cases such as "양배" -> "양배추".
         var crafting = CraftingQueries.ParseCatalog(await _cli.GetCraftableItemsAsync(recipeName, ct));
-        _questRecipeMaterialNames = crafting
+        var cliRecipeMaterialNames = crafting
             .SelectMany(item => item.MissingIngredients)
             .Select(ingredient => ingredient.DisplayName)
             .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        _questRecipeMaterialNames = _questRecipeMaterialNames
+            .Concat(cliRecipeMaterialNames)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
