@@ -72,6 +72,28 @@ Check(!GatheringNavigationPolicy.IsStableFirstRow(
         new System.Drawing.Rectangle(176,620,465,66),
         new System.Drawing.Rectangle(310,620,300,66)),
     "first gathering row rejects a large horizontal/layout change");
+long bulkOwned = 0;
+int bulkStarts = 0;
+int bulkWaits = 0;
+long seenTargetTotal = -1;
+var bulk = new LifeSkillBulkGatheringAutomation(
+    _ => Task.FromResult(bulkOwned),
+    _ =>
+    {
+        bulkStarts++;
+        return Task.CompletedTask;
+    },
+    (before, targetTotal, _) =>
+    {
+        bulkWaits++;
+        seenTargetTotal = targetTotal;
+        bulkOwned = targetTotal + 110;
+        return Task.FromResult(true);
+    });
+await bulk.RunAsync(new GatheringPlan("통나무", 340), default);
+Check(bulkStarts == 1 && bulkWaits == 1 && seenTargetTotal == 340 && bulkOwned == 450,
+    "life-skill bulk gathering stops the active 100-action cycle when requested material target is reached");
+
 var plan=new GatheringPlan("철 광석",5);
 try { (plan with {SourceRecipe=new AlteringPlan("금속 가공 시설","철괴(철 광석)",1,3,true)}).Validate(); throw new Exception("paid source accepted"); }
 catch(InvalidDataException){Check(true,"source recipe cannot enable paid altering button");}
