@@ -90,9 +90,8 @@ internal sealed class CraftingAutomation
             long beforeCraft = await _data.ItemCountAsync(plan.DisplayName, ct);
             await _screen.ReturnToStationAndCraftAsync(plan, batchCrafts, ct);
 
-            long expectedMinimum = checked((long)batchCrafts * plan.ProducedPerCraft);
-            long afterCraft = await WaitForOutputIncreaseAsync(
-                plan.DisplayName, beforeCraft, expectedMinimum, ct);
+            long afterCraft = await WaitForOutputRefreshAfterCompletionAsync(
+                plan.DisplayName, beforeCraft, ct);
 
             CompletedCrafts += batchCrafts;
             lastObserved = afterCraft;
@@ -207,10 +206,9 @@ internal sealed class CraftingAutomation
                 StringComparison.Ordinal));
     }
 
-    private async Task<long> WaitForOutputIncreaseAsync(
+    private async Task<long> WaitForOutputRefreshAfterCompletionAsync(
         string displayName,
         long before,
-        long expectedMinimum,
         CancellationToken ct)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(25);
@@ -223,27 +221,46 @@ internal sealed class CraftingAutomation
             long current = await _data.ItemCountAsync(displayName, ct);
             if (current < before)
                 throw new InvalidOperationException(
-                    $"{displayName} 제작 직후 보유량이 감소해 결과를 확정할 수 없습니다.");
-            if (current != last)
+                    $"{displayName} 제작 완료창 확인 후 보유량이 감소해 결과를 확정할 수 없습니다.");
+
+            if (current > before)
+            {
+                if (current == last)
+                    stable++;
+                else
+                {
+                    last = current;
+                    stable = 1;
+                }
+
+                if (stable >= 2)
+                {
+                    Log?.Invoke(
+                        $"[제작] 완료창 이후 재고 반영 확인 · {before}->{current} · " +
+                        "수량은 결과 기록용이며 완료 판정에는 사용하지 않음");
+                    return current;
+                }
+            }
+            else
             {
                 last = current;
                 stable = 0;
             }
 
-            if (current - before >= expectedMinimum)
-            {
-                stable++;
-                if (stable >= 2)
-                    return current;
-            }
-            else stable = 0;
-
             await _delay(TimeSpan.FromMilliseconds(500), ct);
         }
 
         long final = await _data.ItemCountAsync(displayName, ct);
+        if (final > before)
+        {
+            Log?.Invoke(
+                $"[제작] 완료창 이후 재고 최종 반영 확인 · {before}->{final} · " +
+                "수량은 완료 판정에 사용하지 않음");
+            return final;
+        }
+
         throw new InvalidOperationException(
-            $"{displayName} 제작 완료 화면 이후 실제 재고 증가를 확인하지 못했습니다: " +
-            $"+{final - before} / 최소 +{expectedMinimum}");
+            $"{displayName} 실제 제작 완료창 확인 후에도 재고 증가를 확인하지 못했습니다: " +
+            $"{before}->{final}");
     }
 }
