@@ -11,6 +11,7 @@ internal interface ICraftingScreen : IDisposable
     Task CreateQuestAsync(CraftingPlan plan, int craftCount, CancellationToken ct);
     Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(CraftingPlan plan, CancellationToken ct);
     Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct);
+    Task RecoverBatchPreparationAsync(CraftingPlan plan, CancellationToken ct);
     Task CloseOverlayAsync(CancellationToken ct);
     Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct);
 }
