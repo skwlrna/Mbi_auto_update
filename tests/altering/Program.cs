@@ -16,6 +16,14 @@ Check(!AlteringDetailPolicy.IsConfirmed(false, true, false, false),
     "materials alone do not confirm a recipe detail screen");
 Check(!AlteringDetailPolicy.IsConfirmed(false, false, true, false),
     "action alone does not confirm a recipe detail screen");
+Check(AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, false),
+    "real altering completion result can authorize confirmation");
+Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, true, false),
+    "facility travel confirmation dialog never authorizes receipt Space");
+Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, true),
+    "AutoTraveling state never authorizes completion Space");
+Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, true, false, false),
+    "facility screen itself is not a completion result");
 
 var plan = new AlteringPlan("금속 가공 시설", "강철괴", 100, 3, false);
 Check(plan.RequiredWorks == 34 && plan.ExpectedQuantity == 102 && plan.MaximumWings == 0, "target rounding with zero-wing invariant");
