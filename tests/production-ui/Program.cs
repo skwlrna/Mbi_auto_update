@@ -23,6 +23,10 @@ internal static class Program
             var gathering = controls.Single(x => x.Name == "GatheringPage");
             var altering = controls.Single(x => x.Name == "AlteringPage");
             var crafting = controls.Single(x => x.Name == "CraftingPage");
+            TextBox QuantityInput(Control page) => All(page).OfType<TextBox>()
+                .Single(x => x.AccessibleName?.EndsWith("목표 수량", StringComparison.Ordinal) == true);
+            int QuantityValue(TextBox input) => int.Parse(input.Text, System.Globalization.CultureInfo.InvariantCulture);
+            void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
             void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
@@ -31,10 +35,9 @@ internal static class Program
             Menu("홈"); Check(!altering.Visible && !gathering.Visible, "home restores existing central content");
             Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ListBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
             var gi = All(gathering).OfType<ListBox>().Single();
-            var gq = All(gathering).OfType<NumericUpDown>().Single();
-            Check(!gq.Controls.Cast<Control>().Any(x =>
-                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
-                "gathering target quantity hides numeric up/down arrow buttons");
+            var gq = QuantityInput(gathering);
+            Check(!All(gathering).OfType<NumericUpDown>().Any(),
+                "gathering target quantity uses no native spinner control");
             Check(gi.Items.Count == 3 && gi.Items[1]!.ToString() == "상급 통나무+", "gathering dropdown uses actual CLI catalog including plus name");
             gi.SelectedIndex = 2; Pump();
             var gs = All(gathering).OfType<Button>().Single(x => x.AccessibleName == "자동 채집 시작");
@@ -55,18 +58,17 @@ internal static class Program
             Check(fake.Actions.Count == 0 && Field<string?>(form, "_activeMode") is null,
                 "ZIP UI inspection completes without action commands");
             connector.RunFilteredQuery = (a, ct) => fake.Query(a[0], ct);
-            gi.SelectedIndex = 1; gq.Value = 5;
+            gi.SelectedIndex = 1; SetQuantity(gq, 5);
             Menu("자동 가공"); Exclusive(true);
             var ai = All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법");
-            var aq = All(altering).OfType<NumericUpDown>().Single();
+            var aq = QuantityInput(altering);
             var facilityTabs = All(altering).OfType<Button>()
                 .Where(x => x.AccessibleName?.StartsWith("가공 시설 ", StringComparison.Ordinal) == true).ToArray();
             Check(facilityTabs.Length == 6, "automatic altering exposes six large facility tabs");
             var alterSearch = All(altering).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
             Check(alterSearch.Visible, "automatic altering keeps facility tabs and adds item search");
-            Check(!aq.Controls.Cast<Control>().Any(x =>
-                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
-                "target quantity hides numeric up/down arrow buttons");
+            Check(!All(altering).OfType<NumericUpDown>().Any(),
+                "altering target quantity uses no native spinner control");
 
             Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "목재+",
                 "default wood facility tab shows only wood recipes");
@@ -96,9 +98,9 @@ internal static class Program
                 "food facility tab shows multiple food-processing recipes, not only flour");
 
             facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump();
-            ai.SelectedIndex = 0; aq.Value = 5;
+            ai.SelectedIndex = 0; SetQuantity(aq, 5);
             Menu("자동 채집"); Exclusive(false);
-            Check(gi.SelectedIndex == 1 && gq.Value == 5, "switching preserves each page's independent settings");
+            Check(gi.SelectedIndex == 1 && QuantityValue(gq) == 5, "switching preserves each page's independent settings");
             var selectedGather = Invoke<GatheringPlan>(form, "SelectedGatheringPlan");
             Check(selectedGather.DisplayName == "상급 통나무+" && selectedGather.TargetQuantity == 5,
                 "main gathering selection and numeric quantity map to the free-screen plan");
@@ -153,11 +155,10 @@ internal static class Program
             craftSearch.Text = "회복"; Pump();
             Check(craftItems.Items.Count == 1 && craftItems.Items[0]!.ToString() == "상급 회복 물약",
                 "crafting item search filters the complete catalog");
-            var craftingQuantity = All(crafting).OfType<NumericUpDown>().Single();
-            Check(!craftingQuantity.Controls.Cast<Control>().Any(x =>
-                    x.Visible && x.GetType().Name.Contains("UpDownButtons", StringComparison.Ordinal)),
-                "crafting target quantity matches production UI without arrow buttons");
-            craftingQuantity.Value = 23;
+            var craftingQuantity = QuantityInput(crafting);
+            Check(!All(crafting).OfType<NumericUpDown>().Any(),
+                "crafting target quantity uses no native spinner control");
+            SetQuantity(craftingQuantity, 23);
             var craftPlan = Invoke<CraftingPlan>(form, "SelectedCraftingPlan");
             Check(craftPlan.Category == CraftingCategory.Item && craftPlan.TargetQuantity == 23 && craftPlan.ProducedPerCraft == 5,
                 "crafting selection preserves category, quantity and per-craft yield");
@@ -191,7 +192,7 @@ internal static class Program
                 Menu("제작"); Pump();
                 float craftingScale = Math.Min(crafting.Width / 1212f, crafting.Height / 858f);
                 var craftingTitle = All(crafting).OfType<Label>().Single(x => x.Text == "제작");
-                var craftingInput = All(crafting).OfType<NumericUpDown>().Single();
+                var craftingInput = QuantityInput(crafting);
                 Check(craftingTitle.Font.Unit == GraphicsUnit.Pixel &&
                       craftingTitle.Font.Size == Math.Max(13f, MathF.Round(36 * craftingScale)) &&
                       craftingInput.Font.Unit == GraphicsUnit.Pixel &&
@@ -219,7 +220,7 @@ internal static class Program
                     Menu(page == gathering ? "자동 채집" : "자동 가공"); Pump();
                     float referenceScale = Math.Min(page.Width / 1212f, page.Height / 858f);
                     var title = All(page).OfType<Label>().Single(x => x.Text == (page == gathering ? "자동 채집" : "자동 가공"));
-                    var input = All(page).OfType<NumericUpDown>().Single();
+                    var input = QuantityInput(page);
                     Check(title.Font.Unit == GraphicsUnit.Pixel && title.Font.Size == Math.Max(13f, MathF.Round(36 * referenceScale))
                         && input.Font.Unit == GraphicsUnit.Pixel && input.Font.Size == Math.Max(13f, MathF.Round(18 * referenceScale)),
                         page.Name + " title and content match abyss typography at " + size);
@@ -240,9 +241,9 @@ internal static class Program
             if (args.Length > 0)
             {
                 Directory.CreateDirectory(args[0]); form.ClientSize = new Size(1200, 900);
-                gi.SelectedIndex = 0; gq.Value = 100; Menu("자동 채집");
+                gi.SelectedIndex = 0; SetQuantity(gq, 100); Menu("자동 채집");
                 InvokeTask(form, "RefreshProductionStateAsync", gathering); Pump(); Save(form, Path.Combine(args[0], "automatic-gathering.png"));
-                Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump(); ai.SelectedIndex = 0; aq.Value = 50;
+                Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump(); ai.SelectedIndex = 0; SetQuantity(aq, 50);
                 InvokeTask(form, "RefreshProductionStateAsync", altering); Pump(); Save(form, Path.Combine(args[0], "automatic-altering.png"));
                 Menu("홈"); Pump(); Save(form, Path.Combine(args[0], "home.png"));
             }
