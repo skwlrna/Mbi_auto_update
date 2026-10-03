@@ -487,8 +487,26 @@ jobs:
           if($bulkStart -match 'InventoryBulkGatheringAutomation|StartInventoryHundredQuestAsync|_fallback\.StartAsync'){throw 'bulk gathering must not fall back to inventory/material-detail acquisition'}
           if($bulkStart -notmatch '가방/재료상세 경로로 우회하지 않음'){throw 'life-skill-only failure trace missing'}
           if($bulkScreen -notmatch '프로필 열기 · C 입력' -or
-             $bulkScreen -notmatch '프로필 열림 확인 · 생활 스킬 메뉴 확인' -or
-             $bulkScreen -notmatch '생활 스킬 진입 클릭 완료'){throw 'life-skill profile/menu confirmation trace missing'}
+             $bulkScreen -notmatch 'ProfileLifeSkillPoint = new\(400, 944\)' -or
+             $bulkScreen -notmatch '생활 스킬 고정좌표 클릭' -or
+             $bulkScreen -notmatch '생활 스킬 화면 진입 확인 · 상단 제목 2프레임 안정'){throw 'fixed life-skill profile navigation missing'}
+          foreach($fixedCategory in @(
+            '"일상 채집" => new Point\(222, 206\)',
+            '"나무 베기" => new Point\(341, 206\)',
+            '"광석 캐기" => new Point\(460, 206\)',
+            '"약초 채집" => new Point\(578, 206\)',
+            '"양털 깎기" => new Point\(222, 383\)',
+            '"추수" => new Point\(341, 383\)',
+            '"호미질" => new Point\(460, 383\)'
+          )){
+            if($bulkScreen -notmatch $fixedCategory){throw "life-skill fixed category coordinate missing: $fixedCategory"}
+          }
+          $lifeSkillStart = [regex]::Match($bulkScreen, 'private async Task StartLifeSkillHundredAsync[\s\S]*?(?=\r?\n    private async Task<DetectionResult\?> FindStableLifeSkillRowAsync)').Value
+          if([string]::IsNullOrWhiteSpace($lifeSkillStart)){throw 'life-skill start block missing'}
+          if($lifeSkillStart -match 'ClickExactAsync\(\s*"생활 스킬"' -or
+             $lifeSkillStart -match 'ClickExactAsync\(\s*source\.Category'){throw 'life-skill/profile category navigation must use fixed coordinates, not OCR clicks'}
+          if($lifeSkillStart -notmatch '_ui\.ClickFresh\(ProfileLifeSkillPoint, ct\)' -or
+             $lifeSkillStart -notmatch '_ui\.ClickFresh\(categoryPoint, ct\)'){throw 'fixed life-skill/category clicks missing'}
 
           $craftReturn = [regex]::Match($craftScreen, 'public async Task ReturnToStationAndCraftAsync[\s\S]*?(?=\r?\n    private async Task FinishDirectCraftAsync)').Value
           if([string]::IsNullOrWhiteSpace($craftReturn)){throw 'crafting station-return block missing'}
