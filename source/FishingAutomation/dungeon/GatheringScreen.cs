@@ -62,6 +62,17 @@ internal sealed class GatheringScreen : IGatheringScreen
             ct.ThrowIfCancellationRequested();
 
             var state=await _data.ActivityAsync(ct);
+
+            // Do not force get_items while the game explicitly reports pure travel.
+            // This is the same loading guard used by crafting material acquisition.
+            if(state.IsAutoTraveling && !state.IsGathering && !state.IsFishing)
+            {
+                if(attempt==0 || attempt%10==0)
+                    Log?.Invoke($"[자동채집] 이동 중 · 재고 CLI 조회 생략 · {plan.DisplayName}");
+                await Task.Delay(1000,ct);
+                continue;
+            }
+
             long currentCount=await _data.ItemCountAsync(plan.DisplayName,ct);
             long gained=Math.Max(0,currentCount-beforeCount);
 
@@ -82,11 +93,11 @@ internal sealed class GatheringScreen : IGatheringScreen
                 return;
             }
 
-            // When activity is observable, return immediately and let
+            // When gathering itself is observable, return immediately and let
             // GatheringAutomation monitor quantity/progress as before.
-            if(state.IsAutoTraveling || state.IsGathering || state.IsFishing)
+            if(state.IsGathering || state.IsFishing)
             {
-                Log?.Invoke($"[자동채집] 이동/채집 상태 확인 · AutoTraveling={state.IsAutoTraveling}, Gathering={state.IsGathering}, Fishing={state.IsFishing}");
+                Log?.Invoke($"[자동채집] 채집 상태 확인 · Gathering={state.IsGathering}, Fishing={state.IsFishing}");
                 return;
             }
 
