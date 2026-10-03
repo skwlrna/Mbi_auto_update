@@ -163,6 +163,10 @@ jobs:
           if($dashboard -notmatch '자동 가공 설정 / 시작'){throw 'altering action caption missing'}
           if($dashboard -notmatch '자동 채집 설정 / 시작'){throw 'gathering action caption missing'}
           if($dashboard -notmatch '제작 설정 / 시작'){throw 'crafting action caption missing'}
+          $craftPage = Get-Content source/FishingAutomation/MainForm.CraftingPage.cs -Raw
+          if($craftPage -match '제작 분류 탭|제작 아이템|제작 음식|BuildCategoryTabs|SetCategory'){throw 'crafting item/food category tabs must stay removed'}
+          if($craftPage -notmatch '전체 제작 품목을 한 목록에서 검색'){throw 'crafting search-only guidance missing'}
+          if($craftPage -notmatch 'var visible = _choices'){throw 'crafting search must filter the full catalog'}
 
       - name: Inventory loot regression tests
         shell: pwsh
@@ -221,6 +225,18 @@ jobs:
           if ($screen -notmatch '설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음') { throw 'facility travel must explicitly skip Space' }
           if ($screen -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력' -or $screen -match '이동 확인 Space 입력 완료') { throw 'facility travel Space regression returned' }
           if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'completion-result visual detector missing' }
+          $receiptPolicy = Get-Content source/FishingAutomation/AlteringReceiptPolicy.cs -Raw
+          if ($receiptPolicy -notmatch '!travelDialogVisible' -or $receiptPolicy -notmatch '!autoTraveling') { throw 'receipt Space travel veto policy missing' }
+          $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($collectFlow)) { throw 'altering collect flow missing' }
+          if ($collectFlow -notmatch 'await TravelToFacilityAsync\(plan, ct\)' -or
+              $collectFlow -notmatch '완료품 수령 전 현장 가공대 확인') { throw 'completed-work receipt must travel to/prove on-site bench before Space' }
+          if ($collectFlow -notmatch '설비로 이동 없음.*파란 수령 버튼.*Space') { throw 'receipt Space must require on-site move-button absence' }
+          $promptFlow = [regex]::Match($screen, 'private async Task<bool> HasCollectPromptAsync[\s\S]*?(?=\r?\n    private static bool HasCollectButtonVisual)').Value
+          if ($promptFlow -notmatch 'FacilityMoveButton' -or $promptFlow -notmatch '"설비로 이동"') { throw 'remote facility receive veto missing' }
+          if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion' -or
+              $screen -notmatch 'AutoTraveling=true · 추가 Space 차단' -or
+              $screen -notmatch 'IsFacilityTravelDialogAsync') { throw 'travel popup/autotravel completion Space veto missing' }
           if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'completion-result green visual gate missing' }
           if ($screen -notmatch 'p\.B >= 95' -or $screen -notmatch 'blue \* 100 >= sampled \* 2') { throw 'tolerant blue collect-button visual gate missing' }
           if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
