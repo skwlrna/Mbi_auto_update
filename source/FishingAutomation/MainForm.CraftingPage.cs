@@ -20,7 +20,7 @@ public sealed partial class MainForm
         if (_craftingPage.SelectedAmbiguous)
             throw new InvalidOperationException("동일 이름 제작 제법이 여러 개라 자동 선택할 수 없습니다.");
         return new(
-            _craftingPage.Category,
+            CraftingQueries.ResolveUiCategory(choice.Item),
             choice.Item.DisplayName,
             (int)_craftingPage.Quantity.Value,
             choice.Item.ProducedPerCraft);
@@ -63,8 +63,6 @@ public sealed partial class MainForm
     {
         private readonly MainForm _owner;
         private readonly TextBox _search = new();
-        private Button _food = null!;
-        private Button _item = null!;
         private readonly Button _start;
         private readonly Button _stop;
         private readonly Button _reload;
@@ -86,7 +84,6 @@ public sealed partial class MainForm
         internal readonly ListBox Items = new();
         internal readonly QuantityTextBox Quantity = new();
         internal readonly Label Owned = new();
-        internal CraftingCategory Category { get; private set; } = CraftingCategory.Food;
         internal string CliStatus = "확인 전";
         internal string? SelectedName => Items.SelectedItem is CraftingChoice choice
             ? choice.Item.DisplayName : null;
@@ -114,7 +111,7 @@ public sealed partial class MainForm
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 58)); header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
             header.Controls.Add(owner.SectionTitle("제작", 26), 0, 0);
-            header.Controls.Add(new Label { Text = "아이템·음식 분류와 검색으로 원하는 제작 품목을 빠르게 찾습니다.", Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
+            header.Controls.Add(new Label { Text = "전체 제작 품목을 한 목록에서 검색해 빠르게 찾습니다.", Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
             root.Controls.Add(header, 0, 0);
 
             Items.AccessibleName = "제작 품목"; StyleListBox(Items);
@@ -130,10 +127,9 @@ public sealed partial class MainForm
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
 
             var leftCard = Card(); leftCard.Padding = new Padding(16, 10, 16, 10); leftCard.Margin = new Padding(0, 0, 9, 0); leftCard.AccessibleName = "제작 품목 영역";
-            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty, BackColor = Color.Transparent };
-            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72)); left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, BackColor = Color.Transparent };
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
 
             var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
             settingsHeading.Controls.Add(new Label { Text = "제작 설정", Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft });
@@ -141,10 +137,9 @@ public sealed partial class MainForm
             _reload.AccessibleName = "제작 목록 새로고침"; _reload.Dock = DockStyle.Right; _reload.Width = 110; _reload.Margin = new Padding(2);
             settingsHeading.Controls.Add(_reload);
             left.Controls.Add(settingsHeading, 0, 0);
-            left.Controls.Add(BuildCategoryTabs(), 0, 1);
-            left.Controls.Add(BuildLabeledField("품목 검색", _search, "crafting-field"), 0, 2);
-            left.Controls.Add(BuildListArea("제작 품목"), 0, 3);
-            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "crafting-field"), 0, 4);
+            left.Controls.Add(BuildLabeledField("품목 검색", _search, "crafting-field"), 0, 1);
+            left.Controls.Add(BuildListArea("제작 품목"), 0, 2);
+            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "crafting-field"), 0, 3);
             leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
 
             var right = new TableLayoutPanel
@@ -193,7 +188,6 @@ public sealed partial class MainForm
             void Typography(Control control, float pixels) => control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
             Typography(header.Controls[0], 36); Typography(header.Controls[1], 18); Typography(settingsHeading.Controls[0], 21);
             Typography(status.Controls[0], 21); Typography(_reload, 14);
-            Typography(_item, 17); Typography(_food, 17);
             foreach (var label in new[] { _state, _stage, _elapsed, _errors, _detail }) Typography(label, 17);
             Typography(_progress, 18); Typography(_percentage, 18); Typography(_start, 22); Typography(_stop, 22);
 
@@ -225,33 +219,7 @@ public sealed partial class MainForm
             }
             Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
             _search.TextChanged += (_, _) => Filter(); Items.SelectedIndexChanged += (_, _) => SelectionChanged();
-            Quantity.ValueChanged += (_, _) => SelectionChanged(); SetCategory(CraftingCategory.Food); UpdateExecution();
-        }
-
-        private TableLayoutPanel BuildCategoryTabs()
-        {
-            var tabs = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 1,
-                Margin = new Padding(0, 4, 0, 4),
-                BackColor = Color.Transparent,
-                AccessibleName = "제작 분류 탭"
-            };
-            tabs.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-
-            _item = Button("아이템", () => SetCategory(CraftingCategory.Item));
-            _food = Button("음식", () => SetCategory(CraftingCategory.Food));
-            _item.AccessibleName = "제작 아이템";
-            _food.AccessibleName = "제작 음식";
-            _item.Margin = new Padding(2);
-            _food.Margin = new Padding(2);
-            tabs.Controls.Add(_item, 0, 0);
-            tabs.Controls.Add(_food, 1, 0);
-            return tabs;
+            Quantity.ValueChanged += (_, _) => SelectionChanged(); UpdateExecution();
         }
 
         private static Panel Card()
@@ -551,18 +519,6 @@ public sealed partial class MainForm
                 Math.Max(0, (surface.Height - control.Height) / 2));
         }
 
-        private void SetCategory(CraftingCategory category)
-        {
-            Category = category;
-            _food.BackColor = category == CraftingCategory.Food ? Accent : CardBg2;
-            _item.BackColor = category == CraftingCategory.Item ? Accent : CardBg2;
-            _food.ForeColor = category == CraftingCategory.Food ? Color.White : TitleText;
-            _item.ForeColor = category == CraftingCategory.Item ? Color.White : TitleText;
-            _food.Invalidate();
-            _item.Invalidate();
-            Filter();
-        }
-
         internal async Task LoadCatalogAsync(bool force = false)
         {
             if (_loading || (_loaded && !force) || _owner.AnyRunning) return;
@@ -575,11 +531,9 @@ public sealed partial class MainForm
                 CliStatus = "정상";
                 Filter();
                 var coverage = CraftingQueries.CategoryCoverage(_choices);
-                int foodVisible = CraftingQueries.ForUiCategory(_choices, CraftingCategory.Food).Count();
-                int itemVisible = CraftingQueries.ForUiCategory(_choices, CraftingCategory.Item).Count();
                 _owner._log.Write(
-                    $"[제작] CLI 제작 목록 {_choices.Length}개 · 원본분류 음식={coverage.Food}, 아이템={coverage.Item}, 미분류={coverage.Unknown} · " +
-                    $"표시 음식={foodVisible}, 아이템={itemVisible} · 폴백={(coverage.UsesFallback ? "사용" : "미사용")}");
+                    $"[제작] CLI 제작 목록 {_choices.Length}개 · 검색 전용 목록 · " +
+                    $"원본분류 음식={coverage.Food}, 아이템={coverage.Item}, 미분류={coverage.Unknown}");
                 _owner._craftingNextPoll = DateTime.MinValue;
                 await _owner.RefreshCraftingStateAsync();
             }
@@ -605,7 +559,7 @@ public sealed partial class MainForm
             if (Items is null) return;
             string? previous = SelectedName;
             string search = _search.Text.Trim();
-            var visible = CraftingQueries.ForUiCategory(_choices, Category)
+            var visible = _choices
                 .Where(x => string.IsNullOrWhiteSpace(search) ||
                     x.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(x => x.DisplayName, StringComparer.Ordinal)
@@ -674,7 +628,7 @@ public sealed partial class MainForm
             bool ownRun = _owner._activeMode == "제작";
             bool busy = _owner.AnyRunning || _owner._starting;
             bool selected = Items.SelectedItem is CraftingChoice;
-            foreach (Control control in new Control[] { Items, Quantity, _search, _reload, _food, _item })
+            foreach (Control control in new Control[] { Items, Quantity, _search, _reload })
                 control.Enabled = !busy && !_loading;
             _start.Enabled = !busy && !_loading && selected && !SelectedAmbiguous;
             _stop.Enabled = ownRun && _owner.AnyRunning;
