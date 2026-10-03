@@ -143,13 +143,13 @@ internal static class Program
                   craftItemTab.Parent == craftFoodTab.Parent &&
                   craftFoodTab.BackColor != craftItemTab.BackColor,
                 "crafting uses altering-style side-by-side item and food category tabs");
-            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "야채볶음"),
-                "food crafting catalog includes CLI food item");
+            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "야채볶음") &&
+                  craftItems.Items.Cast<object>().All(x => x.ToString() != "상급 회복 물약" && x.ToString() != "분류 없는 결과물"),
+                "food crafting tab shows only food items");
             All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템").PerformClick(); Pump();
-            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "상급 회복 물약"),
-                "item crafting category includes CLI item");
-            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "분류 없는 결과물"),
-                "unknown craftable category is not omitted from item UI");
+            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "상급 회복 물약") &&
+                  craftItems.Items.Cast<object>().All(x => x.ToString() != "야채볶음" && x.ToString() != "분류 없는 결과물"),
+                "item crafting tab shows only item entries");
             craftSearch.Text = "회복"; Pump();
             Check(craftItems.Items.Count == 1 && craftItems.Items[0]!.ToString() == "상급 회복 물약",
                 "crafting item search filters the complete catalog");
