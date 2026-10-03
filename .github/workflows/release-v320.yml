@@ -23,15 +23,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: f47be6b60f18f4b6347022e17a5a8dba1615a299
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
       - name: Verify release source and versions
         shell: pwsh
         run: |
-          git fetch origin main
-          if ($LASTEXITCODE -ne 0) { throw 'main fetch failed' }
-          if ((git rev-parse HEAD) -ne (git rev-parse origin/main)) { throw 'release must use latest main' }
+          $releaseSource = 'f47be6b60f18f4b6347022e17a5a8dba1615a299'
+          if ((git rev-parse HEAD) -ne $releaseSource) { throw 'release source snapshot mismatch' }
+          $workflowDiff = @(git diff --name-only a1bf01fca2c85712066b5d0a343b8f9c15c56938..HEAD | Where-Object { $_ -like '.github/workflows/*' })
+          if ($LASTEXITCODE -ne 0) { throw 'release source diff check failed' }
+          if ($workflowDiff.Count -gt 0) { throw 'release source snapshot must not modify workflow files' }
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
           if ($u -notmatch 'CurrentVersion = "V3\.0\.20"') { throw 'version constant mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
