@@ -352,11 +352,20 @@ jobs:
           $releaseTarget=$env:GITHUB_SHA
 
           if(-not $r) {
+            $remoteTag = git ls-remote --tags origin refs/tags/V3.0.20
+            if($LASTEXITCODE-ne0){throw 'Tag lookup failed'}
+            if([string]::IsNullOrWhiteSpace(($remoteTag | Out-String).Trim())) {
+              git tag V3.0.20 $releaseTarget
+              if($LASTEXITCODE-ne0){throw 'Local tag creation failed'}
+              git push origin refs/tags/V3.0.20
+              if($LASTEXITCODE-ne0){throw 'Tag push failed'}
+            }
+
             gh release create V3.0.20 `
               artifacts/MabiAuto_V3.0.20_Windows_Lite.zip `
               artifacts/MabiAuto_V3.0.20_Windows_Lite.zip.sha256 `
               artifacts/MabiAuto_V3.0.20_Source.zip `
-              --draft --target $releaseTarget --title 'Mabi Auto V3.0.20' `
+              --draft --verify-tag --title 'Mabi Auto V3.0.20' `
               --notes-file source/RELEASE_NOTES.md
             if($LASTEXITCODE-ne0){throw 'Release upload failed'}
 
