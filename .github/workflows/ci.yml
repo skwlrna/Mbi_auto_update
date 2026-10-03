@@ -448,8 +448,8 @@ jobs:
              $craftScreen -match 'freshProduct'){throw 'craft completion must not hard-gate on product-name OCR'}
           if($craftScreen -notmatch 'InventoryOnlyCountAsync\(displayName' -or
              $craftScreen -notmatch 'CraftCompletionConfirmArea' -or
-             $craftScreen -notmatch '품목명 OCR 비필수' -or
-             $craftScreen -notmatch 'Space = 결과창 확인'){throw 'craft completion inventory/confirm fallback missing'}
+             $craftScreen -notmatch '실제 제작 완료창 확인' -or
+             $craftScreen -notmatch 'actual result popup confirm only'){throw 'craft completion popup-only guard missing'}
           $questText = Get-Content source/FishingAutomation/CraftingQuestText.cs -Raw
           if($questText -notmatch 'IsTitleNameOnly' -or
              $questText -notmatch 'IsQuestProgress'){throw 'crafting quest split-title/structure helpers missing'}
