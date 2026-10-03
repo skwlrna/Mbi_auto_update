@@ -118,10 +118,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             }
             else
             {
-                if (greenConfirm && (travelDialogVisible || autoTraveling == true))
-                    Log?.Invoke(
-                        $"[자동 가공] 초록 확인창 감지했지만 이동 상태라 Space 차단 · " +
-                        $"이동팝업={travelDialogVisible} · AutoTraveling={autoTraveling == true}");
                 stableFrames = 0;
             }
 
@@ -818,6 +814,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             }
             else
             {
+                if (greenConfirm && (travelDialogVisible || autoTraveling == true))
+                    Log?.Invoke(
+                        $"[자동 가공] 초록 확인창 감지했지만 이동 상태라 Space 차단 · " +
+                        $"이동팝업={travelDialogVisible} · AutoTraveling={autoTraveling == true}");
                 stableFrames = 0;
             }
         }
