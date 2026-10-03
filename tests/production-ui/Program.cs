@@ -288,7 +288,7 @@ internal sealed class FakeCli
         if(Fail) return Task.FromResult(new CliProcessOutput(5,"{\"pipe\":\"disconnected\"}",""));
         if(command == "get_craftable_items" && DuplicateCrafting)
             return Task.FromResult(new CliProcessOutput(0,
-                "{\"items\":[{\"DisplayName\":\"동일 이름\",\"Craftable\":true},{\"DisplayName\":\"동일 이름\",\"Craftable\":false}]}", ""));
+                "{\"items\":[{\"DisplayName\":\"동일 이름\",\"Craftable\":true,\"Category\":\"아이템\"},{\"DisplayName\":\"동일 이름\",\"Craftable\":false,\"Category\":\"아이템\"}]}", ""));
         if(command=="get_items" && _gathering && Gain) _logs+=3;
         object data = command switch
         {
