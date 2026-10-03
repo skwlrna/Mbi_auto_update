@@ -253,7 +253,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
         Log?.Invoke(
             $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
-            "100회는 행동 횟수이며 목표 재료를 먼저 확보하면 안전 정지");
+            "100회는 행동 횟수이며 획득 수량과 분리 · 목표 재료를 먼저 확보하면 안전 정지");
         await Task.Delay(700, ct);
     }
 
