@@ -534,13 +534,18 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 throw new InvalidOperationException(
                     $"{displayName} 목표 수량 정지 확인 중 안전하지 않은 상태가 감지되었습니다.");
 
-            if (!IsOwnedLifeSkillActivity(activity))
+            if (LifeSkillStopPolicy.IsStoppedAfterSpace(activity))
             {
                 stableStopped++;
+                Log?.Invoke(
+                    $"[대량 채집] Space 후 종료 확인 {stableStopped}/2 · " +
+                    $"Gathering={activity.IsGathering}, AutoTraveling={activity.IsAutoTraveling}, Fishing={activity.IsFishing}, " +
+                    $"MainButton={activity.MainButtonState}(판정 제외)");
                 if (stableStopped >= 2)
                 {
                     Log?.Invoke(
-                        $"[대량 채집] 채집/이동 종료 CLI 2회 확인 · {displayName}");
+                        $"[대량 채집] 채집/이동 종료 CLI 2회 확인 · {displayName} · " +
+                        "MainButtonState 잔상은 종료 판정에서 제외");
                     return;
                 }
             }
