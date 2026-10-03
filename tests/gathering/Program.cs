@@ -22,6 +22,44 @@ try { GatheringQueries.ParseWeight(MabinogiMobileCli.Parse("get_inventory",new(0
 catch(InvalidDataException) { Check(true,"unavailable bag capacity never treated as empty bag"); }
 try { GatheringQueries.ParseActivity(MabinogiMobileCli.Parse("get_activity",new(0,"{}",""))); throw new Exception("missing activity accepted"); }
 catch(KeyNotFoundException) { Check(true,"missing activity cannot authorize screen input"); }
+
+int activityRejects = 0, itemRejects = 0, weightRejects = 0;
+var loadingCli = new MabinogiMobileCli(log, true, (command, ct) =>
+{
+    ct.ThrowIfCancellationRequested();
+    if (command == "get_activity")
+    {
+        activityRejects++;
+        if (activityRejects <= 2)
+            return Task.FromResult(new CliProcessOutput(0, "{\"status\":\"rejected\",\"reason\":\"loading\"}", ""));
+        return Task.FromResult(new CliProcessOutput(0,
+            "{\"IsDead\":false,\"IsReviving\":false,\"IsInCombat\":false,\"IsAutoPlaying\":false,\"IsAutoTraveling\":false,\"IsDialoguePlaying\":false,\"IsWaitingForSelection\":false,\"Dungeon\":{\"State\":\"NotInDungeon\"},\"Battlefield\":{\"IsInBattleField\":false},\"Tutorial\":{\"IsPlaying\":false},\"Scenario\":{\"IsInScenario\":false},\"Performance\":{\"IsPlaying\":false},\"Mode\":{\"IsPlayingMiniGame\":false,\"IsHousingEditMode\":false,\"MainButtonState\":\"Compass\"},\"Interaction\":{\"HasTarget\":false,\"AvailableInteractionType\":\"None\",\"LastRunningInteractionType\":\"None\"}}", ""));
+    }
+    if (command == "get_items")
+    {
+        itemRejects++;
+        if (itemRejects <= 2)
+            return Task.FromResult(new CliProcessOutput(0, "{\"status\":\"rejected\",\"reason\":\"loading\"}", ""));
+        return Task.FromResult(new CliProcessOutput(0,
+            "[{\"DisplayName\":\"철 광석\",\"Count\":42,\"Location\":\"inventory\"}]", ""));
+    }
+    if (command == "get_inventory")
+    {
+        weightRejects++;
+        if (weightRejects <= 2)
+            return Task.FromResult(new CliProcessOutput(0, "{\"status\":\"rejected\",\"reason\":\"loading\"}", ""));
+        return Task.FromResult(new CliProcessOutput(0,
+            "{\"CurrentInventoryWeightAsDecimal\":1,\"MaxInventoryWeightAsDecimal\":100}", ""));
+    }
+    throw new Exception("unexpected loading retry command: " + command);
+});
+var loadingData = new GatheringCliData(loadingCli);
+Check((await loadingData.ActivityAsync(default)).IsSafeField && activityRejects == 3,
+    "gathering retries transient get_activity loading rejection");
+Check(await loadingData.ItemCountAsync("철 광석", default) == 42 && itemRejects == 3,
+    "gathering retries transient get_items loading rejection");
+Check((await loadingData.WeightAsync(default)).Maximum == 100 && weightRejects == 3,
+    "gathering retries transient get_inventory loading rejection");
 Check(GatheringNavigationPolicy.IsStableFirstRow(
         new System.Drawing.Rectangle(176,620,465,66),
         new System.Drawing.Rectangle(181,624,465,66)),
