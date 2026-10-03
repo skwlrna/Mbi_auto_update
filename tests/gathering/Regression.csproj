@@ -10,6 +10,7 @@
     <Compile Include="../../source/FishingAutomation/GatheringNavigationPolicy.cs" Link="GatheringNavigationPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringCliData.cs" Link="GatheringCliData.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs" Link="LifeSkillBulkGatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/LifeSkillProfilePolicy.cs" Link="LifeSkillProfilePolicy.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryLootTracker.cs" Link="InventoryLootTracker.cs" />
     <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
     <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />
