@@ -186,8 +186,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             new Rectangle(10, 20, 240, 100),
             ct,
             "고정좌표 클릭 후 생활 스킬 화면 제목을 확인하지 못했습니다.",
-            dimText: false,
-            settleMs: 180);
+            dimText: false);
         Log?.Invoke("[대량 채집] 생활 스킬 화면 진입 확인 · 상단 제목 2프레임 안정");
 
         _stage.Move(ProductionStage.SelectCategory, source.Category);
