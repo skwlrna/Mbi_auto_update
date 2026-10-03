@@ -577,17 +577,35 @@ internal sealed class CraftingScreen : ICraftingScreen
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(name))
-                throw Fail(
-                    frame,
-                    $"제작 퀘스트 재료 이름을 확인하지 못했습니다. 수량={ratio.Current}/{ratio.Required} · 행Y={ratio.Y}");
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                try
+                {
+                    name = await CanonicalizeQuestMaterialNameAsync(name!, plan.DisplayName, ct);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Log?.Invoke(
+                        $"[제작] 퀘스트 재료명 OCR 보조 판정 포기 · 수량={ratio.Current}/{ratio.Required} · " +
+                        $"행Y={ratio.Y} · {ex.Message} · 부족 행 자체로 계속");
+                    name = null;
+                }
+            }
 
-            name = await CanonicalizeQuestMaterialNameAsync(name!, plan.DisplayName, ct);
             if (ratio.Current < ratio.Required)
-                deficits.Add(new(name, ratio.Current, ratio.Required, ratio.Y));
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                    Log?.Invoke(
+                        $"[제작] 퀘스트 재료명 OCR 미확인 · 수량={ratio.Current}/{ratio.Required} · " +
+                        $"행Y={ratio.Y} · 이름 없이 부족 행으로 등록");
+                deficits.Add(new(name ?? "", ratio.Current, ratio.Required, ratio.Y));
+            }
         }
 
-        _lastSingleQuestDeficit = deficits.Count == 1 ? deficits[0] : null;
+        _lastSingleQuestDeficit =
+            deficits.Count == 1 && !string.IsNullOrWhiteSpace(deficits[0].DisplayName)
+                ? deficits[0]
+                : null;
         Log?.Invoke(deficits.Count == 0
             ? $"[제작] {plan.DisplayName} 퀘스트 부족 재료 없음"
             : "[제작] 퀘스트 부족 재료 · " +
@@ -743,26 +761,21 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     public async Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
     {
-        _stage.Move(ProductionStage.AcquireMaterial, deficit.DisplayName);
-        // Re-read the exact material on two fresh popup frames. RowY is only a
-        // narrowing hint; it is never a saved click coordinate.
-        var deficitRoi = new Rectangle(
-            70,
-            Math.Max(120, deficit.RowY - 70),
-            650,
-            140);
-        _ = await _ui.ClickStableExactAsync(
-            deficit.DisplayName,
-            deficitRoi,
-            ct,
-            $"부족 재료 {deficit.DisplayName}의 정확한 행을 다시 확인하지 못했습니다.",
-            dimText: true);
+        string label = string.IsNullOrWhiteSpace(deficit.DisplayName)
+            ? $"부족 재료 행 {deficit.Current}/{deficit.Required}"
+            : deficit.DisplayName;
 
+        _stage.Move(ProductionStage.AcquireMaterial, label);
+
+        // Material-name OCR is diagnostic only. The actionable identity is the
+        // stable shortage ratio row that the game itself presents in the quest.
+        // This lets a visible 0/60 row continue even when dim-gray "양배추" is
+        // completely omitted by Windows OCR.
+        using var beforeAcquire = Capture(ct);
+        await ClickStableQuestDeficitRowAsync(deficit, ct);
         await Task.Delay(CraftingHubLayout.AcquisitionMethodSettleDelayMs, ct);
 
-        bool anyHeaderSeen = false;
-        bool firstMaterialSeen = false;
-        bool secondMaterialSeen = false;
+        int stablePopup = 0;
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
@@ -771,65 +784,53 @@ internal sealed class CraftingScreen : ICraftingScreen
                 CraftingHubLayout.AcquisitionMethodHeaderArea,
                 "구하는 방법",
                 ct);
-            anyHeaderSeen |= header is not null;
-
-            var lines = await _ui.Ocr.ReadLinesAsync(
+            double changeRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
+                beforeAcquire,
                 frame,
-                CraftingHubLayout.AcquisitionMethodListArea,
-                3,
-                ct);
+                CraftingHubLayout.AcquisitionMethodPopupArea);
 
-            // The first row is the game's recommended route. The yellow "추천"
-            // badge is decorative and can disappear from OCR between frames.
-            // Authorize the fixed click from the stable material name in that
-            // recommended-row geometry; require the popup header only once.
-            bool recommendedSeen = lines.Any(x =>
-                AcquisitionMethodPolicy.IsRecommended(x.ReadText));
-            bool materialSeen = lines.Any(x =>
-                CraftingHubLayout.AcquisitionMethodRecommendedRowArea.Contains(x.Center) &&
-                (x.ReadText ?? "").Replace(" ", "")
-                    .Contains(deficit.DisplayName.Replace(" ", ""), StringComparison.Ordinal));
+            bool popupSeen =
+                header is not null ||
+                changeRatio >= CraftingHubLayout.AcquisitionMethodOpenChangeRatio;
+            if (popupSeen) stablePopup++;
+            else stablePopup = 0;
 
             Log?.Invoke(
-                $"[제작] 구하는 방법 팝업 확인 · pass={pass + 1} · " +
-                $"헤더={(header is not null ? "확인" : "없음")} · " +
-                $"추천={(recommendedSeen ? "확인" : "없음")} · " +
-                $"{deficit.DisplayName}={(materialSeen ? "확인" : "없음")}");
+                $"[제작] 구하는 방법 팝업 구조 확인 · pass={pass + 1} · " +
+                $"헤더OCR={(header is not null ? "확인" : "없음")} · " +
+                $"화면변화={changeRatio:P1} · stable={stablePopup}/2");
 
             if (pass == 0)
-            {
-                firstMaterialSeen = materialSeen;
                 await Task.Delay(120, ct);
-            }
-            else
-            {
-                secondMaterialSeen = materialSeen;
-            }
         }
 
-        if (!anyHeaderSeen || !firstMaterialSeen || !secondMaterialSeen)
+        if (stablePopup < 2)
         {
             using var failed = Capture(ct);
             throw Fail(
                 failed,
-                $"{deficit.DisplayName} 구하는 방법 팝업의 추천 첫 행 재료명을 2프레임 안정적으로 확인하지 못했습니다.");
+                $"{label} 부족 행 클릭 후 구하는 방법 팝업 전환을 안정적으로 확인하지 못했습니다.");
         }
 
         Log?.Invoke(
-            $"[제작] 추천 첫 행 안정 확인 · {deficit.DisplayName} 2/2프레임 · " +
-            "추천 글자 OCR은 클릭 조건에서 제외");
+            $"[제작] 추천 첫 행 사용 · {label} · 재료명 OCR은 클릭 조건에서 제외");
 
-        _stage.Move(ProductionStage.Travel, $"{deficit.DisplayName} 추천 획득처 이동/채집");
+        _stage.Move(ProductionStage.Travel, $"{label} 추천 획득처 이동/채집");
         _ui.ClickFresh(CraftingHubLayout.AcquisitionMethodRecommendedPoint, ct);
         Log?.Invoke(
-            $"[제작] {deficit.DisplayName} 추천 획득처 선택 · 고정좌표 " +
+            $"[제작] {label} 추천 획득처 선택 · 고정좌표 " +
             $"({CraftingHubLayout.AcquisitionMethodRecommendedPoint.X}," +
-            $"{CraftingHubLayout.AcquisitionMethodRecommendedPoint.Y}) · 필요 {deficit.Required}개");
+            $"{CraftingHubLayout.AcquisitionMethodRecommendedPoint.Y}) · " +
+            $"퀘스트 필요수량 {deficit.Required}");
 
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
-        int stable = 0;
+        int stableInventory = 0;
+        int stableIdle = 0;
         int activityLoadingRejects = 0;
         int polls = 0;
+        bool sawActivity = false;
+        bool inventoryFallbackLogged = false;
+
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
@@ -841,7 +842,8 @@ internal sealed class CraftingScreen : ICraftingScreen
                 if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
                 {
                     activityLoadingRejects++;
-                    stable = 0;
+                    stableIdle = 0;
+                    stableInventory = 0;
                     if (activityLoadingRejects == 1 || activityLoadingRejects % 5 == 0)
                         Log?.Invoke(
                             $"[제작] 지역 이동/채집 중 get_activity CLI 일시 거부 · 재시도 {activityLoadingRejects}회");
@@ -854,47 +856,184 @@ internal sealed class CraftingScreen : ICraftingScreen
 
             var activity = GatheringQueries.ParseActivity(activityResponse);
             if (!activity.IsSafeField)
-                throw new InvalidOperationException("제작 재료 채집 중 안전하지 않은 상태가 확인되어 정지합니다.");
+                throw new InvalidOperationException(
+                    "제작 재료 채집 중 안전하지 않은 상태가 확인되었습니다. 현재 배치 자동복구 대상으로 전환합니다.");
 
             bool active = activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing ||
                           activity.MainButtonState == "Stop";
             if (active)
             {
-                stable = 0;
+                sawActivity = true;
+                stableIdle = 0;
+                stableInventory = 0;
                 if (polls % 10 == 0)
                     Log?.Invoke(
-                        $"[제작] {deficit.DisplayName} 이동/채집 진행 중 · 재고 CLI 조회 생략 · " +
-                        $"이동={activity.IsAutoTraveling} · 채집={activity.IsGathering || activity.IsFishing}");
+                        $"[제작] {label} 이동/채집 진행 중 · 이동={activity.IsAutoTraveling} · " +
+                        $"채집={activity.IsGathering || activity.IsFishing}");
                 await Task.Delay(1000, ct);
                 continue;
             }
 
-            // Match the automatic-altering travel guard: loading-time CLI rejection is
-            // transient. Inventory is checked only after travel/gathering is no longer active.
-            long current = await _data.InventoryOnlyCountWithLoadingRetryAsync(
-                deficit.DisplayName, ct, Log);
-            if (current >= deficit.Required)
+            stableIdle++;
+
+            if (!string.IsNullOrWhiteSpace(deficit.DisplayName))
             {
-                stable++;
-                if (stable >= 2)
+                try
                 {
-                    Log?.Invoke($"[제작] {deficit.DisplayName} 준비 완료 · {current}/{deficit.Required} · 초과 허용");
-                    _stage.Move(ProductionStage.VerifyInventory, $"{deficit.DisplayName} {current}/{deficit.Required}");
-                    return;
+                    long current = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                        deficit.DisplayName, ct, Log);
+                    if (current >= deficit.Required)
+                    {
+                        stableInventory++;
+                        if (stableInventory >= 2)
+                        {
+                            Log?.Invoke(
+                                $"[제작] {deficit.DisplayName} 준비 완료 · {current}/{deficit.Required} · " +
+                                "CLI 검증 성공 · 초과 허용");
+                            _stage.Move(
+                                ProductionStage.VerifyInventory,
+                                $"{deficit.DisplayName} {current}/{deficit.Required}");
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        stableInventory = 0;
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidDataException or IOException)
+                {
+                    stableInventory = 0;
+                    if (!inventoryFallbackLogged)
+                    {
+                        inventoryFallbackLogged = true;
+                        Log?.Invoke(
+                            $"[제작] {label} 재고 CLI 검증 보조 실패 · {ex.Message} · " +
+                            "활동 종료 후 퀘스트 부족 행 재확인으로 계속");
+                    }
                 }
             }
-            else
+
+            // When the name is unknown, or get_items cannot verify it, activity
+            // ending is enough to hand control back to the quest. The quest is
+            // reopened immediately and remains the authority on whether this row
+            // is still short. Re-entering early is safe: a still-visible row is
+            // simply gathered again.
+            int requiredIdlePolls = sawActivity ? 5 : 8;
+            if (stableIdle >= requiredIdlePolls)
             {
-                stable = 0;
+                Log?.Invoke(
+                    $"[제작] {label} 활동 종료 안정 확인 · idle={stableIdle} · " +
+                    "재료 충족 여부는 새 퀘스트의 부족 행으로 재확인");
+                _stage.Move(
+                    ProductionStage.VerifyInventory,
+                    $"{label} 퀘스트 재확인");
+                return;
             }
 
             await Task.Delay(1000, ct);
         }
 
-        long final = await _data.InventoryOnlyCountWithLoadingRetryAsync(
-            deficit.DisplayName, ct, Log);
+        if (!string.IsNullOrWhiteSpace(deficit.DisplayName))
+        {
+            try
+            {
+                long final = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                    deficit.DisplayName, ct, Log);
+                if (final >= deficit.Required)
+                {
+                    Log?.Invoke(
+                        $"[제작] {deficit.DisplayName} 제한시간 종료 직전 재고 검증 완료 · " +
+                        $"{final}/{deficit.Required}");
+                    _stage.Move(
+                        ProductionStage.VerifyInventory,
+                        $"{deficit.DisplayName} {final}/{deficit.Required}");
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException)
+            {
+                Log?.Invoke(
+                    $"[제작] {label} 제한시간 최종 재고 확인도 보조 실패 · {ex.Message}");
+            }
+        }
+
         throw new InvalidOperationException(
-            $"{deficit.DisplayName} 제작 퀘스트 채집이 필요한 수량에 도달하지 못했습니다: {final}/{deficit.Required}");
+            $"{label} 추천 획득처 진행을 제한 시간 안에 확인하지 못했습니다. 현재 배치 자동복구 대상으로 전환합니다.");
+    }
+
+    private async Task ClickStableQuestDeficitRowAsync(
+        CraftingQuestDeficit deficit,
+        CancellationToken ct)
+    {
+        DetectionResult? first = null;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            var lines = await _ui.Ocr.ReadLinesAsync(
+                frame,
+                CraftingHubLayout.ProductionQuestMaterialArea,
+                3,
+                ct);
+
+            var matches = lines
+                .Where(line => QuestRatioMatches(line, deficit))
+                .OrderBy(line => Math.Abs(line.Center.Y - deficit.RowY))
+                .ToArray();
+
+            if (matches.Length != 1)
+                throw Fail(
+                    frame,
+                    $"부족 재료 행 {deficit.Current}/{deficit.Required}을 안정적으로 다시 찾지 못했습니다. " +
+                    $"행Y={deficit.RowY} · 후보={matches.Length}");
+
+            var current = matches[0];
+            if (pass == 0)
+            {
+                first = current;
+                await Task.Delay(120, ct);
+                continue;
+            }
+
+            if (first is null ||
+                Math.Abs(first.Value.Center.Y - current.Center.Y) >
+                    CraftingHubLayout.QuestMaterialRowStableTolerance)
+                throw Fail(
+                    frame,
+                    $"부족 재료 행 {deficit.Current}/{deficit.Required} 위치가 두 프레임에서 안정적이지 않습니다.");
+
+            var click = new Point(
+                CraftingHubLayout.QuestMaterialRowClickX,
+                current.Center.Y);
+            if (!CraftingHubLayout.ProductionQuestMaterialArea.Contains(click))
+                throw Fail(frame, "부족 재료 행 클릭 좌표가 안전 영역을 벗어났습니다.");
+
+            _ui.ClickFresh(click, ct);
+            Log?.Invoke(
+                $"[제작] 부족 재료 행 선택 · {deficit.Current}/{deficit.Required} · " +
+                $"행Y={current.Center.Y} · 재료명=" +
+                $"{(string.IsNullOrWhiteSpace(deficit.DisplayName) ? "OCR 미확인" : deficit.DisplayName)}");
+        }
+    }
+
+    private static bool QuestRatioMatches(
+        DetectionResult line,
+        CraftingQuestDeficit deficit)
+    {
+        if (Math.Abs(line.Center.Y - deficit.RowY) > 35)
+            return false;
+
+        string text = (line.ReadText ?? "").Replace(" ", "");
+        if (text.Contains("제작대", StringComparison.Ordinal))
+            return false;
+
+        var match = Regex.Match(text, @"(?<cur>\d+)\s*/\s*(?<req>\d+)");
+        return match.Success &&
+               long.TryParse(match.Groups["cur"].Value, out long current) &&
+               long.TryParse(match.Groups["req"].Value, out long required) &&
+               current == deficit.Current &&
+               required == deficit.Required;
     }
 
     public async Task CloseOverlayAsync(CancellationToken ct)
