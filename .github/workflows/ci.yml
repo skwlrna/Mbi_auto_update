@@ -480,10 +480,15 @@ jobs:
           if($readQuest -notmatch 'ReadDimLinesAsync\(frame, nameRoi, ct\)' -or
              $readQuest -notmatch '퀘스트 재료명 회색글씨 보강 OCR' -or
              $readQuest -notmatch 'new Rectangle\(215, Math\.Max\(610, ratio\.Y - 34\), 255, 68\)'){throw 'quest material name must recover from narrow dim row OCR'}
+          $questMatcher = Get-Content source/FishingAutomation/QuestMaterialNameMatcher.cs -Raw
           if($craftScreen -notmatch 'CanonicalizeQuestMaterialNameAsync' -or
              $craftScreen -notmatch 'LoadQuestMaterialNameCatalogAsync' -or
              $craftScreen -notmatch '퀘스트 재료명 OCR 보정' -or
-             $craftScreen -notmatch 'FuzzyText\.ContainsApprox\(ocrName, x, 1\)'){throw 'quest material OCR names must be canonicalized against real catalogs'}
+             $craftScreen -notmatch 'QuestMaterialNameMatcher\.Decide'){throw 'quest material OCR names must be canonicalized against real catalogs'}
+          if($questMatcher -notmatch 'FullEditDistance' -or
+             $questMatcher -notmatch 'StartsWith\(needle' -or
+             $questMatcher -notmatch 'CommonPrefixLength' -or
+             $questMatcher -match 'ContainsApprox'){throw 'quest material matcher must use full-string distance/prefix ranking, not substring fuzzy matching'}
           if($craftScreen -notmatch 'GetGatherableItemsAsync\(ct\)' -or
              $craftScreen -notmatch 'GetAlterableItemsAsync\(ct\)' -or
              $craftScreen -notmatch 'GetCraftableItemsAsync\(recipeName, ct\)'){throw 'quest material canonical catalog sources missing'}
