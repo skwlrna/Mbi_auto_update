@@ -42,6 +42,78 @@ internal static class CraftingFlowTests
             }
         }
 
+        {
+            var screen = new RecoveringBatchScreen();
+            string Json(string command) => command switch
+            {
+                "get_items" => JsonSerializer.Serialize(new[]
+                {
+                    new { DisplayName = "야채볶음", Location = "inventory", Count = screen.Stock }
+                }),
+                "get_craftable_items" => JsonSerializer.Serialize(new
+                {
+                    items = new[]
+                    {
+                        new { DisplayName = "야채볶음", ProducedPerCraft = 1, Craftable = false,
+                            MissingIngredients = Array.Empty<object>() }
+                    }
+                }),
+                _ => throw new Exception("unexpected recovery-test CLI command: " + command)
+            };
+            var cli = new MabinogiMobileCli(log, true, (command, ct) =>
+                Task.FromResult(new CliProcessOutput(0, Json(command), "")));
+            cli.RunFilteredQuery = (args, ct) =>
+                Task.FromResult(new CliProcessOutput(0, Json(args[0]), ""));
+
+            var automation = new CraftingAutomation(
+                new(cli), new(cli), screen, null!, (_, ct) => Task.CompletedTask);
+
+            await automation.RunAsync(
+                new(CraftingCategory.Food, "야채볶음", 20, 1),
+                CancellationToken.None);
+
+            check(screen.Batches.SequenceEqual(new[] { 10, 10, 10 }) &&
+                  automation.CompletedCrafts == 20 &&
+                  screen.CompletedBeforeRecovery == 10,
+                "quest preparation recovery keeps confirmed prior batch and recreates only current batch");
+        }
+
+        {
+            var screen = new NamelessDeficitScreen();
+            string Json(string command) => command switch
+            {
+                "get_items" => JsonSerializer.Serialize(new[]
+                {
+                    new { DisplayName = "야채볶음", Location = "inventory", Count = screen.Stock }
+                }),
+                "get_craftable_items" => JsonSerializer.Serialize(new
+                {
+                    items = new[]
+                    {
+                        new { DisplayName = "야채볶음", ProducedPerCraft = 1, Craftable = false,
+                            MissingIngredients = Array.Empty<object>() }
+                    }
+                }),
+                _ => throw new Exception(
+                    "unnamed quest row must not require a material catalog: " + command)
+            };
+            var cli = new MabinogiMobileCli(log, true, (command, ct) =>
+                Task.FromResult(new CliProcessOutput(0, Json(command), "")));
+            cli.RunFilteredQuery = (args, ct) =>
+                Task.FromResult(new CliProcessOutput(0, Json(args[0]), ""));
+
+            var automation = new CraftingAutomation(
+                new(cli), new(cli), screen, null!, (_, ct) => Task.CompletedTask);
+
+            await automation.RunAsync(
+                new(CraftingCategory.Food, "야채볶음", 1, 1),
+                CancellationToken.None);
+
+            check(screen.NamelessGathered &&
+                  automation.CompletedCrafts == 1,
+                "quest shortage row can be gathered when material-name OCR is unavailable");
+        }
+
         int transientReads = 0;
         var retryCli = new MabinogiMobileCli(log, true, (command, ct) =>
         {
@@ -68,6 +140,111 @@ internal static class CraftingFlowTests
             "감자", CancellationToken.None, null, 5);
         check(retriedCount == 80 && transientReads == 3,
             "quest material inventory retries transient loading cli_rejected instead of aborting");
+    }
+
+    private sealed class RecoveringBatchScreen : ICraftingScreen
+    {
+        internal long Stock = 50;
+        internal int CompletedBeforeRecovery;
+        internal List<int> Batches = new();
+        private int _createCalls;
+        private bool _failedSecondBatch;
+
+        public string InputMode => "test";
+        public event Action<string>? Log { add { } remove { } }
+
+        public Task CreateQuestAsync(CraftingPlan plan, int count, CancellationToken ct)
+        {
+            _createCalls++;
+            Batches.Add(count);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
+            CraftingPlan plan,
+            CancellationToken ct)
+        {
+            if (_createCalls == 2 && !_failedSecondBatch)
+            {
+                _failedSecondBatch = true;
+                CompletedBeforeRecovery = 10;
+                throw new InvalidOperationException("simulated quest OCR/read failure");
+            }
+
+            return Task.FromResult<IReadOnlyList<CraftingQuestDeficit>>(
+                Array.Empty<CraftingQuestDeficit>());
+        }
+
+        public Task GatherQuestDeficitAsync(
+            CraftingQuestDeficit deficit,
+            CancellationToken ct)
+            => throw new Exception("unexpected gather");
+
+        public Task CloseOverlayAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task ReturnToStationAndCraftAsync(
+            CraftingPlan plan,
+            int count,
+            CancellationToken ct)
+        {
+            Stock += count;
+            return Task.CompletedTask;
+        }
+
+        public void Dispose() { }
+    }
+
+    private sealed class NamelessDeficitScreen : ICraftingScreen
+    {
+        internal long Stock = 10;
+        internal bool NamelessGathered;
+        private bool _servedDeficit;
+
+        public string InputMode => "test";
+        public event Action<string>? Log { add { } remove { } }
+
+        public Task CreateQuestAsync(CraftingPlan plan, int count, CancellationToken ct)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
+            CraftingPlan plan,
+            CancellationToken ct)
+        {
+            if (!_servedDeficit)
+            {
+                _servedDeficit = true;
+                return Task.FromResult<IReadOnlyList<CraftingQuestDeficit>>(
+                    new[] { new CraftingQuestDeficit("", 0, 60, 777) });
+            }
+
+            return Task.FromResult<IReadOnlyList<CraftingQuestDeficit>>(
+                Array.Empty<CraftingQuestDeficit>());
+        }
+
+        public Task GatherQuestDeficitAsync(
+            CraftingQuestDeficit deficit,
+            CancellationToken ct)
+        {
+            NamelessGathered =
+                string.IsNullOrWhiteSpace(deficit.DisplayName) &&
+                deficit.Current == 0 &&
+                deficit.Required == 60 &&
+                deficit.RowY == 777;
+            return Task.CompletedTask;
+        }
+
+        public Task CloseOverlayAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task ReturnToStationAndCraftAsync(
+            CraftingPlan plan,
+            int count,
+            CancellationToken ct)
+        {
+            Stock += count;
+            return Task.CompletedTask;
+        }
+
+        public void Dispose() { }
     }
 
     private sealed class Screen : ICraftingScreen
