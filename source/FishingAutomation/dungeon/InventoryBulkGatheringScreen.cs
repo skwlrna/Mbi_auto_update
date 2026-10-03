@@ -17,6 +17,25 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("채집");
 
+    // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
+    private static readonly Point ProfileLifeSkillPoint = new(400, 944);
+
+    private static bool TryLifeSkillCategoryPoint(string category, out Point point)
+    {
+        point = category switch
+        {
+            "일상 채집" => new Point(222, 206),
+            "나무 베기" => new Point(341, 206),
+            "광석 캐기" => new Point(460, 206),
+            "약초 채집" => new Point(578, 206),
+            "양털 깎기" => new Point(222, 383),
+            "추수" => new Point(341, 383),
+            "호미질" => new Point(460, 383),
+            _ => Point.Empty
+        };
+        return point != Point.Empty;
+    }
+
     internal string InputMode => _ui.InputMode;
     internal event Action<string>? Log;
 
@@ -99,26 +118,54 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
         else if (_stage.Current == ProductionStage.VerifyInventory)
             _stage.Move(ProductionStage.OpenHub, $"생활 스킬 반복 · {source.Category}");
-        // C = profile. Confirm that the profile/life-skill menu is really visible
-        // before allowing the next input. Never fall back to inventory/material detail.
-        var lifeSkillArea = new Rectangle(20, 70, 760, 860);
-        Log?.Invoke("[대량 채집] 프로필 열기 · C 입력");
-        _ui.TapFresh(0x2E, ct);
 
-        DateTime profileDeadline = DateTime.UtcNow.AddSeconds(4);
+        if (!TryLifeSkillCategoryPoint(source.Category, out Point categoryPoint))
+            throw new InvalidOperationException(
+                $"생활 스킬 분류 {source.Category}의 고정좌표가 등록되어 있지 않습니다.");
+
+        // Profile is opened with C, but the small bottom "생활 스킬" label is no longer
+        // used as an OCR click target. Confirm the profile with its large stat labels,
+        // then click the user-confirmed fixed bottom navigation coordinate.
         bool profileConfirmed = false;
-        while (DateTime.UtcNow < profileDeadline)
+        for (int attempt = 1; attempt <= 3 && !profileConfirmed; attempt++)
         {
-            ct.ThrowIfCancellationRequested();
-            using var frame = Capture(ct);
-            var lifeSkill = await FindUniqueAsync(frame, lifeSkillArea, "생활 스킬", ct);
-            if (lifeSkill is not null)
+            Log?.Invoke($"[대량 채집] 프로필 열기 · C 입력 {attempt}/3");
+            _ui.TapFresh(0x2E, ct);
+
+            DateTime deadline = DateTime.UtcNow.AddSeconds(3);
+            int stableProfileFrames = 0;
+            while (DateTime.UtcNow < deadline)
             {
-                profileConfirmed = true;
-                Log?.Invoke("[대량 채집] 프로필 열림 확인 · 생활 스킬 메뉴 확인");
-                break;
+                ct.ThrowIfCancellationRequested();
+                using var frame = Capture(ct);
+                var power = await FindUniqueAsync(
+                    frame, new Rectangle(120, 630, 390, 250), "전투력", ct);
+                var vitality = await FindUniqueAsync(
+                    frame, new Rectangle(120, 630, 390, 250), "생활력", ct);
+
+                if (power is not null || vitality is not null)
+                {
+                    stableProfileFrames++;
+                    if (stableProfileFrames >= 2)
+                    {
+                        profileConfirmed = true;
+                        Log?.Invoke("[대량 채집] 프로필 화면 확인 · 전투력/생활력 대형 항목 2프레임 안정");
+                        break;
+                    }
+                }
+                else
+                {
+                    stableProfileFrames = 0;
+                }
+
+                await Task.Delay(180, ct);
             }
-            await Task.Delay(250, ct);
+
+            if (!profileConfirmed && attempt < 3)
+            {
+                Log?.Invoke($"[대량 채집] 프로필 화면 확인 실패 {attempt}/3 · C 재시도");
+                await Task.Delay(350, ct);
+            }
         }
 
         if (!profileConfirmed)
@@ -126,24 +173,28 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             using var failed = Capture(ct);
             throw Fail(
                 failed,
-                "C 입력 후 프로필/생활 스킬 메뉴를 확인하지 못했습니다. 다른 획득 경로로 우회하지 않습니다.");
+                "C 입력 후 프로필 화면을 3회 확인하지 못했습니다. 다른 획득 경로로 우회하지 않습니다.");
         }
 
-        await ClickExactAsync(
+        Log?.Invoke(
+            $"[대량 채집] 생활 스킬 고정좌표 클릭 · ({ProfileLifeSkillPoint.X},{ProfileLifeSkillPoint.Y})");
+        _ui.ClickFresh(ProfileLifeSkillPoint, ct);
+        await Task.Delay(650, ct);
+
+        await _ui.VerifyStableAnchorAsync(
             "생활 스킬",
-            lifeSkillArea,
+            new Rectangle(10, 20, 240, 100),
             ct,
-            "프로필에서 생활 스킬 메뉴를 안정적으로 확인하지 못했습니다.");
-        Log?.Invoke("[대량 채집] 생활 스킬 진입 클릭 완료");
-        await Task.Delay(550, ct);
+            "고정좌표 클릭 후 생활 스킬 화면 제목을 확인하지 못했습니다.",
+            dimText: false,
+            settleMs: 180);
+        Log?.Invoke("[대량 채집] 생활 스킬 화면 진입 확인 · 상단 제목 2프레임 안정");
 
         _stage.Move(ProductionStage.SelectCategory, source.Category);
-        await ClickExactAsync(
-            source.Category,
-            new Rectangle(20, 100, 760, 820),
-            ct,
-            $"생활 스킬 분류 {source.Category}을(를) 확인하지 못했습니다.");
-        await Task.Delay(450, ct);
+        Log?.Invoke(
+            $"[대량 채집] 생활 스킬 분류 고정좌표 클릭 · {source.Category} · ({categoryPoint.X},{categoryPoint.Y})");
+        _ui.ClickFresh(categoryPoint, ct);
+        await Task.Delay(500, ct);
 
         _stage.Move(ProductionStage.Search, source.TargetName);
         var row = await FindStableLifeSkillRowAsync(source, ct);
@@ -151,7 +202,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         {
             using var failed = Capture(ct);
             throw Fail(failed,
-                $"{source.Category} 목록에서 {source.TargetName} 행을 OCR+아이콘 구조로 확인하지 못했습니다.");
+                $"{source.Category} 고정좌표 클릭 후 {source.TargetName} 행을 OCR+아이콘 구조로 확인하지 못했습니다.");
         }
 
         using (var frame = Capture(ct))
