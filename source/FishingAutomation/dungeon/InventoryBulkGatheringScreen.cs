@@ -124,47 +124,40 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             throw new InvalidOperationException(
                 $"생활 스킬 분류 {source.Category}의 고정좌표가 등록되어 있지 않습니다.");
 
-        // Profile is opened with C, but the small bottom "생활 스킬" label is no longer
-        // used as an OCR click target. Confirm the profile with its large stat labels,
-        // then click the user-confirmed fixed bottom navigation coordinate.
+        // C is a toggle. Press it once, then prove that the profile opened.
+        // Never keep toggling merely because one OCR read missed 전투력/생활력.
+        // A second C is allowed only when the screen is still effectively unchanged
+        // from the pre-C field frame on two independent profile regions.
         bool profileConfirmed = false;
-        for (int attempt = 1; attempt <= 3 && !profileConfirmed; attempt++)
+        for (int attempt = 1; attempt <= 2 && !profileConfirmed; attempt++)
         {
-            Log?.Invoke($"[대량 채집] 프로필 열기 · C 입력 {attempt}/3");
+            using var beforeProfileOpen = Capture(ct);
+            Log?.Invoke($"[대량 채집] 프로필 열기 · C 입력 {attempt}/2");
             _ui.TapFresh(0x2E, ct);
 
-            DateTime deadline = DateTime.UtcNow.AddSeconds(3);
-            int stableProfileFrames = 0;
-            while (DateTime.UtcNow < deadline)
+            var observation = await WaitForProfileOpenAsync(beforeProfileOpen, ct);
+            if (observation.Confirmed)
             {
-                ct.ThrowIfCancellationRequested();
-                using var frame = Capture(ct);
-                var power = await FindUniqueAsync(
-                    frame, new Rectangle(120, 630, 390, 250), "전투력", ct);
-                var vitality = await FindUniqueAsync(
-                    frame, new Rectangle(120, 630, 390, 250), "생활력", ct);
-
-                if (power is not null || vitality is not null)
-                {
-                    stableProfileFrames++;
-                    if (stableProfileFrames >= 2)
-                    {
-                        profileConfirmed = true;
-                        Log?.Invoke("[대량 채집] 프로필 화면 확인 · 전투력/생활력 대형 항목 2프레임 안정");
-                        break;
-                    }
-                }
-                else
-                {
-                    stableProfileFrames = 0;
-                }
-
-                await Task.Delay(180, ct);
+                profileConfirmed = true;
+                Log?.Invoke(
+                    $"[대량 채집] 프로필 화면 확인 · {observation.Evidence} · C 추가 입력 없음");
+                break;
             }
 
-            if (!profileConfirmed && attempt < 3)
+            if (!observation.MayRetryToggle)
             {
-                Log?.Invoke($"[대량 채집] 프로필 화면 확인 실패 {attempt}/3 · C 재시도");
+                using var failed = Capture(ct);
+                throw Fail(
+                    failed,
+                    "C 입력 후 화면 전환은 감지됐지만 프로필 확정 증거가 부족합니다. " +
+                    "토글키 C를 다시 누르지 않고 안전하게 정지합니다.");
+            }
+
+            if (attempt < 2)
+            {
+                Log?.Invoke(
+                    "[대량 채집] C 입력 후 프로필 영역 변화 없음 2개 영역 확인 · " +
+                    "프로필이 열리지 않은 것으로 보고 C 1회만 재시도");
                 await Task.Delay(350, ct);
             }
         }
@@ -174,7 +167,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             using var failed = Capture(ct);
             throw Fail(
                 failed,
-                "C 입력 후 프로필 화면을 3회 확인하지 못했습니다. 다른 획득 경로로 우회하지 않습니다.");
+                "C 입력 후 프로필 화면을 확인하지 못했습니다. " +
+                "전투력/생활력 OCR 또는 프로필 고정 화면전환 증거가 필요합니다.");
         }
 
         Log?.Invoke(
@@ -255,6 +249,82 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
             "100회는 행동 횟수이며 획득 수량과 분리 · 목표 재료를 먼저 확보하면 안전 정지");
         await Task.Delay(700, ct);
+    }
+
+    private async Task<(bool Confirmed, bool MayRetryToggle, string Evidence)> WaitForProfileOpenAsync(
+        Bitmap beforeOpen,
+        CancellationToken ct)
+    {
+        var profileBody = new Rectangle(80, 120, 640, 760);
+        var bottomBand = new Rectangle(245, 870, 310, 120);
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        int stableProfileFrames = 0;
+        double lastBodyChange = 0;
+        double lastBottomChange = 0;
+        string lastEvidence = "확인 증거 없음";
+
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+
+            var power = await FindUniqueAsync(
+                frame, new Rectangle(120, 630, 390, 250), "전투력", ct);
+            var vitality = await FindUniqueAsync(
+                frame, new Rectangle(120, 630, 390, 250), "생활력", ct);
+            var lifeSkill = await _ui.Ocr.FindCompactLabelAsync(
+                frame,
+                bottomBand,
+                "생활 스킬",
+                ct);
+
+            lastBodyChange = ProductionUiRuntime.MeasureVisualChangeRatio(
+                beforeOpen,
+                frame,
+                profileBody,
+                sampleStep: 8,
+                channelDelta: 24);
+            lastBottomChange = ProductionUiRuntime.MeasureVisualChangeRatio(
+                beforeOpen,
+                frame,
+                bottomBand,
+                sampleStep: 6,
+                channelDelta: 24);
+
+            bool primaryStatOcr = power is not null || vitality is not null;
+            bool confirmed = LifeSkillProfilePolicy.IsConfirmed(
+                primaryStatOcr,
+                lifeSkill.Found,
+                lastBodyChange,
+                lastBottomChange);
+
+            if (confirmed)
+            {
+                stableProfileFrames++;
+                lastEvidence = primaryStatOcr
+                    ? "전투력/생활력 OCR"
+                    : lifeSkill.Found
+                        ? $"하단 생활 스킬 OCR + 화면전환 body={lastBodyChange:F2}"
+                        : $"프로필 고정 화면전환 body={lastBodyChange:F2}, bottom={lastBottomChange:F2}";
+
+                if (stableProfileFrames >= 2)
+                    return (true, false, lastEvidence);
+            }
+            else
+            {
+                stableProfileFrames = 0;
+            }
+
+            await Task.Delay(180, ct);
+        }
+
+        bool mayRetry = LifeSkillProfilePolicy.MayRetryToggle(
+            lastBodyChange,
+            lastBottomChange);
+        Log?.Invoke(
+            $"[대량 채집] 프로필 확인 미확정 · bodyChange={lastBodyChange:F3} · " +
+            $"bottomChange={lastBottomChange:F3} · C재시도={(mayRetry ? "허용" : "금지")}");
+        return (false, mayRetry, lastEvidence);
     }
 
     private async Task<DetectionResult?> FindStableLifeSkillRowAsync(
