@@ -135,8 +135,8 @@ internal sealed class CraftingAutomation
             var deficits = await _screen.ReadQuestDeficitsAsync(plan, ct);
             if (deficits.Count == 0)
             {
-                Log?.Invoke("[제작] 현재 퀘스트의 부족 재료 없음 · 제작대 복귀 준비");
-                await _screen.CloseOverlayAsync(ct);
+                Log?.Invoke(
+                    "[제작] 현재 퀘스트의 부족 재료 없음 · 마지막 퀘스트 클릭 완료 · 게임 자동 제작대 복귀 대기 · 추가 입력 없음");
                 return;
             }
 
