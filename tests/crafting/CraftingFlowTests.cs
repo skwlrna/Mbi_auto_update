@@ -74,8 +74,9 @@ internal static class CraftingFlowTests
 
             check(screen.Batches.SequenceEqual(new[] { 10, 10, 10 }) &&
                   automation.CompletedCrafts == 20 &&
-                  screen.CompletedBeforeRecovery == 10,
-                "quest preparation recovery keeps confirmed prior batch and recreates only current batch");
+                  screen.CompletedBeforeRecovery == 10 &&
+                  screen.RecoveryCalls == 1,
+                "quest preparation recovery keeps confirmed prior batch, normalizes screen, and recreates only current batch");
         }
 
         {
@@ -146,6 +147,7 @@ internal static class CraftingFlowTests
     {
         internal long Stock = 50;
         internal int CompletedBeforeRecovery;
+        internal int RecoveryCalls;
         internal List<int> Batches = new();
         private int _createCalls;
         private bool _failedSecondBatch;
@@ -179,6 +181,12 @@ internal static class CraftingFlowTests
             CraftingQuestDeficit deficit,
             CancellationToken ct)
             => throw new Exception("unexpected gather");
+
+        public Task RecoverBatchPreparationAsync(CraftingPlan plan, CancellationToken ct)
+        {
+            RecoveryCalls++;
+            return Task.CompletedTask;
+        }
 
         public Task CloseOverlayAsync(CancellationToken ct) => Task.CompletedTask;
 
@@ -233,6 +241,8 @@ internal static class CraftingFlowTests
             return Task.CompletedTask;
         }
 
+        public Task RecoverBatchPreparationAsync(CraftingPlan plan, CancellationToken ct) => Task.CompletedTask;
+
         public Task CloseOverlayAsync(CancellationToken ct) => Task.CompletedTask;
 
         public Task ReturnToStationAndCraftAsync(
@@ -259,6 +269,8 @@ internal static class CraftingFlowTests
         public Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(CraftingPlan plan, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<CraftingQuestDeficit>>(Array.Empty<CraftingQuestDeficit>());
         public Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct) => throw new Exception("unexpected gather");
+        public Task RecoverBatchPreparationAsync(CraftingPlan plan, CancellationToken ct) => Task.CompletedTask;
+
         public Task CloseOverlayAsync(CancellationToken ct) => Task.CompletedTask;
         public Task ReturnToStationAndCraftAsync(CraftingPlan plan, int count, CancellationToken ct)
         { Stock += ShortOutput ? count - 1 : count; return Task.CompletedTask; }
