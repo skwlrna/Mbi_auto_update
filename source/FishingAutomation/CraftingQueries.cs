@@ -74,7 +74,66 @@ internal static class CraftingQueries
     }
 
     internal static IEnumerable<CraftableItem> ForUiCategory(IEnumerable<CraftableItem> items, CraftingCategory category)
-        => items.Where(x => x.Category == category);
+    {
+        var snapshot = items.ToArray();
+        if (snapshot.Length == 0)
+            return Array.Empty<CraftableItem>();
+
+        int known = snapshot.Count(x => x.Category != CraftingCategory.Unknown);
+
+        // V3.0.18 hid Unknown rows entirely. The live game CLI currently returns
+        // catalogs where category metadata can be absent for most/all rows, which
+        // made both tabs empty. If reliable metadata covers less than 25% of the
+        // catalog, classify only the Unknown rows with a deterministic name/recipe
+        // fallback. Each row still belongs to exactly one tab, never both.
+        bool sparseMetadata = known * 4 < snapshot.Length;
+        return snapshot.Where(x =>
+            x.Category == category ||
+            (x.Category == CraftingCategory.Unknown &&
+             sparseMetadata &&
+             FallbackCategory(x) == category));
+    }
+
+    internal static (int Food, int Item, int Unknown, bool UsesFallback) CategoryCoverage(
+        IEnumerable<CraftableItem> items)
+    {
+        var snapshot = items.ToArray();
+        int food = snapshot.Count(x => x.Category == CraftingCategory.Food);
+        int item = snapshot.Count(x => x.Category == CraftingCategory.Item);
+        int unknown = snapshot.Length - food - item;
+        return (food, item, unknown, snapshot.Length > 0 && (food + item) * 4 < snapshot.Length);
+    }
+
+    private static CraftingCategory FallbackCategory(CraftableItem item)
+    {
+        string name = item.DisplayName.Replace(" ", "", StringComparison.Ordinal);
+        string[] foodTokens =
+        {
+            "볶음", "샐러드", "구이", "튀김", "수프", "스프", "찌개", "국", "탕",
+            "밥", "죽", "덮밥", "김밥", "초밥", "국수", "라면", "파스타", "면요리",
+            "스테이크", "꼬치", "오믈렛", "샌드위치", "버거", "빵", "케이크", "쿠키",
+            "파이", "푸딩", "아이스크림", "초콜릿", "사탕", "캔디", "젤리", "잼",
+            "주스", "음료", "차", "커피", "요리"
+        };
+        if (foodTokens.Any(token => name.Contains(token, StringComparison.OrdinalIgnoreCase)))
+            return CraftingCategory.Food;
+
+        // A non-craftable food recipe often exposes only its missing ingredients.
+        // Require at least two strong cooking ingredients so item recipes using one
+        // herb/bottle are not accidentally moved to the food tab.
+        string[] foodIngredients =
+        {
+            "감자", "양파", "양배추", "당근", "토마토", "밀", "쌀", "달걀", "계란",
+            "고기", "생선", "우유", "버터", "치즈", "소금", "설탕", "후추", "버섯"
+        };
+        int ingredientClues = item.MissingIngredients.Count(ingredient =>
+            foodIngredients.Any(token =>
+                ingredient.DisplayName.Contains(token, StringComparison.OrdinalIgnoreCase)));
+        if (ingredientClues >= 2)
+            return CraftingCategory.Food;
+
+        return CraftingCategory.Item;
+    }
 
     internal static int RequiredCrafts(long targetQuantity, int producedPerCraft)
     {
@@ -92,23 +151,41 @@ internal static class CraftingQueries
 
     private static CraftingCategory InferCategory(JsonElement row)
     {
+        // Prefer explicit category/facility/type fields when the CLI exposes them.
         foreach (var property in row.EnumerateObject())
         {
             if (!LooksLikeCategoryProperty(property.Name))
                 continue;
-            foreach (string text in Strings(property.Value))
-            {
-                if (text.Contains("음식", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("food", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("cooking", StringComparison.OrdinalIgnoreCase))
-                    return CraftingCategory.Food;
-                if (text.Contains("아이템", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("약품", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("다목적", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("캠프", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("item", StringComparison.OrdinalIgnoreCase))
-                    return CraftingCategory.Item;
-            }
+            var category = ClassifyCategoryText(Strings(property.Value));
+            if (category != CraftingCategory.Unknown)
+                return category;
+        }
+
+        // Live CLI builds have changed field names before. Scan every string value
+        // as a compatibility fallback so a category hint under a new property name
+        // does not turn the whole catalog into Unknown.
+        var anyValueCategory = ClassifyCategoryText(Strings(row));
+        if (anyValueCategory != CraftingCategory.Unknown)
+            return anyValueCategory;
+
+        return CraftingCategory.Unknown;
+    }
+
+    private static CraftingCategory ClassifyCategoryText(IEnumerable<string> values)
+    {
+        foreach (string text in values)
+        {
+            if (text.Contains("음식", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("요리", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("food", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("cooking", StringComparison.OrdinalIgnoreCase))
+                return CraftingCategory.Food;
+            if (text.Contains("아이템", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("약품", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("다목적", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("캠프", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("item", StringComparison.OrdinalIgnoreCase))
+                return CraftingCategory.Item;
         }
         return CraftingCategory.Unknown;
     }
