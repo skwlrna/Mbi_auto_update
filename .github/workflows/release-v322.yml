@@ -128,6 +128,7 @@ jobs:
              $craftReturn -notmatch '수량 재설정 없음'){throw 'passive crafting return trace missing'}
 
           $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $alter = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
           $resolver = Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if($alteringPlan -notmatch 'interface IAlteringFieldExitScreen'){throw 'altering field-exit contract missing'}
