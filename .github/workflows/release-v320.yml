@@ -349,7 +349,10 @@ jobs:
           $r = @($releases | Where-Object { $_.tag_name -eq 'V3.0.20' }) | Select-Object -First 1
 
           $expected=@('MabiAuto_V3.0.20_Windows_Lite.zip','MabiAuto_V3.0.20_Windows_Lite.zip.sha256','MabiAuto_V3.0.20_Source.zip')
-          $releaseTarget=$env:GITHUB_SHA
+          git fetch origin release-v320-code
+          if($LASTEXITCODE-ne0){throw 'Release code branch fetch failed'}
+          $releaseTarget=(git rev-parse origin/release-v320-code).Trim()
+          if($releaseTarget -ne '285fdd1154a6dd5b73b95e27eff4f5c161a94d22'){throw "Release code target mismatch: $releaseTarget"}
 
           if(-not $r) {
             $remoteTag = git ls-remote --tags origin refs/tags/V3.0.20
