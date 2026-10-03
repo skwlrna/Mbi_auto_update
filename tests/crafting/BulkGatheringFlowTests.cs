@@ -25,10 +25,10 @@ internal static class BulkGatheringFlowTests
         var life = new LifeSkillBulkGatheringAutomation(
             _ => Task.FromResult(lifeStock),
             _ => { lifeCycles++; return Task.CompletedTask; },
-            (before, _) =>
+            (before, targetTotal, _) =>
             {
                 lifeStock += lifeCycles == 1 ? 137 : 81;
-                return Task.CompletedTask;
+                return Task.FromResult(lifeStock >= targetTotal);
             });
         await life.RunAsync(new("통나무", 200), CancellationToken.None);
         check(lifeCycles == 2 && lifeStock - 12 == 218,
