@@ -19,6 +19,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
     private static readonly Point ProfileLifeSkillPoint = new(400, 944);
+    // Live 800x1000 life-skill detail popup: "가까운 위치 찾기" link center.
+    private static readonly Point LifeSkillNearestLocationPoint = new(300, 534);
 
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
@@ -103,7 +105,6 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             "생활 스킬 분류",
             "목록에서",
             "행의 이름/아이콘",
-            "100회 채집 상태",
             "가까운 위치 찾기"
         };
         return safeNavigationFailures.Any(x =>
@@ -225,46 +226,34 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         }
         await Task.Delay(500, ct);
 
-        // Depending on the live detail layout, "100회 채집" may be an explicit
-        // selector/button or the selected life-skill row may already represent it.
-        bool hundredConfirmed = false;
+        // Selecting the life-skill material opens its fixed detail popup. There is
+        // no visible "100회 채집" control here: the game starts the 100-action
+        // auto-gather cycle after "가까운 위치 찾기". Verify only the target popup,
+        // then use the user-confirmed fixed link coordinate.
         using (var frame = Capture(ct))
         {
-            var hundred = await FindUniqueAsync(
-                frame, new Rectangle(60, 160, 680, 700), "100회 채집", ct);
-            if (hundred is not null)
-            {
-                _ui.ClickFresh(hundred.Value.Center, ct);
-                hundredConfirmed = true;
-            }
-            else
-            {
-                var lines = await _ui.Ocr.ReadLinesAsync(
-                    frame, new Rectangle(40, 120, 720, 760), 3, ct);
-                hundredConfirmed = lines.Any(x =>
-                    (x.ReadText ?? "").Replace(" ", "")
-                        .Contains("100회", StringComparison.Ordinal));
-            }
-        }
-
-        if (!hundredConfirmed)
-        {
-            using var failed = Capture(ct);
-            throw Fail(failed,
-                $"{source.TargetName} 생활 스킬에서 100회 채집 상태를 확인하지 못했습니다.");
+            var detailTarget = await FindUniqueAsync(
+                frame,
+                new Rectangle(210, 330, 300, 90),
+                source.TargetName,
+                ct);
+            if (detailTarget is null)
+                throw Fail(
+                    frame,
+                    $"{source.TargetName} 생활 스킬 상세 팝업을 확인하지 못해 가까운 위치 고정좌표를 클릭하지 않습니다.");
         }
 
         _stage.Move(ProductionStage.Detail, source.TargetName);
-        await Task.Delay(350, ct);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
-        await ClickExactAsync(
-            "가까운 위치 찾기",
-            new Rectangle(50, 180, 700, 760),
-            ct,
-            $"{source.TargetName}의 가까운 위치 찾기 버튼을 확인하지 못했습니다.");
+        Log?.Invoke(
+            $"[대량 채집] 가까운 위치 찾기 · 고정좌표 " +
+            $"({LifeSkillNearestLocationPoint.X},{LifeSkillNearestLocationPoint.Y}) · " +
+            "100회 문구 OCR 없음");
+        _ui.ClickFresh(LifeSkillNearestLocationPoint, ct);
 
         Log?.Invoke(
-            $"[대량 채집] {source.Category} · {source.TargetName} · 100회 채집 경로 시작 · 추가 Space 입력 없음");
+            $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 100회 자동채집 자연 종료 감시 · " +
+            "100회는 행동 횟수이며 획득 수량과 분리");
         await Task.Delay(700, ct);
     }
 
