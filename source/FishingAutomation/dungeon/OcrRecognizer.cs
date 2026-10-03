@@ -174,6 +174,59 @@ internal sealed class OcrRecognizer
         return DetectionResult.NotFound;
     }
 
+    // Production quest material names are rendered as small dim-gray text.
+    // Normal ReadLinesAsync can still see the bright x/y counters while dropping
+    // the name on the same row. Re-run only the narrow name ROI through the same
+    // thresholded pipeline used by dim production labels.
+    internal async Task<IReadOnlyList<DetectionResult>> ReadDimLinesAsync(
+        Bitmap frame,
+        Rectangle roi,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        roi = Rectangle.Intersect(new Rectangle(Point.Empty, frame.Size), roi);
+        if (roi.Width <= 0 || roi.Height <= 0)
+            return Array.Empty<DetectionResult>();
+
+        var found = new List<DetectionResult>();
+        foreach (int threshold in new[] { 30, 40, 50, 70, 0 })
+        {
+            ct.ThrowIfCancellationRequested();
+            using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
+            using var prepared = PrepareAlteringText(crop, 3, threshold);
+            using var software = await ToSoftwareBitmapAsync(prepared);
+            var result = await _engine.RecognizeAsync(software);
+            ct.ThrowIfCancellationRequested();
+
+            foreach (var line in result.Lines)
+            {
+                if (line.Words.Count == 0)
+                    continue;
+
+                string text = string.Join(" ", line.Words.Select(w => w.Text)).Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                double left = line.Words.Min(w => w.BoundingRect.X);
+                double top = line.Words.Min(w => w.BoundingRect.Y);
+                double right = line.Words.Max(w => w.BoundingRect.X + w.BoundingRect.Width);
+                double bottom = line.Words.Max(w => w.BoundingRect.Y + w.BoundingRect.Height);
+                var bounds = Rectangle.FromLTRB(
+                    roi.X + (int)Math.Round(left / 3.0),
+                    roi.Y + (int)Math.Round(top / 3.0),
+                    roi.X + (int)Math.Round(right / 3.0),
+                    roi.Y + (int)Math.Round(bottom / 3.0));
+
+                found.Add(new DetectionResult(true, bounds, 1.0, text));
+            }
+        }
+
+        return found
+            .OrderBy(x => x.Bounds.Top)
+            .ThenBy(x => x.Bounds.Left)
+            .ToArray();
+    }
+
     // V0168_ABYSS_LOOT_OCR_LINES
     public async Task<IReadOnlyList<DetectionResult>> ReadLinesAsync(
         Bitmap frame,
