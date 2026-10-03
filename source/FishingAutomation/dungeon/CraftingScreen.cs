@@ -769,38 +769,38 @@ internal sealed class CraftingScreen : ICraftingScreen
         DateTime deadline = DateTime.UtcNow.AddMinutes(5);
         DateTime nextInventoryCheck = DateTime.MinValue;
         long latestInventory = inventoryBefore;
-        int stableCompletion = 0;
-        bool sawBusy = false;
+        long lastLoggedInventory = inventoryBefore;
+        int stableCompletionPopup = 0;
 
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
 
+            // Inventory changes are progress/diagnostic information only.
+            // A great success can make the output count reach or exceed the requested
+            // quantity before every queued craft has finished, so inventory must never
+            // be used as a completion signal.
             if (DateTime.UtcNow >= nextInventoryCheck)
             {
                 try
                 {
                     latestInventory = await _data.InventoryOnlyCountAsync(displayName, ct);
+                    if (latestInventory != lastLoggedInventory)
+                    {
+                        Log?.Invoke(
+                            $"[제작] 제작 진행 중 · 재고 {inventoryBefore}->{latestInventory} · " +
+                            "완료창 대기 · 재고 증가는 완료 판정에 사용하지 않음");
+                        lastLoggedInventory = latestInventory;
+                    }
                 }
                 catch (Exception ex) when (ex is InvalidDataException or IOException)
                 {
-                    Log?.Invoke($"[제작] 완료 재고 확인 보조 실패 · {ex.Message}");
+                    Log?.Invoke($"[제작] 진행 재고 확인 보조 실패 · {ex.Message}");
                 }
                 nextInventoryCheck = DateTime.UtcNow.AddSeconds(1);
             }
 
             using var frame = Capture(ct);
-            var busyLines = await _ui.Ocr.ReadLinesAsync(
-                frame,
-                new Rectangle(60, 20, 700, 430),
-                3,
-                ct);
-            bool busy = busyLines.Any(x =>
-                (x.ReadText ?? "").Replace(" ", "")
-                    .Contains("제작대사용중", StringComparison.Ordinal));
-            if (busy)
-                sawBusy = true;
-
             var complete = await FindUniqueAsync(
                 frame,
                 CraftingHubLayout.CraftCompletionHeaderArea,
@@ -812,36 +812,31 @@ internal sealed class CraftingScreen : ICraftingScreen
                 "확인",
                 ct);
 
-            bool inventoryIncreased = latestInventory > inventoryBefore;
-            bool completionCue =
+            // The visible result popup is the only completion authority.
+            // Do not infer completion from inventory gain or busy/idle transitions.
+            bool completionPopupVisible =
                 complete is not null ||
-                confirm is not null ||
-                inventoryIncreased ||
-                (sawBusy && !busy);
+                confirm is not null;
 
-            if (!completionCue)
+            if (!completionPopupVisible)
             {
-                stableCompletion = 0;
+                stableCompletionPopup = 0;
                 await Task.Delay(600, ct);
                 continue;
             }
 
-            stableCompletion++;
+            stableCompletionPopup++;
             Log?.Invoke(
-                $"[제작] 완료 후보 · 제작완료OCR={(complete is not null ? "확인" : "없음")} · " +
+                $"[제작] 완료창 후보 · 제작완료OCR={(complete is not null ? "확인" : "없음")} · " +
                 $"확인OCR={(confirm is not null ? "확인" : "없음")} · " +
-                $"재고={inventoryBefore}->{latestInventory} · busySeen={sawBusy} · stable={stableCompletion}/2");
+                $"재고={inventoryBefore}->{latestInventory} · stable={stableCompletionPopup}/2");
 
-            if (stableCompletion < 2)
+            if (stableCompletionPopup < 2)
             {
                 await Task.Delay(350, ct);
                 continue;
             }
 
-            // Product-name OCR is deliberately not a hard gate. The V3.0.7 live
-            // result popup was already visible but completion handling kept
-            // waiting. A stable result cue, exact inventory increase, or the
-            // observed busy->not-busy transition is enough to confirm completion.
             using (var fresh = Capture(ct))
             {
                 var freshComplete = await FindUniqueAsync(
@@ -855,24 +850,19 @@ internal sealed class CraftingScreen : ICraftingScreen
                     "확인",
                     ct);
 
-                bool freshCue =
-                    freshComplete is not null ||
-                    freshConfirm is not null ||
-                    latestInventory > inventoryBefore ||
-                    (sawBusy && !busy);
-
-                if (!freshCue)
+                if (freshComplete is null && freshConfirm is null)
                 {
-                    stableCompletion = 0;
+                    stableCompletionPopup = 0;
                     await Task.Delay(450, ct);
                     continue;
                 }
             }
 
             _stage.Move(ProductionStage.Complete, $"{displayName} 제작 완료");
-            _ui.TapFresh(0x39, ct); // Space = 결과창 확인
+            _ui.TapFresh(0x39, ct); // Space = actual result popup confirm only
             Log?.Invoke(
-                $"[제작] 제작 완료 결과창 확인 · 품목명 OCR 비필수 · Space 확인 · 재고 {inventoryBefore}->{latestInventory}");
+                $"[제작] 실제 제작 완료창 확인 · 2프레임+fresh 확인 · Space 확인 · " +
+                $"재고 {inventoryBefore}->{latestInventory}");
             await Task.Delay(600, ct);
             return;
         }
@@ -880,8 +870,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         using var failed = Capture(ct);
         throw Fail(
             failed,
-            $"{displayName} 제작 완료 결과창을 제한 시간 안에 확인하지 못했습니다. " +
-            $"재고={inventoryBefore}->{latestInventory}");
+            $"{displayName} 실제 제작 완료/확인 창을 제한 시간 안에 확인하지 못했습니다. " +
+            $"재고 변화는 완료 판정에 사용하지 않았습니다: {inventoryBefore}->{latestInventory}");
     }
 
     private async Task ClickExactAsync(
