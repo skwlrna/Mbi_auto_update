@@ -168,14 +168,14 @@ internal sealed class CraftingAutomation
 
                 try
                 {
-                    await _screen.CloseOverlayAsync(ct);
+                    await _screen.RecoverBatchPreparationAsync(plan, ct);
                 }
-                catch (Exception closeEx) when (
-                    closeEx is InvalidOperationException or InvalidDataException or IOException)
+                catch (Exception recoveryEx) when (
+                    recoveryEx is InvalidOperationException or InvalidDataException or IOException)
                 {
                     Log?.Invoke(
-                        $"[제작][자동복구] 오버레이 정리 보조 실패 · 새 퀘스트 재생성으로 계속 · " +
-                        closeEx.Message);
+                        $"[제작][자동복구] 기준 화면 복귀 실패 · 다음 복구 시도에서 다시 판정 · " +
+                        recoveryEx.Message);
                 }
 
                 await _delay(TimeSpan.FromMilliseconds(500), ct);
