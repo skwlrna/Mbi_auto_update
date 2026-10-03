@@ -93,6 +93,13 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 {
                     SourceRecipe = sourceRecipe with { AllowPaidButton = false }
                 };
+
+                if (_alteringScreen is IAlteringFieldExitScreen fieldExit)
+                {
+                    Log?.Invoke($"[재료 해결] {itemName} 자동 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
+                    await fieldExit.ExitToFieldAsync(ct);
+                }
+
                 var gathering = new GatheringAutomation(_gathering, _gatheringScreen, _delay, _verificationAttempts);
                 gathering.Log += text => Log?.Invoke(text);
                 Log?.Invoke($"[재료 해결] {itemName} 자동 채집 시작 · 추가 {quantity}개");
