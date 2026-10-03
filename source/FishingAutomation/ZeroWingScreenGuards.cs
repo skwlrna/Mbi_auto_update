@@ -244,6 +244,9 @@ internal sealed class ZeroWingCraftingScreen : ICraftingScreen
     public Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
         => GuardAsync("[제작] 퀘스트 재료 채집", () => _inner.GatherQuestDeficitAsync(deficit, ct), ct);
 
+    public Task RecoverBatchPreparationAsync(CraftingPlan plan, CancellationToken ct)
+        => _inner.RecoverBatchPreparationAsync(plan, ct);
+
     public Task CloseOverlayAsync(CancellationToken ct)
         => _inner.CloseOverlayAsync(ct);
 
