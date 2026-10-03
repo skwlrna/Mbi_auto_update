@@ -240,6 +240,13 @@ try
           ambiguousDecision.AmbiguousCandidates.Count == 2,
         "quest material matching refuses true full-string ties");
 
+    var onionRecipeDecision = QuestMaterialNameMatcher.Decide(
+        "양합",
+        new[] { "감자", "양파", "양배추", "허브" });
+    Check(onionRecipeDecision.Name == "양파" &&
+          onionRecipeDecision.AmbiguousCandidates.Count == 0,
+        "pre-read recipe candidates correct 양합 to 양파 without global 양털 ambiguity");
+
     var queryArgs = MabinogiMobileCli.BuildFilteredQueryArguments("get_craftable_items", "야채볶음");
     Check(queryArgs.Count == 2 && queryArgs[0] == "get_craftable_items" && queryArgs[1].StartsWith("base64:"),
         "Korean craftable filter uses guarded base64 query");
