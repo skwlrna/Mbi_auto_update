@@ -69,6 +69,11 @@ internal interface IAlteringRecoveryScreen
     Task RecoverStallAsync(AlteringPlan plan, int attempt, string reason, CancellationToken ct);
 }
 
+internal interface IAlteringFieldExitScreen
+{
+    Task ExitToFieldAsync(CancellationToken ct);
+}
+
 internal interface IAlteringData
 {
     Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct);
