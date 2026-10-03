@@ -173,6 +173,22 @@ try
           !CraftingQueries.ForUiCategory(items, CraftingCategory.Item).Any(x => x.Category != CraftingCategory.Item),
         "food and item UI categories are strictly separated and unknown entries stay hidden");
 
+    var metadataSparse = new[]
+    {
+        new CraftableItem("야채볶음", true, 1, null, Array.Empty<CraftingIngredient>(), CraftingCategory.Unknown),
+        new CraftableItem("감자 샐러드", true, 1, null, Array.Empty<CraftingIngredient>(), CraftingCategory.Unknown),
+        new CraftableItem("상급 회복 물약", true, 5, null, Array.Empty<CraftingIngredient>(), CraftingCategory.Unknown)
+    };
+    var fallbackFood = CraftingQueries.ForUiCategory(metadataSparse, CraftingCategory.Food).Select(x => x.DisplayName).ToArray();
+    var fallbackItem = CraftingQueries.ForUiCategory(metadataSparse, CraftingCategory.Item).Select(x => x.DisplayName).ToArray();
+    Check(fallbackFood.SequenceEqual(new[] { "야채볶음", "감자 샐러드" }) &&
+          fallbackItem.SequenceEqual(new[] { "상급 회복 물약" }) &&
+          !fallbackFood.Intersect(fallbackItem, StringComparer.Ordinal).Any(),
+        "metadata-sparse live catalog fallback keeps food/item tabs populated without overlap");
+    var sparseCoverage = CraftingQueries.CategoryCoverage(metadataSparse);
+    Check(sparseCoverage.UsesFallback && sparseCoverage.Unknown == 3,
+        "category coverage reports fallback when live CLI omits category metadata");
+
     Check(CraftingQueries.Exact(items, "야채볶음").MissingIngredients.Single().DisplayName == "감자",
         "exact crafting match never picks a partial name");
     try
