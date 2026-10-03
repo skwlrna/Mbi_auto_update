@@ -84,7 +84,7 @@ public sealed partial class MainForm
         private float _layoutScale = 1;
 
         internal readonly ListBox Items = new();
-        internal readonly NumericUpDown Quantity = new ArrowlessNumericUpDown();
+        internal readonly QuantityTextBox Quantity = new();
         internal readonly Label Owned = new();
         internal CraftingCategory Category { get; private set; } = CraftingCategory.Food;
         internal string CliStatus = "확인 전";
@@ -398,39 +398,6 @@ public sealed partial class MainForm
             }
         }
 
-        private sealed class ArrowlessNumericUpDown : NumericUpDown
-        {
-            protected override void OnCreateControl()
-            {
-                base.OnCreateControl();
-                HideArrowButtons();
-            }
-
-            protected override void OnResize(EventArgs e)
-            {
-                base.OnResize(e);
-                HideArrowButtons();
-            }
-
-            private void HideArrowButtons()
-            {
-                foreach (Control child in Controls)
-                {
-                    string typeName = child.GetType().Name;
-                    if (typeName.Contains("UpDownButtons", StringComparison.Ordinal))
-                    {
-                        child.Visible = false;
-                        child.Width = 0;
-                    }
-                    else if (typeName.Contains("UpDownEdit", StringComparison.Ordinal))
-                    {
-                        child.Dock = DockStyle.Fill;
-                        child.Width = ClientSize.Width;
-                    }
-                }
-            }
-        }
-
         private void DrawProgress(Graphics graphics)
         {
             if (_progressBar.Width < 2 || _progressBar.Height < 2) return;
@@ -474,7 +441,6 @@ public sealed partial class MainForm
             control.Margin = new Padding(3, 5, 3, 5);
             control.Font = new Font("맑은 고딕", 13f);
             if (control is TextBox text) text.BorderStyle = BorderStyle.None;
-            if (control is NumericUpDown number) number.BorderStyle = BorderStyle.None;
         }
 
         private static void StyleListBox(ListBox list)
