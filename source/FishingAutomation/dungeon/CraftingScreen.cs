@@ -87,6 +87,9 @@ internal sealed class CraftingScreen : ICraftingScreen
         int craftCount,
         CancellationToken ct)
     {
+        // Let the material counters finish updating after the final + count click.
+        await Task.Delay(250, ct);
+
         static List<(long Owned, long Required)> Parse(IEnumerable<DetectionResult> lines)
         {
             var ratios = new List<(long Owned, long Required)>();
