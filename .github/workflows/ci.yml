@@ -240,7 +240,7 @@ jobs:
           if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'completion-result green visual gate missing' }
           if ($screen -notmatch 'p\.B >= 95' -or $screen -notmatch 'blue \* 100 >= sampled \* 2') { throw 'tolerant blue collect-button visual gate missing' }
           if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
-          if ($screen -notmatch 'attempts: 20, delayMs: 250') { throw 'initial receive wait window missing' }
+          if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
           if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
           if ($screen -notmatch 'resultAttempts: 8') { throw 'first receive completion-result wait must be short' }
           if ($screen -notmatch 'return collected;') { throw 'first receive must return collection/travel result' }
