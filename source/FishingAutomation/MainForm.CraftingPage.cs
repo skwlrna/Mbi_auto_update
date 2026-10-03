@@ -574,8 +574,12 @@ public sealed partial class MainForm
                 _loaded = true;
                 CliStatus = "정상";
                 Filter();
+                var coverage = CraftingQueries.CategoryCoverage(_choices);
+                int foodVisible = CraftingQueries.ForUiCategory(_choices, CraftingCategory.Food).Count();
+                int itemVisible = CraftingQueries.ForUiCategory(_choices, CraftingCategory.Item).Count();
                 _owner._log.Write(
-                    $"[제작] CLI 제작 목록 { _choices.Length }개 · 음식/아이템 검색 UI 준비");
+                    $"[제작] CLI 제작 목록 {_choices.Length}개 · 원본분류 음식={coverage.Food}, 아이템={coverage.Item}, 미분류={coverage.Unknown} · " +
+                    $"표시 음식={foodVisible}, 아이템={itemVisible} · 폴백={(coverage.UsesFallback ? "사용" : "미사용")}");
                 _owner._craftingNextPoll = DateTime.MinValue;
                 await _owner.RefreshCraftingStateAsync();
             }
