@@ -601,59 +601,46 @@ internal sealed class CraftingScreen : ICraftingScreen
             return;
         }
 
-        _stage.Move(ProductionStage.Travel, $"{plan.DisplayName} 제작대로 이동");
-        await CloseOverlayAsync(ct);
-        await Task.Delay(200, ct);
-
-        // The station stage may omit 0/N. Instant crafting is a separate flow.
-        // Only accept a stage immediately below this exact product's quest title.
-        DetectionResult? firstStation = null;
-        DetectionResult? freshStation = null;
-        for (int pass = 0; pass < 2; pass++)
-        {
-            using var frame = Capture(ct);
-            if (await FindQuestStageAsync(frame, plan, directOnly: true, ct) is not null)
-                throw Fail(frame, "즉시 제작 단계는 일반 제작대 복귀로 처리하지 않습니다.");
-
-            var final = await FindQuestStageAsync(frame, plan, directOnly: false, ct);
-            if (final is null)
-                throw Fail(frame, "제작 퀘스트의 제작대 복귀 단계를 찾지 못했습니다.");
-
-            if (pass == 0)
-            {
-                firstStation = final;
-                await Task.Delay(140, ct);
-            }
-            else
-            {
-                freshStation = final;
-                if (firstStation is null ||
-                    !ProductionUiRuntime.Stable(firstStation.Value.Bounds, final.Value.Bounds))
-                    throw Fail(frame, "제작대 복귀 단계 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
-            }
-        }
-        _ui.ClickFresh(freshStation!.Value.Center, ct);
+        _stage.Move(ProductionStage.Travel, $"{plan.DisplayName} 제작대 자동 복귀 대기");
+        Log?.Invoke(
+            $"[제작] 재료 확보 완료 · 마지막 퀘스트 클릭 후 게임 자동 복귀 대기 · " +
+            $"추가 퀘스트/ESC/Space 입력 없음 · 기존 제작 횟수 {craftCount}회 유지");
 
         DateTime stationDeadline = DateTime.UtcNow.AddMinutes(3);
         while (DateTime.UtcNow < stationDeadline)
         {
             ct.ThrowIfCancellationRequested();
+
             using var frame = Capture(ct);
-            if (await IsProductDetailAsync(frame, plan.DisplayName, ct))
+            var craftReady = await FindUniqueAsync(
+                frame,
+                CraftingHubLayout.CraftActionButtonArea,
+                "제작하기",
+                ct);
+
+            if (craftReady is not null)
             {
-                await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
                 long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 제작");
+
+                // The quest keeps the quantity selected when it was created.
+                // Do not touch the count controls again after the automatic return.
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
-                Log?.Invoke($"[제작] 제작대 도착 · 횟수 {craftCount}회 고정좌표 재설정 · 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                Log?.Invoke(
+                    $"[제작] 제작대 도착 · 제작창 자동 표시 확인 · 기존 {craftCount}회 유지 · " +
+                    $"수량 재설정 없음 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
                 return;
             }
-            await Task.Delay(800, ct);
+
+            await Task.Delay(CraftingHubLayout.CraftReadyPollDelayMs, ct);
         }
 
         using var failed = Capture(ct);
-        throw Fail(failed, "제작대로 이동 후 제작 상세 화면이 열리지 않았습니다.");
+        throw Fail(
+            failed,
+            "재료 확보 후 게임 자동 복귀를 기다렸지만 제작대의 제작하기 버튼이 열린 제작창을 확인하지 못했습니다.");
     }
 
     private async Task FinishDirectCraftAsync(
