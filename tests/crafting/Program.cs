@@ -167,9 +167,11 @@ try
     Check(items[0].Category == CraftingCategory.Food && items[1].Category == CraftingCategory.Item,
         "food and item category hints are recognized");
     Check(items[2].Category == CraftingCategory.Unknown, "unknown category is preserved instead of dropped");
-    Check(CraftingQueries.ForUiCategory(items, CraftingCategory.Food).Count() == 2 &&
-          CraftingQueries.ForUiCategory(items, CraftingCategory.Item).Count() == 2,
-        "unknown catalog entries remain visible so UI never omits craftables");
+    Check(CraftingQueries.ForUiCategory(items, CraftingCategory.Food).Select(x => x.DisplayName).SequenceEqual(new[] { "야채볶음" }) &&
+          CraftingQueries.ForUiCategory(items, CraftingCategory.Item).Select(x => x.DisplayName).SequenceEqual(new[] { "상급 회복 물약" }) &&
+          !CraftingQueries.ForUiCategory(items, CraftingCategory.Food).Any(x => x.Category != CraftingCategory.Food) &&
+          !CraftingQueries.ForUiCategory(items, CraftingCategory.Item).Any(x => x.Category != CraftingCategory.Item),
+        "food and item UI categories are strictly separated and unknown entries stay hidden");
 
     Check(CraftingQueries.Exact(items, "야채볶음").MissingIngredients.Single().DisplayName == "감자",
         "exact crafting match never picks a partial name");
