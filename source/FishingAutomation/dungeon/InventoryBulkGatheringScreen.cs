@@ -78,8 +78,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         var automation = new LifeSkillBulkGatheringAutomation(
             token => _data.ItemCountAsync(plan.DisplayName, token),
             token => StartLifeSkillHundredAsync(source, token),
-            (before, token) => WaitForLifeSkillHundredStopAndInventoryAsync(
-                plan.DisplayName, before, TimeSpan.FromMinutes(10), token));
+            (before, targetTotal, token) => WaitForLifeSkillHundredStopOrTargetAsync(
+                plan.DisplayName, before, targetTotal, TimeSpan.FromMinutes(30), token));
         automation.Log += text => Log?.Invoke(text);
 
         try
@@ -252,8 +252,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         _ui.ClickFresh(LifeSkillNearestLocationPoint, ct);
 
         Log?.Invoke(
-            $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 100회 자동채집 자연 종료 감시 · " +
-            "100회는 행동 횟수이며 획득 수량과 분리");
+            $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
+            "100회는 행동 횟수이며 목표 재료를 먼저 확보하면 안전 정지");
         await Task.Delay(700, ct);
     }
 
@@ -339,14 +339,15 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         return sampled > 0 && max - min >= 32 && saturated * 100 >= sampled * 3;
     }
 
-    private async Task WaitForLifeSkillHundredStopAndInventoryAsync(
+    private async Task<bool> WaitForLifeSkillHundredStopOrTargetAsync(
         string displayName,
         long before,
-        TimeSpan timeout,
+        long targetTotal,
+        TimeSpan absoluteTimeout,
         CancellationToken ct)
     {
         DateTime startedAt = DateTime.UtcNow;
-        DateTime deadline = startedAt + timeout;
+        DateTime deadline = startedAt + absoluteTimeout;
         DateTime lastProgressAt = startedAt;
         long last = before;
         bool sawActive = false;
@@ -373,13 +374,41 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 sawGain = gain > 0;
             }
 
-            bool active = activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing ||
-                          activity.MainButtonState == "Stop";
+            bool active = IsOwnedLifeSkillActivity(activity);
             sawActive |= active;
 
             if (!activity.IsSafeField)
                 throw new InvalidOperationException(
                     "생활 스킬 100회 채집 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+
+            if (current >= targetTotal)
+            {
+                Log?.Invoke(
+                    $"[대량 채집] 목표 재료 확보 · {displayName} 현재 {current} / 목표 {targetTotal} · " +
+                    "100회 자연 종료를 기다리지 않고 안전 정지");
+
+                if (active)
+                {
+                    await StopAsync(ct);
+                    Log?.Invoke(
+                        $"[대량 채집] 목표 수량 도달 · Stop 버튼+CLI 상태 확인 후 Space 정지 입력 · {displayName}");
+                }
+
+                await ConfirmLifeSkillStoppedAsync(displayName, ct);
+                long final = await _data.ItemCountAsync(displayName, ct);
+                if (final < targetTotal)
+                    throw new InvalidOperationException(
+                        $"{displayName} 목표 수량 도달 후 정지 검증 중 재고가 목표 아래로 감소했습니다: " +
+                        $"{final}/{targetTotal}");
+
+                _stage.Move(
+                    ProductionStage.VerifyInventory,
+                    $"{displayName} 목표 확보 후 채집 종료 · {final}/{targetTotal}");
+                Log?.Invoke(
+                    $"[대량 채집] 목표 수량 안전 종료 확인 · {displayName} {final}/{targetTotal} · " +
+                    "호출한 가공 단계로 복귀");
+                return true;
+            }
 
             if (sawGain && !active)
             {
@@ -389,8 +418,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                      DateTime.UtcNow - startedAt >= TimeSpan.FromSeconds(20) &&
                      DateTime.UtcNow - lastProgressAt >= TimeSpan.FromSeconds(12)))
                 {
-                    _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 100회 종료 · +{gain}");
-                    return;
+                    _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 100회 자연 종료 · +{gain}");
+                    return false;
                 }
             }
             else
@@ -398,12 +427,63 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 stableIdle = 0;
             }
 
+            // Do not fail merely because a 100-action cycle is slow. The live
+            // V3.0.32 log was still gaining logs at the old 10-minute boundary.
+            // Only a long no-progress period while the action remains active is a
+            // real stall; the absolute timeout is a final safety bound.
+            if (sawGain &&
+                DateTime.UtcNow - lastProgressAt >= TimeSpan.FromMinutes(5))
+                throw new InvalidOperationException(
+                    $"{displayName} 생활 스킬 채집 수량이 5분 이상 증가하지 않아 정지합니다. " +
+                    $"현재 {current}, 이번 주기 +{gain}.");
+
             await Task.Delay(1000, ct);
         }
 
-        long final = await _data.ItemCountAsync(displayName, ct);
+        long finalCount = await _data.ItemCountAsync(displayName, ct);
         throw new InvalidOperationException(
-            $"{displayName} 생활 스킬 100회의 자연 종료를 확인하지 못했습니다. 수량 {before}→{final}.");
+            $"{displayName} 생활 스킬 채집이 30분 안전 한도를 넘었습니다. 수량 {before}→{finalCount}.");
+    }
+
+    private static bool IsOwnedLifeSkillActivity(GatheringActivity activity)
+        => activity.IsAutoTraveling ||
+           activity.IsGathering ||
+           activity.IsFishing ||
+           activity.MainButtonState == "Stop";
+
+    private async Task ConfirmLifeSkillStoppedAsync(
+        string displayName,
+        CancellationToken ct)
+    {
+        int stableStopped = 0;
+        for (int attempt = 1; attempt <= 12; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var activity = await _data.ActivityAsync(ct);
+            if (!activity.IsSafeField)
+                throw new InvalidOperationException(
+                    $"{displayName} 목표 수량 정지 확인 중 안전하지 않은 상태가 감지되었습니다.");
+
+            if (!IsOwnedLifeSkillActivity(activity))
+            {
+                stableStopped++;
+                if (stableStopped >= 2)
+                {
+                    Log?.Invoke(
+                        $"[대량 채집] 채집/이동 종료 CLI 2회 확인 · {displayName}");
+                    return;
+                }
+            }
+            else
+            {
+                stableStopped = 0;
+            }
+
+            await Task.Delay(500, ct);
+        }
+
+        throw new InvalidOperationException(
+            $"{displayName} 목표 수량 도달 후 Space 정지 입력은 보냈지만 채집/이동 종료를 확인하지 못했습니다.");
     }
 
     private async Task StartInventoryHundredQuestAsync(string displayName, CancellationToken ct)
