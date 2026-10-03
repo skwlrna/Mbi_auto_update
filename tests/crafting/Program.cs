@@ -167,6 +167,10 @@ try
     Check(items[0].Category == CraftingCategory.Food && items[1].Category == CraftingCategory.Item,
         "food and item category hints are recognized");
     Check(items[2].Category == CraftingCategory.Unknown, "unknown category is preserved instead of dropped");
+    Check(CraftingQueries.ResolveUiCategory(items[0]) == CraftingCategory.Food &&
+          CraftingQueries.ResolveUiCategory(items[1]) == CraftingCategory.Item &&
+          CraftingQueries.ResolveUiCategory(items[2]) != CraftingCategory.Unknown,
+        "search-only crafting selection resolves an in-game station category for every listed row");
     Check(CraftingQueries.ForUiCategory(items, CraftingCategory.Food).Select(x => x.DisplayName).SequenceEqual(new[] { "야채볶음" }) &&
           CraftingQueries.ForUiCategory(items, CraftingCategory.Item).Select(x => x.DisplayName).SequenceEqual(new[] { "상급 회복 물약" }) &&
           !CraftingQueries.ForUiCategory(items, CraftingCategory.Food).Any(x => x.Category != CraftingCategory.Food) &&

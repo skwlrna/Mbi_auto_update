@@ -139,19 +139,14 @@ internal static class Program
                   craftItems.Parent is Panel &&
                   craftSearch.Parent is Panel,
                 "crafting search/item/quantity fields use dashboard card surfaces");
-            var craftItemTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템");
-            var craftFoodTab = All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 음식");
-            Check(craftItemTab.Left < craftFoodTab.Left &&
-                  craftItemTab.Parent == craftFoodTab.Parent &&
-                  craftFoodTab.BackColor != craftItemTab.BackColor,
-                "crafting uses altering-style side-by-side item and food category tabs");
+            Check(!All(crafting).OfType<Button>().Any(x =>
+                    x.AccessibleName is "제작 아이템" or "제작 음식") &&
+                  !All(crafting).Any(x => x.AccessibleName == "제작 분류 탭"),
+                "crafting item/food category tabs are removed");
             Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "야채볶음") &&
-                  craftItems.Items.Cast<object>().All(x => x.ToString() != "상급 회복 물약" && x.ToString() != "분류 없는 결과물"),
-                "food crafting tab shows only food items");
-            All(crafting).OfType<Button>().Single(x => x.AccessibleName == "제작 아이템").PerformClick(); Pump();
-            Check(craftItems.Items.Cast<object>().Any(x => x.ToString() == "상급 회복 물약") &&
-                  craftItems.Items.Cast<object>().All(x => x.ToString() != "야채볶음" && x.ToString() != "분류 없는 결과물"),
-                "item crafting tab shows only item entries");
+                  craftItems.Items.Cast<object>().Any(x => x.ToString() == "상급 회복 물약") &&
+                  craftItems.Items.Cast<object>().Any(x => x.ToString() == "분류 없는 결과물"),
+                "crafting search-only list shows the full catalog");
             craftSearch.Text = "회복"; Pump();
             Check(craftItems.Items.Count == 1 && craftItems.Items[0]!.ToString() == "상급 회복 물약",
                 "crafting item search filters the complete catalog");
@@ -198,12 +193,9 @@ internal static class Program
                       craftingInput.Font.Unit == GraphicsUnit.Pixel &&
                       craftingInput.Font.Size == Math.Max(13f, MathF.Round(18 * craftingScale)),
                     "crafting title and content match automatic-altering typography at " + size);
-                var craftingTabs = All(crafting).OfType<Button>()
-                    .Where(x => x.AccessibleName is "제작 아이템" or "제작 음식").ToArray();
-                Check(craftingTabs.Length == 2 &&
-                      craftingTabs.All(x => x.Font.Unit == GraphicsUnit.Pixel &&
-                          x.Font.Size == Math.Max(12f, MathF.Round(17 * craftingScale))),
-                    "crafting category tabs match automatic-altering font scale at " + size);
+                Check(!All(crafting).OfType<Button>().Any(x =>
+                        x.AccessibleName is "제작 아이템" or "제작 음식"),
+                    "crafting category tabs stay removed at " + size);
                 var craftingProgress = All(crafting).OfType<Label>().Single(x => x.Text.StartsWith("진행 수량  ", StringComparison.Ordinal));
                 Check(craftingProgress.Height >= craftingProgress.Font.Height && FullyContained(craftingProgress, crafting),
                     "crafting progress is fully visible at " + size);
