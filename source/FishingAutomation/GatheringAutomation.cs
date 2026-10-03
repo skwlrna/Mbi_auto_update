@@ -72,13 +72,29 @@ internal sealed class GatheringAutomation
                     throw new InvalidOperationException("선택 품목이 낚시로 연결되었습니다. 현재 자동 채집에서는 낚시를 지원하지 않아 정지합니다.");
                 if (!activity.IsSafeField)
                     throw new InvalidOperationException("전투·사망·대화 등 채집을 계속할 수 없는 상태가 확인되어 정지합니다. 상태: " + DescribeActivity(activity));
+
+                travelPolls = activity.IsAutoTraveling ? travelPolls + 1 : 0;
+                if (travelPolls >= 900)
+                    throw new InvalidOperationException("이동이 장시간 끝나지 않아 정지합니다.");
+
+                // Match the crafting material route: while the game is in pure
+                // auto-travel/loading, do not force an inventory read. get_items can
+                // be temporarily rejected during this transition. Once gathering
+                // starts (or travel ends), inventory becomes the source of truth again.
+                if (activity.IsAutoTraveling && !activity.IsGathering && !activity.IsFishing)
+                {
+                    idlePolls = 0;
+                    if (travelPolls == 1 || travelPolls % 10 == 0)
+                        Log?.Invoke($"[자동 채집] 이동 중 · 재고 CLI 조회 생략 · {plan.DisplayName}");
+                    await _delay(TimeSpan.FromSeconds(2), ct);
+                    continue;
+                }
+
                 long count = await _data.ItemCountAsync(plan.DisplayName, ct);
                 if (count < baseline) throw new InvalidOperationException("채집 중 대상 재료의 보유 수량이 감소해 수량을 확정할 수 없습니다.");
                 long gained = count - baseline;
                 if (gained < Gained) throw new InvalidOperationException("채집 중 재료가 소비되어 추가 수량 확인을 중단합니다.");
-                travelPolls = activity.IsAutoTraveling ? travelPolls + 1 : 0;
-                if(travelPolls >= 900) throw new InvalidOperationException("이동이 장시간 끝나지 않아 정지합니다.");
-                idlePolls = activity.IsAutoTraveling || gained > Gained ? 0 : idlePolls + 1;
+                idlePolls = gained > Gained ? 0 : idlePolls + 1;
                 Gained = gained;
                 Log?.Invoke($"[자동 채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개");
                 if (Gained >= plan.TargetQuantity) break;
