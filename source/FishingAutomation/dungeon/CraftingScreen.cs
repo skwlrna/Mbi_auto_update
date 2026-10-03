@@ -45,10 +45,20 @@ internal sealed class CraftingScreen : ICraftingScreen
         await OpenProductAsync(plan, ct);
         await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
 
+        // CLI Craftable reflects whether the recipe is currently craftable at all
+        // (effectively one craft in the live catalog). For a selected 2~10 craft batch,
+        // the detail UI is authoritative because it already scales every material
+        // requirement to the selected count (e.g. 65/80 for a 10-craft batch).
         var exact = await _data.ExactAsync(plan.DisplayName, ct);
+        var materialState = await ReadSelectedBatchMaterialStateAsync(craftCount, ct);
         bool canDirectCraft =
             exact.Craftable &&
-            exact.MissingIngredients.All(x => x.Owned >= x.Required);
+            materialState.Parsed &&
+            materialState.AllEnough;
+
+        Log?.Invoke(
+            $"[제작] 선택 {craftCount}회 실제 재료 판정 · {materialState.Summary} · " +
+            (canDirectCraft ? "직접 제작 가능" : "부족/판독불확실 → 퀘스트 만들기"));
 
         if (canDirectCraft)
         {
@@ -71,6 +81,68 @@ internal sealed class CraftingScreen : ICraftingScreen
             $"[제작] 재료 부족 · 퀘스트 만들기 · 고정좌표 " +
             $"({CraftingHubLayout.CraftQuestButtonPoint.X},{CraftingHubLayout.CraftQuestButtonPoint.Y})");
         await Task.Delay(800, ct);
+    }
+
+    private async Task<(bool Parsed, bool AllEnough, string Summary)> ReadSelectedBatchMaterialStateAsync(
+        int craftCount,
+        CancellationToken ct)
+    {
+        static List<(long Owned, long Required)> Parse(IEnumerable<DetectionResult> lines)
+        {
+            var ratios = new List<(long Owned, long Required)>();
+            foreach (var line in lines)
+            {
+                string text = (line.ReadText ?? "").Replace(" ", "");
+                var match = Regex.Match(text, @"(?<owned>\d+)\s*/\s*(?<required>\d+)");
+                if (!match.Success ||
+                    !long.TryParse(match.Groups["owned"].Value, out long owned) ||
+                    !long.TryParse(match.Groups["required"].Value, out long required) ||
+                    owned < 0 || required <= 0)
+                    continue;
+                ratios.Add((owned, required));
+            }
+            return ratios;
+        }
+
+        List<(long Owned, long Required)>? first = null;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            var lines = await _ui.Ocr.ReadLinesAsync(
+                frame,
+                CraftingHubLayout.ProductionQuestMaterialArea,
+                3,
+                ct);
+            var ratios = Parse(lines);
+
+            if (ratios.Count == 0)
+            {
+                Log?.Invoke(
+                    $"[제작] 선택 {craftCount}회 상세 재료 수량 OCR 없음 · 안전하게 퀘스트 경로 사용");
+                return (false, false, "재료 비율 OCR 없음");
+            }
+
+            if (first is null)
+            {
+                first = ratios;
+                await Task.Delay(180, ct);
+                continue;
+            }
+
+            if (first.Count != ratios.Count ||
+                !first.SequenceEqual(ratios))
+            {
+                Log?.Invoke(
+                    $"[제작] 선택 {craftCount}회 상세 재료 수량 2프레임 불일치 · 안전하게 퀘스트 경로 사용");
+                return (false, false, "재료 비율 2프레임 불일치");
+            }
+
+            bool allEnough = ratios.All(x => x.Owned >= x.Required);
+            string summary = string.Join(", ", ratios.Select(x => $"{x.Owned}/{x.Required}"));
+            return (true, allEnough, summary);
+        }
+
+        return (false, false, "재료 비율 확인 실패");
     }
 
     private async Task OpenProductAsync(CraftingPlan plan, CancellationToken ct)
