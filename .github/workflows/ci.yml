@@ -472,6 +472,14 @@ jobs:
           if($craftScreen -match 'var roi = new Rectangle\(70, 130, 670, 520\)' -or
              $craftScreen -notmatch 'ProductionQuestMaterialArea' -or
              $craftScreen -notmatch '실제 하단 재료행 기준'){throw 'quest material OCR must use live lower popup ROI'}
+          $ocrRecognizer = Get-Content source/FishingAutomation/dungeon/OcrRecognizer.cs -Raw
+          $readQuest = [regex]::Match($craftScreen, 'public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync[\s\S]*?(?=\r?\n    private static string\? CleanName)').Value
+          if([string]::IsNullOrWhiteSpace($readQuest)){throw 'quest deficit reader block missing'}
+          if($ocrRecognizer -notmatch 'ReadDimLinesAsync' -or
+             $ocrRecognizer -notmatch 'new\[\] \{ 30, 40, 50, 70, 0 \}'){throw 'dim-gray quest material OCR fallback missing'}
+          if($readQuest -notmatch 'ReadDimLinesAsync\(frame, nameRoi, ct\)' -or
+             $readQuest -notmatch '퀘스트 재료명 회색글씨 보강 OCR' -or
+             $readQuest -notmatch 'new Rectangle\(215, Math\.Max\(610, ratio\.Y - 34\), 255, 68\)'){throw 'quest material name must recover from narrow dim row OCR'}
           if($craftScreen -match 'new Rectangle\(45, 230, 560, 180\)' -or
              $craftScreen -notmatch 'AcquisitionMethodHeaderArea' -or
              $craftScreen -notmatch 'AcquisitionMethodRecommendedPoint' -or
