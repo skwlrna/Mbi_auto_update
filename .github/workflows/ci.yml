@@ -427,6 +427,13 @@ jobs:
              $craftScreen -notmatch '기본 1회 기준' -or
              $craftScreen -notmatch '재료 충분 · 제작하러 가기' -or
              $craftScreen -notmatch '재료 부족 · 퀘스트 만들기'){throw 'fixed crafting detail/direct route missing'}
+          $createQuest = [regex]::Match($craftScreen, 'public async Task CreateQuestAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Parsed, bool AllEnough, string Summary\)> ReadSelectedBatchMaterialStateAsync)').Value
+          if([string]::IsNullOrWhiteSpace($createQuest)){throw 'craft route selection block missing'}
+          if($createQuest -notmatch 'ReadSelectedBatchMaterialStateAsync\(craftCount, ct\)' -or
+             $createQuest -notmatch 'materialState\.Parsed' -or
+             $createQuest -notmatch 'materialState\.AllEnough'){throw 'craft route must use selected-batch material ratios'}
+          if($craftScreen -notmatch '선택 .*회 실제 재료 판정' -or
+             $craftScreen -notmatch '2프레임 불일치 · 안전하게 퀘스트 경로 사용'){throw 'selected-batch material safety trace missing'}
           if($craftScreen -match 'for \(int i = 0; i < 9; i\+\+\)' -or
              $craftScreen -match 'CraftCountMinusPoint, ct'){throw 'crafting count must not spam minus-reset clicks'}
           if($layout -notmatch 'CraftDetailSettleDelayMs = 100' -or
@@ -508,6 +515,11 @@ jobs:
              $lifeSkillStart -match 'ClickExactAsync\(\s*source\.Category'){throw 'life-skill/profile category navigation must use fixed coordinates, not OCR clicks'}
           if($lifeSkillStart -notmatch '_ui\.ClickFresh\(ProfileLifeSkillPoint, ct\)' -or
              $lifeSkillStart -notmatch '_ui\.ClickFresh\(categoryPoint, ct\)'){throw 'fixed life-skill/category clicks missing'}
+          if($bulkScreen -notmatch 'LifeSkillNearestLocationPoint = new\(300, 534\)' -or
+             $lifeSkillStart -notmatch '_ui\.ClickFresh\(LifeSkillNearestLocationPoint, ct\)'){throw 'fixed nearest-location life-skill click missing'}
+          if($lifeSkillStart -match 'ClickExactAsync\(\s*"가까운 위치 찾기"' -or
+             $lifeSkillStart -match 'FindUniqueAsync\([\s\S]{0,300}"100회 채집"'){throw 'life-skill start must not OCR-click nearest location or search for a visible 100회 control'}
+          if($lifeSkillStart -notmatch '100회는 행동 횟수이며 획득 수량과 분리'){throw '100-action vs item-count separation trace missing'}
 
           $craftReturn = [regex]::Match($craftScreen, 'public async Task ReturnToStationAndCraftAsync[\s\S]*?(?=\r?\n    private async Task FinishDirectCraftAsync)').Value
           if([string]::IsNullOrWhiteSpace($craftReturn)){throw 'crafting station-return block missing'}
