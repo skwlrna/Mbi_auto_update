@@ -533,34 +533,36 @@ internal sealed class CraftingScreen : ICraftingScreen
         // on the dim-gray row text (live examples: 감사->감자, 양배->양배추).
         // Never use substring fuzzy matching here: a short OCR token such as "양배"
         // otherwise matches unrelated one/two-syllable catalog entries.
-        string? recipeCandidate = ChooseCanonicalQuestMaterial(
+        var recipeDecision = QuestMaterialNameMatcher.Decide(
             ocrName,
-            _questRecipeMaterialNames,
-            out string recipeDiagnostic);
-        if (recipeCandidate is not null)
+            _questRecipeMaterialNames);
+        if (recipeDecision.Name is not null)
         {
             Log?.Invoke(
-                $"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {recipeCandidate} · " +
-                $"현재 레시피 재료 우선 · {recipeDiagnostic}");
-            return recipeCandidate;
+                $"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {recipeDecision.Name} · " +
+                $"현재 레시피 재료 우선 · {recipeDecision.Diagnostic}");
+            return recipeDecision.Name;
         }
+        if (recipeDecision.AmbiguousCandidates.Count > 0)
+            throw new InvalidOperationException(
+                $"제작 퀘스트 재료명 '{ocrName}'의 현재 레시피 후보가 여러 개라 자동 보정하지 않습니다: " +
+                string.Join(", ", recipeDecision.AmbiguousCandidates));
 
-        string? catalogCandidate = ChooseCanonicalQuestMaterial(
+        var catalogDecision = QuestMaterialNameMatcher.Decide(
             ocrName,
-            _questMaterialNameCatalog,
-            out string catalogDiagnostic);
-        if (catalogCandidate is not null)
+            _questMaterialNameCatalog);
+        if (catalogDecision.Name is not null)
         {
             Log?.Invoke(
-                $"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {catalogCandidate} · " +
-                $"전체 문자열 유일 최상위 후보 · {catalogDiagnostic}");
-            return catalogCandidate;
+                $"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {catalogDecision.Name} · " +
+                $"전체 문자열 유일 최상위 후보 · {catalogDecision.Diagnostic}");
+            return catalogDecision.Name;
         }
 
-        if (catalogDiagnostic.StartsWith("ambiguous:", StringComparison.Ordinal))
+        if (catalogDecision.AmbiguousCandidates.Count > 0)
             throw new InvalidOperationException(
                 $"제작 퀘스트 재료명 '{ocrName}'의 실제 품목 최상위 후보가 여러 개라 자동 보정하지 않습니다: " +
-                catalogDiagnostic["ambiguous:".Length..]);
+                string.Join(", ", catalogDecision.AmbiguousCandidates));
 
         // Keep exact visual text for quest-only materials that are not exposed by
         // current read-only catalogs. The later two-frame row verification still
@@ -610,102 +612,6 @@ internal sealed class CraftingScreen : ICraftingScreen
             .ToArray();
         Log?.Invoke($"[제작] 퀘스트 재료명 검증 카탈로그 준비 · {result.Length}개");
         return result;
-    }
-
-    private static string? ChooseCanonicalQuestMaterial(
-        string ocrName,
-        IEnumerable<string> candidates,
-        out string diagnostic)
-    {
-        string needle = FuzzyText.Normalize(ocrName);
-        if (needle.Length == 0)
-        {
-            diagnostic = "none";
-            return null;
-        }
-
-        var scored = candidates
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.Ordinal)
-            .Select(name =>
-            {
-                string normalized = FuzzyText.Normalize(name);
-                int distance = FullEditDistance(needle, normalized);
-                bool fullPrefix = normalized.StartsWith(needle, StringComparison.Ordinal);
-                int prefix = CommonPrefixLength(needle, normalized);
-                int lengthGap = Math.Abs(normalized.Length - needle.Length);
-                return new
-                {
-                    Name = name,
-                    Distance = distance,
-                    FullPrefix = fullPrefix,
-                    Prefix = prefix,
-                    LengthGap = lengthGap
-                };
-            })
-            .Where(x => x.Distance <= 1)
-            .OrderBy(x => x.Distance)
-            .ThenByDescending(x => x.FullPrefix)
-            .ThenByDescending(x => x.Prefix)
-            .ThenBy(x => x.LengthGap)
-            .ThenBy(x => x.Name, StringComparer.Ordinal)
-            .ToArray();
-
-        if (scored.Length == 0)
-        {
-            diagnostic = "none";
-            return null;
-        }
-
-        var best = scored[0];
-        var tied = scored
-            .Where(x =>
-                x.Distance == best.Distance &&
-                x.FullPrefix == best.FullPrefix &&
-                x.Prefix == best.Prefix &&
-                x.LengthGap == best.LengthGap)
-            .ToArray();
-
-        if (tied.Length != 1)
-        {
-            diagnostic = "ambiguous:" + string.Join(", ", tied.Select(x => x.Name));
-            return null;
-        }
-
-        diagnostic =
-            $"거리={best.Distance} · 전체접두={(best.FullPrefix ? "예" : "아니오")} · " +
-            $"공통접두={best.Prefix} · 길이차={best.LengthGap}";
-        return best.Name;
-    }
-
-    private static int CommonPrefixLength(string a, string b)
-    {
-        int limit = Math.Min(a.Length, b.Length);
-        int i = 0;
-        while (i < limit && a[i] == b[i]) i++;
-        return i;
-    }
-
-    private static int FullEditDistance(string a, string b)
-    {
-        var prev = new int[b.Length + 1];
-        var cur = new int[b.Length + 1];
-        for (int j = 0; j <= b.Length; j++) prev[j] = j;
-
-        for (int i = 1; i <= a.Length; i++)
-        {
-            cur[0] = i;
-            for (int j = 1; j <= b.Length; j++)
-            {
-                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
-                cur[j] = Math.Min(
-                    Math.Min(cur[j - 1] + 1, prev[j] + 1),
-                    prev[j - 1] + cost);
-            }
-            (prev, cur) = (cur, prev);
-        }
-
-        return prev[b.Length];
     }
 
     private static string? CleanName(string text)
