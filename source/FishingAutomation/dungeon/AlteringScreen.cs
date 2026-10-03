@@ -2,7 +2,7 @@ using FishingAutomation;
 
 namespace DungeonVisionBot;
 
-internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
+internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("가공");
@@ -889,6 +889,79 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
 
         return true;
     }
+    public async Task ExitToFieldAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // Material gathering must start from the ordinary field. A completed receipt
+        // returns to the facility window, so explicitly unwind detail -> facility ->
+        // processing hub -> field before the gathering screen sends C.
+        _confirmedOnsiteFacility = null;
+        _cachedRecipeKey = null;
+        _hasCachedRecipeCenter = false;
+
+        int stableFieldFrames = 0;
+        for (int attempt = 1; attempt <= 10; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+
+            bool detailVisible = await FindAsync(
+                frame, new Rectangle(100, 690, 580, 200), "필요한 재료", ct) is not null;
+            if (detailVisible)
+            {
+                stableFieldFrames = 0;
+                Log?.Invoke($"[자동 가공] 채집 전 화면 정리 {attempt}/10 · 현재=품목 상세 · Esc");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(500, ct);
+                continue;
+            }
+
+            string? facility = null;
+            foreach (string name in AlteringPlan.Facilities.Select(x => x.Replace(" 시설", "")))
+            {
+                if (await FindFacilityHeaderAsync(frame, name, ct) is not null)
+                {
+                    facility = name;
+                    break;
+                }
+            }
+
+            if (facility is not null)
+            {
+                stableFieldFrames = 0;
+                Log?.Invoke($"[자동 가공] 채집 전 화면 정리 {attempt}/10 · 현재={facility} 시설창 · 뒤로가기");
+                _ui.ClickFresh(new Point(33, 55), ct);
+                await Task.Delay(700, ct);
+                continue;
+            }
+
+            if (await FindFacilityHeaderAsync(frame, "가공", ct) is not null)
+            {
+                stableFieldFrames = 0;
+                Log?.Invoke($"[자동 가공] 채집 전 화면 정리 {attempt}/10 · 현재=가공 허브 · Esc");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(700, ct);
+                continue;
+            }
+
+            // Do not press anything on an unknown/transition frame. Two consecutive
+            // frames with no altering detail/facility/hub evidence are required before
+            // authorizing the gathering screen to open the profile with C.
+            stableFieldFrames++;
+            if (stableFieldFrames >= 2)
+            {
+                Log?.Invoke("[자동 가공] 채집 전 가공 UI 종료 확인 · 일반 필드 2프레임 확인");
+                return;
+            }
+
+            await Task.Delay(250, ct);
+        }
+
+        using var failed = Capture(ct);
+        Fail(failed, "채집 시작 전 가공 UI를 완전히 닫고 일반 필드로 복귀하지 못했습니다.");
+    }
+
     public async Task RecoverStallAsync(
         AlteringPlan plan, int attempt, string reason, CancellationToken ct)
     {
