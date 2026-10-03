@@ -13,6 +13,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     private int _directCraftPendingCount;
     private CraftingQuestDeficit? _lastSingleQuestDeficit;
     private IReadOnlyList<string>? _questMaterialNameCatalog;
+    private IReadOnlyList<string> _questRecipeMaterialNames = Array.Empty<string>();
 
     internal CraftingScreen(
         nint hwnd,
@@ -530,28 +531,36 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         // Korean quest material OCR commonly substitutes or drops one syllable
         // on the dim-gray row text (live examples: 감사->감자, 양배->양배추).
-        // Only accept a single catalog candidate within one edit.
-        var fuzzy = _questMaterialNameCatalog
-            .Where(x =>
-            {
-                string candidate = FuzzyText.Normalize(x);
-                if (candidate.Length == 0 || Math.Abs(candidate.Length - normalizedOcr.Length) > 1)
-                    return false;
-                return FuzzyText.ContainsApprox(ocrName, x, 1);
-            })
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        if (fuzzy.Length == 1)
+        // Never use substring fuzzy matching here: a short OCR token such as "양배"
+        // otherwise matches unrelated one/two-syllable catalog entries.
+        string? recipeCandidate = ChooseCanonicalQuestMaterial(
+            ocrName,
+            _questRecipeMaterialNames,
+            out string recipeDiagnostic);
+        if (recipeCandidate is not null)
         {
-            Log?.Invoke($"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {fuzzy[0]} · 실제 품목 목록 유일 후보");
-            return fuzzy[0];
+            Log?.Invoke(
+                $"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {recipeCandidate} · " +
+                $"현재 레시피 재료 우선 · {recipeDiagnostic}");
+            return recipeCandidate;
         }
 
-        if (fuzzy.Length > 1)
+        string? catalogCandidate = ChooseCanonicalQuestMaterial(
+            ocrName,
+            _questMaterialNameCatalog,
+            out string catalogDiagnostic);
+        if (catalogCandidate is not null)
+        {
+            Log?.Invoke(
+                $"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {catalogCandidate} · " +
+                $"전체 문자열 유일 최상위 후보 · {catalogDiagnostic}");
+            return catalogCandidate;
+        }
+
+        if (catalogDiagnostic.StartsWith("ambiguous:", StringComparison.Ordinal))
             throw new InvalidOperationException(
-                $"제작 퀘스트 재료명 '{ocrName}'의 실제 품목 후보가 여러 개라 자동 보정하지 않습니다: " +
-                string.Join(", ", fuzzy));
+                $"제작 퀘스트 재료명 '{ocrName}'의 실제 품목 최상위 후보가 여러 개라 자동 보정하지 않습니다: " +
+                catalogDiagnostic["ambiguous:".Length..]);
 
         // Keep exact visual text for quest-only materials that are not exposed by
         // current read-only catalogs. The later two-frame row verification still
@@ -581,12 +590,19 @@ internal sealed class CraftingScreen : ICraftingScreen
                 names.Add(ingredient.DisplayName);
         }
 
-        // Add any ingredient names exposed for the current recipe. This covers
-        // quest-only materials when the CLI reports them as missing.
+        // Add ingredient names exposed for the current recipe and keep them as
+        // the highest-priority correction set. This is narrower than the global
+        // catalog and resolves live cases such as "양배" -> "양배추".
         var crafting = CraftingQueries.ParseCatalog(await _cli.GetCraftableItemsAsync(recipeName, ct));
-        foreach (var item in crafting)
-        foreach (var ingredient in item.MissingIngredients)
-            names.Add(ingredient.DisplayName);
+        _questRecipeMaterialNames = crafting
+            .SelectMany(item => item.MissingIngredients)
+            .Select(ingredient => ingredient.DisplayName)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        foreach (string ingredientName in _questRecipeMaterialNames)
+            names.Add(ingredientName);
 
         var result = names
             .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -594,6 +610,102 @@ internal sealed class CraftingScreen : ICraftingScreen
             .ToArray();
         Log?.Invoke($"[제작] 퀘스트 재료명 검증 카탈로그 준비 · {result.Length}개");
         return result;
+    }
+
+    private static string? ChooseCanonicalQuestMaterial(
+        string ocrName,
+        IEnumerable<string> candidates,
+        out string diagnostic)
+    {
+        string needle = FuzzyText.Normalize(ocrName);
+        if (needle.Length == 0)
+        {
+            diagnostic = "none";
+            return null;
+        }
+
+        var scored = candidates
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .Select(name =>
+            {
+                string normalized = FuzzyText.Normalize(name);
+                int distance = FullEditDistance(needle, normalized);
+                bool fullPrefix = normalized.StartsWith(needle, StringComparison.Ordinal);
+                int prefix = CommonPrefixLength(needle, normalized);
+                int lengthGap = Math.Abs(normalized.Length - needle.Length);
+                return new
+                {
+                    Name = name,
+                    Distance = distance,
+                    FullPrefix = fullPrefix,
+                    Prefix = prefix,
+                    LengthGap = lengthGap
+                };
+            })
+            .Where(x => x.Distance <= 1)
+            .OrderBy(x => x.Distance)
+            .ThenByDescending(x => x.FullPrefix)
+            .ThenByDescending(x => x.Prefix)
+            .ThenBy(x => x.LengthGap)
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        if (scored.Length == 0)
+        {
+            diagnostic = "none";
+            return null;
+        }
+
+        var best = scored[0];
+        var tied = scored
+            .Where(x =>
+                x.Distance == best.Distance &&
+                x.FullPrefix == best.FullPrefix &&
+                x.Prefix == best.Prefix &&
+                x.LengthGap == best.LengthGap)
+            .ToArray();
+
+        if (tied.Length != 1)
+        {
+            diagnostic = "ambiguous:" + string.Join(", ", tied.Select(x => x.Name));
+            return null;
+        }
+
+        diagnostic =
+            $"거리={best.Distance} · 전체접두={(best.FullPrefix ? "예" : "아니오")} · " +
+            $"공통접두={best.Prefix} · 길이차={best.LengthGap}";
+        return best.Name;
+    }
+
+    private static int CommonPrefixLength(string a, string b)
+    {
+        int limit = Math.Min(a.Length, b.Length);
+        int i = 0;
+        while (i < limit && a[i] == b[i]) i++;
+        return i;
+    }
+
+    private static int FullEditDistance(string a, string b)
+    {
+        var prev = new int[b.Length + 1];
+        var cur = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                cur[j] = Math.Min(
+                    Math.Min(cur[j - 1] + 1, prev[j] + 1),
+                    prev[j - 1] + cost);
+            }
+            (prev, cur) = (cur, prev);
+        }
+
+        return prev[b.Length];
     }
 
     private static string? CleanName(string text)
