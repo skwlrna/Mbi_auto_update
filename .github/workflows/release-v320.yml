@@ -378,7 +378,10 @@ jobs:
           }
 
           if(-not $r){throw 'V3.0.20 release not found'}
-          if($r.target_commitish -ne $releaseTarget){throw "V3.0.20 target mismatch: $($r.target_commitish) != $releaseTarget"}
+          $tagLine = (git ls-remote --tags origin refs/tags/V3.0.20 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($tagLine)){throw 'V3.0.20 tag verification failed'}
+          $tagSha = (($tagLine -split "\s+")[0]).Trim()
+          if($tagSha -ne $releaseTarget){throw "V3.0.20 tag mismatch: $tagSha != $releaseTarget"}
           foreach($name in $expected){if($name -notin $r.assets.name){throw "Missing release asset: $name"}}
 
           if($r.draft) {
