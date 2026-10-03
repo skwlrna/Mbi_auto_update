@@ -43,7 +43,6 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
-        _questRecipeMaterialNames = Array.Empty<string>();
 
         await OpenProductAsync(plan, ct);
         await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
@@ -54,6 +53,16 @@ internal sealed class CraftingScreen : ICraftingScreen
         // requirement to the selected count (e.g. 65/80 for a 10-craft batch).
         var exact = await _data.ExactAsync(plan.DisplayName, ct);
         var materialState = await ReadSelectedBatchMaterialStateAsync(craftCount, ct);
+
+        // Refresh canonical ingredient names exposed by the filtered CLI on every
+        // batch. Do not clear names learned by earlier batches: an ingredient that
+        // was sufficient before can become short after prior crafts consume stock.
+        _questRecipeMaterialNames = _questRecipeMaterialNames
+            .Concat(exact.MissingIngredients.Select(ingredient => ingredient.DisplayName))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
 
         // Seed the quest-name matcher before the quest is created. The CLI gives
         // canonical names for currently missing one-craft ingredients, while the
