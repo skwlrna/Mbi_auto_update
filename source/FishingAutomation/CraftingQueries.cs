@@ -74,7 +74,7 @@ internal static class CraftingQueries
     }
 
     internal static IEnumerable<CraftableItem> ForUiCategory(IEnumerable<CraftableItem> items, CraftingCategory category)
-        => items.Where(x => x.Category == category || x.Category == CraftingCategory.Unknown);
+        => items.Where(x => x.Category == category);
 
     internal static int RequiredCrafts(long targetQuantity, int producedPerCraft)
     {
