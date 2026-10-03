@@ -12,6 +12,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
     private CraftingQuestDeficit? _lastSingleQuestDeficit;
+    private IReadOnlyList<string>? _questMaterialNameCatalog;
 
     internal CraftingScreen(
         nint hwnd,
@@ -492,8 +493,10 @@ internal sealed class CraftingScreen : ICraftingScreen
                 throw Fail(
                     frame,
                     $"제작 퀘스트 재료 이름을 확인하지 못했습니다. 수량={ratio.Current}/{ratio.Required} · 행Y={ratio.Y}");
+
+            name = await CanonicalizeQuestMaterialNameAsync(name!, plan.DisplayName, ct);
             if (ratio.Current < ratio.Required)
-                deficits.Add(new(name!, ratio.Current, ratio.Required, ratio.Y));
+                deficits.Add(new(name, ratio.Current, ratio.Required, ratio.Y));
         }
 
         _lastSingleQuestDeficit = deficits.Count == 1 ? deficits[0] : null;
@@ -502,6 +505,95 @@ internal sealed class CraftingScreen : ICraftingScreen
             : "[제작] 퀘스트 부족 재료 · " +
               string.Join(", ", deficits.Select(x => $"{x.DisplayName} {x.Current}/{x.Required}")));
         return deficits;
+    }
+
+    private async Task<string> CanonicalizeQuestMaterialNameAsync(
+        string ocrName,
+        string recipeName,
+        CancellationToken ct)
+    {
+        string normalizedOcr = FuzzyText.Normalize(ocrName);
+        if (normalizedOcr.Length == 0)
+            return ocrName;
+
+        _questMaterialNameCatalog ??= await LoadQuestMaterialNameCatalogAsync(recipeName, ct);
+
+        var exact = _questMaterialNameCatalog
+            .Where(x => string.Equals(FuzzyText.Normalize(x), normalizedOcr, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (exact.Length == 1)
+            return exact[0];
+        if (exact.Length > 1)
+            throw new InvalidOperationException(
+                $"제작 퀘스트 재료명 '{ocrName}'과 정확히 일치하는 실제 품목명이 여러 개라 자동 선택하지 않습니다.");
+
+        // Korean quest material OCR commonly substitutes or drops one syllable
+        // on the dim-gray row text (live examples: 감사->감자, 양배->양배추).
+        // Only accept a single catalog candidate within one edit.
+        var fuzzy = _questMaterialNameCatalog
+            .Where(x =>
+            {
+                string candidate = FuzzyText.Normalize(x);
+                if (candidate.Length == 0 || Math.Abs(candidate.Length - normalizedOcr.Length) > 1)
+                    return false;
+                return FuzzyText.ContainsApprox(ocrName, x, 1);
+            })
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (fuzzy.Length == 1)
+        {
+            Log?.Invoke($"[제작] 퀘스트 재료명 OCR 보정 · {ocrName} → {fuzzy[0]} · 실제 품목 목록 유일 후보");
+            return fuzzy[0];
+        }
+
+        if (fuzzy.Length > 1)
+            throw new InvalidOperationException(
+                $"제작 퀘스트 재료명 '{ocrName}'의 실제 품목 후보가 여러 개라 자동 보정하지 않습니다: " +
+                string.Join(", ", fuzzy));
+
+        // Keep exact visual text for quest-only materials that are not exposed by
+        // current read-only catalogs. The later two-frame row verification still
+        // prevents a click when that visual name is not really present.
+        Log?.Invoke($"[제작] 퀘스트 재료명 카탈로그 미확인 · {ocrName} · 화면 2프레임 재검증 경로 유지");
+        return ocrName;
+    }
+
+    private async Task<IReadOnlyList<string>> LoadQuestMaterialNameCatalogAsync(
+        string recipeName,
+        CancellationToken ct)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        var gatherable = GatheringQueries.ParseCatalog(await _cli.GetGatherableItemsAsync(ct));
+        foreach (var item in gatherable)
+            names.Add(item.DisplayName);
+
+        var altering = AlteringQueries.ParseRecipes(await _cli.GetAlterableItemsAsync(ct));
+        foreach (var recipe in altering)
+        {
+            names.Add(recipe.DisplayName);
+            string output = Regex.Replace(recipe.DisplayName, @"\([^()]*\)$", "").Trim();
+            if (!string.IsNullOrWhiteSpace(output))
+                names.Add(output);
+            foreach (var ingredient in recipe.MissingIngredients)
+                names.Add(ingredient.DisplayName);
+        }
+
+        // Add any ingredient names exposed for the current recipe. This covers
+        // quest-only materials when the CLI reports them as missing.
+        var crafting = CraftingQueries.ParseCatalog(await _cli.GetCraftableItemsAsync(recipeName, ct));
+        foreach (var item in crafting)
+        foreach (var ingredient in item.MissingIngredients)
+            names.Add(ingredient.DisplayName);
+
+        var result = names
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        Log?.Invoke($"[제작] 퀘스트 재료명 검증 카탈로그 준비 · {result.Length}개");
+        return result;
     }
 
     private static string? CleanName(string text)
