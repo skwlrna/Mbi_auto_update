@@ -371,6 +371,17 @@ jobs:
           if ($queries -match 'IsSafeField[\s\S]{0,300}!IsInBattlefield') { throw 'Battlefield flag must not be an unsafe-field gate' }
           $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
           if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
+          $bulkScreen = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $stopPolicy = Get-Content source/FishingAutomation/LifeSkillStopPolicy.cs -Raw
+          $postStop = [regex]::Match($bulkScreen, 'private async Task ConfirmLifeSkillStoppedAsync[\s\S]*?(?=\r?\n    private async Task StartInventoryHundredQuestAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($postStop)) { throw 'post-Space life-skill stop confirmation missing' }
+          if ($postStop -notmatch 'LifeSkillStopPolicy\.IsStoppedAfterSpace') { throw 'post-Space stop confirmation must use activity-only policy' }
+          if ($postStop -match 'IsOwnedLifeSkillActivity\(activity\)') { throw 'stale MainButtonState must not keep post-Space gathering alive' }
+          if ($postStop -notmatch 'MainButtonState 잔상은 종료 판정에서 제외') { throw 'post-Space stale button diagnostic missing' }
+          if ($stopPolicy -notmatch '!activity\.IsGathering' -and $stopPolicy -notmatch '!isGathering') { throw 'post-Space policy must require gathering ended' }
+          if ($stopPolicy -notmatch '!activity\.IsAutoTraveling' -and $stopPolicy -notmatch '!isAutoTraveling') { throw 'post-Space policy must require travel ended' }
+          if ($stopPolicy -notmatch '!activity\.IsFishing' -and $stopPolicy -notmatch '!isFishing') { throw 'post-Space policy must require fishing ended' }
+          if ($stopPolicy -match 'MainButtonState') { throw 'post-Space policy must ignore stale main-button state' }
 
       - name: V3 production engine regression tests
         shell: pwsh
