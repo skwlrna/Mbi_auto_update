@@ -84,8 +84,12 @@ Check(LifeSkillProfilePolicy.MayRetryToggle(0.01, 0.01),
     "C may retry only when both profile regions remain effectively unchanged");
 Check(LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false),
     "post-Space completion accepts all real gathering activities stopped");
-Check(LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false),
-    "post-Space completion is independent from stale main-button text");
+var staleStopButton = new GatheringActivity(
+    false, false, false, false, false, false, false,
+    "NotInDungeon", false, false, false, false, false, false,
+    "Stop", false, "None", "None");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton),
+    "post-Space completion ignores stale MainButtonState Stop when all real activities ended");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false),
     "post-Space completion rejects active gathering");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false),
