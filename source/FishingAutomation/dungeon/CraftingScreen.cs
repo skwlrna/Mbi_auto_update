@@ -522,8 +522,9 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         await Task.Delay(CraftingHubLayout.AcquisitionMethodSettleDelayMs, ct);
 
-        bool firstReady = false;
-        bool secondReady = false;
+        bool anyHeaderSeen = false;
+        bool firstMaterialSeen = false;
+        bool secondMaterialSeen = false;
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
@@ -532,6 +533,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                 CraftingHubLayout.AcquisitionMethodHeaderArea,
                 "구하는 방법",
                 ct);
+            anyHeaderSeen |= header is not null;
 
             var lines = await _ui.Ocr.ReadLinesAsync(
                 frame,
@@ -539,6 +541,10 @@ internal sealed class CraftingScreen : ICraftingScreen
                 3,
                 ct);
 
+            // The first row is the game's recommended route. The yellow "추천"
+            // badge is decorative and can disappear from OCR between frames.
+            // Authorize the fixed click from the stable material name in that
+            // recommended-row geometry; require the popup header only once.
             bool recommendedSeen = lines.Any(x =>
                 AcquisitionMethodPolicy.IsRecommended(x.ReadText));
             bool materialSeen = lines.Any(x =>
@@ -546,7 +552,6 @@ internal sealed class CraftingScreen : ICraftingScreen
                 (x.ReadText ?? "").Replace(" ", "")
                     .Contains(deficit.DisplayName.Replace(" ", ""), StringComparison.Ordinal));
 
-            bool ready = header is not null && (recommendedSeen || materialSeen);
             Log?.Invoke(
                 $"[제작] 구하는 방법 팝업 확인 · pass={pass + 1} · " +
                 $"헤더={(header is not null ? "확인" : "없음")} · " +
@@ -555,22 +560,26 @@ internal sealed class CraftingScreen : ICraftingScreen
 
             if (pass == 0)
             {
-                firstReady = ready;
+                firstMaterialSeen = materialSeen;
                 await Task.Delay(120, ct);
             }
             else
             {
-                secondReady = ready;
+                secondMaterialSeen = materialSeen;
             }
         }
 
-        if (!firstReady || !secondReady)
+        if (!anyHeaderSeen || !firstMaterialSeen || !secondMaterialSeen)
         {
             using var failed = Capture(ct);
             throw Fail(
                 failed,
-                $"{deficit.DisplayName} 구하는 방법 팝업/추천 행을 안정적으로 확인하지 못했습니다.");
+                $"{deficit.DisplayName} 구하는 방법 팝업의 추천 첫 행 재료명을 2프레임 안정적으로 확인하지 못했습니다.");
         }
+
+        Log?.Invoke(
+            $"[제작] 추천 첫 행 안정 확인 · {deficit.DisplayName} 2/2프레임 · " +
+            "추천 글자 OCR은 클릭 조건에서 제외");
 
         _stage.Move(ProductionStage.Travel, $"{deficit.DisplayName} 추천 획득처 이동/채집");
         _ui.ClickFresh(CraftingHubLayout.AcquisitionMethodRecommendedPoint, ct);
