@@ -26,6 +26,7 @@
     <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
     <Compile Include="../../source/FishingAutomation/AcquisitionMethodPolicy.cs" Link="AcquisitionMethodPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingQueries.cs" Link="CraftingQueries.cs" />
+    <Compile Include="../../source/FishingAutomation/QuestMaterialNameMatcher.cs" Link="QuestMaterialNameMatcher.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingCliData.cs" Link="CraftingCliData.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingPlan.cs" Link="CraftingPlan.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryLootTracker.cs" Link="InventoryLootTracker.cs" />
