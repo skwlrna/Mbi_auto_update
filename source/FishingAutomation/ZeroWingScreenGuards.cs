@@ -19,7 +19,7 @@ internal static class SpiritWingSafety
     }
 }
 
-internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
+internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly IAlteringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -57,6 +57,15 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecover
             if (_inner is not IAlteringRecoveryScreen recovery)
                 throw new InvalidOperationException("현재 가공 화면은 정체 복구를 지원하지 않습니다.");
             await recovery.RecoverStallAsync(plan, attempt, reason, ct).ConfigureAwait(false);
+            return true;
+        }, ct);
+
+    public Task ExitToFieldAsync(CancellationToken ct)
+        => GuardAsync("[자동 가공] 채집 전 가공 UI 종료", async () =>
+        {
+            if (_inner is not IAlteringFieldExitScreen fieldExit)
+                throw new InvalidOperationException("현재 가공 화면은 채집 전 일반 필드 복귀를 지원하지 않습니다.");
+            await fieldExit.ExitToFieldAsync(ct).ConfigureAwait(false);
             return true;
         }, ct);
 
