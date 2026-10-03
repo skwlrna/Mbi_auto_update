@@ -11,6 +11,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     private readonly ProductionStageMachine _stage = new("제작");
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
+    private CraftingQuestDeficit? _lastSingleQuestDeficit;
 
     internal CraftingScreen(
         nint hwnd,
@@ -306,6 +307,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal))
         {
+            _lastSingleQuestDeficit = null;
             Log?.Invoke("[제작] 재료 충분 직접 제작 · 퀘스트 재료 확인 생략");
             return Array.Empty<CraftingQuestDeficit>();
         }
@@ -341,7 +343,29 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         var deficits = new List<CraftingQuestDeficit>();
         if (ratios.Count == 0)
-            throw Fail(frame, "제작 퀘스트 재료 수량을 읽지 못했습니다. 재료 준비 완료로 간주하지 않습니다.");
+        {
+            // After the final missing material is gathered/processed, the live quest
+            // popup can remove every material ratio row entirely. V3.0.17 treated
+            // that normal completed state as an OCR failure. Accept the empty ratio
+            // screen only when the immediately preceding read had exactly one deficit
+            // and current inventory independently proves that material is now enough.
+            if (_lastSingleQuestDeficit is CraftingQuestDeficit verified)
+            {
+                long current = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                    verified.DisplayName, ct, Log);
+                if (current >= verified.Required)
+                {
+                    Log?.Invoke(
+                        $"[제작] 퀘스트 재료행 없음 · 직전 마지막 부족 재료 재고 검증 완료 · " +
+                        $"{verified.DisplayName} {current}/{verified.Required} · 부족 재료 없음으로 진행");
+                    _lastSingleQuestDeficit = null;
+                    return Array.Empty<CraftingQuestDeficit>();
+                }
+            }
+
+            throw Fail(frame,
+                "제작 퀘스트 재료 수량을 읽지 못했습니다. 직전 마지막 부족 재료의 재고 완료 근거도 없어 중단합니다.");
+        }
         foreach (var ratio in ratios)
         {
             // The final station step also has 0/N; it is not a material row.
@@ -363,6 +387,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                 deficits.Add(new(name!, ratio.Current, ratio.Required, ratio.Y));
         }
 
+        _lastSingleQuestDeficit = deficits.Count == 1 ? deficits[0] : null;
         Log?.Invoke(deficits.Count == 0
             ? $"[제작] {plan.DisplayName} 퀘스트 부족 재료 없음"
             : "[제작] 퀘스트 부족 재료 · " +
