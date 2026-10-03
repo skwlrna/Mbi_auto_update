@@ -50,6 +50,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
         if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
             return false;
 
+        // Never authorize a receive Space from the remote facility screen.
+        // The same facility title is visible both remotely and on-site; only the
+        // on-site state has no "설비로 이동" control.
+        if (await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null)
+            return false;
+
         if (_cli is null)
             return false;
 
@@ -685,6 +691,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             .Count(x => x.FacilityName == plan.FacilityName);
     }
 
+    private async Task<bool?> TryAutoTravelingAsync(CancellationToken ct)
+    {
+        if (_cli is null)
+            return null;
+
+        var response = await _cli.GetActivityAsync(ct);
+        if (!response.Success)
+        {
+            if (CliAutomationGuards.IsTransientLoadingRejection(response))
+                return null;
+            return GatheringQueries.ParseActivity(response).IsAutoTraveling;
+        }
+
+        return GatheringQueries.ParseActivity(response).IsAutoTraveling;
+    }
+
+    private async Task<bool> IsFacilityTravelDialogAsync(Bitmap frame, CancellationToken ct)
+    {
+        // The travel-confirm dialog and the real completion result both have a large
+        // green button. Distinguish them by the travel wording inside the dialog.
+        return await FindAsync(frame, FacilityTravelDialog, "설비로 이동", ct) is not null ||
+               await FindAsync(frame, FacilityTravelDialog, "이동", ct) is not null;
+    }
+
     private async Task<bool> ConfirmCompletionResultAsync(
         AlteringPlan plan, CancellationToken ct, int resultAttempts = 24)
     {
@@ -701,17 +731,36 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             using var frame = Capture(ct);
             bool greenConfirm = HasBottomConfirmationModal(frame);
             bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool travelDialogVisible = greenConfirm && await IsFacilityTravelDialogAsync(frame, ct);
+            bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
-            if (greenConfirm && !facilityVisible)
+            bool canConfirm = AlteringReceiptPolicy.CanConfirmCompletion(
+                greenConfirm,
+                facilityVisible,
+                travelDialogVisible,
+                autoTraveling == true);
+
+            if (canConfirm)
             {
                 stableFrames++;
                 if (stableFrames < 2)
                     continue;
 
+                // One more activity read immediately before the only result-confirm
+                // Space. If travel started between the two visual frames, input stays
+                // blocked.
+                bool? freshTravel = await TryAutoTravelingAsync(ct);
+                if (freshTravel == true)
+                {
+                    stableFrames = 0;
+                    Log?.Invoke("[자동 가공] 완료창 후보 감지 중 AutoTraveling=true · 추가 Space 차단");
+                    continue;
+                }
+
                 int? workCountBefore = await TryFacilityWorkCountAsync(plan, ct);
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
                 Log?.Invoke(
-                    "[자동 가공] 가공 완료 결과창 확인 · Space 입력 · " +
+                    "[자동 가공] 가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · Space 입력 · " +
                     $"수령 전 시설 작업수={(workCountBefore?.ToString() ?? "확인불가")}");
                 _ui.TapFresh(0x39, ct);
 
@@ -765,6 +814,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
             }
             else
             {
+                if (greenConfirm && (travelDialogVisible || autoTraveling == true))
+                    Log?.Invoke(
+                        $"[자동 가공] 초록 확인창 감지했지만 이동 상태라 Space 차단 · " +
+                        $"이동팝업={travelDialogVisible} · AutoTraveling={autoTraveling == true}");
                 stableFrames = 0;
             }
         }
@@ -776,34 +829,45 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen
     {
         await EnterFacilityAsync(plan, ct);
 
-        // The facility can take a moment to paint the completed-work controls after
-        // entering. Wait up to five seconds and require two consecutive confirmations:
-        // facility header + completed CLI work + cyan receive button.
-        if (!await WaitForCollectPromptAsync(plan, attempts: 20, delayMs: 250, ct))
+        // Receiving must use the same location proof as new work registration.
+        // If this is the remote facility screen, travel first and wait until the
+        // facility title is visible with "설비로 이동" gone for two frames.
+        Log?.Invoke($"[자동 가공] 완료품 수령 전 현장 가공대 확인 · {plan.ScreenTitle}");
+        await TravelToFacilityAsync(plan, ct);
+        await EnterFacilityAsync(plan, ct);
+        _confirmedOnsiteFacility = plan.FacilityName;
+
+        // Require two consecutive on-site receive confirmations. HasCollectPromptAsync
+        // itself vetoes any frame where "설비로 이동" is visible.
+        if (!await WaitForCollectPromptAsync(plan, attempts: 24, delayMs: 250, ct))
         {
             using var failed = Capture(ct);
-            Fail(failed, "완료 작업은 확인됐지만 왼쪽 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
+            Fail(failed, "현장 가공대 도착 후 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
         }
 
-        _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 1차 수령");
-        Log?.Invoke($"[자동 가공] 수령 화면 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 1차 Space");
+        _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
+        Log?.Invoke(
+            $"[자동 가공] 현장 수령 화면 확인 · {plan.ScreenTitle} + 설비로 이동 없음 + CLI 완료 작업 + 파란 수령 버튼 · Space");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
-        // If the first Space actually collected the jobs, close the result screen and
-        // prove that the facility window returned. Otherwise it started facility travel.
-        // Keep this distinction short so the caller can immediately switch to the
-        // second-stage receive path instead of waiting on unchanged CLI queue data.
-        bool collected = await ConfirmCompletionResultAsync(plan, ct, resultAttempts: 8);
-        if (!collected)
-            Log?.Invoke("[자동 가공] 1차 Space 후 가공 완료 결과창 없음 · 설비 이동으로 판정");
-        return collected;
+        if (!await ConfirmCompletionResultAsync(plan, ct, resultAttempts: 24))
+        {
+            using var failed = Capture(ct);
+            Fail(failed, "현장 수령 Space 후 가공 완료 결과창을 안전하게 확인하지 못했습니다.");
+        }
+
+        return true;
     }
 
     public async Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
     {
-        // First Space can start travel instead of collecting. Wait passively for the
-        // same visual/CLI receipt evidence to become stable at the processing bench.
+        // Compatibility fallback. The primary CollectAsync now performs travel before
+        // any receive Space, so this path should normally be unused. If called, it still
+        // waits for proven on-site state before authorizing input.
+        await EnterFacilityAsync(plan, ct);
+        await TravelToFacilityAsync(plan, ct);
+        await EnterFacilityAsync(plan, ct);
         if (!await WaitForCollectPromptAsync(plan, attempts: 90, delayMs: 500, ct))
         {
             Log?.Invoke("[자동 가공] 가공대 도착 후 CLI 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
