@@ -168,6 +168,7 @@ jobs:
         shell: pwsh
         run: |
           $craft = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $craftAuto = Get-Content source/FishingAutomation/CraftingAutomation.cs -Raw
           $gather = Get-Content source/FishingAutomation/dungeon/GatheringScreen.cs -Raw
           $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
           $alter = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
