@@ -82,6 +82,16 @@ Check(!LifeSkillProfilePolicy.MayRetryToggle(0.20, 0.10),
     "C toggle is never retried after a meaningful profile-like screen transition");
 Check(LifeSkillProfilePolicy.MayRetryToggle(0.01, 0.01),
     "C may retry only when both profile regions remain effectively unchanged");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false),
+    "post-Space completion accepts all real gathering activities stopped");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false),
+    "post-Space completion is independent from stale main-button text");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false),
+    "post-Space completion rejects active gathering");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false),
+    "post-Space completion rejects active travel");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true),
+    "post-Space completion rejects active fishing");
 long bulkOwned = 0;
 int bulkStarts = 0;
 int bulkWaits = 0;
