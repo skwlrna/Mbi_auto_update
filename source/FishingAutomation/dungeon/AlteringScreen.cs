@@ -101,8 +101,53 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return sampled > 0 && blue * 100 >= sampled * 2;
     }
 
+    private static bool HasOnsiteCloseButtonVisual(Bitmap frame)
+    {
+        var roi = Rectangle.Intersect(
+            AlteringFacilityLayout.OnsiteCloseVisualArea,
+            new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width < 30 || roi.Height < 30)
+            return false;
+
+        int bright = 0;
+        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
+
+        for (int y = roi.Top; y < roi.Bottom; y++)
+        for (int x = roi.Left; x < roi.Right; x++)
+        {
+            Color p = frame.GetPixel(x, y);
+            int max = Math.Max(p.R, Math.Max(p.G, p.B));
+            int min = Math.Min(p.R, Math.Min(p.G, p.B));
+
+            // On-site close X is a compact neutral-white glyph. The surrounding
+            // machine/currency art does not occupy this tight top-right ROI.
+            bool white = p.R >= 150 && p.G >= 150 && p.B >= 150 &&
+                max - min <= 45;
+            if (!white)
+                continue;
+
+            bright++;
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        if (bright < 28)
+            return false;
+
+        int width = maxX - minX;
+        int height = maxY - minY;
+        return width >= 14 && height >= 14;
+    }
+
     private static bool HasFacilityMoveButtonVisual(Bitmap frame)
     {
+        // The on-site X is authoritative. V3.1.9 live evidence showed that the
+        // dark slot/background could satisfy the permissive teal gate for one frame.
+        // Never let that color false-positive override a visible on-site X.
+        if (HasOnsiteCloseButtonVisual(frame))
+            return false;
         var roi = Rectangle.Intersect(
             AlteringFacilityLayout.MoveButtonVisualArea,
             new Rectangle(Point.Empty, frame.Size));
@@ -403,7 +448,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 await Task.Delay(100, ct);
         }
 
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 연속 등록 · 현장 상태 유지 확인 · 설비 이동 재검사 생략");
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 연속 등록 · 현장 상태 유지 확인 · 우측 상단 X 우선 판정 · 설비 이동 오탐 차단");
         return true;
     }
 

@@ -10,12 +10,21 @@ internal static class AlteringFacilityLayout
     internal static readonly Rectangle MoveButtonVisualArea = new(15, 205, 155, 65);
     internal static readonly Point MoveButtonPoint = new(85, 235);
 
+    // User-confirmed on-site facility screen. The white X at the top-right is
+    // present on-site and absent on the remote/back-arrow screen. It is the
+    // highest-priority visual veto against false remote detection.
+    internal static readonly Rectangle OnsiteCloseVisualArea = new(744, 42, 44, 44);
+
     internal static bool IsSafeMoveGeometry()
         => MoveButtonVisualArea.Contains(MoveButtonPoint) &&
            MoveButtonVisualArea.Left >= 0 &&
            MoveButtonVisualArea.Top >= 0 &&
            MoveButtonVisualArea.Right <= 800 &&
-           MoveButtonVisualArea.Bottom <= 1000;
+           MoveButtonVisualArea.Bottom <= 1000 &&
+           OnsiteCloseVisualArea.Left >= 0 &&
+           OnsiteCloseVisualArea.Top >= 0 &&
+           OnsiteCloseVisualArea.Right <= 800 &&
+           OnsiteCloseVisualArea.Bottom <= 1000;
 
     // Canonical 800x1000 hub: two rows of three cards. Include only each large
     // title, excluding the repeated facility name and level badge below it.
