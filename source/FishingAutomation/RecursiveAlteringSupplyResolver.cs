@@ -146,14 +146,10 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             if (candidates.Length == 0)
                 throw new InvalidOperationException($"{itemName}은(는) 자동 채집 품목도 가공 가능한 중간 재료도 아닙니다.");
 
-            AlteringRecipe producer;
-            var exact = candidates.Where(x => x.DisplayName == itemName).ToArray();
-            if (exact.Length == 1) producer = exact[0];
-            else if (exact.Length > 1)
-                throw new InvalidOperationException($"{itemName} 가공 제법이 여러 개라 자동 선택하지 않습니다.");
-            else if (candidates.Length == 1) producer = candidates[0];
-            else
-                throw new InvalidOperationException($"{itemName}을 만드는 가공 제법이 여러 개라 자동 선택하지 않습니다.");
+            AlteringRecipe producer = SelectProducer(itemName, candidates);
+            if (itemName == "철괴" &&
+                producer.DisplayName == "철괴(철 광석)")
+                Log?.Invoke("[재료 해결] 철괴 생산 제법 고정 · 철괴(철 광석) 사용 · 철괴(광석) 제외");
 
             int duplicateCount = recipes.Count(x => x.DisplayName == producer.DisplayName);
             if (duplicateCount != 1)
@@ -278,11 +274,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 if (candidates.Length == 0)
                     return; // Existing resolver gives the authoritative error later.
 
-                AlteringRecipe? producer = null;
-                var exact = candidates.Where(x => x.DisplayName == itemName).ToArray();
-                if (exact.Length == 1) producer = exact[0];
-                else if (exact.Length == 0 && candidates.Length == 1) producer = candidates[0];
-                if (producer is null || producer.MissingIngredients.Count == 0)
+                AlteringRecipe producer = SelectProducer(itemName, candidates);
+                if (producer.MissingIngredients.Count == 0)
                     return;
 
                 string? facility = AlteringFacilityResolver.Resolve(producer);
@@ -336,6 +329,33 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 group.First().SourceRecipe));
         }
         return merged.ToArray();
+    }
+
+    private static AlteringRecipe SelectProducer(
+        string itemName,
+        IReadOnlyList<AlteringRecipe> candidates)
+    {
+        var exact = candidates.Where(x => x.DisplayName == itemName).ToArray();
+        if (exact.Length == 1) return exact[0];
+        if (exact.Length > 1)
+            throw new InvalidOperationException(
+                $"{itemName} 가공 제법이 여러 개라 자동 선택하지 않습니다.");
+
+        // Explicit live-test rule: when the output "철괴" has both qualified
+        // recipes, recursive production always uses 철괴(철 광석). The legacy
+        // 철괴(광석) route is intentionally excluded.
+        if (itemName == "철괴")
+        {
+            var preferred = candidates
+                .Where(x => x.DisplayName == "철괴(철 광석)")
+                .ToArray();
+            if (preferred.Length == 1) return preferred[0];
+        }
+
+        if (candidates.Count == 1) return candidates[0];
+
+        throw new InvalidOperationException(
+            $"{itemName}을 만드는 가공 제법이 여러 개라 자동 선택하지 않습니다.");
     }
 
     private static string OutputName(string displayName)
