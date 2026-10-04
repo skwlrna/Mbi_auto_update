@@ -235,21 +235,38 @@ var ambiguousResumeSession = AlteringSessionState.Create(shrunkResumePlan, testI
     Stage = "작업 등록 확인"
 };
 ambiguousResumeStore.Save(ambiguousResumeSession);
-try
+var ambiguousResumeAuto = new AlteringAutomation(
+    ambiguousResumeWorld, ambiguousResumeWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, sessionStore: ambiguousResumeStore, session: ambiguousResumeSession);
+await ambiguousResumeAuto.RunAsync(shrunkResumePlan, default);
+Check(ambiguousResumeAuto.QueuedWorks == 2 && ambiguousResumeWorld.QueueCalls == 0 &&
+      ambiguousResumeWorld.Owned == 6,
+    "resume credits authoritative output quantity when the old pending-registration count is ambiguous");
+Check(!File.Exists(ambiguousResumePath), "quantity-reconciled resume removes the checkpoint");
+
+var manualCleanupPlan = new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 100, 5, false);
+var manualCleanupWorld = new FakeWorld(manualCleanupPlan) { Owned = 20 };
+string manualCleanupPath = Path.Combine(Path.GetTempPath(), "mabi-altering-resume-manual-cleanup-" + Guid.NewGuid().ToString("N") + ".json");
+var manualCleanupStore = new AlteringSessionStore(manualCleanupPath);
+var manualCleanupSession = AlteringSessionState.Create(manualCleanupPlan, testIdentity, 0, 0) with
 {
-    await new AlteringAutomation(
-        ambiguousResumeWorld, ambiguousResumeWorld,
-        (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-        4, sessionStore: ambiguousResumeStore, session: ambiguousResumeSession)
-        .RunAsync(shrunkResumePlan, default);
-    throw new Exception("ambiguous queue-shrink resume was accepted");
-}
-catch (InvalidOperationException)
-{
-    Check(ambiguousResumeWorld.QueueCalls == 0,
-        "resume still stops before input when inventory gain could also include the interrupted registration");
-}
-ambiguousResumeStore.Delete();
+    QueuedWorks = 6,
+    LastObservedOutputQuantity = 5,
+    PendingRegistration = true,
+    PendingBeforeMatchingCount = 5,
+    Stage = "작업 등록 확인"
+};
+manualCleanupStore.Save(manualCleanupSession);
+var manualCleanupAuto = new AlteringAutomation(
+    manualCleanupWorld, manualCleanupWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, sessionStore: manualCleanupStore, session: manualCleanupSession);
+await manualCleanupAuto.RunAsync(manualCleanupPlan, default);
+Check(manualCleanupAuto.QueuedWorks == 20 && manualCleanupWorld.QueueCalls == 16 &&
+      manualCleanupWorld.Owned == 100,
+    "resume re-bases progress after completed jobs were received and remaining queued jobs were manually cancelled");
+Check(!File.Exists(manualCleanupPath), "manual receive/cancel reconciliation completes and clears the checkpoint");
 
 var extraQueuePlan = plan with { TargetQuantity = 3 };
 var extraQueueWorld = new FakeWorld(extraQueuePlan);
