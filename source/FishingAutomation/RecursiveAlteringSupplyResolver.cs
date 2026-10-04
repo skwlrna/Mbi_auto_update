@@ -56,7 +56,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 
             Log?.Invoke(
                 $"[재료 해결] 다중 채집 준비 · {parentPlan.DisplayName} · " +
-                string.Join(", ", multiGather.Select(x => $"{x.DisplayName} +{x.AdditionalQuantity}")));
+                string.Join(", ", multiGather.Select(x => $"{x.DisplayName} 목표 {x.TargetTotal}")));
             await fieldExit.ExitToFieldAsync(ct);
             Log?.Invoke("[재료 해결] 다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
 
@@ -121,6 +121,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 Log?.Invoke($"[재료 해결] {itemName} 단일 보충 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
                 await fieldExit.ExitToFieldAsync(ct);
 
+                long currentBeforeFallback = await _gathering.ItemCountAsync(itemName, ct);
+                long fallbackTargetTotal = checked(currentBeforeFallback + quantity);
                 var coordinator = new MultiGatheringCoordinator(
                     _gathering, _gatheringScreen, _delay, _verificationAttempts);
                 coordinator.Log += text => Log?.Invoke(text);
@@ -129,7 +131,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                     {
                         new MultiGatheringRequest(
                             itemName,
-                            quantity,
+                            fallbackTargetTotal,
                             sourceRecipe with { AllowPaidButton = false })
                     },
                     ct);
@@ -257,9 +259,10 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 if (!gatherable.ToolOk)
                     throw new InvalidOperationException($"{itemName} 채집 도구가 없거나 내구도가 부족합니다.");
 
+                long currentNow = await _altering.ItemCountAsync(itemName, ct);
                 requests.Add(new MultiGatheringRequest(
                     itemName,
-                    shortage,
+                    checked(currentNow + shortage),
                     sourceRecipe with { AllowPaidButton = false }));
                 return;
             }
@@ -322,13 +325,17 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 
         // The virtual inventory ledger applies the current stock only once across
         // sibling branches. Duplicate raw leaves therefore become one summed request.
-        return requests
-            .GroupBy(x => x.DisplayName, StringComparer.Ordinal)
-            .Select(g => new MultiGatheringRequest(
-                g.Key,
-                checked(g.Sum(x => x.AdditionalQuantity)),
-                g.First().SourceRecipe))
-            .ToArray();
+        var merged = new List<MultiGatheringRequest>();
+        foreach (var group in requests.GroupBy(x => x.DisplayName, StringComparer.Ordinal))
+        {
+            long current = await _altering.ItemCountAsync(group.Key, ct);
+            long additional = checked(group.Sum(x => Math.Max(0, x.TargetTotal - current)));
+            merged.Add(new MultiGatheringRequest(
+                group.Key,
+                checked(current + additional),
+                group.First().SourceRecipe));
+        }
+        return merged.ToArray();
     }
 
     private static string OutputName(string displayName)
