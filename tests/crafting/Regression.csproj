@@ -19,6 +19,7 @@
     <Compile Include="../../source/FishingAutomation/GatheringCliData.cs" Link="GatheringCliData.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringQueries.cs" Link="GatheringQueries.cs" />
+    <Compile Include="../../source/FishingAutomation/GatheringSafetyPolicy.cs" Link="GatheringSafetyPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/MultiGatheringCoordinator.cs" Link="MultiGatheringCoordinator.cs" />
     <Compile Include="../../source/FishingAutomation/RecursiveAlteringSupplyResolver.cs" Link="RecursiveAlteringSupplyResolver.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
