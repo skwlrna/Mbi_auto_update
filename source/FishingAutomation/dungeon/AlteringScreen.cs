@@ -693,21 +693,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
         await SelectRecipeAsync(plan, ct);
 
-        // After the move has completed, a recipe that still exposes the remote
-        // "가공하러 가기" state is an error. Do not back out and move a second time.
-        using (var detail = Capture(ct))
-        {
-            if (!await IsRecipeDetailStructureAsync(detail, ct))
-                Fail(detail, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
-
-            bool moveVisual = HasFacilityMoveButtonVisual(detail);
-            var paid = await FindAsync(detail, RecipeActionButton, "가공하러 가기", ct);
-            if (moveVisual || paid is not null)
-                Fail(
-                    detail,
-                    "설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지합니다.");
-        }
-
+        // V3.1.8 execution model for every processing facility:
+        // recipe selection performs the first detail confirmation, then the only
+        // remaining registration guard is the two-fresh-frame action check below.
+        // Do not add a separate duplicate detail/OCR pass here.
         Point visualActionCenter = Point.Empty;
         for (int pass = 0; pass < 2; pass++)
         {
