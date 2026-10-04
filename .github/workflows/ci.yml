@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.11"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.12"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.11</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.12</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -216,6 +216,10 @@ jobs:
              $fixedLayout -notmatch 'ProcessingSearchFirstResultPoint = new\(219, 412\)'){throw 'medicine crafting-style search geometry missing'}
           if($selectRecipe -notmatch 'TrySelectFixedRecipeAsync' -or
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
+          $fixedSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectFixedRecipeAsync[\s\S]*?(?=\r?\n    private async Task<bool> TrySelectMedicineRecipeBySearchAsync)').Value
+          $medicineSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectMedicineRecipeBySearchAsync[\s\S]*?(?=\r?\n    private async Task SelectRecipeAsync)').Value
+          if($fixedSelect -match 'HasFacilityMoveButtonVisual' -or $fixedSelect -match '원격 .*고정좌표 입력을 차단'){throw 'fixed recipe selection must be allowed before facility travel'}
+          if($medicineSelect -match 'HasFacilityMoveButtonVisual' -or $medicineSelect -match '원격 약품 가공 화면에서는 검색 입력을 시작하지 않습니다'){throw 'medicine search must be allowed before facility travel'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
@@ -227,7 +231,8 @@ jobs:
           if($screen -notmatch '우측 상단 X 우선 판정 · 설비 이동 오탐 차단'){throw 'on-site close-X reuse diagnostic missing'}
           if($screen -notmatch 'HasFacilityMoveButtonVisual' -or
              $screen -notmatch 'remoteConfirmed: true' -or
-             $screen -notmatch '원격 오판 자동복구 완료'){throw 'facility move visual/recovery route missing'}
+             $screen -notmatch '품목 상세 기준 설비 이동 필요 확정' -or
+             $screen -notmatch '설비 이동은 이번 등록에서 1회만 실행'){throw 'recipe-first single facility travel route missing'}
           if($screen -match 'FindAsync\([^\r\n]*FacilityMoveButton[^\r\n]*"설비로 이동"'){throw 'small facility move label OCR returned to processing flow'}
           if($screen -notmatch 'teal \* 100 < sampled \* 5' -or
              $screen -notmatch 'width >= 90 && height >= 18'){throw 'facility move teal-shape detector missing'}
@@ -237,8 +242,12 @@ jobs:
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
-          if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'recipe must be selected only after facility travel' }
-          if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
+          if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $selectIndex -gt $travelIndex) { throw 'recipe detail must be selected before the optional facility travel' }
+          if ([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 1) { throw 'queue registration must allow at most one facility travel' }
+          if ($queue -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)') { throw 'queue travel must only start after recipe detail confirms remote state' }
+          if ($queue -notmatch '품목 상세 기준 이미 현장 가공 가능 · 설비 이동 생략') { throw 'recipe-detail on-site skip trace missing' }
+          if ($queue -notmatch '설비 이동 1회 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'single-travel retry bound missing' }
+          if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
           if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
           if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
           if ($queue -notmatch 'HasFacilityMoveButtonVisual' -or
