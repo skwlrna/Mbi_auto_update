@@ -92,6 +92,11 @@ public sealed partial class MainForm
     { public override string ToString() => Item.DisplayName; }
     private sealed record RecipeChoice(AlteringRecipe Recipe)
     { public override string ToString() => Recipe.DisplayName; }
+    private sealed record AlteringQueueChoice(AlteringPlan Plan)
+    {
+        public override string ToString()
+            => $"{Plan.DisplayName}  ·  {Plan.TargetQuantity:N0}개";
+    }
 
     // Native controls in the existing central content region, sharing its palette.
     // Independent pages retain their own selections and never appear together.
@@ -119,10 +124,14 @@ public sealed partial class MainForm
         private int _percent;
         private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
+        private readonly ListBox _alteringQueue = new();
+        private Button? _addQueue, _removeQueue, _clearQueue;
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
         internal int? CompletedWorks;
+        internal IReadOnlyList<AlteringPlan> QueuedAlteringPlans
+            => _alteringQueue.Items.Cast<AlteringQueueChoice>().Select(x => x.Plan).ToArray();
         internal string? SelectedName => Items.SelectedItem switch
         { GatheringChoice g => g.Item.DisplayName, RecipeChoice r => r.Recipe.DisplayName, _ => null };
         internal string? OutputName => Items.SelectedItem is RecipeChoice r
@@ -155,13 +164,18 @@ public sealed partial class MainForm
             header.Controls.Add(owner.SectionTitle(AccessibleName, 26), 0, 0);
             header.Controls.Add(new Label
             {
-                Text = altering ? "가공 분류를 유지하고 검색으로 원하는 품목을 빠르게 찾습니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
+                Text = altering ? "품목과 목표 수량을 작업 목록에 담으면 다중가공으로 순서대로 실행합니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
                 Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft
             }, 0, 1);
             root.Controls.Add(header, 0, 0);
 
             Items.AccessibleName = altering ? "가공 제법" : "채집 품목";
             StyleListBox(Items);
+            if (altering)
+            {
+                _alteringQueue.AccessibleName = "다중가공 작업 목록";
+                StyleListBox(_alteringQueue);
+            }
             Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity);
             Facility.DropDownStyle = ComboBoxStyle.DropDownList;
             Facility.Items.AddRange(FacilityUiOrder); Facility.SelectedIndex = 0;
@@ -179,7 +193,7 @@ public sealed partial class MainForm
                 Padding = new Padding(16, 10, 16, 10), Margin = new Padding(0, 0, 9, 0),
                 AccessibleName = altering ? "가공 품목 영역" : "채집 품목 영역"
             };
-            int leftRows = altering ? 5 : 4;
+            int leftRows = altering ? 6 : 4;
             var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = leftRows, Margin = Padding.Empty, BackColor = Color.Transparent };
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
@@ -205,7 +219,12 @@ public sealed partial class MainForm
             left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             left.Controls.Add(BuildListArea(altering ? "가공 품목" : "채집 품목"), 0, row++);
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
-            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"), 0, row);
+            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"), 0, row++);
+            if (altering)
+            {
+                left.RowStyles.Add(new RowStyle(SizeType.Absolute, 128));
+                left.Controls.Add(BuildAlteringQueueArea(), 0, row++);
+            }
             leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
 
             var right = new TableLayoutPanel
@@ -251,6 +270,9 @@ public sealed partial class MainForm
             Typography(header.Controls[0], 36); Typography(header.Controls[1], 18); Typography(settingsHeading.Controls[0], 21);
             Typography(status.Controls[0], 21); Typography(_reload, 14);
             if (_inspect is not null) Typography(_inspect, 14);
+            if (_addQueue is not null) Typography(_addQueue, 13);
+            if (_removeQueue is not null) Typography(_removeQueue, 13);
+            if (_clearQueue is not null) Typography(_clearQueue, 13);
             foreach (var tab in _facilityTabButtons.Values) Typography(tab, 17);
             foreach (var label in new[] { _state, _condition, _elapsed, _collection, _character, _cli }) Typography(label, 17);
             Typography(_progressText, 18); Typography(_percentage, 18); Typography(_start, 22); Typography(_stop, 22);
@@ -386,6 +408,132 @@ public sealed partial class MainForm
             layout.Controls.Add(new Label { Text = caption, Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel) }, 0, 0);
             var surface = new LauncherCard { Dock = DockStyle.Fill, BackColor = CardBg2, Padding = new Padding(5), Margin = new Padding(0, 2, 0, 2) };
             surface.Controls.Add(Items); layout.Controls.Add(surface, 0, 1); return layout;
+        }
+
+        private Control BuildAlteringQueueArea()
+        {
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent,
+                AccessibleName = "다중가공 작업 목록 영역"
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            var header = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                Margin = Padding.Empty
+            };
+            header.Controls.Add(new Label
+            {
+                Text = "다중가공 작업 목록",
+                Dock = DockStyle.Fill,
+                ForeColor = TitleText,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("맑은 고딕", 16f, FontStyle.Bold, GraphicsUnit.Pixel)
+            });
+
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                Width = 230,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+            _addQueue = PageButton("+ 추가", AddCurrentAlteringQueue);
+            _removeQueue = PageButton("삭제", RemoveSelectedAlteringQueue);
+            _clearQueue = PageButton("비우기", ClearQueuedAlteringPlans);
+            foreach (var button in new[] { _addQueue, _removeQueue, _clearQueue })
+            {
+                button.Dock = DockStyle.None;
+                button.Width = 72;
+                button.Height = 29;
+                button.Margin = new Padding(2, 1, 2, 1);
+            }
+            buttons.Controls.Add(_addQueue);
+            buttons.Controls.Add(_removeQueue);
+            buttons.Controls.Add(_clearQueue);
+            header.Controls.Add(buttons);
+            layout.Controls.Add(header, 0, 0);
+
+            var surface = new LauncherCard
+            {
+                Dock = DockStyle.Fill,
+                BackColor = CardBg2,
+                Padding = new Padding(5),
+                Margin = new Padding(0, 2, 0, 2)
+            };
+            surface.Controls.Add(_alteringQueue);
+            layout.Controls.Add(surface, 0, 1);
+            return layout;
+        }
+
+        private void AddCurrentAlteringQueue()
+        {
+            if (!IsAltering || _owner.AnyRunning || _loading)
+                return;
+
+            try
+            {
+                var plan = _owner.SelectedAlteringPlan();
+                var queued = _alteringQueue.Items.Cast<AlteringQueueChoice>().ToArray();
+                int existing = Array.FindIndex(queued, x =>
+                    x.Plan.FacilityName == plan.FacilityName &&
+                    x.Plan.DisplayName == plan.DisplayName &&
+                    x.Plan.RecipeOrdinal == plan.RecipeOrdinal);
+
+                var item = new AlteringQueueChoice(plan);
+                if (existing >= 0)
+                {
+                    _alteringQueue.Items[existing] = item;
+                    _alteringQueue.SelectedIndex = existing;
+                    _owner._log.Write(
+                        $"[다중가공] 작업 목표 갱신 · {plan.DisplayName} {plan.TargetQuantity:N0}개");
+                }
+                else
+                {
+                    _alteringQueue.Items.Add(item);
+                    _alteringQueue.SelectedIndex = _alteringQueue.Items.Count - 1;
+                    _owner._log.Write(
+                        $"[다중가공] 작업 추가 · {plan.ScreenTitle} · {plan.DisplayName} {plan.TargetQuantity:N0}개");
+                }
+
+                UpdateExecution();
+            }
+            catch (Exception ex)
+            {
+                _owner._log.Write("[다중가공] 작업 추가 실패: " + ex.Message);
+            }
+        }
+
+        private void RemoveSelectedAlteringQueue()
+        {
+            if (_owner.AnyRunning || _alteringQueue.SelectedIndex < 0)
+                return;
+            string removed = _alteringQueue.SelectedItem?.ToString() ?? "작업";
+            _alteringQueue.Items.RemoveAt(_alteringQueue.SelectedIndex);
+            _owner._log.Write("[다중가공] 작업 삭제 · " + removed);
+            UpdateExecution();
+        }
+
+        internal void ClearQueuedAlteringPlans()
+        {
+            if (_owner.AnyRunning)
+                return;
+            if (_alteringQueue.Items.Count == 0)
+                return;
+            _alteringQueue.Items.Clear();
+            _owner._log.Write("[다중가공] 작업 목록 비움");
+            UpdateExecution();
         }
 
         private Control BuildSummaryCard(string caption, bool condition)
@@ -701,7 +849,15 @@ public sealed partial class MainForm
             Facility.Enabled = !busy && !_loading;
             foreach (var tab in _facilityTabButtons.Values) tab.Enabled = !busy && !_loading;
             if (_inspect is not null) _inspect.Enabled = !busy && !_loading && SelectedName is not null;
-            _start.Enabled = !busy && !_loading && available; _stop.Enabled = running;
+            if (_addQueue is not null) _addQueue.Enabled = !busy && !_loading && available;
+            if (_removeQueue is not null) _removeQueue.Enabled = !busy && _alteringQueue.SelectedIndex >= 0;
+            if (_clearQueue is not null) _clearQueue.Enabled = !busy && _alteringQueue.Items.Count > 0;
+            _alteringQueue.Enabled = !busy;
+            bool hasBatch = IsAltering && _alteringQueue.Items.Count > 0;
+            _start.Text = hasBatch
+                ? $"▶   다중가공 {_alteringQueue.Items.Count}종 시작 (F9)"
+                : "▶   " + AccessibleName + " 시작 (F9)";
+            _start.Enabled = !busy && !_loading && (available || hasBatch); _stop.Enabled = running;
             bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
             bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
