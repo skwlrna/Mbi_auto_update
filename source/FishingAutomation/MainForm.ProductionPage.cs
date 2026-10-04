@@ -452,6 +452,9 @@ public sealed partial class MainForm
             _addQueue = PageButton("+ 추가", AddCurrentAlteringQueue);
             _removeQueue = PageButton("삭제", RemoveSelectedAlteringQueue);
             _clearQueue = PageButton("비우기", ClearQueuedAlteringPlans);
+            _addQueue.AccessibleName = "다중가공 작업 추가";
+            _removeQueue.AccessibleName = "다중가공 작업 삭제";
+            _clearQueue.AccessibleName = "다중가공 작업 비우기";
             foreach (var button in new[] { _addQueue, _removeQueue, _clearQueue })
             {
                 button.Dock = DockStyle.None;
