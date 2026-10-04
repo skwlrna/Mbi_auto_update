@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.8"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.9"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.8</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.9</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -216,6 +216,17 @@ jobs:
              $fixedLayout -notmatch 'ProcessingSearchFirstResultPoint = new\(219, 412\)'){throw 'medicine crafting-style search geometry missing'}
           if($selectRecipe -notmatch 'TrySelectFixedRecipeAsync' -or
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
+          $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
+          if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
+             $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
+          if($screen -notmatch 'HasFacilityMoveButtonVisual' -or
+             $screen -notmatch 'remoteConfirmed: true' -or
+             $screen -notmatch '원격 오판 자동복구 완료'){throw 'facility move visual/recovery route missing'}
+          if($screen -match 'FindAsync\([^\r\n]*FacilityMoveButton[^\r\n]*"설비로 이동"'){throw 'small facility move label OCR returned to processing flow'}
+          if($screen -notmatch 'teal \* 100 < sampled \* 5' -or
+             $screen -notmatch 'width >= 90 && height >= 18'){throw 'facility move teal-shape detector missing'}
+          if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
+             $screen -notmatch '작은 설비로 이동 문구 OCR 생략'){throw 'fixed move click/OCR-skip trace missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
@@ -224,7 +235,8 @@ jobs:
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
           if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
           if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
-          if ($queue -notmatch '"설비로 이동"' -or $queue -notmatch '"가공하러 가기"') { throw 'remote-state veto missing before visual process click' }
+          if ($queue -notmatch 'HasFacilityMoveButtonVisual' -or
+              $queue -notmatch '"가공하러 가기"') { throw 'remote-state visual/text veto missing before process click' }
           if ($queue -notmatch 'visualActionCenter') { throw 'visual action coordinates must drive the on-site click' }
           if ($queue -notmatch 'TryReuseOnsiteFacilityAsync') { throw 'consecutive on-site facility reuse missing' }
           if ($screen -notmatch '_confirmedOnsiteFacility' -or $screen -notmatch '연속 등록 · 현장 상태 유지 확인') { throw 'stable on-site facility cache missing' }
@@ -234,9 +246,13 @@ jobs:
           foreach($facility in @('금속 가공 시설','목재 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
             if($planText -notmatch [regex]::Escape($facility)){throw "facility missing from common altering path: $facility"}
           }
-          if ($screen -notmatch '설비로 이동 버튼 없음 · 이미 현장 가공창') { throw 'already-on-site facility state missing' }
-          if ($screen -notmatch 'facilityVisible && !moveVisible' -or $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must use facility visible + move button absent' }
-          if ($screen -notmatch '설비 도착 확인 · 설비로 이동 버튼 없음') { throw 'on-site arrival confirmation log missing' }
+          if ($screen -notmatch '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창') { throw 'already-on-site visual facility state missing' }
+          if ($screen -notmatch 'sawDeparture' -or
+              $screen -notmatch 'facilityVisible' -or
+              $screen -notmatch '!moveVisible' -or
+              $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must require departure evidence + facility visible + move button absent' }
+          if ($screen -notmatch '설비 도착 확인 · ' -or
+              $screen -notmatch '설비로 이동 버튼 화면 없음 2프레임 · OCR 없음') { throw 'on-site visual arrival confirmation log missing' }
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
@@ -251,7 +267,7 @@ jobs:
               $collectFlow -notmatch '완료품 수령 전 현장 가공대 확인') { throw 'completed-work receipt must travel to/prove on-site bench before Space' }
           if ($collectFlow -notmatch '설비로 이동 없음.*파란 수령 버튼.*Space') { throw 'receipt Space must require on-site move-button absence' }
           $promptFlow = [regex]::Match($screen, 'private async Task<bool> HasCollectPromptAsync[\s\S]*?(?=\r?\n    private static bool HasCollectButtonVisual)').Value
-          if ($promptFlow -notmatch 'FacilityMoveButton' -or $promptFlow -notmatch '"설비로 이동"') { throw 'remote facility receive veto missing' }
+          if ($promptFlow -notmatch 'HasFacilityMoveButtonVisual') { throw 'visual remote facility receive veto missing' }
           if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion' -or
               $screen -notmatch 'AutoTraveling=true · 추가 Space 차단' -or
               $screen -notmatch 'IsFacilityTravelDialogAsync') { throw 'travel popup/autotravel completion Space veto missing' }

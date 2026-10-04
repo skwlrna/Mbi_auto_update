@@ -18,7 +18,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     private static readonly Rectangle CollectVisualButton = new(10, 270, 110, 85);
-    private static readonly Rectangle FacilityMoveButton = new(10, 180, 220, 120);
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
@@ -51,9 +50,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             return false;
 
         // Never authorize a receive Space from the remote facility screen.
-        // The same facility title is visible both remotely and on-site; only the
-        // on-site state has no "설비로 이동" control.
-        if (await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null)
+        // Do not OCR the small "설비로 이동" label: its fixed teal button body is
+        // the state signal. OCR failure must never be interpreted as on-site.
+        if (HasFacilityMoveButtonVisual(frame))
             return false;
 
         if (_cli is null)
@@ -100,6 +99,47 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         // The real button occupies a large part of this ROI. A 2% floor is still
         // enough to reject the dark inactive area while tolerating dim captures.
         return sampled > 0 && blue * 100 >= sampled * 2;
+    }
+
+    private static bool HasFacilityMoveButtonVisual(Bitmap frame)
+    {
+        var roi = Rectangle.Intersect(
+            AlteringFacilityLayout.MoveButtonVisualArea,
+            new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width < 120 || roi.Height < 45)
+            return false;
+
+        int sampled = 0;
+        int teal = 0;
+        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
+
+        for (int y = roi.Top; y < roi.Bottom; y += 2)
+        for (int x = roi.Left; x < roi.Right; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+
+            // Remote "설비로 이동" is a broad blue/teal pill.  The on-site
+            // "모두 받기" control and slot rings are gray and fail the channel
+            // separation below even when brightness varies.
+            bool button = p.B >= 35 && p.G >= 30 && p.R <= 65 &&
+                p.B >= p.R + 18 && p.G >= p.R + 10;
+            if (!button)
+                continue;
+
+            teal++;
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        if (sampled == 0 || teal * 100 < sampled * 5)
+            return false;
+
+        int width = maxX - minX;
+        int height = maxY - minY;
+        return width >= 90 && height >= 18;
     }
 
     private async Task<bool> WaitForCollectPromptAsync(
@@ -351,8 +391,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         {
             using var frame = Capture(ct);
             bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
-            bool moveVisible = facilityVisible &&
-                await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null;
+            bool moveVisible = facilityVisible && HasFacilityMoveButtonVisual(frame);
 
             if (!facilityVisible || moveVisible)
             {
@@ -390,7 +429,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, $"{plan.ScreenTitle} 고정좌표 입력 전 시설 화면을 확인하지 못했습니다.");
 
-            if (await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null)
+            if (HasFacilityMoveButtonVisual(frame))
                 Fail(frame, $"원격 {plan.ScreenTitle} 화면에서 고정좌표 입력을 차단했습니다.");
         }
 
@@ -424,7 +463,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         using var beforeSearch = Capture(ct);
         if (await FindFacilityHeaderAsync(beforeSearch, plan.ScreenTitle, ct) is null)
             Fail(beforeSearch, "약품 검색 전 약품 가공 화면을 확인하지 못했습니다.");
-        if (await FindAsync(beforeSearch, FacilityMoveButton, "설비로 이동", ct) is not null)
+        if (HasFacilityMoveButtonVisual(beforeSearch))
             Fail(beforeSearch, "원격 약품 가공 화면에서는 검색 입력을 시작하지 않습니다.");
 
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
@@ -514,8 +553,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                     Fail(frame, "연속 등록 전 가공 시설 화면을 확인하지 못했습니다.");
 
-                var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
-                if (move is not null)
+                if (HasFacilityMoveButtonVisual(frame))
                     Fail(frame, "연속 등록 중 원격 가공 화면이 감지되어 고정 품목 좌표 입력을 차단했습니다.");
             }
 
@@ -606,13 +644,46 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
         }
 
-        await SelectRecipeAsync(plan, ct);
+        bool recoveredRemoteDetail = false;
+        while (true)
+        {
+            await SelectRecipeAsync(plan, ct);
+
+            using var routeFrame = Capture(ct);
+            if (!await IsRecipeDetailStructureAsync(routeFrame, ct))
+                Fail(routeFrame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
+
+            bool moveVisual = HasFacilityMoveButtonVisual(routeFrame);
+            var paid = await FindAsync(routeFrame, RecipeActionButton, "가공하러 가기", ct);
+            if (!moveVisual && paid is null)
+                break;
+
+            if (recoveredRemoteDetail)
+                Fail(routeFrame,
+                    "설비 이동 재시도 후에도 원격 가공 상태가 확인되어 추가 입력 없이 정지합니다.");
+
+            // V3.1.8 live log: small move-label OCR missed the remote state, but
+            // the selected recipe clearly exposed "가공하러 가기". Close detail,
+            // then use the fixed move-button coordinate exactly once. Never press
+            // the paid recipe action.
+            Log?.Invoke(
+                $"[자동 가공] 품목 선택 후 원격 상태 재확인 · " +
+                $"이동버튼화면={moveVisual} · 가공하러가기={paid is not null} · " +
+                "상세창 Esc 후 설비로 이동 고정좌표 복구");
+            _ui.TapFresh(0x01, ct);
+            await Task.Delay(500, ct);
+
+            _confirmedOnsiteFacility = null;
+            await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
+            await EnterFacilityAsync(plan, ct);
+            _confirmedOnsiteFacility = plan.FacilityName;
+            recoveredRemoteDetail = true;
+            Log?.Invoke($"[자동 가공] 원격 오판 자동복구 완료 · {plan.ScreenTitle} 현장 재진입 · 품목 다시 선택");
+        }
 
         // Two fresh observations are required immediately before the only registration
-        // click. Do not depend on OCR of "가공하기": the live button can contain an
-        // unrelated number/icon before the label. The travel step above has already
-        // proven the on-site state; here we additionally veto any visible remote
-        // "설비로 이동"/"가공하러 가기" state and require the wide green action shape.
+        // click. The fixed move-button visual and the large "가공하러 가기" text are
+        // both vetoes; only the wide free-process action is allowed.
         Point visualActionCenter = Point.Empty;
         for (int pass = 0; pass < 2; pass++)
         {
@@ -620,9 +691,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (!await IsRecipeDetailStructureAsync(frame, ct))
                 Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
 
-            var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
+            bool moveVisual = HasFacilityMoveButtonVisual(frame);
             var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-            if (move is not null || paid is not null)
+            if (moveVisual || paid is not null)
                 Fail(frame, "원격 가공 상태가 감지되어 현장 가공 입력을 차단했습니다.");
 
             if (!TryFindFreeProcessButtonVisual(frame, out visualActionCenter))
@@ -667,58 +738,77 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return sampled > 0 && green * 100 >= sampled * 8;
     }
 
-    private async Task TravelToFacilityAsync(AlteringPlan plan, CancellationToken ct)
+    private async Task TravelToFacilityAsync(
+        AlteringPlan plan,
+        CancellationToken ct,
+        bool remoteConfirmed = false)
     {
         if (_cli is null)
             throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
+        if (!AlteringFacilityLayout.IsSafeMoveGeometry())
+            throw new InvalidOperationException("설비로 이동 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
-        // The same facility window has two real states:
-        //   remote: "설비로 이동" is visible
-        //   on-site: the facility list is visible but "설비로 이동" is gone
-        // Require two stable frames before deciding which state we are in.
-        DetectionResult? moveToClick = null;
+        // Primary state signal is the fixed teal move-button body, not its text.
+        // V3.1.8 proved that OCR can miss the visible label and must never turn
+        // "OCR 없음" into "already on-site".
         int moveFrames = 0;
         int onsiteFrames = 0;
-        for (int attempt = 0; attempt < 8; attempt++)
+
+        if (!remoteConfirmed)
         {
-            ct.ThrowIfCancellationRequested();
-            using var frame = Capture(ct);
-
-            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
-                Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
-
-            var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
-
-            if (move is null)
+            for (int attempt = 0; attempt < 8; attempt++)
             {
-                onsiteFrames++;
-                moveFrames = 0;
-                if (onsiteFrames >= 2)
+                ct.ThrowIfCancellationRequested();
+                using var frame = Capture(ct);
+
+                if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                    Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
+
+                bool moveVisible = HasFacilityMoveButtonVisual(frame);
+                if (!moveVisible)
                 {
-                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 버튼 없음 · 이미 현장 가공창");
-                    return;
+                    onsiteFrames++;
+                    moveFrames = 0;
+                    if (onsiteFrames >= 2)
+                    {
+                        Log?.Invoke(
+                            $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창");
+                        return;
+                    }
                 }
-            }
-            else if (move is not null)
-            {
-                moveFrames++;
-                onsiteFrames = 0;
-                moveToClick = move;
-                if (moveFrames >= 2)
-                    break;
-            }
-            await Task.Delay(180, ct);
-        }
+                else
+                {
+                    moveFrames++;
+                    onsiteFrames = 0;
+                    if (moveFrames >= 2)
+                        break;
+                }
 
-        if (moveToClick is null || moveFrames < 2)
+                await Task.Delay(180, ct);
+            }
+
+            if (moveFrames < 2)
+            {
+                using var failed = Capture(ct);
+                Fail(failed, "설비 이동 버튼 화면 상태를 안정적으로 확인하지 못했습니다.");
+            }
+        }
+        else
         {
-            using var failed = Capture(ct);
-            Fail(failed, "설비 이동 상태를 안정적으로 확인하지 못했습니다.");
+            using var confirmed = Capture(ct);
+            if (await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
+                Fail(confirmed, "원격 상태 복구 전 가공 시설 화면을 확인하지 못했습니다.");
+
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 상세창 원격 상태로 설비 이동 확정 · " +
+                "작은 설비로 이동 문구 OCR 생략");
         }
 
         _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭");
-        _ui.ClickFresh(moveToClick.Value.Center, ct);
+        Log?.Invoke(
+            $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
+            $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · OCR 없음");
+        _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
 
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음");
@@ -750,6 +840,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             else if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
             {
                 loadingCliRejects++;
+                sawDeparture = true;
                 if (loadingCliRejects == 1 || loadingCliRejects % 5 == 0)
                     Log?.Invoke($"[자동 가공] 지역 이동 로딩 중 CLI 일시 거부 · 재시도 {loadingCliRejects}회");
             }
@@ -760,22 +851,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
             using var frame = Capture(ct);
             bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
-            bool moveVisible = false;
-            if (facilityVisible)
-                moveVisible = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null;
+            bool moveVisible = facilityVisible && HasFacilityMoveButtonVisual(frame);
 
             if (!facilityVisible)
                 sawDeparture = true;
 
-            // On-site state is authoritative: facility window + no "설비로 이동".
-            // This also covers the game's direct transition where there is no loading
-            // screen and the remote button simply disappears.
-            if (facilityVisible && !moveVisible && activity?.IsAutoTraveling != true)
+            // After a real move click, do not accept an immediate visual false-negative
+            // as arrival. Require departure/travel/loading evidence first, then two
+            // stable facility frames with the teal move button gone.
+            if (sawDeparture &&
+                facilityVisible &&
+                !moveVisible &&
+                activity?.IsAutoTraveling != true)
             {
                 onsiteStableFrames++;
                 if (onsiteStableFrames >= 2)
                 {
-                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · 설비로 이동 버튼 없음");
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
+                        "설비로 이동 버튼 화면 없음 2프레임 · OCR 없음");
                     return;
                 }
             }
@@ -785,7 +879,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             }
 
             if (attempt > 0 && attempt % 10 == 0)
-                Log?.Invoke($"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · 화면이탈={sawDeparture} · 가공창={facilityVisible} · 이동버튼={moveVisible} · CLI로딩거부={loadingCliRejects}");
+                Log?.Invoke(
+                    $"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · " +
+                    $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
+                    $"이동버튼화면={moveVisible} · CLI로딩거부={loadingCliRejects}");
         }
 
         throw new InvalidOperationException("설비로 이동 후 현장 가공창을 제한 시간 안에 확인하지 못해 정지합니다.");
@@ -1128,8 +1225,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             else if (sameFacility)
             {
                 bool popupVisible = HasBottomConfirmationModal(snapshot);
-                bool moveVisible = !popupVisible &&
-                    await FindAsync(snapshot, FacilityMoveButton, "설비로 이동", ct) is not null;
+                bool moveVisible = !popupVisible && HasFacilityMoveButtonVisual(snapshot);
 
                 if (!popupVisible)
                 {
