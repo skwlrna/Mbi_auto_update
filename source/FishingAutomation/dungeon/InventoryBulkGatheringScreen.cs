@@ -15,12 +15,16 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     private readonly CraftingCliData _inventory;
     private readonly GatheringScreen _fallback;
     private readonly ProductionUiRuntime _ui;
+    private readonly TemplateMatcher _lifeSkillTemplateMatcher;
     private readonly ProductionStageMachine _stage = new("채집");
 
     // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
     private static readonly Point ProfileLifeSkillPoint = new(400, 944);
-    // Live 800x1000 life-skill detail popup: "가까운 위치 찾기" link center.
-    private static readonly Point LifeSkillNearestLocationPoint = new(300, 534);
+    private const string LifeSkillNearestHelpTemplate =
+        "dungeon/templates/life_skill_nearest_help.png";
+    // Restrict template matching to the lower-left portion of the life-skill detail popup.
+    // This avoids unrelated '?' help icons elsewhere on the screen.
+    private static readonly Rectangle LifeSkillNearestHelpArea = new(150, 400, 260, 250);
 
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
@@ -54,6 +58,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         _fallback = new GatheringScreen(hwnd, settings, debugDir, cli, data);
         _fallback.Log += text => Log?.Invoke(text);
         _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "bulk-gathering");
+        _lifeSkillTemplateMatcher = new TemplateMatcher(AppContext.BaseDirectory);
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[대량 채집][상태] {stage} · {detail}");
     }
@@ -235,23 +240,85 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(650, ct);
 
         // The selected material row already identifies the target. Do not OCR the
-        // same material name again inside the detail popup; the live 800x1000
-        // "가까운 위치 찾기" link uses the shared fixed coordinate for every life skill.
+        // material name or the "가까운 위치 찾기" text again. The detail popup can
+        // have different heights, so use the stable '?' help icon beside that link
+        // as a visual anchor and click a scaled offset to its left.
         Log?.Invoke(
-            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명 OCR 재확인 생략 · 가까운 위치 고정좌표 사용");
+            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명/가까운 위치 문구 OCR 생략 · ? 이미지 기준");
 
         _stage.Move(ProductionStage.Detail, source.TargetName);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
-        Log?.Invoke(
-            $"[대량 채집] 가까운 위치 찾기 · 고정좌표 " +
-            $"({LifeSkillNearestLocationPoint.X},{LifeSkillNearestLocationPoint.Y}) · " +
-            "100회 문구 OCR 없음");
-        _ui.ClickFresh(LifeSkillNearestLocationPoint, ct);
+        await ClickLifeSkillNearestLocationAsync(source.TargetName, ct);
 
         Log?.Invoke(
             $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
             "100회는 행동 횟수이며 획득 수량과 분리 · 목표 재료를 먼저 확보하면 안전 정지");
         await Task.Delay(700, ct);
+    }
+
+    private async Task ClickLifeSkillNearestLocationAsync(
+        string targetName,
+        CancellationToken ct)
+    {
+        DetectionResult? first = null;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+            var found = _lifeSkillTemplateMatcher.FindBrightGlyphMultiScale(
+                frame,
+                LifeSkillNearestHelpArea,
+                LifeSkillNearestHelpTemplate,
+                threshold: 0.78,
+                minScale: 0.75,
+                maxScale: 1.35,
+                step: 0.05);
+
+            if (!found.Found)
+                throw Fail(
+                    frame,
+                    $"{targetName} 생활 스킬 상세창에서 가까운 위치 기준 ? 이미지를 찾지 못했습니다. " +
+                    $"score={found.Score:F3}");
+
+            if (pass == 0)
+            {
+                first = found;
+                await Task.Delay(160, ct);
+                continue;
+            }
+
+            if (first is null || !ProductionUiRuntime.Stable(first.Value.Bounds, found.Bounds))
+                throw Fail(
+                    frame,
+                    $"{targetName} 가까운 위치 기준 ? 이미지 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
+
+            // The supplied rice/tree captures place the clickable link immediately
+            // left of the help icon. Scale the offset with the matched icon width so
+            // render-scale differences do not shift the click onto the '?' itself.
+            double scale = found.Bounds.Width / 16.0;
+            int leftOffset = Math.Clamp((int)Math.Round(56 * scale), 42, 74);
+            var clickPoint = new Point(
+                found.Center.X - leftOffset,
+                found.Center.Y);
+
+            if (!LifeSkillNearestHelpArea.Contains(found.Center) ||
+                clickPoint.X < 140 || clickPoint.X > 390 ||
+                clickPoint.Y < 400 || clickPoint.Y > 650)
+                throw Fail(
+                    frame,
+                    $"{targetName} 가까운 위치 기준 ? 이미지/클릭 좌표가 안전 영역을 벗어났습니다.");
+
+            Log?.Invoke(
+                $"[대량 채집] 가까운 위치 찾기 · ? 이미지 2프레임 확인 · " +
+                $"score={found.Score:F3} · ?=({found.Center.X},{found.Center.Y}) · " +
+                $"클릭=({clickPoint.X},{clickPoint.Y}) · OCR 없음");
+            _ui.ClickFresh(clickPoint, ct);
+            return;
+        }
+
+        using var failed = Capture(ct);
+        throw Fail(failed, $"{targetName} 가까운 위치 기준 ? 이미지 확인을 완료하지 못했습니다.");
     }
 
     private async Task<(bool Confirmed, bool MayRetryToggle, string Evidence)> WaitForProfileOpenAsync(
