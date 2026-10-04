@@ -665,9 +665,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
-        // Match the working food-crafting route: select the recipe first, then use
-        // the detail action itself to decide whether one facility trip is required.
-        // Do not pre-judge remote/on-site state before the recipe detail is opened.
+        // Restore the facility-first order that was used through V3.1.11:
+        // open the processing facility, move to the real bench first, then select
+        // the recipe. Never open a recipe detail before the first facility move.
         bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
         if (reusedOnsite)
         {
@@ -678,61 +678,36 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             _confirmedOnsiteFacility = null;
             await EnterFacilityAsync(plan, ct);
             Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} 진입 · 음식 제작과 동일하게 품목 상세를 먼저 확인하고 설비 이동 필요 여부를 1회 판정");
+                $"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동");
+
+            // The user-selected facility screen is already authoritative here.
+            // Skip the old pre-move visual false-negative check and click the known
+            // free facility-move coordinate exactly once.
+            await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
+
+            await EnterFacilityAsync(plan, ct);
+            _confirmedOnsiteFacility = plan.FacilityName;
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
         }
 
         await SelectRecipeAsync(plan, ct);
 
-        using (var routeFrame = Capture(ct))
+        // After the move has completed, a recipe that still exposes the remote
+        // "가공하러 가기" state is an error. Do not back out and move a second time.
+        using (var detail = Capture(ct))
         {
-            if (!await IsRecipeDetailStructureAsync(routeFrame, ct))
-                Fail(routeFrame, "품목 선택 후 상세 화면을 확인하지 못했습니다.");
+            if (!await IsRecipeDetailStructureAsync(detail, ct))
+                Fail(detail, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
 
-            bool moveVisual = HasFacilityMoveButtonVisual(routeFrame);
-            var paid = await FindAsync(routeFrame, RecipeActionButton, "가공하러 가기", ct);
-            bool needsTravel = moveVisual || paid is not null;
-
-            if (needsTravel)
-            {
-                Log?.Invoke(
-                    $"[자동 가공] 품목 상세 기준 설비 이동 필요 확정 · " +
-                    $"이동버튼화면={moveVisual} · 가공하러가기={paid is not null} · " +
-                    "설비 이동은 이번 등록에서 1회만 실행");
-
-                _ui.TapFresh(0x01, ct);
-                await Task.Delay(500, ct);
-
-                _confirmedOnsiteFacility = null;
-                await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
-                await EnterFacilityAsync(plan, ct);
-                _confirmedOnsiteFacility = plan.FacilityName;
-
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} 설비 도착 · 같은 품목을 다시 선택하고 바로 현장 가공");
-                await SelectRecipeAsync(plan, ct);
-
-                using var onsiteDetail = Capture(ct);
-                if (!await IsRecipeDetailStructureAsync(onsiteDetail, ct))
-                    Fail(onsiteDetail, "설비 도착 후 재선택한 품목 상세 화면을 확인하지 못했습니다.");
-
-                bool stillMoveVisual = HasFacilityMoveButtonVisual(onsiteDetail);
-                var stillPaid = await FindAsync(onsiteDetail, RecipeActionButton, "가공하러 가기", ct);
-                if (stillMoveVisual || stillPaid is not null)
-                    Fail(
-                        onsiteDetail,
-                        "설비 이동 1회 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지합니다.");
-            }
-            else
-            {
-                _confirmedOnsiteFacility = plan.FacilityName;
-                Log?.Invoke(
-                    $"[자동 가공] 품목 상세 기준 이미 현장 가공 가능 · 설비 이동 생략 · {plan.DisplayName}");
-            }
+            bool moveVisual = HasFacilityMoveButtonVisual(detail);
+            var paid = await FindAsync(detail, RecipeActionButton, "가공하러 가기", ct);
+            if (moveVisual || paid is not null)
+                Fail(
+                    detail,
+                    "설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지합니다.");
         }
 
-        // Two fresh observations are required immediately before the only registration
-        // click. The fixed move-button visual and the large "가공하러 가기" text are
-        // both vetoes; only the wide free-process action is allowed.
         Point visualActionCenter = Point.Empty;
         for (int pass = 0; pass < 2; pass++)
         {
