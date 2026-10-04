@@ -411,15 +411,24 @@ internal sealed class CraftingScreen : ICraftingScreen
         await Task.Delay(550, ct);
 
         using var verify = Capture(ct);
-        if (await IsProductDetailAsync(verify, displayName, ct))
+        if (await IsProductDetailStructureAsync(verify, ct))
         {
-            Log?.Invoke($"[제작] {displayName} 상세 화면 확인 · 검색 단계 완료");
+            Log?.Invoke($"[제작] 선택 후 품목명 OCR 재확인 생략 · 상세 화면 구조 확인 · 검색 단계 완료");
             return;
         }
 
         throw Fail(
             verify,
-            $"첫 결과 클릭 후 {displayName} 제작 상세 화면을 확인하지 못했습니다. 추가 fallback 클릭 없이 정지");
+            $"첫 결과 클릭 후 제작 상세 화면 구조를 확인하지 못했습니다. 추가 fallback 클릭 없이 정지");
+    }
+
+    private async Task<bool> IsProductDetailStructureAsync(Bitmap frame, CancellationToken ct)
+    {
+        var client = new Rectangle(Point.Empty, frame.Size);
+        var materials = await FindUniqueAsync(frame, client, "필요한 재료", ct);
+        var quest = await FindUniqueAsync(frame, client, "퀘스트 만들기", ct);
+        return materials is not null && quest is not null &&
+            materials.Value.Center.Y < quest.Value.Center.Y;
     }
 
     private async Task<bool> IsProductDetailAsync(Bitmap frame, string displayName, CancellationToken ct)

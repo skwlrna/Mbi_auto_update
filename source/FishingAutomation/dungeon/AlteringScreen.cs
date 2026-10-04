@@ -158,24 +158,22 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return null;
     }
 
-    private async Task<bool> IsRecipeDetailAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
+    private async Task<bool> IsRecipeDetailStructureAsync(Bitmap frame, CancellationToken ct)
     {
-        bool titleMatched = await FindRecipeAsync(frame, plan, ct) is not null;
-        if (titleMatched) return true;
-
+        // After a recipe card has already been selected, do not OCR the same recipe
+        // name again. Only prove that the expected detail-sheet structure opened.
         bool materialsVisible = await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null;
         bool freeVisible = await FindAsync(frame, RecipeActionButton, "가공하기", ct) is not null;
         bool paidVisible = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct) is not null;
         bool visualAction = TryFindFreeProcessButtonVisual(frame, out _);
 
-        bool confirmed = AlteringDetailPolicy.IsConfirmed(titleMatched, materialsVisible, freeVisible, paidVisible) ||
-            (materialsVisible && visualAction);
+        bool confirmed = materialsVisible && (freeVisible || paidVisible || visualAction);
         if (confirmed)
         {
             string action = freeVisible ? "가공하기 OCR" :
                 paidVisible ? "가공하러 가기 OCR" :
                 "하단 실행 버튼 화면";
-            Log?.Invoke($"[자동 가공] 상세 제목 OCR 보조 판정 · 필요한 재료 + {action} 확인");
+            Log?.Invoke($"[자동 가공] 선택 후 품목명 OCR 재확인 생략 · 필요한 재료 + {action} 확인");
         }
 
         return confirmed;
@@ -280,8 +278,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
                 if (otherFacility is not null)
                 {
-                    Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다.");
-                    _ui.ClickFresh(new(33, 55), ct);
+                    Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다 · Esc");
+                    _ui.TapFresh(0x01, ct);
                     await Task.Delay(900, ct);
                     continue;
                 }
@@ -395,7 +393,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             await Task.Delay(250, ct);
 
             using var popup = Capture(ct);
-            if (!await IsRecipeDetailAsync(popup, plan, ct))
+            if (!await IsRecipeDetailStructureAsync(popup, ct))
                 Fail(popup, "저장된 고정 품목 좌표에서 선택한 품목 상세 화면을 확인하지 못했습니다.");
 
             _stage.Move(ProductionStage.Detail, plan.DisplayName);
@@ -438,7 +436,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 _ui.ClickFresh(selected.Center, ct);
                 await Task.Delay(350, ct);
                 using var popup = Capture(ct);
-                if (!await IsRecipeDetailAsync(popup, plan, ct))
+                if (!await IsRecipeDetailStructureAsync(popup, ct))
                     Fail(popup, "선택한 품목의 상세 화면을 확인하지 못했습니다.");
 
                 _stage.Move(ProductionStage.Detail, plan.DisplayName);
@@ -489,7 +487,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         for (int pass = 0; pass < 2; pass++)
         {
             using var frame = Capture(ct);
-            if (!await IsRecipeDetailAsync(frame, plan, ct))
+            if (!await IsRecipeDetailStructureAsync(frame, ct))
                 Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
 
             var move = await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct);
@@ -930,8 +928,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (facility is not null)
             {
                 stableFieldFrames = 0;
-                Log?.Invoke($"[자동 가공] 채집 전 화면 정리 {attempt}/10 · 현재={facility} 시설창 · 뒤로가기");
-                _ui.ClickFresh(new Point(33, 55), ct);
+                Log?.Invoke($"[자동 가공] 채집 전 화면 정리 {attempt}/10 · 현재={facility} 시설창 · Esc");
+                _ui.TapFresh(0x01, ct);
                 await Task.Delay(700, ct);
                 continue;
             }
