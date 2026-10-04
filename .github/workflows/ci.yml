@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.8"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.9"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.8</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.9</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -216,6 +216,17 @@ jobs:
              $fixedLayout -notmatch 'ProcessingSearchFirstResultPoint = new\(219, 412\)'){throw 'medicine crafting-style search geometry missing'}
           if($selectRecipe -notmatch 'TrySelectFixedRecipeAsync' -or
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
+          $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
+          if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
+             $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
+          if($selectRecipe -notmatch 'HasFacilityMoveButtonVisual' -or
+             $selectRecipe -notmatch 'remoteConfirmed: true' -or
+             $selectRecipe -notmatch '원격 오판 자동복구 완료'){throw 'facility move visual/recovery route missing'}
+          if($selectRecipe -match 'FindAsync\([^\r\n]*FacilityMoveButton[^\r\n]*"설비로 이동"'){throw 'small facility move label OCR returned to recipe flow'}
+          if($screen -notmatch 'teal \* 100 < sampled \* 5' -or
+             $screen -notmatch 'width >= 90 && height >= 18'){throw 'facility move teal-shape detector missing'}
+          if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
+             $screen -notmatch '작은 설비로 이동 문구 OCR 생략'){throw 'fixed move click/OCR-skip trace missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
