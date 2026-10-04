@@ -22,25 +22,6 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     // Live 800x1000 life-skill detail popup: "가까운 위치 찾기" link center.
     private static readonly Point LifeSkillNearestLocationPoint = new(300, 534);
 
-    // Keep every drag point well inside the life-skill list panel. Dragging near or
-    // beyond the modal border can dismiss the life-skill window.
-    private static readonly Point LifeSkillListDragStart = new(580, 760);
-    private static readonly Point LifeSkillListDragEnd = new(580, 350);
-
-    private static bool TryHarvestRowPoint(string targetName, out Point point)
-    {
-        point = targetName switch
-        {
-            "밀" => new Point(400, 488),
-            "옥수수" => new Point(400, 576),
-            "콩" => new Point(400, 665),
-            "쌀" => new Point(400, 753),
-            "귀리" => new Point(400, 842),
-            _ => Point.Empty
-        };
-        return point != Point.Empty;
-    }
-
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
         point = category switch
@@ -210,16 +191,18 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(500, ct);
 
         _stage.Move(ProductionStage.Search, source.TargetName);
-        if (string.Equals(source.Category, "추수", StringComparison.Ordinal) &&
-            TryHarvestRowPoint(source.TargetName, out Point harvestPoint))
+        if (LifeSkillListLayout.TryFixedRowPoint(
+                source.Category,
+                source.TargetName,
+                out Point fixedRowPoint))
         {
-            // User-confirmed harvest layout: all five rows are visible on one page
-            // in this fixed order, so never drag or require row OCR before clicking.
-            // The detail popup target is still verified immediately afterwards.
+            // Confirmed one-page categories never drag. Fixed-row input is followed
+            // by exact/compact target verification in the detail popup before any
+            // "가까운 위치 찾기" input is allowed.
             Log?.Invoke(
-                $"[대량 채집] 추수 한 페이지 고정좌표 · {source.TargetName} · " +
-                $"({harvestPoint.X},{harvestPoint.Y}) · 드래그 없음");
-            _ui.ClickFresh(harvestPoint, ct);
+                $"[대량 채집] {source.Category} 한 페이지 고정좌표 · {source.TargetName} · " +
+                $"({fixedRowPoint.X},{fixedRowPoint.Y}) · 드래그 없음");
+            _ui.ClickFresh(fixedRowPoint, ct);
         }
         else
         {
@@ -367,7 +350,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         // 불필요한 드래그는 행 위치를 흔들 수 있으므로 추수는 첫 화면만 검사한다.
         // 다른 카테고리는 기존처럼 목록 영역만 제한적으로 스크롤한다.
         var listRoi = new Rectangle(150, 145, 630, 700);
-        int maxPages = string.Equals(source.Category, "추수", StringComparison.Ordinal) ? 1 : 9;
+        int maxPages = LifeSkillListLayout.NeverScroll(source.Category) ? 1 : 9;
 
         for (int page = 0; page < maxPages; page++)
         {
@@ -411,8 +394,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             using (var frame = Capture(ct))
             {
                 _ui.DragFresh(
-                    LifeSkillListDragStart,
-                    LifeSkillListDragEnd,
+                    LifeSkillListLayout.SafeDragStart,
+                    LifeSkillListLayout.SafeDragEnd,
                     450,
                     ct);
             }
