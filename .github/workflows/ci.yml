@@ -373,15 +373,19 @@ jobs:
           if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
           $safetyPolicy = Get-Content source/FishingAutomation/GatheringSafetyPolicy.cs -Raw
           if ($automation -notmatch 'GatheringSafetyPolicy\.IsSafeField' -or
-              $automation -notmatch 'Reviving=true 잔상 제외') { throw 'stale Reviving live-log policy is not wired to gathering start' }
-          if ($safetyPolicy -notmatch 'IsClearlyStaleReviving' -or
-              $safetyPolicy -notmatch 'MainButtonState == "Compass"' -or
-              $safetyPolicy -notmatch 'LastRunningInteractionType == "Gathering"') { throw 'stale Reviving policy evidence gates missing' }
-          foreach($hardGate in @('IsDead','IsInCombat','IsDialoguePlaying','IsWaitingForSelection','NotInDungeon','IsPlayingMiniGame')){
-            if($safetyPolicy -notmatch $hardGate){throw "gathering hard safety gate missing from stale-revive policy: $hardGate"}
+              $automation -notmatch 'WaitForCombatEndAsync' -or
+              $automation -notmatch '전투 중 · 입력 없이 종료 대기') { throw 'gathering combat-wait policy is not wired to execution' }
+          if ($safetyPolicy -match 'IsClearlyStaleReviving' -or
+              $safetyPolicy -match 'activity\.IsReviving') { throw 'Reviving must not gate gathering safety' }
+          if ($safetyPolicy -notmatch 'ShouldWaitForCombat' -or
+              $safetyPolicy -notmatch 'activity\.IsInCombat') { throw 'combat wait-state policy missing' }
+          foreach($hardGate in @('IsDead','IsDialoguePlaying','IsWaitingForSelection','NotInDungeon','IsPlayingMiniGame')){
+            if($safetyPolicy -notmatch $hardGate){throw "gathering hard safety gate missing: $hardGate"}
           }
           $bulkScreen = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
-          if ($bulkScreen -notmatch 'GatheringSafetyPolicy\.IsSafeField') { throw 'bulk life-skill loop does not use stale-revive aware safety policy' }
+          if ($bulkScreen -notmatch 'GatheringSafetyPolicy\.IsSafeField' -or
+              $bulkScreen -notmatch 'WaitForCombatEndAsync' -or
+              $bulkScreen -notmatch '전투 중 · 입력 없이 종료 대기') { throw 'bulk life-skill combat wait is not wired' }
           $stopPolicy = Get-Content source/FishingAutomation/LifeSkillStopPolicy.cs -Raw
           $postStop = [regex]::Match($bulkScreen, 'private async Task ConfirmLifeSkillStoppedAsync[\s\S]*?(?=\r?\n    private async Task StartInventoryHundredQuestAsync)').Value
           if ([string]::IsNullOrWhiteSpace($postStop)) { throw 'post-Space life-skill stop confirmation missing' }
