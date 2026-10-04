@@ -440,7 +440,7 @@ jobs:
           $gatherData = Get-Content source/FishingAutomation/GatheringCliData.cs -Raw
           $gatherAuto = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
           if ($craftScreen -notmatch '_lastSingleQuestDeficit' -or $craftScreen -notmatch '직전 마지막 부족 재료 재고 검증 완료') { throw 'crafting final-material empty-row recovery missing' }
-          if ($alterScreen -notmatch 'TryFacilityWorkCountAsync' -or $alterScreen -notmatch 'CLI 작업 감소로 수령 확정') { throw 'altering receipt CLI evidence fallback missing' }
+          if ($alterScreen -notmatch 'TryMatchingWorkCountAsync' -or $alterScreen -notmatch 'CLI 동일 품목 작업 감소로 수령 확정') { throw 'altering same-item receipt CLI evidence fallback missing' }
           $receiptPolicy = Get-Content source/FishingAutomation/AlteringReceiptPolicy.cs -Raw
           if ($receiptPolicy -notmatch '!travelDialogVisible' -or $receiptPolicy -notmatch '!autoTraveling') { throw 'altering receipt travel veto policy missing' }
           if ($alterScreen -notmatch '완료품 수령 전 현장 가공대 확인' -or
