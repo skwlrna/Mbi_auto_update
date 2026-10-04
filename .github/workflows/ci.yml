@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.13"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.14"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.13</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.14</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -264,12 +264,12 @@ jobs:
             if($planText -notmatch [regex]::Escape($facility)){throw "facility missing from common altering path: $facility"}
           }
           if ($screen -notmatch '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창') { throw 'already-on-site visual facility state missing' }
-          if ($screen -notmatch 'sawDeparture' -or
-              $screen -notmatch 'facilityVisible' -or
-              $screen -notmatch '!moveVisible' -or
-              $screen -notmatch 'onsiteStableFrames') { throw 'on-site arrival must require departure evidence + facility visible + move button absent' }
-          if ($screen -notmatch '설비 도착 확인 · ' -or
-              $screen -notmatch '설비로 이동 버튼 화면 없음 2프레임 · OCR 없음') { throw 'on-site visual arrival confirmation log missing' }
+          $travel = [regex]::Match($screen, 'private async Task TravelToFacilityAsync[\s\S]*?(?=\r?\n    // Free navigation only)').Value
+          if ($travel -notmatch 'facilityVisible' -or
+              $travel -notmatch '!moveVisible' -or
+              $travel -notmatch 'onsiteStableFrames') { throw 'direct on-site arrival visual gate missing' }
+          if ($travel -match 'if \(sawDeparture &&\s*facilityVisible') { throw 'departure evidence must not gate direct facility arrival' }
+          if ($travel -notmatch '가공창 유지 \+ 설비로 이동 버튼 없음 2프레임 · 직접 전환 허용') { throw 'direct facility arrival trace missing' }
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
