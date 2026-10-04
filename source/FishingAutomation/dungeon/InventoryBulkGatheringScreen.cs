@@ -22,6 +22,25 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     // Live 800x1000 life-skill detail popup: "가까운 위치 찾기" link center.
     private static readonly Point LifeSkillNearestLocationPoint = new(300, 534);
 
+    // Keep every drag point well inside the life-skill list panel. Dragging near or
+    // beyond the modal border can dismiss the life-skill window.
+    private static readonly Point LifeSkillListDragStart = new(580, 760);
+    private static readonly Point LifeSkillListDragEnd = new(580, 350);
+
+    private static bool TryHarvestRowPoint(string targetName, out Point point)
+    {
+        point = targetName switch
+        {
+            "밀" => new Point(400, 488),
+            "옥수수" => new Point(400, 576),
+            "콩" => new Point(400, 665),
+            "쌀" => new Point(400, 753),
+            "귀리" => new Point(400, 842),
+            _ => Point.Empty
+        };
+        return point != Point.Empty;
+    }
+
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
         point = category switch
@@ -191,16 +210,28 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(500, ct);
 
         _stage.Move(ProductionStage.Search, source.TargetName);
-        var row = await FindStableLifeSkillRowAsync(source, ct);
-        if (row is null)
+        if (string.Equals(source.Category, "추수", StringComparison.Ordinal) &&
+            TryHarvestRowPoint(source.TargetName, out Point harvestPoint))
         {
-            using var failed = Capture(ct);
-            throw Fail(failed,
-                $"{source.Category} 고정좌표 클릭 후 {source.TargetName} 행을 OCR+아이콘 구조로 확인하지 못했습니다.");
+            // User-confirmed harvest layout: all five rows are visible on one page
+            // in this fixed order, so never drag or require row OCR before clicking.
+            // The detail popup target is still verified immediately afterwards.
+            Log?.Invoke(
+                $"[대량 채집] 추수 한 페이지 고정좌표 · {source.TargetName} · " +
+                $"({harvestPoint.X},{harvestPoint.Y}) · 드래그 없음");
+            _ui.ClickFresh(harvestPoint, ct);
         }
-
-        using (var frame = Capture(ct))
+        else
         {
+            var row = await FindStableLifeSkillRowAsync(source, ct);
+            if (row is null)
+            {
+                using var failed = Capture(ct);
+                throw Fail(failed,
+                    $"{source.Category} 고정좌표 클릭 후 {source.TargetName} 행을 OCR+아이콘 구조로 확인하지 못했습니다.");
+            }
+
+            using var frame = Capture(ct);
             // Reconfirm the exact label and same-row icon immediately before input.
             var rowRoi = Rectangle.Intersect(
                 new Rectangle(150, Math.Max(90, row.Value.Bounds.Top - 50), 630, 100),
@@ -380,8 +411,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             using (var frame = Capture(ct))
             {
                 _ui.DragFresh(
-                    new Point(715, 765),
-                    new Point(715, 345),
+                    LifeSkillListDragStart,
+                    LifeSkillListDragEnd,
                     450,
                     ct);
             }
