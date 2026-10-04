@@ -196,9 +196,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 source.TargetName,
                 out Point fixedRowPoint))
         {
-            // Confirmed one-page categories never drag. Fixed-row input is followed
-            // by exact/compact target verification in the detail popup before any
-            // "가까운 위치 찾기" input is allowed.
+            // Confirmed one-page categories never drag. The selected fixed row is
+            // followed directly by the shared fixed "가까운 위치 찾기" coordinate.
             Log?.Invoke(
                 $"[대량 채집] {source.Category} 한 페이지 고정좌표 · {source.TargetName} · " +
                 $"({fixedRowPoint.X},{fixedRowPoint.Y}) · 드래그 없음");
@@ -233,24 +232,13 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                     Math.Clamp(exact.Value.Center.X, 180, 740),
                     exact.Value.Center.Y), ct);
         }
-        await Task.Delay(500, ct);
+        await Task.Delay(650, ct);
 
-        // Selecting the life-skill material opens its fixed detail popup. There is
-        // no visible "100회 채집" control here: the game starts the 100-action
-        // auto-gather cycle after "가까운 위치 찾기". Verify only the target popup,
-        // then use the user-confirmed fixed link coordinate.
-        using (var frame = Capture(ct))
-        {
-            var detailTarget = await FindLifeSkillLabelAsync(
-                frame,
-                new Rectangle(210, 330, 300, 90),
-                source.TargetName,
-                ct);
-            if (detailTarget is null)
-                throw Fail(
-                    frame,
-                    $"{source.TargetName} 생활 스킬 상세 팝업을 확인하지 못해 가까운 위치 고정좌표를 클릭하지 않습니다.");
-        }
+        // The selected material row already identifies the target. Do not OCR the
+        // same material name again inside the detail popup; the live 800x1000
+        // "가까운 위치 찾기" link uses the shared fixed coordinate for every life skill.
+        Log?.Invoke(
+            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명 OCR 재확인 생략 · 가까운 위치 고정좌표 사용");
 
         _stage.Move(ProductionStage.Detail, source.TargetName);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
