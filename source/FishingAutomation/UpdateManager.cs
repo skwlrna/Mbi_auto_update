@@ -16,7 +16,7 @@ internal sealed record ReleaseUpdateInfo(
 
 internal static class UpdateManager
 {
-    public const string CurrentVersion = "V3.1.14";
+    public const string CurrentVersion = "V3.1.15";
     public const string RepositoryOwner = "skwlrna";
     public const string RepositoryName = "Mbi_auto_update";
 
@@ -25,7 +25,7 @@ internal static class UpdateManager
     private static HttpClient CreateHttpClient()
     {
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("MabiAuto", "3114"));
+        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("MabiAuto", "3115"));
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return http;
     }
