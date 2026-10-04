@@ -535,9 +535,9 @@ jobs:
           $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.3' }) | Select-Object -First 1
 
           $expected=@('MabiAuto_V3.1.3_Windows_Lite.zip','MabiAuto_V3.1.3_Windows_Lite.zip.sha256','MabiAuto_V3.1.3_Source.zip')
-          git fetch origin release-v312-code
+          git fetch origin release-v313-code
           if($LASTEXITCODE-ne0){throw 'Release code branch fetch failed'}
-          $releaseTarget=(git rev-parse origin/release-v312-code).Trim()
+          $releaseTarget=(git rev-parse origin/release-v313-code).Trim()
           if($releaseTarget -ne '95b7f5cb6691c7588ef577e10934ba5c5ddde63d'){throw "Release code target mismatch: $releaseTarget"}
 
           if(-not $r) {
