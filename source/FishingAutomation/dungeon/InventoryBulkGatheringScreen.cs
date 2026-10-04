@@ -19,10 +19,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
     private static readonly Point ProfileLifeSkillPoint = new(400, 944);
-    // The life-skill detail popup height changes with each material description,
-    // so "가까운 위치 찾기" must be located from the visible popup instead of
-    // using one fixed Y coordinate for every material.
-    private static readonly Rectangle LifeSkillNearestLocationArea = new(190, 430, 320, 210);
+    // "가까운 위치 찾기" moves vertically with the material description.
+    // Anchor on its small question-mark icon instead of OCR or one fixed Y coordinate.
+    private const string LifeSkillNearestQuestionTemplate =
+        "dungeon/templates/life_skill_nearest_question.png";
+    private static readonly Rectangle LifeSkillNearestQuestionArea = new(210, 420, 230, 240);
+    private const int LifeSkillNearestClickOffsetX = -62;
 
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
@@ -198,8 +200,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 source.TargetName,
                 out Point fixedRowPoint))
         {
-            // Confirmed one-page categories never drag. The selected fixed row is
-            // followed directly by the shared fixed "가까운 위치 찾기" coordinate.
+            // Confirmed one-page categories never drag. After selecting the row,
+            // navigation is anchored from the detail popup's question-mark icon.
             Log?.Invoke(
                 $"[대량 채집] {source.Category} 한 페이지 고정좌표 · {source.TargetName} · " +
                 $"({fixedRowPoint.X},{fixedRowPoint.Y}) · 드래그 없음");
@@ -237,25 +239,39 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(650, ct);
 
         // The selected material row already identifies the target. Do not OCR the
-        // same material name again inside the detail popup. The popup's vertical
-        // position changes with description length, so locate only the navigation
-        // link itself and click its stable text center.
+        // material name or the "가까운 위치 찾기" text again. The link's small '?'
+        // icon is visually stable even when the popup height changes. Detect that
+        // icon on two frames, re-detect immediately before input, then click left
+        // on the link text itself so the help icon is never clicked.
         Log?.Invoke(
-            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명 OCR 재확인 생략 · 가까운 위치 문구 탐색");
+            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명/가까운 위치 OCR 생략 · ? 아이콘 기준 탐색");
 
         _stage.Move(ProductionStage.Detail, source.TargetName);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
 
-        var nearest = await _ui.ClickStableExactAsync(
-            "가까운 위치 찾기",
-            LifeSkillNearestLocationArea,
+        Point nearestClick = Point.Empty;
+        var question = await _ui.ClickOffsetFromStableTemplateAsync(
+            LifeSkillNearestQuestionTemplate,
+            LifeSkillNearestQuestionArea,
+            found =>
+            {
+                nearestClick = new Point(
+                    Math.Clamp(found.Center.X + LifeSkillNearestClickOffsetX, 180, 390),
+                    found.Center.Y);
+                return nearestClick;
+            },
             ct,
-            $"{source.TargetName} 상세 화면에서 가까운 위치 찾기를 확인하지 못했습니다.",
-            dimText: true);
+            $"{source.TargetName} 상세 화면에서 가까운 위치 ? 아이콘을 안정적으로 확인하지 못했습니다.",
+            threshold: 0.84,
+            minScale: 0.75,
+            maxScale: 1.35,
+            step: 0.05,
+            settleMs: 160);
 
         Log?.Invoke(
-            $"[대량 채집] 가까운 위치 찾기 · 화면 문구 중심 클릭 · " +
-            $"({nearest.Center.X},{nearest.Center.Y}) · 품목명/100회 문구 OCR 없음");
+            $"[대량 채집] 가까운 위치 찾기 · ? 템플릿 기준 왼쪽 오프셋 클릭 · " +
+            $"anchor=({question.Center.X},{question.Center.Y}) score={question.Score:F3} · " +
+            $"click=({nearestClick.X},{nearestClick.Y}) · 품목명/문구 OCR 없음");
 
         Log?.Invoke(
             $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
