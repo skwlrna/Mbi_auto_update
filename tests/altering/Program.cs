@@ -390,7 +390,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             MakeRecipe("강철괴", 3, "금속 가공 시설",
                 new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 }),
             MakeRecipe("철괴(철 광석)", 3, "금속 가공 시설",
-                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 })
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 }),
+            MakeRecipe("철괴(광석)", 3, "금속 가공 시설",
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["돌 광석"] = 10 })
         });
     }
 
