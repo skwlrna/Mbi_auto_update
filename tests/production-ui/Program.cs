@@ -69,6 +69,14 @@ internal static class Program
             Check(alterSearch.Visible, "automatic altering keeps facility tabs and adds item search");
             Check(!All(altering).OfType<NumericUpDown>().Any(),
                 "altering target quantity uses no native spinner control");
+            var alteringQueue = All(altering).OfType<ListBox>()
+                .Single(x => x.AccessibleName == "다중가공 작업 목록");
+            var addAlteringQueue = All(altering).OfType<Button>()
+                .Single(x => x.AccessibleName == "다중가공 작업 추가");
+            var clearAlteringQueue = All(altering).OfType<Button>()
+                .Single(x => x.AccessibleName == "다중가공 작업 비우기");
+            Check(alteringQueue.Visible && addAlteringQueue.Visible,
+                "automatic altering exposes a visible multi-altering job queue");
 
             Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "목재+",
                 "default wood facility tab shows only wood recipes");
@@ -84,6 +92,18 @@ internal static class Program
             ai.SelectedIndex = 1;
             Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
                 "missing-material recipe remains startable for recursive resolution");
+
+            SetQuantity(aq, 11);
+            addAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 1 &&
+                  alteringQueue.Items[0]!.ToString()!.Contains("강철괴", StringComparison.Ordinal) &&
+                  alteringQueue.Items[0]!.ToString()!.Contains("11", StringComparison.Ordinal),
+                "multi-altering queue captures the selected recipe and its own target quantity");
+            Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Text.Contains("다중가공 1종", StringComparison.Ordinal),
+                "F9 start clearly switches to multi-altering when queued jobs exist");
+            clearAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0,
+                "multi-altering queue can be cleared before execution");
 
             facilityTabs.Single(x => x.Text == "약품").PerformClick(); Pump();
             Check(ai.Items.Count == 3 &&
