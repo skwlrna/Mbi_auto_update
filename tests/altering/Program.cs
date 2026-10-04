@@ -203,6 +203,54 @@ Check(resumeAuto.QueuedWorks == 1 && resumeWorld.QueueCalls == 0 && resumeWorld.
     "resume reconciles an interrupted confirmed registration without duplicate clicking");
 Check(!File.Exists(resumePath), "successful resumed production deletes the session checkpoint");
 
+var shrunkResumePlan = plan with { TargetQuantity = 6 };
+var shrunkResumeWorld = new FakeWorld(shrunkResumePlan) { Owned = 3 };
+string shrunkResumePath = Path.Combine(Path.GetTempPath(), "mabi-altering-resume-shrink-" + Guid.NewGuid().ToString("N") + ".json");
+var shrunkResumeStore = new AlteringSessionStore(shrunkResumePath);
+var shrunkResumeSession = AlteringSessionState.Create(shrunkResumePlan, testIdentity, 0, 0) with
+{
+    QueuedWorks = 1,
+    PendingRegistration = true,
+    PendingBeforeMatchingCount = 1,
+    Stage = "작업 등록 확인"
+};
+shrunkResumeStore.Save(shrunkResumeSession);
+var shrunkResumeAuto = new AlteringAutomation(
+    shrunkResumeWorld, shrunkResumeWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, sessionStore: shrunkResumeStore, session: shrunkResumeSession);
+await shrunkResumeAuto.RunAsync(shrunkResumePlan, default);
+Check(shrunkResumeAuto.QueuedWorks == 2 && shrunkResumeWorld.QueueCalls == 1 && shrunkResumeWorld.Owned == 6,
+    "resume accepts queue shrink only when received output proves the interrupted registration was not added");
+Check(!File.Exists(shrunkResumePath), "queue-shrink resume completes and removes the checkpoint");
+
+var ambiguousResumeWorld = new FakeWorld(shrunkResumePlan) { Owned = 6 };
+string ambiguousResumePath = Path.Combine(Path.GetTempPath(), "mabi-altering-resume-ambiguous-" + Guid.NewGuid().ToString("N") + ".json");
+var ambiguousResumeStore = new AlteringSessionStore(ambiguousResumePath);
+var ambiguousResumeSession = AlteringSessionState.Create(shrunkResumePlan, testIdentity, 0, 0) with
+{
+    QueuedWorks = 1,
+    PendingRegistration = true,
+    PendingBeforeMatchingCount = 1,
+    Stage = "작업 등록 확인"
+};
+ambiguousResumeStore.Save(ambiguousResumeSession);
+try
+{
+    await new AlteringAutomation(
+        ambiguousResumeWorld, ambiguousResumeWorld,
+        (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+        4, sessionStore: ambiguousResumeStore, session: ambiguousResumeSession)
+        .RunAsync(shrunkResumePlan, default);
+    throw new Exception("ambiguous queue-shrink resume was accepted");
+}
+catch (InvalidOperationException)
+{
+    Check(ambiguousResumeWorld.QueueCalls == 0,
+        "resume still stops before input when inventory gain could also include the interrupted registration");
+}
+ambiguousResumeStore.Delete();
+
 var extraQueuePlan = plan with { TargetQuantity = 3 };
 var extraQueueWorld = new FakeWorld(extraQueuePlan);
 extraQueueWorld.AddPending();
