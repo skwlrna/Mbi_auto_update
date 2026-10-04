@@ -69,8 +69,9 @@ Check(!AlteringRecipeLayout.IsFixedFacility("약품 가공 시설") &&
     "medicine uses crafting-style search instead of fixed recipe cards");
 Check(AlteringFacilityLayout.IsSafeMoveGeometry() &&
       AlteringFacilityLayout.MoveButtonPoint == new System.Drawing.Point(85, 235) &&
-      AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65),
-    "facility move uses user-confirmed fixed 800x1000 visual geometry");
+      AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65) &&
+      AlteringFacilityLayout.OnsiteCloseVisualArea == new System.Drawing.Rectangle(744, 42, 44, 44),
+    "facility move uses user-confirmed remote button and on-site close-X geometry");
 
 Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("새록 버섯 진액", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
       AlteringFacilityResolver.Resolve(new AlteringRecipe("튼튼 버섯 가루", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
