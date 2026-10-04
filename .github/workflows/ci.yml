@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.7"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.8"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.7</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.8</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -200,6 +200,22 @@ jobs:
           if ($selectRecipe -notmatch 'RecipeCacheKey' -or $selectRecipe -notmatch '_cachedRecipeCenter') { throw 'confirmed recipe-coordinate reuse missing' }
           if ($selectRecipe -notmatch '고정 품목 좌표 재사용' -or $selectRecipe -notmatch '고정 품목 좌표 저장') { throw 'recipe coordinate cache diagnostics missing' }
           if ($selectRecipe -match 'DragClientPoint') { throw 'cached recipe path must never drag the UI' }
+          $fixedLayout = Get-Content source/FishingAutomation/AlteringRecipeLayout.cs -Raw
+          foreach($point in @(
+            '"물에 불린 쌀".*new\(340, 724\)',
+            '"목재\+".*new\(340, 412\)',
+            '"강철괴".*new\(461, 412\)',
+            '"가죽\+".*new\(340, 412\)',
+            '"옷감\+".*new\(461, 412\)'
+          )){
+            if($fixedLayout -notmatch $point){throw "user-confirmed processing fixed coordinate missing: $point"}
+          }
+          if($fixedLayout -notmatch '"최상급 목재", 2\).*new\(340, 756\)'){throw 'duplicate wood recipe ordinal coordinate missing'}
+          if($fixedLayout -notmatch 'ProcessingSearchIconPoint = new\(39, 117\)' -or
+             $fixedLayout -notmatch 'ProcessingSearchInputPoint = new\(400, 862\)' -or
+             $fixedLayout -notmatch 'ProcessingSearchFirstResultPoint = new\(219, 412\)'){throw 'medicine crafting-style search geometry missing'}
+          if($selectRecipe -notmatch 'TrySelectFixedRecipeAsync' -or
+             $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
