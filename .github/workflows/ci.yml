@@ -631,18 +631,21 @@ jobs:
           if($zeroWing -notmatch 'IAlteringFieldExitScreen' -or
              $zeroWing -notmatch '채집 전 가공 UI 종료'){throw 'zero-wing field-exit guard missing'}
 
-          $resolverGather = [regex]::Match($resolver, 'var gatherPlan = new GatheringPlan[\s\S]*?await gathering\.RunAsync\(gatherPlan, ct\);').Value
-          if([string]::IsNullOrWhiteSpace($resolverGather)){throw 'recursive gathering transition block missing'}
+          $resolverGather = [regex]::Match($resolver, 'var multiGather = await BuildMultiGatheringPlanAsync[\s\S]*?await coordinator\.RunAsync\(multiGather, ct\);').Value
+          if([string]::IsNullOrWhiteSpace($resolverGather)){throw 'recursive multi-gather transition block missing'}
           $exitIndex = $resolverGather.IndexOf('await fieldExit.ExitToFieldAsync(ct)')
-          $gatherIndex = $resolverGather.IndexOf('await gathering.RunAsync(gatherPlan, ct)')
-          if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'recursive gathering must exit altering UI before opening life skill'}
-          if($resolverGather -notmatch '자동 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'recursive gathering field-exit trace missing'}
+          $gatherIndex = $resolverGather.IndexOf('await coordinator.RunAsync(multiGather, ct)')
+          if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'recursive multi-gather must exit altering UI before opening life skill'}
+          if($resolverGather -notmatch '다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'recursive multi-gather field-exit trace missing'}
+          if($multiGather -notmatch 'new GatheringAutomation' -or
+             $multiGather -notmatch 'await automation\.RunAsync\(plan, ct\)'){throw 'multi-gather must delegate execution to verified single-gather automation'}
+          if($multiGather -match 'TapFresh|ClickFresh|DragFresh|0x39'){throw 'multi-gather coordinator must not own direct input or Space'}
 
           if($alterScreen -match '이동 확인 Space 입력 완료' -or
              $alterScreen -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력'){throw 'facility travel Space regression returned'}
           if($alterScreen -notmatch '설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음'){throw 'facility travel must remain passive after click'}
 
-          foreach($source in @($craftScreen,$gatherScreen,$bulkScreen,$alterScreen,$resolver)){
+          foreach($source in @($craftScreen,$gatherScreen,$bulkScreen,$alterScreen,$resolver,$multiGather)){
             if($source -match 'execute_gathering|execute_altering|execute_crafting'){throw 'paid production CLI action leaked into V3 production execution'}
           }
 
