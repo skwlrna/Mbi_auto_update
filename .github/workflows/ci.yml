@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.14"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.15"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.14</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.15</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -247,7 +247,8 @@ jobs:
           if ($queue -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)') { throw 'first facility move must use the fixed free move route' }
           if ($queue -notmatch '품목 선택 전 설비로 이동') { throw 'facility-first move trace missing' }
           if ($queue -notmatch '설비 도착 · 이제 .* 선택') { throw 'post-arrival recipe selection trace missing' }
-          if ($queue -notmatch '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'post-arrival remote veto missing' }
+          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 1) { throw 'V3.1.8 queue flow must keep only the two-frame detail/action guard' }
+          if ($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'duplicate post-select detail/OCR pass returned' }
           if ($queue -match '품목 상세 기준 설비 이동 필요 확정' -or $queue -match '같은 품목을 다시 선택') { throw 'recipe-first backtrack flow returned' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
           if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
@@ -263,6 +264,7 @@ jobs:
           foreach($facility in @('금속 가공 시설','목재 가공 시설','가죽 가공 시설','옷감 가공 시설','약품 가공 시설','식재료 가공 시설')){
             if($planText -notmatch [regex]::Escape($facility)){throw "facility missing from common altering path: $facility"}
           }
+          if($queue -notmatch 'V3\.1\.8 execution model for every processing facility'){throw 'V3.1.8 all-processing execution marker missing'}
           if ($screen -notmatch '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창') { throw 'already-on-site visual facility state missing' }
           $travel = [regex]::Match($screen, 'private async Task TravelToFacilityAsync[\s\S]*?(?=\r?\n    // Free navigation only)').Value
           if ($travel -notmatch 'facilityVisible' -or
