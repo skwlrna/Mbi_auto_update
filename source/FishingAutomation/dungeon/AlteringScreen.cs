@@ -473,9 +473,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         {
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, $"{plan.ScreenTitle} 고정좌표 입력 전 시설 화면을 확인하지 못했습니다.");
-
-            if (HasFacilityMoveButtonVisual(frame))
-                Fail(frame, $"원격 {plan.ScreenTitle} 화면에서 고정좌표 입력을 차단했습니다.");
         }
 
         Log?.Invoke(
@@ -508,8 +505,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         using var beforeSearch = Capture(ct);
         if (await FindFacilityHeaderAsync(beforeSearch, plan.ScreenTitle, ct) is null)
             Fail(beforeSearch, "약품 검색 전 약품 가공 화면을 확인하지 못했습니다.");
-        if (HasFacilityMoveButtonVisual(beforeSearch))
-            Fail(beforeSearch, "원격 약품 가공 화면에서는 검색 입력을 시작하지 않습니다.");
 
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
@@ -670,60 +665,69 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
-        // First registration for a facility uses the full safe navigation path.
-        // Consecutive registrations in the same facility reuse the already-proven
-        // on-site state after two fresh frames. This is generic for every processing
-        // facility in AlteringPlan.Facilities.
+        // Match the working food-crafting route: select the recipe first, then use
+        // the detail action itself to decide whether one facility trip is required.
+        // Do not pre-judge remote/on-site state before the recipe detail is opened.
         bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
         if (reusedOnsite)
+        {
             _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 현장 상태 재사용");
-        if (!reusedOnsite)
+        }
+        else
         {
             _confirmedOnsiteFacility = null;
             await EnterFacilityAsync(plan, ct);
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동합니다.");
-            await TravelToFacilityAsync(plan, ct);
-
-            await EnterFacilityAsync(plan, ct);
-            _confirmedOnsiteFacility = plan.FacilityName;
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} 진입 · 음식 제작과 동일하게 품목 상세를 먼저 확인하고 설비 이동 필요 여부를 1회 판정");
         }
 
-        bool recoveredRemoteDetail = false;
-        while (true)
-        {
-            await SelectRecipeAsync(plan, ct);
+        await SelectRecipeAsync(plan, ct);
 
-            using var routeFrame = Capture(ct);
+        using (var routeFrame = Capture(ct))
+        {
             if (!await IsRecipeDetailStructureAsync(routeFrame, ct))
-                Fail(routeFrame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
+                Fail(routeFrame, "품목 선택 후 상세 화면을 확인하지 못했습니다.");
 
             bool moveVisual = HasFacilityMoveButtonVisual(routeFrame);
             var paid = await FindAsync(routeFrame, RecipeActionButton, "가공하러 가기", ct);
-            if (!moveVisual && paid is null)
-                break;
+            bool needsTravel = moveVisual || paid is not null;
 
-            if (recoveredRemoteDetail)
-                Fail(routeFrame,
-                    "설비 이동 재시도 후에도 원격 가공 상태가 확인되어 추가 입력 없이 정지합니다.");
+            if (needsTravel)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] 품목 상세 기준 설비 이동 필요 확정 · " +
+                    $"이동버튼화면={moveVisual} · 가공하러가기={paid is not null} · " +
+                    "설비 이동은 이번 등록에서 1회만 실행");
 
-            // V3.1.8 live log: small move-label OCR missed the remote state, but
-            // the selected recipe clearly exposed "가공하러 가기". Close detail,
-            // then use the fixed move-button coordinate exactly once. Never press
-            // the paid recipe action.
-            Log?.Invoke(
-                $"[자동 가공] 품목 선택 후 원격 상태 재확인 · " +
-                $"이동버튼화면={moveVisual} · 가공하러가기={paid is not null} · " +
-                "상세창 Esc 후 설비로 이동 고정좌표 복구");
-            _ui.TapFresh(0x01, ct);
-            await Task.Delay(500, ct);
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(500, ct);
 
-            _confirmedOnsiteFacility = null;
-            await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
-            await EnterFacilityAsync(plan, ct);
-            _confirmedOnsiteFacility = plan.FacilityName;
-            recoveredRemoteDetail = true;
-            Log?.Invoke($"[자동 가공] 원격 오판 자동복구 완료 · {plan.ScreenTitle} 현장 재진입 · 품목 다시 선택");
+                _confirmedOnsiteFacility = null;
+                await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
+                await EnterFacilityAsync(plan, ct);
+                _confirmedOnsiteFacility = plan.FacilityName;
+
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} 설비 도착 · 같은 품목을 다시 선택하고 바로 현장 가공");
+                await SelectRecipeAsync(plan, ct);
+
+                using var onsiteDetail = Capture(ct);
+                if (!await IsRecipeDetailStructureAsync(onsiteDetail, ct))
+                    Fail(onsiteDetail, "설비 도착 후 재선택한 품목 상세 화면을 확인하지 못했습니다.");
+
+                bool stillMoveVisual = HasFacilityMoveButtonVisual(onsiteDetail);
+                var stillPaid = await FindAsync(onsiteDetail, RecipeActionButton, "가공하러 가기", ct);
+                if (stillMoveVisual || stillPaid is not null)
+                    Fail(
+                        onsiteDetail,
+                        "설비 이동 1회 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지합니다.");
+            }
+            else
+            {
+                _confirmedOnsiteFacility = plan.FacilityName;
+                Log?.Invoke(
+                    $"[자동 가공] 품목 상세 기준 이미 현장 가공 가능 · 설비 이동 생략 · {plan.DisplayName}");
+            }
         }
 
         // Two fresh observations are required immediately before the only registration
@@ -755,7 +759,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             _ui.ClickFresh(visualActionCenter, ct);
         }
     }
-
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
     {
