@@ -19,8 +19,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
     private static readonly Point ProfileLifeSkillPoint = new(400, 944);
-    // Live 800x1000 life-skill detail popup: "가까운 위치 찾기" link center.
-    private static readonly Point LifeSkillNearestLocationPoint = new(300, 534);
+    // The life-skill detail popup height changes with each material description,
+    // so "가까운 위치 찾기" must be located from the visible popup instead of
+    // using one fixed Y coordinate for every material.
+    private static readonly Rectangle LifeSkillNearestLocationArea = new(190, 430, 320, 210);
 
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
@@ -235,18 +237,25 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(650, ct);
 
         // The selected material row already identifies the target. Do not OCR the
-        // same material name again inside the detail popup; the live 800x1000
-        // "가까운 위치 찾기" link uses the shared fixed coordinate for every life skill.
+        // same material name again inside the detail popup. The popup's vertical
+        // position changes with description length, so locate only the navigation
+        // link itself and click its stable text center.
         Log?.Invoke(
-            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명 OCR 재확인 생략 · 가까운 위치 고정좌표 사용");
+            $"[대량 채집] {source.TargetName} 선택 후 상세 품목명 OCR 재확인 생략 · 가까운 위치 문구 탐색");
 
         _stage.Move(ProductionStage.Detail, source.TargetName);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
+
+        var nearest = await _ui.ClickStableExactAsync(
+            "가까운 위치 찾기",
+            LifeSkillNearestLocationArea,
+            ct,
+            $"{source.TargetName} 상세 화면에서 가까운 위치 찾기를 확인하지 못했습니다.",
+            dimText: true);
+
         Log?.Invoke(
-            $"[대량 채집] 가까운 위치 찾기 · 고정좌표 " +
-            $"({LifeSkillNearestLocationPoint.X},{LifeSkillNearestLocationPoint.Y}) · " +
-            "100회 문구 OCR 없음");
-        _ui.ClickFresh(LifeSkillNearestLocationPoint, ct);
+            $"[대량 채집] 가까운 위치 찾기 · 화면 문구 중심 클릭 · " +
+            $"({nearest.Center.X},{nearest.Center.Y}) · 품목명/100회 문구 OCR 없음");
 
         Log?.Invoke(
             $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
