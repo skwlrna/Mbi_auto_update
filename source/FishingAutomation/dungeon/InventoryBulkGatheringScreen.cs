@@ -20,11 +20,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
     // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
     private static readonly Point ProfileLifeSkillPoint = new(400, 944);
-    private const string LifeSkillNearestQuestionTemplate =
-        "dungeon/templates/life_skill_nearest_question.png";
+    private const string LifeSkillNearestHelpTemplate =
+        "dungeon/templates/life_skill_nearest_help.png";
     // Restrict template matching to the lower-left portion of the life-skill detail popup.
     // This avoids unrelated '?' help icons elsewhere on the screen.
-    private static readonly Rectangle LifeSkillNearestQuestionArea = new(150, 400, 260, 250);
+    private static readonly Rectangle LifeSkillNearestHelpArea = new(150, 400, 260, 250);
 
     private static bool TryLifeSkillCategoryPoint(string category, out Point point)
     {
@@ -262,8 +262,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     {
         Point clickPoint = Point.Empty;
         var found = await _ui.ClickOffsetFromStableBrightTemplateAsync(
-            LifeSkillNearestQuestionTemplate,
-            LifeSkillNearestQuestionArea,
+            LifeSkillNearestHelpTemplate,
+            LifeSkillNearestHelpArea,
             current =>
             {
                 // The supplied rice/tree captures place the clickable link immediately
@@ -275,7 +275,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                     current.Center.X - leftOffset,
                     current.Center.Y);
 
-                if (!LifeSkillNearestQuestionArea.Contains(current.Center) ||
+                if (!LifeSkillNearestHelpArea.Contains(current.Center) ||
                     clickPoint.X < 140 || clickPoint.X > 390 ||
                     clickPoint.Y < 400 || clickPoint.Y > 650)
                     throw new InvalidOperationException(
