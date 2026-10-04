@@ -202,11 +202,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         using (var frame = Capture(ct))
         {
             // Reconfirm the exact label and same-row icon immediately before input.
-            var exact = await FindUniqueAsync(
+            var rowRoi = Rectangle.Intersect(
+                new Rectangle(150, Math.Max(90, row.Value.Bounds.Top - 50), 630, 100),
+                new Rectangle(Point.Empty, frame.Size));
+            var exact = await FindLifeSkillLabelAsync(
                 frame,
-                Rectangle.Intersect(
-                    new Rectangle(150, Math.Max(90, row.Value.Bounds.Top - 50), 630, 100),
-                    new Rectangle(Point.Empty, frame.Size)),
+                rowRoi,
                 source.TargetName,
                 ct);
             if (exact is null || !exact.Value.Bounds.IntersectsWith(row.Value.Bounds) ||
@@ -226,7 +227,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         // then use the user-confirmed fixed link coordinate.
         using (var frame = Capture(ct))
         {
-            var detailTarget = await FindUniqueAsync(
+            var detailTarget = await FindLifeSkillLabelAsync(
                 frame,
                 new Rectangle(210, 330, 300, 90),
                 source.TargetName,
@@ -331,39 +332,49 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         LivingSkillGatheringSource source,
         CancellationToken ct)
     {
-        // Start at the category's current list position and scroll only the list area.
-        // Individual gatherables never use a hard-coded Y coordinate.
+        // 추수는 현재 확인된 밀/옥수수/콩/쌀/귀리가 첫 화면 한 페이지에 모두 보인다.
+        // 불필요한 드래그는 행 위치를 흔들 수 있으므로 추수는 첫 화면만 검사한다.
+        // 다른 카테고리는 기존처럼 목록 영역만 제한적으로 스크롤한다.
         var listRoi = new Rectangle(150, 145, 630, 700);
-        for (int page = 0; page < 9; page++)
+        int maxPages = string.Equals(source.Category, "추수", StringComparison.Ordinal) ? 1 : 9;
+
+        for (int page = 0; page < maxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
             DetectionResult? first = null;
             using (var frame = Capture(ct))
             {
-                var found = await _ui.Ocr.FindAlteringLabelsAsync(
-                    frame, listRoi, source.TargetName, ct, dimText: true);
-                if (found.Count == 1 && HasRowIconVisual(frame, found[0].Bounds))
-                    first = found[0];
+                first = await FindLifeSkillLabelAsync(
+                    frame,
+                    listRoi,
+                    source.TargetName,
+                    ct);
+                if (first is not null && !HasRowIconVisual(frame, first.Value.Bounds))
+                    first = null;
             }
 
             if (first is not null)
             {
                 await Task.Delay(160, ct);
                 using var fresh = Capture(ct);
-                var found = await _ui.Ocr.FindAlteringLabelsAsync(
-                    fresh, listRoi, source.TargetName, ct, dimText: true);
-                if (found.Count == 1 &&
-                    GatheringNavigationPolicy.IsStableFirstRow(first.Value.Bounds, found[0].Bounds) &&
-                    HasRowIconVisual(fresh, found[0].Bounds))
+                var second = await FindLifeSkillLabelAsync(
+                    fresh,
+                    listRoi,
+                    source.TargetName,
+                    ct);
+                if (second is not null &&
+                    GatheringNavigationPolicy.IsStableFirstRow(first.Value.Bounds, second.Value.Bounds) &&
+                    HasRowIconVisual(fresh, second.Value.Bounds))
                 {
+                    string mode = source.TargetName.Length == 1 ? "compact exact" : "OCR exact";
                     Log?.Invoke(
-                        $"[대량 채집] 생활 스킬 행 확인 · {source.Category}/{source.TargetName} · OCR exact + 같은 행 아이콘");
-                    return found[0];
+                        $"[대량 채집] 생활 스킬 행 확인 · {source.Category}/{source.TargetName} · {mode} + 같은 행 아이콘");
+                    return second;
                 }
             }
 
-            if (page == 8)
+            if (page + 1 >= maxPages)
                 break;
 
             using (var frame = Capture(ct))
@@ -378,6 +389,24 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         }
 
         return null;
+    }
+
+    private async Task<DetectionResult?> FindLifeSkillLabelAsync(
+        Bitmap frame,
+        Rectangle roi,
+        string targetName,
+        CancellationToken ct)
+    {
+        // Windows OCR is less reliable for a single Hangul syllable such as 밀/콩/쌀.
+        // Keep exact matching, but use the compact-label recognizer for one-syllable
+        // life-skill names. Longer names retain the existing dim-text exact matcher.
+        if (targetName.Length == 1)
+        {
+            var compact = await _ui.Ocr.FindCompactLabelAsync(frame, roi, targetName, ct);
+            return compact.Found ? compact : null;
+        }
+
+        return await FindUniqueAsync(frame, roi, targetName, ct);
     }
 
     private static bool HasRowIconVisual(Bitmap frame, Rectangle textBounds)
