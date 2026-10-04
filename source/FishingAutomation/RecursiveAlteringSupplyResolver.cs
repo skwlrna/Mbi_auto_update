@@ -41,6 +41,31 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         if (blockedRecipe.MissingIngredients.Count == 0)
             throw new InvalidOperationException($"부족 재료 목록이 없어 자동으로 해결하지 않습니다: {blockedRecipe.Reason ?? "unknown"}");
 
+        // Pre-plan every raw shortage that can be proven from the current missing-
+        // ingredient tree, then gather those raws in one field session. The planner
+        // is conservative: if the CLI does not expose an ingredient because it is
+        // currently sufficient, the normal recursive fallback below will re-check
+        // later rather than inventing recipe data.
+        var multiGather = await BuildMultiGatheringPlanAsync(
+            parentPlan, blockedRecipe, remainingWorks, ct);
+        if (multiGather.Count > 0)
+        {
+            if (_alteringScreen is not IAlteringFieldExitScreen fieldExit)
+                throw new InvalidOperationException(
+                    "다중 채집 전에 가공 UI를 안전하게 종료할 수 없는 화면 구현입니다.");
+
+            Log?.Invoke(
+                $"[재료 해결] 다중 채집 준비 · {parentPlan.DisplayName} · " +
+                string.Join(", ", multiGather.Select(x => $"{x.DisplayName} +{x.AdditionalQuantity}")));
+            await fieldExit.ExitToFieldAsync(ct);
+            Log?.Invoke("[재료 해결] 다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
+
+            var coordinator = new MultiGatheringCoordinator(
+                _gathering, _gatheringScreen, _delay, _verificationAttempts);
+            coordinator.Log += text => Log?.Invoke(text);
+            await coordinator.RunAsync(multiGather, ct);
+        }
+
         foreach (var missing in blockedRecipe.MissingIngredients)
         {
             ct.ThrowIfCancellationRequested();
@@ -85,29 +110,29 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 if (!gatherable.ToolOk)
                     throw new InvalidOperationException($"{itemName} 채집 도구가 없거나 내구도가 부족합니다.");
 
-                long before = await _gathering.ItemCountAsync(itemName, ct);
                 if (sourceRecipe is null)
                     throw new InvalidOperationException(
                         $"{itemName}은 직접 채집 재료입니다. 제작에서는 제작 퀘스트 채집 경로를 사용해야 합니다.");
-                var gatherPlan = new GatheringPlan(itemName, checked((int)quantity))
-                {
-                    SourceRecipe = sourceRecipe with { AllowPaidButton = false }
-                };
 
-                if (_alteringScreen is IAlteringFieldExitScreen fieldExit)
-                {
-                    Log?.Invoke($"[재료 해결] {itemName} 자동 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
-                    await fieldExit.ExitToFieldAsync(ct);
-                }
+                if (_alteringScreen is not IAlteringFieldExitScreen fieldExit)
+                    throw new InvalidOperationException(
+                        $"{itemName} 자동 채집 전에 가공 UI를 안전하게 종료할 수 없습니다.");
 
-                var gathering = new GatheringAutomation(_gathering, _gatheringScreen, _delay, _verificationAttempts);
-                gathering.Log += text => Log?.Invoke(text);
-                Log?.Invoke($"[재료 해결] {itemName} 자동 채집 시작 · 추가 {quantity}개");
-                await gathering.RunAsync(gatherPlan, ct);
-                long after = await _gathering.ItemCountAsync(itemName, ct);
-                if (after - before < quantity)
-                    throw new InvalidOperationException($"{itemName} 채집 후 수량 검증 실패: +{after - before} / 필요 +{quantity}");
-                Log?.Invoke($"[재료 해결] {itemName} 자동 채집 완료 · +{after - before}개");
+                Log?.Invoke($"[재료 해결] {itemName} 단일 보충 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
+                await fieldExit.ExitToFieldAsync(ct);
+
+                var coordinator = new MultiGatheringCoordinator(
+                    _gathering, _gatheringScreen, _delay, _verificationAttempts);
+                coordinator.Log += text => Log?.Invoke(text);
+                await coordinator.RunAsync(
+                    new[]
+                    {
+                        new MultiGatheringRequest(
+                            itemName,
+                            quantity,
+                            sourceRecipe with { AllowPaidButton = false })
+                    },
+                    ct);
                 return;
             }
 
@@ -183,6 +208,127 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         {
             _active.Remove(itemName);
         }
+    }
+
+    private async Task<IReadOnlyList<MultiGatheringRequest>> BuildMultiGatheringPlanAsync(
+        AlteringPlan parentPlan,
+        AlteringRecipe blockedRecipe,
+        int remainingWorks,
+        CancellationToken ct)
+    {
+        var catalog = await _gathering.CatalogAsync(ct);
+        var recipes = await _altering.RecipesAsync(ct);
+        var requests = new List<MultiGatheringRequest>();
+        var virtualAvailable = new Dictionary<string, long>(StringComparer.Ordinal);
+        var planningPath = new HashSet<string>(StringComparer.Ordinal);
+
+        async Task<long> TakeAvailableAsync(string itemName, long demand)
+        {
+            if (!virtualAvailable.TryGetValue(itemName, out long available))
+            {
+                available = await _altering.ItemCountAsync(itemName, ct);
+                virtualAvailable[itemName] = available;
+            }
+
+            long used = Math.Min(available, demand);
+            virtualAvailable[itemName] = available - used;
+            return demand - used;
+        }
+
+        async Task PlanItemAsync(
+            string itemName,
+            long demand,
+            AlteringPlan sourceRecipe,
+            int depth)
+        {
+            if (demand <= 0) return;
+            if (depth >= _maxDepth)
+                throw new InvalidOperationException(
+                    $"다중 채집 계획 중 재료 단계가 {_maxDepth}단계를 넘었습니다: {itemName}");
+
+            long shortage = await TakeAvailableAsync(itemName, demand);
+            if (shortage <= 0) return;
+
+            var gatherable = catalog.SingleOrDefault(x => x.DisplayName == itemName);
+            if (gatherable is not null)
+            {
+                if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(itemName))
+                    return; // Existing resolver will report the quest-only rule.
+                if (!gatherable.ToolOk)
+                    throw new InvalidOperationException($"{itemName} 채집 도구가 없거나 내구도가 부족합니다.");
+
+                requests.Add(new MultiGatheringRequest(
+                    itemName,
+                    shortage,
+                    sourceRecipe with { AllowPaidButton = false }));
+                return;
+            }
+
+            if (!planningPath.Add(itemName))
+                throw new InvalidOperationException(
+                    $"다중 채집 계획에서 재료 순환 의존성이 감지되었습니다: {itemName}");
+            try
+            {
+                var candidates = recipes.Where(x =>
+                    x.DisplayName == itemName ||
+                    OutputName(x.DisplayName) == itemName).ToArray();
+                if (candidates.Length == 0)
+                    return; // Existing resolver gives the authoritative error later.
+
+                AlteringRecipe? producer = null;
+                var exact = candidates.Where(x => x.DisplayName == itemName).ToArray();
+                if (exact.Length == 1) producer = exact[0];
+                else if (exact.Length == 0 && candidates.Length == 1) producer = candidates[0];
+                if (producer is null || producer.MissingIngredients.Count == 0)
+                    return;
+
+                string? facility = AlteringFacilityResolver.Resolve(producer);
+                if (facility is null)
+                    return;
+
+                var subPlan = new AlteringPlan(
+                    facility,
+                    producer.DisplayName,
+                    checked((int)shortage),
+                    producer.ProducedPerWork,
+                    false);
+
+                foreach (var missing in producer.MissingIngredients)
+                {
+                    long childDemand = checked(missing.Required * (long)subPlan.RequiredWorks);
+                    await PlanItemAsync(
+                        missing.DisplayName,
+                        childDemand,
+                        subPlan,
+                        depth + 1);
+                }
+            }
+            finally
+            {
+                planningPath.Remove(itemName);
+            }
+        }
+
+        foreach (var missing in blockedRecipe.MissingIngredients)
+        {
+            ct.ThrowIfCancellationRequested();
+            long demand = checked(missing.Required * (long)remainingWorks);
+            await PlanItemAsync(
+                missing.DisplayName,
+                demand,
+                parentPlan,
+                0);
+        }
+
+        // The virtual inventory ledger applies the current stock only once across
+        // sibling branches. Duplicate raw leaves therefore become one summed request.
+        return requests
+            .GroupBy(x => x.DisplayName, StringComparer.Ordinal)
+            .Select(g => new MultiGatheringRequest(
+                g.Key,
+                checked(g.Sum(x => x.AdditionalQuantity)),
+                g.First().SourceRecipe))
+            .ToArray();
     }
 
     private static string OutputName(string displayName)
