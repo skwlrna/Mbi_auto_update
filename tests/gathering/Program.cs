@@ -96,6 +96,28 @@ Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false),
     "post-Space completion rejects active travel");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true),
     "post-Space completion rejects active fishing");
+
+Check(LifeSkillListLayout.TryFixedRowPoint("추수", "밀", out var harvestWheat) &&
+      harvestWheat == new System.Drawing.Point(400, 488) &&
+      LifeSkillListLayout.TryFixedRowPoint("추수", "쌀", out var harvestRice) &&
+      harvestRice == new System.Drawing.Point(400, 753) &&
+      LifeSkillListLayout.TryFixedRowPoint("추수", "귀리", out var harvestOat) &&
+      harvestOat == new System.Drawing.Point(400, 842),
+    "harvest uses user-confirmed one-page fixed rows including rice");
+Check(LifeSkillListLayout.TryFixedRowPoint("양털 깎기", "양털", out var woolFirst) &&
+      woolFirst == new System.Drawing.Point(400, 488) &&
+      LifeSkillListLayout.TryFixedRowPoint("양털 깎기", "특급 양털", out var woolLast) &&
+      woolLast == new System.Drawing.Point(400, 930),
+    "wool uses fixed one-page row geometry without scrolling");
+Check(LifeSkillListLayout.NeverScroll("추수") &&
+      LifeSkillListLayout.NeverScroll("양털 깎기") &&
+      !LifeSkillListLayout.NeverScroll("나무 베기"),
+    "only confirmed one-page categories disable scrolling");
+Check(LifeSkillListLayout.SafeDragStart == new System.Drawing.Point(580, 760) &&
+      LifeSkillListLayout.SafeDragEnd == new System.Drawing.Point(580, 350) &&
+      LifeSkillListLayout.SafeDragStart.X < 640 &&
+      LifeSkillListLayout.SafeDragEnd.X < 640,
+    "scrolling categories keep drag points safely inside the life-skill modal");
 long bulkOwned = 0;
 int bulkStarts = 0;
 int bulkWaits = 0;

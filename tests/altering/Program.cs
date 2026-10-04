@@ -243,6 +243,37 @@ Check(recursiveWorld.Count("강철괴") == 3 &&
 Check(steelAuto.ReservedWings == 0 && recursiveWorld.ReserveCallbackCalls == 0,
     "recursive steel production never reserves Spirit Wings");
 
+var multiWorld = new RecursiveProductionWorld();
+multiWorld.SetCount("석탄", 0);
+var multiResolver = new RecursiveAlteringSupplyResolver(
+    multiWorld, multiWorld, multiWorld, multiWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var multiAuto = new AlteringAutomation(
+    multiWorld, multiWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, multiResolver);
+await multiAuto.RunAsync(steelPlan, default);
+Check(multiWorld.Count("강철괴") == 3 &&
+      multiWorld.GatherStarts == 2 &&
+      multiWorld.Gathered.SequenceEqual(new[] { "철 광석", "석탄" }) &&
+      multiWorld.FieldExitCalls == 1,
+    "multi-gather batches iron ore and coal in one field transition before recursive processing");
+Check(multiWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)", "강철괴" }),
+    "multi-gather preserves recursive caller return: intermediate iron then final steel");
+
+var skipWorld = new RecursiveProductionWorld();
+skipWorld.SetCount("철 광석", 20);
+var skipCoordinator = new MultiGatheringCoordinator(
+    skipWorld, skipWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4);
+await skipCoordinator.RunAsync(
+    new[] { new MultiGatheringRequest("철 광석", 10, steelPlan) },
+    default);
+Check(skipWorld.GatherStarts == 0,
+    "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
@@ -333,7 +364,7 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 }
 
 
-internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IGatheringData, IGatheringScreen
+internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
 {
     private static readonly GatheringActivity Idle =
         new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
@@ -345,9 +376,11 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     private readonly List<AlteringWork> _works = new();
     private string? _gathering;
     internal readonly List<string> Queued = new();
-    internal int GatherStarts, ReserveCallbackCalls;
+    internal readonly List<string> Gathered = new();
+    internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
+    internal void SetCount(string name, long value) => _items[name] = value;
 
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
@@ -357,7 +390,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             MakeRecipe("강철괴", 3, "금속 가공 시설",
                 new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 }),
             MakeRecipe("철괴(철 광석)", 3, "금속 가공 시설",
-                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 })
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 }),
+            MakeRecipe("철괴(광석)", 3, "금속 가공 시설",
+                new Dictionary<string,long>(StringComparer.Ordinal) { ["돌 광석"] = 10 })
         });
     }
 
@@ -418,7 +453,11 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult<IReadOnlyList<GatherableItem>>(new[] { new GatherableItem("철 광석", true) });
+        return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]
+        {
+            new GatherableItem("철 광석", true),
+            new GatherableItem("석탄", true)
+        });
     }
 
     public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
@@ -440,6 +479,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     {
         ct.ThrowIfCancellationRequested();
         GatherStarts++;
+        Gathered.Add(plan.DisplayName);
         _gathering = plan.DisplayName;
         return Task.CompletedTask;
     }
@@ -448,6 +488,13 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     {
         ct.ThrowIfCancellationRequested();
         _gathering = null;
+        return Task.CompletedTask;
+    }
+
+    public Task ExitToFieldAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        FieldExitCalls++;
         return Task.CompletedTask;
     }
 
