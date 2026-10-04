@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.15"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.16"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.15</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.16</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -320,6 +320,12 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($queueCheckpoint) -or $queueCheckpoint -notmatch 'SavePendingRegistration\(previous\)' -or $queueCheckpoint.IndexOf('SavePendingRegistration(previous)') -gt $queueCheckpoint.IndexOf('await _screen.QueueAsync')) { throw 'registration checkpoint must be persisted before screen input' }
           if ($altering -notmatch '이어하기 등록 복구' -or $altering -notmatch 'current == before \+ 1' -or $altering -notmatch 'current == before') { throw 'interrupted registration reconciliation missing' }
           if ($altering -notmatch 'maximumKnownWorks' -or $altering -notmatch 'LastObservedOutputQuantity') { throw 'resume live queue/output reconciliation missing' }
+          if ($altering -notmatch '이어하기 실상태 재산정' -or
+              $altering -notmatch 'initialExistingCount == 0' -or
+              $altering -notmatch 'gainedSinceStart' -or
+              $altering -notmatch 'completedEquivalent' -or
+              $altering -notmatch 'currentKnownWorks' -or
+              $altering -notmatch '취소/소멸') { throw 'manual receive/cancel resume reconciliation missing' }
           if ($altering -notmatch 'internal void NoteStage') { throw 'recursive material stage checkpoint hook missing' }
           if ($altering -notmatch '_sessionStore\?\.Delete\(\)') { throw 'successful production must clear resume checkpoint' }
           if ($altering -notmatch 'oldMinimum = checked' -or $altering -notmatch 'grossGained - oldMinimum') { throw 'pre-existing output exclusion missing from final verification' }
