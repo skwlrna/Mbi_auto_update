@@ -22,103 +22,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
-    // User-confirmed on-site 800x1000 processing grids.  The screenshots were
-    // aligned to the common first work-slot center, producing one shared X grid.
-    // Food starts slightly higher; metal/wood/leather/fabric share the standard Y grid.
-    private static readonly Point[] FixedColumns =
-    {
-        new(219, 0), new(340, 0), new(461, 0), new(582, 0)
-    };
-    private static readonly int[] FoodRows = { 382, 553, 724, 896 };
-    private static readonly int[] StandardRows = { 412, 584, 756, 928 };
-
-    private static readonly IReadOnlyDictionary<(string Facility, string Name, int Ordinal), Point> FixedRecipeCenters =
-        new Dictionary<(string Facility, string Name, int Ordinal), Point>
-        {
-            // 식재료 · 4 x 4 (마지막 행 3개)
-            [("식재료 가공 시설", "마요네즈", 1)] = new(219, 382),
-            [("식재료 가공 시설", "밀가루", 1)] = new(340, 382),
-            [("식재료 가공 시설", "치즈", 1)] = new(461, 382),
-            [("식재료 가공 시설", "면", 1)] = new(582, 382),
-            [("식재료 가공 시설", "생크림", 1)] = new(219, 553),
-            [("식재료 가공 시설", "물에 불린 콩", 1)] = new(340, 553),
-            [("식재료 가공 시설", "두부", 1)] = new(461, 553),
-            [("식재료 가공 시설", "두유", 1)] = new(582, 553),
-            [("식재료 가공 시설", "숙성된 커다란 고기", 1)] = new(219, 724),
-            [("식재료 가공 시설", "물에 불린 쌀", 1)] = new(340, 724),
-            [("식재료 가공 시설", "밥", 1)] = new(461, 724),
-            [("식재료 가공 시설", "말린 찻잎", 1)] = new(582, 724),
-            [("식재료 가공 시설", "발효된 찻잎", 1)] = new(219, 896),
-            [("식재료 가공 시설", "헤이즐넛 오일", 1)] = new(340, 896),
-            [("식재료 가공 시설", "오트밀", 1)] = new(461, 896),
-
-            // 금속 · 사진의 화면 순서 그대로. 은합금괴는 동일 이름 제법 2개.
-            [("금속 가공 시설", "철괴(광석)", 1)] = new(219, 412),
-            [("금속 가공 시설", "철괴(철 광석)", 1)] = new(340, 412),
-            [("금속 가공 시설", "강철괴", 1)] = new(461, 412),
-            [("금속 가공 시설", "합금강괴", 1)] = new(582, 412),
-            [("금속 가공 시설", "타르", 1)] = new(219, 584),
-            [("금속 가공 시설", "특수강괴", 1)] = new(340, 584),
-            [("금속 가공 시설", "은합금괴", 1)] = new(461, 584),
-            [("금속 가공 시설", "윤철괴", 1)] = new(582, 584),
-            [("금속 가공 시설", "은합금괴", 2)] = new(219, 756),
-            [("금속 가공 시설", "백금강괴", 1)] = new(340, 756),
-
-            // 목재 · 최상급 목재는 동일 이름 제법 2개.
-            [("목재 가공 시설", "목재", 1)] = new(219, 412),
-            [("목재 가공 시설", "목재+", 1)] = new(340, 412),
-            [("목재 가공 시설", "상급 목재", 1)] = new(461, 412),
-            [("목재 가공 시설", "상급 목재+", 1)] = new(582, 412),
-            [("목재 가공 시설", "부드러운 목재", 1)] = new(219, 584),
-            [("목재 가공 시설", "단단한 목재", 1)] = new(340, 584),
-            [("목재 가공 시설", "최상급 목재", 1)] = new(461, 584),
-            [("목재 가공 시설", "최상급 목재+", 1)] = new(582, 584),
-            [("목재 가공 시설", "구름결 막대", 1)] = new(219, 756),
-            [("목재 가공 시설", "최상급 목재", 2)] = new(340, 756),
-            [("목재 가공 시설", "특급 목재", 1)] = new(461, 756),
-
-            // 가죽 · 최상급 가죽은 동일 이름 제법 2개.
-            [("가죽 가공 시설", "가죽", 1)] = new(219, 412),
-            [("가죽 가공 시설", "가죽+", 1)] = new(340, 412),
-            [("가죽 가공 시설", "상급 가죽", 1)] = new(461, 412),
-            [("가죽 가공 시설", "상급 가죽+", 1)] = new(582, 412),
-            [("가죽 가공 시설", "최상급 가죽", 1)] = new(219, 584),
-            [("가죽 가공 시설", "최상급 가죽+", 1)] = new(340, 584),
-            [("가죽 가공 시설", "최상급 가죽", 2)] = new(461, 584),
-            [("가죽 가공 시설", "특급 가죽", 1)] = new(582, 584),
-
-            // 옷감 · 최상급 옷감은 동일 이름 제법 2개.
-            [("옷감 가공 시설", "옷감", 1)] = new(219, 412),
-            [("옷감 가공 시설", "실크", 1)] = new(340, 412),
-            [("옷감 가공 시설", "옷감+", 1)] = new(461, 412),
-            [("옷감 가공 시설", "상급 옷감", 1)] = new(582, 412),
-            [("옷감 가공 시설", "두꺼운 옷감", 1)] = new(219, 584),
-            [("옷감 가공 시설", "상급 실크", 1)] = new(340, 584),
-            [("옷감 가공 시설", "상급 옷감+", 1)] = new(461, 584),
-            [("옷감 가공 시설", "식물 섬유", 1)] = new(582, 584),
-            [("옷감 가공 시설", "밧줄", 1)] = new(219, 756),
-            [("옷감 가공 시설", "최상급 옷감", 1)] = new(340, 756),
-            [("옷감 가공 시설", "최상급 실크", 1)] = new(461, 756),
-            [("옷감 가공 시설", "튼튼한 밧줄", 1)] = new(582, 756),
-            [("옷감 가공 시설", "최상급 옷감+", 1)] = new(219, 928),
-            [("옷감 가공 시설", "최상급 옷감", 2)] = new(340, 928),
-            [("옷감 가공 시설", "특급 옷감", 1)] = new(461, 928),
-            [("옷감 가공 시설", "특급 실크", 1)] = new(582, 928),
-        };
-
-    private static readonly HashSet<string> FixedCoordinateFacilities = new(StringComparer.Ordinal)
-    {
-        "식재료 가공 시설", "금속 가공 시설", "목재 가공 시설", "가죽 가공 시설", "옷감 가공 시설"
-    };
-
-    // 약품은 사용자 지정: 제작과 같은 검색 방식.
-    private static readonly Point ProcessingSearchIconPoint = new(39, 117);
-    private static readonly Rectangle ProcessingSearchDialogArea = new(140, 760, 520, 235);
-    private static readonly Point ProcessingSearchInputPoint = new(400, 862);
-    private static readonly Rectangle ProcessingSearchResultArea = new(35, 350, 730, 550);
-    private static readonly Point ProcessingSearchFirstResultPoint = new(219, 412);
-    private const double ProcessingSearchOpenChangeRatio = 0.08;
-    private const double ProcessingSearchResultChangeRatio = 0.06;
     internal string InputMode => _ui.InputMode;
     internal event Action<string>? Log;
 
@@ -469,27 +372,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         AlteringPlan plan,
         CancellationToken ct)
     {
-        if (!FixedCoordinateFacilities.Contains(plan.FacilityName))
+        if (!AlteringRecipeLayout.IsFixedFacility(plan.FacilityName))
             return false;
 
-        if (!FixedRecipeCenters.TryGetValue(
-                (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal),
-                out Point center))
-        {
-            // Most recipes have no qualifier and their CLI/output name is identical.
-            // Keep one safe fallback for a single unqualified recipe, but never guess
-            // between duplicate recipe ordinals.
-            if (plan.RecipeCount == 1 &&
-                !string.Equals(plan.OutputName, plan.DisplayName, StringComparison.Ordinal) &&
-                FixedRecipeCenters.TryGetValue(
-                    (plan.FacilityName, plan.OutputName, 1),
-                    out Point outputCenter))
-                center = outputCenter;
-            else
-                throw new InvalidOperationException(
-                    $"{plan.ScreenTitle} 고정좌표가 정의되지 않았습니다: " +
-                    $"{plan.DisplayName} (순번 {plan.RecipeOrdinal}/{plan.RecipeCount})");
-        }
+        if (!AlteringRecipeLayout.TryGetFixedCenter(plan, out Point center))
+            throw new InvalidOperationException(
+                $"{plan.ScreenTitle} 고정좌표가 정의되지 않았습니다: " +
+                $"{plan.DisplayName} (순번 {plan.RecipeOrdinal}/{plan.RecipeCount})");
+
+        if (!AlteringRecipeLayout.IsSafeFixedCenter(center))
+            throw new InvalidOperationException(
+                $"{plan.ScreenTitle} 고정좌표가 800x1000 안전 영역을 벗어났습니다: " +
+                $"{plan.DisplayName} ({center.X},{center.Y})");
 
         using (var frame = Capture(ct))
         {
@@ -524,13 +418,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (!string.Equals(plan.FacilityName, "약품 가공 시설", StringComparison.Ordinal))
             return false;
 
+        if (!AlteringRecipeLayout.IsSafeMedicineSearchGeometry())
+            throw new InvalidOperationException("약품 검색 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
+
         using var beforeSearch = Capture(ct);
         if (await FindFacilityHeaderAsync(beforeSearch, plan.ScreenTitle, ct) is null)
             Fail(beforeSearch, "약품 검색 전 약품 가공 화면을 확인하지 못했습니다.");
         if (await FindAsync(beforeSearch, FacilityMoveButton, "설비로 이동", ct) is not null)
             Fail(beforeSearch, "원격 약품 가공 화면에서는 검색 입력을 시작하지 않습니다.");
 
-        _ui.ClickFresh(ProcessingSearchIconPoint, ct);
+        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 돋보기 · 고정좌표 " +
             $"({ProcessingSearchIconPoint.X},{ProcessingSearchIconPoint.Y})");
@@ -540,12 +437,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         double openRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
             beforeSearch,
             searchDialog,
-            ProcessingSearchDialogArea);
-        if (openRatio < ProcessingSearchOpenChangeRatio)
+            AlteringRecipeLayout.ProcessingSearchDialogArea);
+        if (openRatio < AlteringRecipeLayout.ProcessingSearchOpenChangeRatio)
             Fail(searchDialog,
                 $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
 
-        _ui.ClickFresh(ProcessingSearchInputPoint, ct);
+        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
         _ui.PasteFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
         _ui.TapFresh(0x1C, ct); // Enter
@@ -561,7 +458,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         double resultRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
             beforeApply,
             resultFrame,
-            ProcessingSearchResultArea);
+            AlteringRecipeLayout.ProcessingSearchResultArea);
         var exact = await _ui.Ocr.FindAlteringLabelsAsync(
             resultFrame,
             ProcessingSearchResultArea,
@@ -574,7 +471,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 ? $"[자동 가공] 약품 검색 결과 · exact OCR 후보 {exact.Count}개 · 화면 변화 {resultRatio:P1}"
                 : $"[자동 가공] 약품 검색 결과 · OCR 미검출 · 화면 변화 {resultRatio:P1}");
 
-        if (exact.Count == 0 && resultRatio < ProcessingSearchResultChangeRatio)
+        if (exact.Count == 0 && resultRatio < AlteringRecipeLayout.ProcessingSearchResultChangeRatio)
             Fail(resultFrame,
                 $"약품 검색 적용 후 결과 화면 전환을 확인하지 못했습니다. 변화율={resultRatio:P1}");
 
@@ -582,7 +479,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             Fail(resultFrame,
                 $"약품 검색 결과가 중복 제법 순번 {plan.RecipeOrdinal}이라 첫 결과 고정좌표를 사용하지 않습니다.");
 
-        _ui.ClickFresh(ProcessingSearchFirstResultPoint, ct);
+        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 첫 결과 선택 · 고정좌표 " +
             $"({ProcessingSearchFirstResultPoint.X},{ProcessingSearchFirstResultPoint.Y})");
