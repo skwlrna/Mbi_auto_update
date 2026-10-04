@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.16"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.17"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.16</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.17</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -296,6 +296,12 @@ jobs:
           if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
           if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
           if ($screen -notmatch 'resultAttempts: 24') { throw 'on-site receipt completion-result wait missing' }
+          if ($collectFlow -notmatch 'receiptWorkCountBefore = await TryMatchingWorkCountAsync\(plan, ct\)' -or
+              $screen -notmatch 'TryMatchingWorkCountAsync' -or
+              $screen -notmatch 'IsCliReceiptConfirmed' -or
+              $screen -notmatch '첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정') { throw 'pre-receipt same-item CLI confirmation path missing' }
+          if ($receiptPolicy -notmatch 'IsCliReceiptConfirmed' -or
+              $receiptPolicy -notmatch 'after < before') { throw 'CLI receipt decrease policy missing' }
           $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
           if ($collectFlow -notmatch 'return true;') { throw 'on-site receive must return only after confirmed collection' }
           if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · Space 입력') { throw 'safe completion result Space confirmation log missing' }

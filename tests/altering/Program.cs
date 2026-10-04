@@ -25,6 +25,14 @@ Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, true),
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, true, false, false),
     "facility screen itself is not a completion result");
 
+Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
+    "same-item queue decrease confirms an altering receipt");
+Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(1, 0),
+    "last same-item work disappearing confirms an altering receipt");
+Check(!AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 7) &&
+      !AlteringReceiptPolicy.IsCliReceiptConfirmed(6, 7),
+    "unchanged or increased same-item queue never confirms a receipt");
+
 var plan = new AlteringPlan("금속 가공 시설", "강철괴", 100, 3, false);
 Check(plan.RequiredWorks == 34 && plan.ExpectedQuantity == 102 && plan.MaximumWings == 0, "target rounding with zero-wing invariant");
 Check(AlteringText.Normalize("목재 +") != AlteringText.Normalize("목재"), "plus variants stay distinct");

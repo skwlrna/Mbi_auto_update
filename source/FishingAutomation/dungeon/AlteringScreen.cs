@@ -928,6 +928,27 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             .Count(x => x.FacilityName == plan.FacilityName);
     }
 
+    private async Task<int?> TryMatchingWorkCountAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        if (_cli is null)
+            return null;
+
+        var response = await _cli.GetAlteringWorksAsync(ct);
+        if (!response.Success)
+        {
+            if (CliAutomationGuards.IsTransientLoadingRejection(response))
+                return null;
+            _ = AlteringQueries.ParseWorks(response);
+        }
+
+        return AlteringQueries.ParseWorks(response)
+            .Count(x =>
+                x.FacilityName == plan.FacilityName &&
+                (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
+    }
+
     private async Task<bool?> TryAutoTravelingAsync(CancellationToken ct)
     {
         if (_cli is null)
@@ -953,7 +974,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     }
 
     private async Task<bool> ConfirmCompletionResultAsync(
-        AlteringPlan plan, CancellationToken ct, int resultAttempts = 24)
+        AlteringPlan plan,
+        CancellationToken ct,
+        int? receiptWorkCountBefore = null,
+        int resultAttempts = 24)
     {
         // Successful receipt replaces the facility UI with the full-screen
         // "가공 완료" result. Detect the large green bottom confirmation shape,
@@ -965,9 +989,47 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             ct.ThrowIfCancellationRequested();
             await Task.Delay(200, ct);
 
+            int? liveMatchingCount = receiptWorkCountBefore is int
+                ? await TryMatchingWorkCountAsync(plan, ct)
+                : null;
+
             using var frame = Capture(ct);
             bool greenConfirm = HasBottomConfirmationModal(frame);
             bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+
+            if (receiptWorkCountBefore is int receiptBefore &&
+                liveMatchingCount is int receiptNow &&
+                AlteringReceiptPolicy.IsCliReceiptConfirmed(receiptBefore, receiptNow))
+            {
+                _stage.Move(ProductionStage.VerifyInventory, $"{plan.DisplayName} 수령 후 CLI 작업 감소 확인");
+
+                if (facilityVisible)
+                {
+                    _confirmedOnsiteFacility = plan.FacilityName;
+                    Log?.Invoke(
+                        $"[자동 가공] 첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · " +
+                        $"{receiptBefore}->{receiptNow} · 시설창 복귀 확인");
+                    return true;
+                }
+
+                bool travelDialogAfterReceipt = greenConfirm && await IsFacilityTravelDialogAsync(frame, ct);
+                bool? autoTravelAfterReceipt = await TryAutoTravelingAsync(ct);
+                bool safeResultVisible = AlteringReceiptPolicy.CanConfirmCompletion(
+                    greenConfirm,
+                    facilityVisible,
+                    travelDialogAfterReceipt,
+                    autoTravelAfterReceipt == true);
+
+                if (!safeResultVisible)
+                {
+                    _confirmedOnsiteFacility = null;
+                    Log?.Invoke(
+                        $"[자동 가공] 첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · " +
+                        $"{receiptBefore}->{receiptNow} · 결과창 인식 생략 · 다음 가공 진입에서 화면 재검증");
+                    return true;
+                }
+            }
+
             bool travelDialogVisible = greenConfirm && await IsFacilityTravelDialogAsync(frame, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
@@ -994,11 +1056,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     continue;
                 }
 
-                int? workCountBefore = await TryFacilityWorkCountAsync(plan, ct);
+                int? workCountBefore = receiptWorkCountBefore ?? await TryMatchingWorkCountAsync(plan, ct);
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
                 Log?.Invoke(
                     "[자동 가공] 가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · Space 입력 · " +
-                    $"수령 전 시설 작업수={(workCountBefore?.ToString() ?? "확인불가")}");
+                    $"첫 수령 전 동일 품목 작업수={(workCountBefore?.ToString() ?? "확인불가")}");
                 _ui.TapFresh(0x39, ct);
 
                 // V3.0.17 required the same facility title to return twice within six
@@ -1030,15 +1092,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
                     if (workCountBefore is int before)
                     {
-                        int? current = await TryFacilityWorkCountAsync(plan, ct);
-                        if (current is int now && now < before)
+                        int? current = await TryMatchingWorkCountAsync(plan, ct);
+                        if (current is int now &&
+                            AlteringReceiptPolicy.IsCliReceiptConfirmed(before, now))
                         {
                             _confirmedOnsiteFacility = null;
                             _stage.Move(
                                 ProductionStage.VerifyInventory,
                                 $"{plan.DisplayName} 수령 후 CLI 작업 감소 확인");
                             Log?.Invoke(
-                                $"[자동 가공] 시설 화면 전환 중이지만 CLI 작업 감소로 수령 확정 · {before}->{now} · " +
+                                $"[자동 가공] 시설 화면 전환 중이지만 CLI 동일 품목 작업 감소로 수령 확정 · {before}->{now} · " +
                                 "다음 가공 진입에서 시설 화면 재검증");
                             return true;
                         }
@@ -1082,13 +1145,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             Fail(failed, "현장 가공대 도착 후 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
         }
 
+        int? receiptWorkCountBefore = await TryMatchingWorkCountAsync(plan, ct);
+
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
         Log?.Invoke(
-            $"[자동 가공] 현장 수령 화면 확인 · {plan.ScreenTitle} + 설비로 이동 없음 + CLI 완료 작업 + 파란 수령 버튼 · Space");
+            $"[자동 가공] 현장 수령 화면 확인 · {plan.ScreenTitle} + 설비로 이동 없음 + CLI 완료 작업 + 파란 수령 버튼 · Space · " +
+            $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
-        if (!await ConfirmCompletionResultAsync(plan, ct, resultAttempts: 24))
+        if (!await ConfirmCompletionResultAsync(
+                plan, ct, receiptWorkCountBefore: receiptWorkCountBefore, resultAttempts: 24))
         {
             using var failed = Capture(ct);
             Fail(failed, "현장 수령 Space 후 가공 완료 결과창을 안전하게 확인하지 못했습니다.");
@@ -1111,14 +1178,20 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             return false;
         }
 
+        int? receiptWorkCountBefore = await TryMatchingWorkCountAsync(plan, ct);
+
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 2차 수령");
-        Log?.Invoke($"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space");
+        Log?.Invoke(
+            $"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space · " +
+            $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(700, ct);
 
-        // At the bench this should be the real receipt. Close "가공 완료" and wait
-        // until the same processing facility window returns before reporting success.
-        if (!await ConfirmCompletionResultAsync(plan, ct))
+        // At the bench this should be the real receipt. Close "가공 완료" when it is
+        // visible, but a verified same-item CLI queue decrease is authoritative even
+        // if the transient result screen is missed.
+        if (!await ConfirmCompletionResultAsync(
+                plan, ct, receiptWorkCountBefore: receiptWorkCountBefore))
         {
             using var failed = Capture(ct);
             Fail(failed, "2차 모두 받기 후 가공 완료 확인창을 확인하지 못했습니다.");
