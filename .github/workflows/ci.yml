@@ -235,7 +235,8 @@ jobs:
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'old recipe-first remote detection flow returned' }
           if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
           if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
-          if ($queue -notmatch '"설비로 이동"' -or $queue -notmatch '"가공하러 가기"') { throw 'remote-state veto missing before visual process click' }
+          if ($queue -notmatch 'HasFacilityMoveButtonVisual' -or
+              $queue -notmatch '"가공하러 가기"') { throw 'remote-state visual/text veto missing before process click' }
           if ($queue -notmatch 'visualActionCenter') { throw 'visual action coordinates must drive the on-site click' }
           if ($queue -notmatch 'TryReuseOnsiteFacilityAsync') { throw 'consecutive on-site facility reuse missing' }
           if ($screen -notmatch '_confirmedOnsiteFacility' -or $screen -notmatch '연속 등록 · 현장 상태 유지 확인') { throw 'stable on-site facility cache missing' }
