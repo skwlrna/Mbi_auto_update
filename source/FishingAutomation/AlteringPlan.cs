@@ -160,16 +160,59 @@ internal sealed class AlteringAutomation
                     $"이어하기 대기열에 저장 기록보다 많은 동일 품목 작업이 있습니다: 저장 기준 최대 {maximumKnownWorks}건 / 현재 {currentKnownWorks}건. " +
                     "외부에서 추가 등록된 작업과 목표 작업을 구분할 수 없어 정지합니다.");
 
-            if (_session.PendingRegistration)
-            {
-                int current = Matching(works, plan).Count();
-                int before = _session.PendingBeforeMatchingCount;
-                long currentOutput = await _data.ItemCountAsync(plan.OutputName, ct);
-                if (currentOutput < _session.LastObservedOutputQuantity)
-                    throw new InvalidOperationException(
-                        $"이어하기 등록 확인 중 {plan.OutputName} 보유량이 감소했습니다: 마지막 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {currentOutput:N0}. " +
-                        "중복 등록 방지를 위해 정지합니다.");
+            long currentOutput = await _data.ItemCountAsync(plan.OutputName, ct);
+            if (currentOutput < _session.LastObservedOutputQuantity)
+                throw new InvalidOperationException(
+                    $"이어하기 확인 중 {plan.OutputName} 보유량이 감소했습니다: 마지막 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {currentOutput:N0}. " +
+                    "완성품 소비로 목표 추적이 모호해져 중복 등록 방지를 위해 정지합니다.");
 
+            // When this session started with no pre-existing same-item jobs, every
+            // current matching job belongs to this session. Rebuild progress from
+            // authoritative facts instead of trusting a stale queued-work counter:
+            //   1) output gained since the session baseline, expressed as minimum
+            //      work-equivalents, plus
+            //   2) same-item jobs that are still present in the live queue.
+            // This safely handles the user receiving completed jobs and cancelling
+            // the remaining queued jobs before pressing F9 again.
+            if (initialExistingCount == 0)
+            {
+                long gainedSinceStart = Math.Max(0, currentOutput - baseline);
+                int completedEquivalent = checked((int)Math.Min(
+                    plan.RequiredWorks,
+                    gainedSinceStart / plan.ProducedPerWork));
+                int reconciledQueued = Math.Min(
+                    plan.RequiredWorks,
+                    checked(completedEquivalent + currentKnownWorks));
+
+                int savedQueued = QueuedWorks;
+                bool hadPending = _session.PendingRegistration;
+                QueuedWorks = reconciledQueued;
+
+                if (savedQueued != QueuedWorks || hadPending)
+                {
+                    int cancelledEquivalent = Math.Max(0, savedQueued - QueuedWorks);
+                    Log?.Invoke(
+                        $"[자동 가공] 이어하기 실상태 재산정 · 저장 등록 {savedQueued}/{plan.RequiredWorks} → " +
+                        $"실제 진행 {QueuedWorks}/{plan.RequiredWorks} · 세션 완성품 증가 +{gainedSinceStart:N0}개 " +
+                        $"({completedEquivalent}작업 상당) · 현재 대기 {currentKnownWorks}건" +
+                        (cancelledEquivalent > 0
+                            ? $" · 취소/소멸 {cancelledEquivalent}작업 상당 제외"
+                            : ""));
+                }
+
+                SaveSession(_session with
+                {
+                    QueuedWorks = QueuedWorks,
+                    PendingRegistration = false,
+                    PendingBeforeMatchingCount = 0,
+                    LastObservedOutputQuantity = currentOutput,
+                    Stage = "가공 이어하기 · 실상태 재산정"
+                });
+            }
+            else if (_session.PendingRegistration)
+            {
+                int current = currentKnownWorks;
+                int before = _session.PendingBeforeMatchingCount;
                 long outputGain = currentOutput - _session.LastObservedOutputQuantity;
                 if (current == before + 1)
                 {
@@ -196,14 +239,14 @@ internal sealed class AlteringAutomation
                     {
                         throw new InvalidOperationException(
                             $"이어하기 등록 상태를 안전하게 확정할 수 없습니다. 저장 전 {before}건 / 현재 {current}건 / " +
-                            $"완성품 증가 +{outputGain:N0}개. 중복 등록 방지를 위해 정지합니다.");
+                            $"완성품 증가 +{outputGain:N0}개. 기존 작업이 섞인 세션이라 자동 재산정하지 않고 정지합니다.");
                     }
                 }
                 else
                 {
                     throw new InvalidOperationException(
                         $"이어하기 등록 상태를 안전하게 확정할 수 없습니다. 저장 전 {before}건 / 현재 {current}건 / " +
-                        $"완성품 증가 +{outputGain:N0}개. 중복 등록 방지를 위해 정지합니다.");
+                        $"완성품 증가 +{outputGain:N0}개. 기존 작업이 섞인 세션이라 자동 재산정하지 않고 정지합니다.");
                 }
 
                 SaveSession(_session with
