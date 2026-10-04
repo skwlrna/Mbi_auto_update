@@ -368,14 +368,144 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return true;
     }
 
+    private async Task<bool> TrySelectFixedRecipeAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        if (!AlteringRecipeLayout.IsFixedFacility(plan.FacilityName))
+            return false;
+
+        if (!AlteringRecipeLayout.TryGetFixedCenter(plan, out Point center))
+            throw new InvalidOperationException(
+                $"{plan.ScreenTitle} 고정좌표가 정의되지 않았습니다: " +
+                $"{plan.DisplayName} (순번 {plan.RecipeOrdinal}/{plan.RecipeCount})");
+
+        if (!AlteringRecipeLayout.IsSafeFixedCenter(center))
+            throw new InvalidOperationException(
+                $"{plan.ScreenTitle} 고정좌표가 800x1000 안전 영역을 벗어났습니다: " +
+                $"{plan.DisplayName} ({center.X},{center.Y})");
+
+        using (var frame = Capture(ct))
+        {
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                Fail(frame, $"{plan.ScreenTitle} 고정좌표 입력 전 시설 화면을 확인하지 못했습니다.");
+
+            if (await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null)
+                Fail(frame, $"원격 {plan.ScreenTitle} 화면에서 고정좌표 입력을 차단했습니다.");
+        }
+
+        Log?.Invoke(
+            $"[자동 가공] {plan.ScreenTitle} 고정좌표 선택 · {plan.DisplayName} · " +
+            $"순번 {plan.RecipeOrdinal}/{plan.RecipeCount} · ({center.X},{center.Y}) · 카드명 OCR 없음");
+        _ui.ClickFresh(center, ct);
+        await Task.Delay(350, ct);
+
+        using var popup = Capture(ct);
+        if (!await IsRecipeDetailStructureAsync(popup, ct))
+            Fail(popup,
+                $"{plan.ScreenTitle} 고정좌표 ({center.X},{center.Y}) 클릭 후 품목 상세 구조를 확인하지 못했습니다.");
+
+        _stage.Move(ProductionStage.Detail, plan.DisplayName);
+        Log?.Invoke(
+            $"[자동 가공] {plan.ScreenTitle} · {plan.DisplayName} 고정좌표 상세 구조 확인 완료");
+        return true;
+    }
+
+    private async Task<bool> TrySelectMedicineRecipeBySearchAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        if (!string.Equals(plan.FacilityName, "약품 가공 시설", StringComparison.Ordinal))
+            return false;
+
+        if (!AlteringRecipeLayout.IsSafeMedicineSearchGeometry())
+            throw new InvalidOperationException("약품 검색 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
+
+        using var beforeSearch = Capture(ct);
+        if (await FindFacilityHeaderAsync(beforeSearch, plan.ScreenTitle, ct) is null)
+            Fail(beforeSearch, "약품 검색 전 약품 가공 화면을 확인하지 못했습니다.");
+        if (await FindAsync(beforeSearch, FacilityMoveButton, "설비로 이동", ct) is not null)
+            Fail(beforeSearch, "원격 약품 가공 화면에서는 검색 입력을 시작하지 않습니다.");
+
+        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
+        Log?.Invoke(
+            $"[자동 가공] 약품 검색 돋보기 · 고정좌표 " +
+            $"({AlteringRecipeLayout.ProcessingSearchIconPoint.X},{AlteringRecipeLayout.ProcessingSearchIconPoint.Y})");
+        await Task.Delay(450, ct);
+
+        using var searchDialog = Capture(ct);
+        double openRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
+            beforeSearch,
+            searchDialog,
+            AlteringRecipeLayout.ProcessingSearchDialogArea);
+        if (openRatio < AlteringRecipeLayout.ProcessingSearchOpenChangeRatio)
+            Fail(searchDialog,
+                $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
+
+        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
+        _ui.PasteFresh(plan.DisplayName, ct);
+        await Task.Delay(120, ct);
+        _ui.TapFresh(0x1C, ct); // Enter
+        Log?.Invoke($"[자동 가공] 약품 검색어 입력 확정 · Enter · {plan.DisplayName}");
+        await Task.Delay(220, ct);
+
+        using var beforeApply = Capture(ct);
+        _ui.TapFresh(0x39, ct); // Space = 적용
+        Log?.Invoke("[자동 가공] 약품 검색 적용 · Space");
+        await Task.Delay(700, ct);
+
+        using var resultFrame = Capture(ct);
+        double resultRatio = ProductionUiRuntime.MeasureVisualChangeRatio(
+            beforeApply,
+            resultFrame,
+            AlteringRecipeLayout.ProcessingSearchResultArea);
+        var exact = await _ui.Ocr.FindAlteringLabelsAsync(
+            resultFrame,
+            AlteringRecipeLayout.ProcessingSearchResultArea,
+            plan.DisplayName,
+            ct,
+            cardCandidate: true);
+
+        Log?.Invoke(
+            exact.Count > 0
+                ? $"[자동 가공] 약품 검색 결과 · exact OCR 후보 {exact.Count}개 · 화면 변화 {resultRatio:P1}"
+                : $"[자동 가공] 약품 검색 결과 · OCR 미검출 · 화면 변화 {resultRatio:P1}");
+
+        if (exact.Count == 0 && resultRatio < AlteringRecipeLayout.ProcessingSearchResultChangeRatio)
+            Fail(resultFrame,
+                $"약품 검색 적용 후 결과 화면 전환을 확인하지 못했습니다. 변화율={resultRatio:P1}");
+
+        if (plan.RecipeOrdinal != 1)
+            Fail(resultFrame,
+                $"약품 검색 결과가 중복 제법 순번 {plan.RecipeOrdinal}이라 첫 결과 고정좌표를 사용하지 않습니다.");
+
+        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
+        Log?.Invoke(
+            $"[자동 가공] 약품 검색 첫 결과 선택 · 고정좌표 " +
+            $"({AlteringRecipeLayout.ProcessingSearchFirstResultPoint.X},{AlteringRecipeLayout.ProcessingSearchFirstResultPoint.Y})");
+        await Task.Delay(400, ct);
+
+        using var popup = Capture(ct);
+        if (!await IsRecipeDetailStructureAsync(popup, ct))
+            Fail(popup, "약품 검색 첫 결과 클릭 후 품목 상세 구조를 확인하지 못했습니다.");
+
+        _stage.Move(ProductionStage.Detail, plan.DisplayName);
+        Log?.Invoke($"[자동 가공] 약품 검색 완료 · {plan.DisplayName} · 제작과 동일한 검색 흐름");
+        return true;
+    }
+
     private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
     {
         _stage.Move(ProductionStage.Search, plan.DisplayName);
+        if (await TrySelectFixedRecipeAsync(plan, ct))
+            return;
+        if (await TrySelectMedicineRecipeBySearchAsync(plan, ct))
+            return;
+
         string cacheKey = RecipeCacheKey(plan);
 
-        // The live UI positions are stable until a game patch. After the first exact
-        // OCR selection, reuse that confirmed card coordinate for the same facility,
-        // recipe and ordinal. Never drag or search through other pages.
+        // Fallback only for a future/unknown facility. Current five fixed-grid
+        // facilities return above, and medicine uses the search flow above.
         if (_hasCachedRecipeCenter &&
             string.Equals(_cachedRecipeKey, cacheKey, StringComparison.Ordinal))
         {

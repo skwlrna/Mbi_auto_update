@@ -31,6 +31,43 @@ Check(AlteringText.Normalize("목재 +") != AlteringText.Normalize("목재"), "p
 Check(AlteringText.IsCardCandidate("강철과", "강철괴"), "faint card is only a candidate for detail verification");
 Check(!AlteringText.IsCardCandidate("상급 목재", "상급 목재+") && !AlteringText.IsCardCandidate("철괴(광석)","철괴(철 광석)"), "candidate matching preserves recipe qualifiers");
 Check(new AlteringPlan(plan.FacilityName, "철괴(철 광석)", 1, 3, false).OutputName == "철괴", "ingredient-qualified recipe maps to output item");
+var riceLayoutPlan = new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 1, 5, false)
+    with { RecipeCount = 1 };
+Check(AlteringRecipeLayout.TryGetFixedCenter(riceLayoutPlan, out var riceCenter) &&
+      riceCenter == new System.Drawing.Point(340, 724),
+    "food on-site layout pins soaked rice to row 3 column 2");
+var woodPlusLayoutPlan = new AlteringPlan("목재 가공 시설", "목재+", 1, 3, false)
+    with { RecipeCount = 1 };
+Check(AlteringRecipeLayout.TryGetFixedCenter(woodPlusLayoutPlan, out var woodPlusCenter) &&
+      woodPlusCenter == new System.Drawing.Point(340, 412),
+    "wood on-site layout pins wood plus to row 1 column 2");
+var steelLayoutPlan = new AlteringPlan("금속 가공 시설", "강철괴", 1, 3, false)
+    with { RecipeCount = 1 };
+Check(AlteringRecipeLayout.TryGetFixedCenter(steelLayoutPlan, out var steelCenter) &&
+      steelCenter == new System.Drawing.Point(461, 412),
+    "metal on-site layout pins steel ingot to row 1 column 3");
+var leatherPlusLayoutPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 1, 3, false)
+    with { RecipeCount = 1 };
+Check(AlteringRecipeLayout.TryGetFixedCenter(leatherPlusLayoutPlan, out var leatherPlusCenter) &&
+      leatherPlusCenter == new System.Drawing.Point(340, 412),
+    "leather on-site layout pins leather plus to row 1 column 2");
+var clothPlusLayoutPlan = new AlteringPlan("옷감 가공 시설", "옷감+", 1, 3, false)
+    with { RecipeCount = 1 };
+Check(AlteringRecipeLayout.TryGetFixedCenter(clothPlusLayoutPlan, out var clothPlusCenter) &&
+      clothPlusCenter == new System.Drawing.Point(461, 412),
+    "fabric on-site layout pins cloth plus to row 1 column 3");
+var duplicateWood1 = new AlteringPlan("목재 가공 시설", "최상급 목재", 1, 3, false, 1)
+    with { RecipeCount = 2 };
+var duplicateWood2 = duplicateWood1 with { RecipeOrdinal = 2 };
+Check(AlteringRecipeLayout.TryGetFixedCenter(duplicateWood1, out var duplicateWoodCenter1) &&
+      AlteringRecipeLayout.TryGetFixedCenter(duplicateWood2, out var duplicateWoodCenter2) &&
+      duplicateWoodCenter1 == new System.Drawing.Point(461, 584) &&
+      duplicateWoodCenter2 == new System.Drawing.Point(340, 756),
+    "duplicate fixed-grid recipes preserve recipe ordinal");
+Check(!AlteringRecipeLayout.IsFixedFacility("약품 가공 시설") &&
+      AlteringRecipeLayout.IsSafeMedicineSearchGeometry(),
+    "medicine uses crafting-style search instead of fixed recipe cards");
+
 Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("새록 버섯 진액", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
       AlteringFacilityResolver.Resolve(new AlteringRecipe("튼튼 버섯 가루", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
       AlteringFacilityResolver.Resolve(new AlteringRecipe("불꽃의 결정(석양 나비)", true, 3, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설",
