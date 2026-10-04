@@ -222,7 +222,7 @@ public sealed partial class MainForm : Form
         _ => "abyss_dungeon_hallucination_anchorage"
     };
     private bool DungeonRunning => _dungeonTask is { IsCompleted: false };
-    private bool AnyRunning => _starting || _fishingBot.IsRunning || DungeonRunning;
+    private bool AnyRunning => _starting || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
 
     private void UpdateAbyssSelectorVisibility()
     {
@@ -551,6 +551,11 @@ public sealed partial class MainForm : Form
     private void StopSelected()
     {
         if (_starting) _cancelStart = true;
+        if (_multiAlteringRunning && _multiAlteringCts is not null && !_multiAlteringCts.IsCancellationRequested)
+        {
+            _log.Write("[다중가공] 정지 요청(F10) · 현재 품목 정지 후 다음 품목 시작 금지");
+            _multiAlteringCts.Cancel();
+        }
         if (_fishingBot.IsRunning)
         {
             _fishingStoppedAt = DateTime.Now;
@@ -573,6 +578,7 @@ public sealed partial class MainForm : Form
     private void StopAll()
     {
         _cancelStart = true;
+        if (_multiAlteringCts is not null && !_multiAlteringCts.IsCancellationRequested) _multiAlteringCts.Cancel();
         if (_fishingBot.IsRunning) _fishingBot.Stop();
         if (_dungeonCts is not null && !_dungeonCts.IsCancellationRequested) _dungeonCts.Cancel();
     }
