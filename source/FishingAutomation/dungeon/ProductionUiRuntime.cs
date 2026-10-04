@@ -290,7 +290,18 @@ internal sealed class ProductionUiRuntime : IDisposable
                 fresh,
                 failure + $" · 클릭 직전 템플릿 위치가 바뀌었습니다. 점수={current.Score:F3}");
 
-        Point point = clickPoint(current);
+        Point point;
+        try
+        {
+            point = clickPoint(current);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw Failure(
+                fresh,
+                failure + " · " + ex.Message);
+        }
+
         if (!new Rectangle(Point.Empty, fresh.Size).Contains(point))
             throw Failure(
                 fresh,
