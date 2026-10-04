@@ -22,6 +22,29 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
+    // 800x1000 live food-processing layout. User-confirmed one-page grid:
+    // four columns, four rows (last row has three items). Selection never OCRs
+    // the small card label; the large detail title is used only as a safety veto.
+    private static readonly IReadOnlyDictionary<string, Point> FoodRecipeCenters =
+        new Dictionary<string, Point>(StringComparer.Ordinal)
+        {
+            ["마요네즈"] = new(194, 397),
+            ["밀가루"] = new(315, 397),
+            ["치즈"] = new(436, 397),
+            ["면"] = new(557, 397),
+            ["생크림"] = new(194, 563),
+            ["물에 불린 콩"] = new(315, 563),
+            ["두부"] = new(436, 563),
+            ["두유"] = new(557, 563),
+            ["숙성된 커다란 고기"] = new(194, 736),
+            ["물에 불린 쌀"] = new(315, 736),
+            ["밥"] = new(436, 736),
+            ["말린 찻잎"] = new(557, 736),
+            ["발효된 찻잎"] = new(194, 907),
+            ["헤이즐넛 오일"] = new(315, 907),
+            ["오트밀"] = new(436, 907),
+        };
+    private static readonly Rectangle FoodDetailTitle = new(240, 600, 440, 120);
     internal string InputMode => _ui.InputMode;
     internal event Action<string>? Log;
 
@@ -368,9 +391,50 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return true;
     }
 
+    private async Task<bool> TrySelectFoodRecipeByFixedCoordinateAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        if (!string.Equals(plan.FacilityName, "식재료 가공 시설", StringComparison.Ordinal))
+            return false;
+
+        if (!FoodRecipeCenters.TryGetValue(plan.OutputName, out Point center))
+            throw new InvalidOperationException($"식재료 고정좌표가 정의되지 않았습니다: {plan.OutputName}");
+
+        using (var frame = Capture(ct))
+        {
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                Fail(frame, "식재료 고정좌표 입력 전 식재료 가공 화면을 확인하지 못했습니다.");
+
+            if (await FindAsync(frame, FacilityMoveButton, "설비로 이동", ct) is not null)
+                Fail(frame, "원격 식재료 가공 화면에서 고정좌표 입력을 차단했습니다.");
+        }
+
+        Log?.Invoke(
+            $"[자동 가공] 식재료 고정좌표 선택 · {plan.OutputName} · ({center.X},{center.Y}) · 카드명 OCR 없음");
+        _ui.ClickFresh(center, ct);
+        await Task.Delay(350, ct);
+
+        using var popup = Capture(ct);
+        if (await FindAsync(popup, FoodDetailTitle, plan.OutputName, ct) is null)
+            Fail(popup,
+                $"식재료 고정좌표 ({center.X},{center.Y}) 클릭 후 상세 제목 {plan.OutputName}을 확인하지 못했습니다.");
+
+        if (!await IsRecipeDetailStructureAsync(popup, ct))
+            Fail(popup, "식재료 고정좌표 클릭 후 품목 상세 구조를 확인하지 못했습니다.");
+
+        _stage.Move(ProductionStage.Detail, plan.DisplayName);
+        Log?.Invoke(
+            $"[자동 가공] 식재료 가공 · {plan.OutputName} 고정좌표 확인 완료 · 큰 상세 제목 일치");
+        return true;
+    }
+
     private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
     {
         _stage.Move(ProductionStage.Search, plan.DisplayName);
+        if (await TrySelectFoodRecipeByFixedCoordinateAsync(plan, ct))
+            return;
+
         string cacheKey = RecipeCacheKey(plan);
 
         // The live UI positions are stable until a game patch. After the first exact
