@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.9"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.10"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.9</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.10</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -219,6 +219,12 @@ jobs:
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
+          if($facilityLayout -notmatch 'OnsiteCloseVisualArea = new\(744, 42, 44, 44\)'){throw 'on-site close-X geometry missing'}
+          if($screen -notmatch 'HasOnsiteCloseButtonVisual' -or
+             $screen -notmatch 'if \(HasOnsiteCloseButtonVisual\(frame\)\)\s*return false;' -or
+             $screen -notmatch 'bright < 28' -or
+             $screen -notmatch 'width >= 14 && height >= 14'){throw 'on-site close-X remote-veto detector missing'}
+          if($screen -notmatch '우측 상단 X 우선 판정 · 설비 이동 오탐 차단'){throw 'on-site close-X reuse diagnostic missing'}
           if($screen -notmatch 'HasFacilityMoveButtonVisual' -or
              $screen -notmatch 'remoteConfirmed: true' -or
              $screen -notmatch '원격 오판 자동복구 완료'){throw 'facility move visual/recovery route missing'}
