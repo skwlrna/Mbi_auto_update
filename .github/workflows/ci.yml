@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.0\.35"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.1"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.0\.35</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.1</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -382,6 +382,17 @@ jobs:
           if ($stopPolicy -notmatch '!activity\.IsAutoTraveling' -and $stopPolicy -notmatch '!isAutoTraveling') { throw 'post-Space policy must require travel ended' }
           if ($stopPolicy -notmatch '!activity\.IsFishing' -and $stopPolicy -notmatch '!isFishing') { throw 'post-Space policy must require fishing ended' }
           if ($stopPolicy -match 'MainButtonState') { throw 'post-Space policy must ignore stale main-button state' }
+          $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
+          if ($bulkScreen -notmatch 'LifeSkillListLayout\.TryFixedRowPoint') { throw 'fixed one-page life-skill row policy is not wired' }
+          if ($bulkScreen -notmatch 'LifeSkillListLayout\.SafeDragStart' -or
+              $bulkScreen -notmatch 'LifeSkillListLayout\.SafeDragEnd') { throw 'safe in-modal life-skill drag policy is not wired' }
+          if ($bulkScreen -match 'new Point\(715, 765\)' -or $bulkScreen -match 'new Point\(715, 345\)') { throw 'unsafe border-adjacent life-skill drag returned' }
+          if ($lifeLayout -notmatch '"추수"' -or
+              $lifeLayout -notmatch '"양털 깎기"' -or
+              $lifeLayout -notmatch 'NeverScroll') { throw 'one-page harvest/wool no-scroll policy missing' }
+          foreach($point in @('new Point\(400, OnePageRowY\[index\]\)','580, 760','580, 350')){
+            if($lifeLayout -notmatch $point){throw "life-skill fixed/safe layout evidence missing: $point"}
+          }
 
       - name: V3 production engine regression tests
         shell: pwsh
@@ -403,8 +414,21 @@ jobs:
           $resolver = Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
+          $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
 
           if($crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
+          if($resolver -notmatch 'BuildMultiGatheringPlanAsync' -or
+             $resolver -notmatch 'new MultiGatheringCoordinator' -or
+             $resolver -notmatch '다중 채집 전 가공 UI 종료') { throw 'recursive multi-gather planning/wiring missing' }
+          if($resolver -notmatch '철괴\(철 광석\)' -or
+             $resolver -notmatch '철괴\(광석\) 제외') { throw 'recursive iron ingot must prefer iron-ore recipe and exclude legacy ore route' }
+          if($multiGather -notmatch 'new GatheringAutomation' -or
+             $multiGather -notmatch 'TargetTotal' -or
+             $multiGather -notmatch '시작 직전 재고') { throw 'multi-gather must reuse single gather and recheck absolute inventory targets' }
+          if($multiGather -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput') { throw 'multi-gather coordinator must never own direct input' }
+          if($lifeLayout -notmatch 'SafeDragStart = new\(580, 760\)' -or
+             $lifeLayout -notmatch 'SafeDragEnd = new\(580, 350\)') { throw 'safe modal-internal drag coordinates missing' }
           if($craftScreen -notmatch '퀘스트 만들기' -or $craftScreen -notmatch '제작 완료'){throw 'quest-driven crafting flow missing'}
 
           foreach($screen in @($craftScreen,$gatherScreen,$bulkScreen,$alterScreen)){
