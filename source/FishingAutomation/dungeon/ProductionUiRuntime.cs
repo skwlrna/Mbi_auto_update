@@ -19,6 +19,7 @@ internal sealed class ProductionUiRuntime : IDisposable
     private readonly GuardedInputController _input;
     private readonly WindowCapture _capture = new();
     private readonly OcrRecognizer _ocr = new();
+    private readonly TemplateMatcher _templates = new(AppContext.BaseDirectory);
     private readonly string _debugDir;
     private readonly string _debugStem;
     private bool _disposed;
@@ -216,6 +217,98 @@ internal sealed class ProductionUiRuntime : IDisposable
         Point point = clickPoint(current.Value);
         _input.ClickClientPoint(_hwnd, point);
         return current.Value;
+    }
+
+    internal DetectionResult FindBrightTemplate(
+        Bitmap frame,
+        Rectangle roi,
+        string templatePath,
+        double threshold,
+        double minScale = 0.75,
+        double maxScale = 1.35,
+        double step = 0.05)
+    {
+        roi = Rectangle.Intersect(roi, new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width <= 0 || roi.Height <= 0)
+            return DetectionResult.NotFound;
+
+        return _templates.FindBrightGlyphMultiScale(
+            frame,
+            roi,
+            templatePath,
+            threshold,
+            minScale,
+            maxScale,
+            step);
+    }
+
+    internal async Task<DetectionResult> ClickOffsetFromStableBrightTemplateAsync(
+        string templatePath,
+        Rectangle roi,
+        Func<DetectionResult, Point> clickPoint,
+        CancellationToken ct,
+        string failure,
+        double threshold = 0.78,
+        double minScale = 0.75,
+        double maxScale = 1.35,
+        double step = 0.05,
+        int settleMs = 160)
+    {
+        DetectionResult? first = null;
+        DetectionResult second = DetectionResult.NotFound;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            var found = FindBrightTemplate(
+                frame, roi, templatePath, threshold, minScale, maxScale, step);
+            if (!found.Found)
+                throw Failure(
+                    frame,
+                    failure + $" · 템플릿 점수={found.Score:F3}");
+
+            if (pass == 0)
+            {
+                first = found;
+                await Task.Delay(settleMs, ct);
+                continue;
+            }
+
+            if (first is null || !Stable(first.Value.Bounds, found.Bounds))
+                throw Failure(
+                    frame,
+                    failure + " · 두 프레임의 템플릿 위치가 안정적으로 일치하지 않았습니다.");
+
+            second = found;
+        }
+
+        using var fresh = Capture(ct);
+        var current = FindBrightTemplate(
+            fresh, roi, templatePath, threshold, minScale, maxScale, step);
+        if (!current.Found || !Stable(second.Bounds, current.Bounds))
+            throw Failure(
+                fresh,
+                failure + $" · 클릭 직전 템플릿 위치가 바뀌었습니다. 점수={current.Score:F3}");
+
+        Point point;
+        try
+        {
+            point = clickPoint(current);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw Failure(
+                fresh,
+                failure + " · " + ex.Message);
+        }
+
+        if (!new Rectangle(Point.Empty, fresh.Size).Contains(point))
+            throw Failure(
+                fresh,
+                failure + " · 계산된 클릭 좌표가 게임 화면 밖입니다.");
+
+        _input.ClickClientPoint(_hwnd, point);
+        return current;
     }
 
     internal async Task<DetectionResult> ClickStableExactAndPasteAsync(
