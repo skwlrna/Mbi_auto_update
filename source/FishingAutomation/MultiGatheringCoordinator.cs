@@ -2,7 +2,7 @@ namespace FishingAutomation;
 
 internal sealed record MultiGatheringRequest(
     string DisplayName,
-    long AdditionalQuantity,
+    long TargetTotal,
     AlteringPlan SourceRecipe);
 
 /// <summary>
@@ -38,17 +38,17 @@ internal sealed class MultiGatheringCoordinator
         if (requests.Count == 0) return;
 
         var grouped = requests
-            .Where(x => x.AdditionalQuantity > 0)
+            .Where(x => x.TargetTotal > 0)
             .GroupBy(x => x.DisplayName, StringComparer.Ordinal)
             .Select(g => new MultiGatheringRequest(
                 g.Key,
-                checked(g.Sum(x => x.AdditionalQuantity)),
+                g.Max(x => x.TargetTotal),
                 g.First().SourceRecipe with { AllowPaidButton = false }))
             .ToArray();
 
         Log?.Invoke(
             $"[다중 채집] 계획 확정 · {grouped.Length}종 · " +
-            string.Join(", ", grouped.Select(x => $"{x.DisplayName} +{x.AdditionalQuantity}")));
+            string.Join(", ", grouped.Select(x => $"{x.DisplayName} 목표 {x.TargetTotal}")));
 
         foreach (var request in grouped)
         {
@@ -57,7 +57,7 @@ internal sealed class MultiGatheringCoordinator
             // Re-read immediately before this material. Previous gathering or a
             // manual inventory change may already have satisfied part of the plan.
             long before = await _data.ItemCountAsync(request.DisplayName, ct);
-            long targetTotal = checked(before + request.AdditionalQuantity);
+            long targetTotal = request.TargetTotal;
 
             // One more fresh read keeps "start-time inventory is authority" explicit.
             long fresh = await _data.ItemCountAsync(request.DisplayName, ct);
