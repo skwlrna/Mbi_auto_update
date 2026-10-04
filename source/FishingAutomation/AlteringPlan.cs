@@ -164,19 +164,46 @@ internal sealed class AlteringAutomation
             {
                 int current = Matching(works, plan).Count();
                 int before = _session.PendingBeforeMatchingCount;
+                long currentOutput = await _data.ItemCountAsync(plan.OutputName, ct);
+                if (currentOutput < _session.LastObservedOutputQuantity)
+                    throw new InvalidOperationException(
+                        $"이어하기 등록 확인 중 {plan.OutputName} 보유량이 감소했습니다: 마지막 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {currentOutput:N0}. " +
+                        "중복 등록 방지를 위해 정지합니다.");
+
+                long outputGain = currentOutput - _session.LastObservedOutputQuantity;
                 if (current == before + 1)
                 {
                     QueuedWorks++;
                     Log?.Invoke($"[자동 가공] 이어하기 등록 복구 · 중단 직전 1작업이 실제 등록된 것으로 확인 · 전체 {QueuedWorks}/{plan.RequiredWorks}");
                 }
-                else if (current == before)
+                else if (current == before && outputGain == 0)
                 {
                     Log?.Invoke("[자동 가공] 이어하기 등록 복구 · 중단 직전 작업은 등록되지 않은 것으로 확인 · 재클릭 없이 정상 진행");
+                }
+                else if (current < before)
+                {
+                    int disappearedWithoutPending = before - current;
+                    long minimumWithoutPending = checked((long)disappearedWithoutPending * plan.ProducedPerWork);
+                    long minimumWithPending = checked((long)(disappearedWithoutPending + 1) * plan.ProducedPerWork);
+
+                    if (outputGain >= minimumWithoutPending && outputGain < minimumWithPending)
+                    {
+                        Log?.Invoke(
+                            $"[자동 가공] 이어하기 등록 복구 · 저장 후 기존 작업 {disappearedWithoutPending}건이 수령되어 대기열이 감소했지만 " +
+                            $"완성품 증가 +{outputGain:N0}개로 중단 직전 새 작업은 등록되지 않은 것으로 확정 · 재클릭 없이 정상 진행");
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            $"이어하기 등록 상태를 안전하게 확정할 수 없습니다. 저장 전 {before}건 / 현재 {current}건 / " +
+                            $"완성품 증가 +{outputGain:N0}개. 중복 등록 방지를 위해 정지합니다.");
+                    }
                 }
                 else
                 {
                     throw new InvalidOperationException(
-                        $"이어하기 등록 상태를 안전하게 확정할 수 없습니다. 저장 전 {before}건 / 현재 {current}건. 중복 등록 방지를 위해 정지합니다.");
+                        $"이어하기 등록 상태를 안전하게 확정할 수 없습니다. 저장 전 {before}건 / 현재 {current}건 / " +
+                        $"완성품 증가 +{outputGain:N0}개. 중복 등록 방지를 위해 정지합니다.");
                 }
 
                 SaveSession(_session with
@@ -184,6 +211,7 @@ internal sealed class AlteringAutomation
                     QueuedWorks = QueuedWorks,
                     PendingRegistration = false,
                     PendingBeforeMatchingCount = 0,
+                    LastObservedOutputQuantity = currentOutput,
                     Stage = "가공 이어하기"
                 });
             }
