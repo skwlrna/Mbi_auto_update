@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.6"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.7"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.6</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.7</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -622,7 +622,7 @@ jobs:
           if($lifeSkillStart -match 'detailTarget' -or
              $lifeSkillStart -match '생활 스킬 상세 팝업을 확인하지 못해'){throw 'life-skill target name must not be OCR-reconfirmed after row selection'}
           if($lifeSkillStart -notmatch '상세 품목명/가까운 위치 문구 OCR 생략'){throw 'life-skill post-click OCR removal trace missing'}
-          $nearestHelper = [regex]::Match($bulkScreen, 'private async Task ClickLifeSkillNearestLocationAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Confirmed)').Value
+          $nearestHelper = [regex]::Match($bulkScreen, 'private async Task ClickLifeSkillNearestLocationAsync[\s\S]*?(?=\r?\n    private async Task ResolveLifeSkillNearestResultAsync)').Value
           if([string]::IsNullOrWhiteSpace($nearestHelper)){throw 'nearest-location help-icon helper missing'}
           if($nearestHelper -match 'FindUniqueAsync|FindCompact|ClickStableExact|FindBrightGlyphMultiScale'){throw 'nearest-location helper must delegate final-frame template validation to shared runtime and never depend on OCR'}
           if($nearestHelper -notmatch 'ClickOffsetFromStableBrightTemplateAsync' -or
@@ -633,6 +633,19 @@ jobs:
              $runtime -notmatch 'FindBrightTemplate\(' -or
              $runtime -notmatch '클릭 직전 템플릿 위치가 바뀌었습니다' -or
              $runtime -notmatch '_input\.ClickClientPoint'){throw 'shared final-frame bright-template click guard missing'}
+
+          $nearestResult = [regex]::Match($bulkScreen, 'private async Task ResolveLifeSkillNearestResultAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Confirmed)').Value
+          if([string]::IsNullOrWhiteSpace($nearestResult)){throw 'nearest-location direct/recommended routing helper missing'}
+          if($nearestResult -notmatch 'activity\.IsAutoTraveling' -or
+             $nearestResult -notmatch 'activity\.IsGathering' -or
+             $nearestResult -notmatch '_navigationVision\.FirstPlaceAsync' -or
+             $nearestResult -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow' -or
+             $nearestResult -notmatch '가까운 위치 결과=바로 이동형' -or
+             $nearestResult -notmatch '가까운 위치 결과=추천 장소형'){throw 'nearest-location CLI direct/recommended split is incomplete'}
+          $cliRouteIndex = $nearestResult.IndexOf('if (activity.IsAutoTraveling')
+          $placeRouteIndex = $nearestResult.IndexOf('_navigationVision.FirstPlaceAsync')
+          if($cliRouteIndex -lt 0 -or $placeRouteIndex -lt 0 -or $cliRouteIndex -gt $placeRouteIndex){throw 'CLI direct-travel decision must run before recommended-place screen input'}
+          if($lifeSkillStart -notmatch 'ResolveLifeSkillNearestResultAsync\(source\.TargetName, ct\)'){throw 'life-skill start does not route nearest-location result'}
           if($lifeSkillStart -notmatch '100회는 행동 횟수이며 획득 수량과 분리'){throw '100-action vs item-count separation trace missing'}
 
           $craftReturn = [regex]::Match($craftScreen, 'public async Task ReturnToStationAndCraftAsync[\s\S]*?(?=\r?\n    private async Task FinishDirectCraftAsync)').Value

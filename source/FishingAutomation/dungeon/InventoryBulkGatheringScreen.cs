@@ -14,6 +14,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     private readonly GatheringCliData _data;
     private readonly CraftingCliData _inventory;
     private readonly GatheringScreen _fallback;
+    private readonly GatheringVision _navigationVision = new();
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("채집");
 
@@ -247,11 +248,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         _stage.Move(ProductionStage.Detail, source.TargetName);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
         await ClickLifeSkillNearestLocationAsync(source.TargetName, ct);
+        await ResolveLifeSkillNearestResultAsync(source.TargetName, ct);
 
         Log?.Invoke(
-            $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 이동 후 목표 수량/100회 자연 종료 감시 · " +
+            $"[대량 채집] {source.Category} · {source.TargetName} · 가까운 위치 분기 완료 후 목표 수량/100회 자연 종료 감시 · " +
             "100회는 행동 횟수이며 획득 수량과 분리 · 목표 재료를 먼저 확보하면 안전 정지");
-        await Task.Delay(700, ct);
+        await Task.Delay(350, ct);
     }
 
     private async Task ClickLifeSkillNearestLocationAsync(
@@ -293,6 +295,84 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             $"[대량 채집] 가까운 위치 찾기 · ? 이미지 2프레임 + 클릭 직전 재확인 · " +
             $"score={found.Score:F3} · ?=({found.Center.X},{found.Center.Y}) · " +
             $"클릭=({clickPoint.X},{clickPoint.Y}) · OCR 없음");
+    }
+
+    private async Task ResolveLifeSkillNearestResultAsync(
+        string targetName,
+        CancellationToken ct)
+    {
+        Rectangle? firstPlaceBounds = null;
+        string? firstPlaceText = null;
+
+        // Some materials (for example rice) start auto-travel immediately.
+        // Others open the existing gathering-place list and require one more
+        // first-row selection. Let CLI activity win first; only touch the screen
+        // when that activity did not start and the place list is stably visible.
+        for (int poll = 1; poll <= 12; poll++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var activity = await _data.ActivityAsync(ct);
+            if (!GatheringSafetyPolicy.IsSafeField(activity))
+                throw new InvalidOperationException(
+                    $"{targetName} 가까운 위치 클릭 후 사망·대화·던전 등 진행 불가 상태가 확인되었습니다.");
+
+            activity = await WaitForCombatEndAsync(
+                activity,
+                $"{targetName} 가까운 위치 결과 확인",
+                ct);
+
+            if (activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing)
+            {
+                Log?.Invoke(
+                    $"[대량 채집] 가까운 위치 결과=바로 이동형 · {targetName} · " +
+                    $"AutoTraveling={activity.IsAutoTraveling}, Gathering={activity.IsGathering}, Fishing={activity.IsFishing} · 추가 장소 클릭 없음");
+                return;
+            }
+
+            using var frame = Capture(ct);
+            var firstPlace = await _navigationVision.FirstPlaceAsync(frame, ct);
+            if (firstPlace is not null)
+            {
+                if (firstPlaceBounds is null)
+                {
+                    firstPlaceBounds = firstPlace.Value.Bounds;
+                    firstPlaceText = firstPlace.Value.Text;
+                    await Task.Delay(160, ct);
+                    continue;
+                }
+
+                if (!GatheringNavigationPolicy.IsStableFirstRow(
+                        firstPlaceBounds.Value,
+                        firstPlace.Value.Bounds))
+                    throw Fail(
+                        frame,
+                        $"{targetName} 추천 장소 첫 행 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
+
+                Point click = new(
+                    firstPlace.Value.Bounds.Left + firstPlace.Value.Bounds.Width / 2,
+                    firstPlace.Value.Bounds.Top + firstPlace.Value.Bounds.Height / 2);
+
+                string display = string.IsNullOrWhiteSpace(firstPlace.Value.Text)
+                    ? firstPlaceText ?? "첫 번째 장소"
+                    : firstPlace.Value.Text;
+
+                Log?.Invoke(
+                    $"[대량 채집] 가까운 위치 결과=추천 장소형 · {targetName} · " +
+                    $"첫 장소 {display} · 행 위치 2프레임 확인 · ({click.X},{click.Y}) 클릭");
+                _ui.ClickFresh(click, ct);
+                return;
+            }
+
+            firstPlaceBounds = null;
+            firstPlaceText = null;
+            await Task.Delay(300, ct);
+        }
+
+        using var failed = Capture(ct);
+        throw Fail(
+            failed,
+            $"{targetName} 가까운 위치 클릭 후 CLI 자동이동/채집도 추천 장소 목록도 확인하지 못했습니다.");
     }
 
     private async Task<(bool Confirmed, bool MayRetryToggle, string Evidence)> WaitForProfileOpenAsync(
