@@ -1,0 +1,689 @@
+name: Release V3.1.16 Resume Reconciliation
+# Pinned V3.1.16 source snapshot. Keeps the V3.1.8 processing flow and reconciles resume state after manual receive/cancel cleanup.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/release-v3116-resume-reconcile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v3116-resume-reconcile
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3a0c5203a10be59f395cb4b9c55652da8f7263cc
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify release source and versions
+        shell: pwsh
+        run: |
+          $releaseSource = '3a0c5203a10be59f395cb4b9c55652da8f7263cc'
+          if ((git rev-parse HEAD) -ne $releaseSource) { throw 'release source snapshot mismatch' }
+          $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.16"') { throw 'version constant mismatch' }
+          $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          foreach ($field in @('Version','AssemblyVersion','FileVersion')) {
+            $expected = if ($field -eq 'Version') { '3.1.16' } else { '3.1.16.0' }
+            if ($p -notmatch [regex]::Escape("<$field>$expected</$field>")) { throw "$field mismatch" }
+          }
+      - name: Restore and test
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet restore changes/tests/stability/Regression.csproj
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+      - name: Updater rollback regression tests
+        shell: pwsh
+        run: ./changes/tests/stability/Updater.Tests.ps1 -Updater ./source/tools/ApplyUpdate.ps1
+
+      - name: Loot and retry regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/loot-retry/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Loot/retry regressions failed' }
+          dotnet run --project tests/retry-flow/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Retry flow regressions failed' }
+
+      - name: Read-only CLI regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/cli-readonly/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'CLI regressions failed' }
+      - name: Inventory loot regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/inventory-loot/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Inventory loot regressions failed' }
+      - name: Automatic altering regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering regressions failed' }
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering visual harness build failed' }
+
+      - name: Diagnostic-only regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/gathering-diagnostic/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic regressions failed' }
+
+      - name: Automatic gathering regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/gathering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Gathering regressions failed' }
+
+      - name: Crafting regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Crafting regressions failed' }
+
+      - name: V3.1.16 behavior guards
+        shell: pwsh
+        run: |
+          $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $craft = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $runtime = Get-Content source/FishingAutomation/dungeon/ProductionUiRuntime.cs -Raw
+          if($craft -notmatch 'IsProductDetailStructureAsync' -or
+             $craft -notmatch '선택 후 품목명 OCR 재확인 생략'){throw 'crafting post-click structural detail check missing'}
+          if($craft -match 'if \(await IsProductDetailAsync\(verify, displayName, ct\)\)'){throw 'crafting post-click item-name OCR reconfirmation returned'}
+          $craftAuto = Get-Content source/FishingAutomation/CraftingAutomation.cs -Raw
+
+          $bulkStart = [regex]::Match($bulk, 'public async Task StartAsync[\s\S]*?(?=\r?\n    private static bool CanUseInventoryFallback)').Value
+          if([string]::IsNullOrWhiteSpace($bulkStart)){throw 'bulk gathering StartAsync block missing'}
+          if($bulkStart -match 'InventoryBulkGatheringAutomation|StartInventoryHundredQuestAsync|_fallback\.StartAsync'){throw 'bulk gathering must stay life-skill only'}
+          if($bulk -notmatch '프로필 열기 · C 입력' -or
+             $bulk -notmatch 'ProfileLifeSkillPoint = new\(400, 944\)' -or
+             $bulk -notmatch '생활 스킬 고정좌표 클릭' -or
+             $bulk -notmatch '생활 스킬 화면 진입 확인 · 상단 제목 2프레임 안정'){throw 'fixed profile/life-skill navigation missing'}
+          foreach($fixedCategory in @(
+            '"일상 채집" => new Point\(222, 206\)',
+            '"나무 베기" => new Point\(341, 206\)',
+            '"광석 캐기" => new Point\(460, 206\)',
+            '"약초 채집" => new Point\(578, 206\)',
+            '"양털 깎기" => new Point\(222, 383\)',
+            '"추수" => new Point\(341, 383\)',
+            '"호미질" => new Point\(460, 383\)'
+          )){
+            if($bulk -notmatch $fixedCategory){throw "fixed life-skill category coordinate missing: $fixedCategory"}
+          }
+          $lifeSkillStart = [regex]::Match($bulk, 'private async Task StartLifeSkillHundredAsync[\s\S]*?(?=\r?\n    private async Task<DetectionResult\?> FindStableLifeSkillRowAsync)').Value
+          if([string]::IsNullOrWhiteSpace($lifeSkillStart)){throw 'life-skill start block missing'}
+          if($lifeSkillStart -match 'ClickExactAsync\(\s*"생활 스킬"' -or
+             $lifeSkillStart -match 'ClickExactAsync\(\s*source\.Category'){throw 'life-skill/profile category navigation must stay fixed-coordinate'}
+          if($bulk -match 'LifeSkillNearestLocationPoint'){throw 'obsolete fixed nearest-location coordinate returned'}
+          if($bulk -notmatch 'LifeSkillNearestHelpTemplate' -or
+             $bulk -notmatch 'life_skill_nearest_help\.png' -or
+             $bulk -notmatch 'ClickLifeSkillNearestLocationAsync'){throw 'life-skill nearest-location help-icon template path missing'}
+          if(-not (Test-Path source/FishingAutomation/dungeon/templates/life_skill_nearest_help.png)){throw 'life-skill nearest-location help-icon template file missing'}
+          if($lifeSkillStart -match 'ClickExactAsync\(\s*"가까운 위치 찾기"' -or
+             $lifeSkillStart -match 'FindUniqueAsync\([\s\S]{0,300}"100회 채집"'){throw 'life-skill start must not OCR-click nearest location or search for a visible 100회 control'}
+          if($lifeSkillStart -match 'detailTarget' -or
+             $lifeSkillStart -match '생활 스킬 상세 팝업을 확인하지 못해'){throw 'life-skill target name must not be OCR-reconfirmed after row selection'}
+          if($lifeSkillStart -notmatch '상세 품목명/가까운 위치 문구 OCR 생략'){throw 'life-skill post-click OCR removal trace missing'}
+          $nearestHelper = [regex]::Match($bulk, 'private async Task ClickLifeSkillNearestLocationAsync[\s\S]*?(?=\r?\n    private async Task ResolveLifeSkillNearestResultAsync)').Value
+          if([string]::IsNullOrWhiteSpace($nearestHelper)){throw 'nearest-location help-icon helper missing'}
+          if($nearestHelper -match 'FindUniqueAsync|FindCompact|ClickStableExact|FindBrightGlyphMultiScale'){throw 'nearest-location helper must delegate final-frame template validation to shared runtime and never depend on OCR'}
+          if($nearestHelper -notmatch 'ClickOffsetFromStableBrightTemplateAsync' -or
+             $nearestHelper -notmatch 'threshold: 0\.78' -or
+             $nearestHelper -notmatch 'leftOffset' -or
+             $nearestHelper -notmatch '클릭 직전 재확인'){throw 'nearest-location final-frame validated template/offset guard missing'}
+          if($runtime -notmatch 'ClickOffsetFromStableBrightTemplateAsync' -or
+             $runtime -notmatch 'FindBrightTemplate\(' -or
+             $runtime -notmatch '클릭 직전 템플릿 위치가 바뀌었습니다' -or
+             $runtime -notmatch '_input\.ClickClientPoint'){throw 'shared final-frame bright-template click guard missing'}
+
+          $nearestResult = [regex]::Match($bulk, 'private async Task ResolveLifeSkillNearestResultAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Confirmed)').Value
+          if([string]::IsNullOrWhiteSpace($nearestResult)){throw 'nearest-location direct/recommended routing helper missing'}
+          if($nearestResult -notmatch 'activity\.IsAutoTraveling' -or
+             $nearestResult -notmatch 'activity\.IsGathering' -or
+             $nearestResult -notmatch '_navigationVision\.FirstPlaceAsync' -or
+             $nearestResult -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow' -or
+             $nearestResult -notmatch '가까운 위치 결과=바로 이동형' -or
+             $nearestResult -notmatch '가까운 위치 결과=추천 장소형'){throw 'nearest-location CLI direct/recommended split is incomplete'}
+          $cliRouteIndex = $nearestResult.IndexOf('if (activity.IsAutoTraveling')
+          $placeRouteIndex = $nearestResult.IndexOf('_navigationVision.FirstPlaceAsync')
+          if($cliRouteIndex -lt 0 -or $placeRouteIndex -lt 0 -or $cliRouteIndex -gt $placeRouteIndex){throw 'CLI direct-travel decision must run before recommended-place screen input'}
+          if($lifeSkillStart -notmatch 'ResolveLifeSkillNearestResultAsync\(source\.TargetName, ct\)'){throw 'life-skill start does not route nearest-location result'}
+          if($lifeSkillStart -notmatch '100회는 행동 횟수이며 획득 수량과 분리'){throw '100-action vs item-count separation trace missing'}
+          if($bulk -notmatch 'WaitForProfileOpenAsync' -or
+             $bulk -notmatch 'LifeSkillProfilePolicy\.MayRetryToggle' -or
+             $bulk -notmatch 'C 추가 입력 없음' -or
+             $bulk -notmatch '토글키 C를 다시 누르지 않고 안전하게 정지'){throw 'safe profile C-toggle recovery missing'}
+          if($bulk -match 'attempt <= 3'){throw 'profile recognition must not blindly toggle C three times'}
+          if($bulk -notmatch '목표 재료 확보' -or
+             $bulk -notmatch 'Stop 버튼\+CLI 상태 확인 후 Space 정지 입력' -or
+             $bulk -notmatch '채집/이동 종료 CLI 2회 확인' -or
+             $bulk -notmatch '호출한 가공 단계로 복귀'){throw 'target-quantity bulk gathering safe stop/return trace missing'}
+          $stopPolicy = Get-Content source/FishingAutomation/LifeSkillStopPolicy.cs -Raw
+          $postStop = [regex]::Match($bulk, 'private async Task ConfirmLifeSkillStoppedAsync[\s\S]*?(?=\r?\n    private async Task StartInventoryHundredQuestAsync)').Value
+          if([string]::IsNullOrWhiteSpace($postStop)){throw 'post-Space stop confirmation missing'}
+          if($postStop -notmatch 'LifeSkillStopPolicy\.IsStoppedAfterSpace' -or
+             $postStop -notmatch 'MainButtonState 잔상은 종료 판정에서 제외'){throw 'post-Space stale Stop-button handling missing'}
+          if($postStop -match 'IsOwnedLifeSkillActivity\(activity\)'){throw 'post-Space confirmation must not use stale MainButtonState activity helper'}
+          if($stopPolicy -match 'MainButtonState' -or
+             $stopPolicy -notmatch '!isGathering' -or
+             $stopPolicy -notmatch '!isAutoTraveling' -or
+             $stopPolicy -notmatch '!isFishing'){throw 'post-Space activity-only stop policy missing'}
+
+          $noDeficit = [regex]::Match($craftAuto, 'if \(deficits\.Count == 0\)[\s\S]*?(?=\r?\n\s*string signature)').Value
+          if([string]::IsNullOrWhiteSpace($noDeficit)){throw 'crafting no-deficit block missing'}
+          if($noDeficit -match 'CloseOverlayAsync'){throw 'final material completion must not close the quest overlay'}
+          if($noDeficit -notmatch '게임 자동 제작대 복귀 대기'){throw 'automatic station-return trace missing'}
+
+          $craftReturn = [regex]::Match($craft, 'public async Task ReturnToStationAndCraftAsync[\s\S]*?(?=\r?\n    private async Task FinishDirectCraftAsync)').Value
+          if([string]::IsNullOrWhiteSpace($craftReturn)){throw 'crafting return block missing'}
+          if($craftReturn -match 'FindQuestStageAsync|SetCraftCountAsync|CloseOverlayAsync'){throw 'station return must not re-find quest stage, close overlay, or reset count'}
+          if($craftReturn -notmatch '추가 퀘스트/ESC/Space 입력 없음' -or
+             $craftReturn -notmatch '수량 재설정 없음'){throw 'passive crafting return trace missing'}
+
+          $createQuest = [regex]::Match($craft, 'public async Task CreateQuestAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Parsed, bool AllEnough, string Summary, IReadOnlyList<string> MaterialNames\)> ReadSelectedBatchMaterialStateAsync)').Value
+          if([string]::IsNullOrWhiteSpace($createQuest)){throw 'craft route selection block missing'}
+          if($createQuest -notmatch 'ReadSelectedBatchMaterialStateAsync\(craftCount, ct\)' -or
+             $createQuest -notmatch 'materialState\.Parsed' -or
+             $createQuest -notmatch 'materialState\.AllEnough'){throw 'craft route must use selected-batch material ratios'}
+          if($craft -notmatch '선택 .*회 실제 재료 판정' -or
+             $craft -notmatch '2프레임 불일치 · 안전하게 퀘스트 경로 사용'){throw 'selected-batch material safety trace missing'}
+          if($craft -notmatch '상세 레시피 재료명 선판독' -or
+             $craft -notmatch '퀘스트 생성 전 레시피 재료 후보 확정' -or
+             $craft -notmatch 'detailCanonicalNames'){throw 'recipe material pre-read guard missing'}
+
+          $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $alter = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          if($alter -notmatch 'IsRecipeDetailStructureAsync' -or
+             $alter -notmatch '선택 후 품목명 OCR 재확인 생략'){throw 'altering post-click structural detail check missing'}
+          if($alter -match 'IsRecipeDetailAsync\('){throw 'altering post-click recipe-name OCR reconfirmation returned'}
+          $resolver = Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
+          $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
+          $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
+          $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if($alteringPlan -notmatch 'interface IAlteringFieldExitScreen'){throw 'altering field-exit contract missing'}
+          if($alter -notmatch 'IAlteringFieldExitScreen' -or
+             $alter -notmatch 'ExitToFieldAsync' -or
+             $alter -notmatch '채집 전 가공 UI 종료 확인 · 일반 필드 2프레임 확인' -or
+             $alter -notmatch 'stableFieldFrames >= 2'){throw 'altering field-exit implementation missing'}
+          $fieldExit = [regex]::Match($alter, 'public async Task ExitToFieldAsync[\s\S]*?(?=\r?\n    public async Task RecoverStallAsync)').Value
+          if([string]::IsNullOrWhiteSpace($fieldExit)){throw 'altering field-exit method missing'}
+          if($fieldExit -match 'TapFresh\(0x39'){throw 'field exit must never press Space'}
+          if($fieldExit -match 'ClickFresh\(new Point\(33, 55\), ct\)'){throw 'field exit must not use obsolete left-top back coordinate'}
+          if($fieldExit -notmatch 'TapFresh\(0x01, ct\)'){throw 'field exit must unwind facility and hub with ESC'}
+          if($zeroWing -notmatch 'IAlteringFieldExitScreen' -or
+             $zeroWing -notmatch '채집 전 가공 UI 종료'){throw 'zero-wing field-exit guard missing'}
+          $resolverGather = [regex]::Match($resolver, 'var multiGather = await BuildMultiGatheringPlanAsync[\s\S]*?await coordinator\.RunAsync\(multiGather, ct\);').Value
+          if([string]::IsNullOrWhiteSpace($resolverGather)){throw 'recursive multi-gather transition block missing'}
+          $exitIndex = $resolverGather.IndexOf('await fieldExit.ExitToFieldAsync(ct)')
+          $gatherIndex = $resolverGather.IndexOf('await coordinator.RunAsync(multiGather, ct)')
+          if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'multi-gather must exit processing UI before life-skill gathering'}
+          if($resolverGather -notmatch '다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'multi-gather field-exit trace missing'}
+          if($resolver -notmatch '철괴\(철 광석\)' -or $resolver -notmatch '철괴\(광석\) 제외'){throw 'iron ingot recursive producer preference missing'}
+          if($multiGather -notmatch 'new GatheringAutomation' -or
+             $multiGather -notmatch 'await automation\.RunAsync\(plan, ct\)' -or
+             $multiGather -notmatch 'TargetTotal' -or
+             $multiGather -notmatch '시작 직전 재고'){throw 'multi-gather must delegate to verified single gather with fresh inventory targets'}
+          if($multiGather -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|0x39'){throw 'multi-gather coordinator must not own direct input or Space'}
+          if($bulk -notmatch 'LifeSkillListLayout\.TryFixedRowPoint' -or
+             $bulk -notmatch 'LifeSkillListLayout\.SafeDragStart' -or
+             $bulk -notmatch 'LifeSkillListLayout\.SafeDragEnd'){throw 'fixed/no-scroll life-skill layout is not wired'}
+          if($bulk -match 'new Point\(715, 765\)' -or $bulk -match 'new Point\(715, 345\)'){throw 'unsafe border-adjacent life-skill drag returned'}
+          if($lifeLayout -notmatch '"추수"' -or
+             $lifeLayout -notmatch '"양털 깎기"' -or
+             $lifeLayout -notmatch 'NeverScroll' -or
+             $lifeLayout -notmatch 'SafeDragStart = new\(580, 760\)' -or
+             $lifeLayout -notmatch 'SafeDragEnd = new\(580, 350\)'){throw 'fixed harvest/wool or safe drag layout missing'}
+      - name: V3.1.16 new behavior guards
+        shell: pwsh
+        run: |
+          $multi = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
+          $multiMain = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $page = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          $safety = Get-Content source/FishingAutomation/GatheringSafetyPolicy.cs -Raw
+          $gather = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
+          $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $layout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
+          if($multi -notmatch 'Func<AlteringPlan, CancellationToken, Task>' -or
+             $multi -notmatch 'await runSingle\(plan, ct\)'){throw 'multi-altering single-runner delegation missing'}
+          if($multi -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime'){throw 'multi-altering must not own direct input'}
+          if($multiMain -notmatch 'StartAlteringAsync\(plan, batchChild: true\)' -or
+             $multiMain -notmatch '다음 품목은 시작하지 않음'){throw 'multi-altering runtime stop/delegation guard missing'}
+          if($page -notmatch '다중가공 작업 목록' -or
+             $page -notmatch '다중가공 .*종 시작' -or
+             $page -notmatch 'AddCurrentAlteringQueue'){throw 'multi-altering visible queue UI missing'}
+          if($safety -match 'IsClearlyStaleReviving' -or
+             $safety -match 'activity\.IsReviving'){throw 'Reviving must not gate gathering safety'}
+          if($safety -notmatch 'ShouldWaitForCombat' -or
+             $safety -notmatch 'activity\.IsInCombat'){throw 'combat wait-state policy missing'}
+          foreach($hardGate in @('IsDead','IsDialoguePlaying','IsWaitingForSelection','NotInDungeon','IsPlayingMiniGame')){
+            if($safety -notmatch $hardGate){throw "gathering hard safety gate missing: $hardGate"}
+          }
+          if($gather -notmatch 'WaitForCombatEndAsync' -or
+             $gather -notmatch '전투 중 · 입력 없이 종료 대기' -or
+             $gather -notmatch 'GatheringSafetyPolicy\.IsSafeField'){throw 'gathering combat-wait policy not wired'}
+          if($bulk -notmatch 'WaitForCombatEndAsync' -or
+             $bulk -notmatch '전투 중 · 입력 없이 종료 대기' -or
+             $bulk -notmatch 'GatheringSafetyPolicy\.IsSafeField'){throw 'bulk gathering combat-wait policy not wired'}
+          if($layout -notmatch '"추수"' -or $layout -notmatch '"양털 깎기"' -or
+             $layout -notmatch 'SafeDragStart = new\(580, 760\)' -or
+             $layout -notmatch 'SafeDragEnd = new\(580, 350\)'){throw 'V3.1.1 fixed/no-scroll/safe-drag rules missing'}
+
+      - name: V3 production architecture checks
+        shell: pwsh
+        run: |
+          $craft = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $craftAuto = Get-Content source/FishingAutomation/CraftingAutomation.cs -Raw
+          $gather = Get-Content source/FishingAutomation/dungeon/GatheringScreen.cs -Raw
+          $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $alter = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          $runtime = Get-Content source/FishingAutomation/dungeon/ProductionUiRuntime.cs -Raw
+          $search = Get-Content source/FishingAutomation/dungeon/ProductionSearchFlow.cs -Raw
+          $states = Get-Content source/FishingAutomation/ProductionStageMachine.cs -Raw
+          foreach($screen in @($craft,$gather,$bulk,$alter)){
+            if($screen -notmatch 'ProductionUiRuntime'){throw 'production screen bypasses V3 runtime'}
+            if($screen -match 'RefreshInputFrame'){throw 'legacy whole-frame freshness code returned'}
+            if($screen -match 'GuardedInputController _input' -or $screen -match 'WindowCapture _capture'){throw 'legacy screen-owned input/capture returned'}
+            if($screen -notmatch 'ProductionStageMachine'){throw 'production screen state tracking missing'}
+          }
+          if($runtime -match 'changed > sampled' -or $runtime -match 'sampled \* 0\.02'){throw 'whole-frame pixel diff returned'}
+          if($runtime -notmatch '클릭 직전 대상 위치가 바뀌었습니다'){throw 'target ROI final re-read missing'}
+          if($runtime -notmatch 'MeasureVisualChangeRatio' -or $runtime -notmatch 'HasMeaningfulVisualChange'){throw 'fixed-ROI visual transition helper missing'}
+          if($search -notmatch 'TapFresh\(0x1C, ct\)'){throw 'mandatory Enter search confirmation missing'}
+          if($craft -match 'ProductionSearchFlow\.SearchAndSelectAsync' -or
+             $craft -match 'ClickOffsetFromStableExactAsync' -or
+             $craft -match '검색창 확인 실패 · 돋보기만 OCR fallback'){throw 'unsafe crafting OCR fallback click returned'}
+          if($craft -notmatch 'MeasureVisualChangeRatio' -or
+             $craft -notmatch '검색창 열림 확인 · OCR 미사용' -or
+             $craft -notmatch '추가 클릭 없이 정지'){throw 'crafting search visual-state stop guards missing'}
+          $layout = Get-Content source/FishingAutomation/CraftingHubLayout.cs -Raw
+          if($layout -notmatch 'new\(400, 862\)' -or
+             $layout -notmatch 'ProductListSettleDelayMs = 1200'){throw 'live crafting search input coordinate or settle delay missing'}
+          if($layout -notmatch 'new\(218, 613\)'){throw 'live crafting first result card center missing'}
+          foreach($point in @('new\(275, 835\)','new\(400, 835\)','new\(525, 835\)','new\(307, 950\)','new\(507, 950\)')){
+            if($layout -notmatch $point){throw "live crafting detail control missing: $point"}
+          }
+          if($craft -match 'ReadCraftCountAsync|ReadStableCraftCountAsync'){throw 'crafting count OCR hard gate returned'}
+          if($craft -notmatch '기본 1회 유지' -or
+             $craft -notmatch '기본 1회 기준' -or
+             $craft -notmatch '재료 충분 · 제작하러 가기' -or
+             $craft -notmatch '재료 부족 · 퀘스트 만들기'){throw 'fixed crafting detail/direct route missing'}
+          if($craft -match 'for \(int i = 0; i < 9; i\+\+\)' -or
+             $craft -match 'CraftCountMinusPoint, ct'){throw 'crafting count must not spam minus-reset clicks'}
+          if($layout -notmatch 'CraftDetailSettleDelayMs = 100' -or
+             $layout -notmatch 'CraftReadyPollDelayMs = 150'){throw 'crafting responsive delay constants missing'}
+          if($layout -notmatch 'new\(742, 310\)' -or
+             $layout -notmatch 'ProductionQuestPopupArea'){throw 'fixed newest production quest geometry missing'}
+          if($layout -notmatch 'ProductionQuestMaterialArea' -or
+             $layout -notmatch 'new\(160, 640, 480, 270\)'){throw 'live lower quest material ROI missing'}
+          if($layout -notmatch 'AcquisitionMethodHeaderArea' -or
+             $layout -notmatch 'new\(135, 505, 530, 115\)' -or
+             $layout -notmatch 'new\(400, 650\)'){throw 'live acquisition popup/recommended geometry missing'}
+          if($craft -match 'WaitForDirectCraftDepartureAsync' -or
+             $craft -match '제작하러 가기 클릭 후 화면 전환/자동이동을 확인하지 못했습니다'){throw 'direct crafting must not hard-gate transient travel'}
+          if($craft -notmatch 'CraftActionButtonArea' -or
+             $craft -notmatch '제작대 도착 · 제작하기 버튼 즉시 확인' -or
+             $craft -notmatch 'TapFresh\(0x39, ct\)'){throw 'direct crafting must quickly wait for 제작하기 and press Space'}
+          if($craft -match '직접 제작대 도착 · .*회 설정'){throw 'direct crafting must not reset count again after station arrival'}
+          if($craft -match '제작 완료 화면의 결과물이' -or
+             $craft -match 'freshProduct'){throw 'craft completion must not hard-gate on product-name OCR'}
+          if($craft -notmatch 'InventoryOnlyCountAsync\(displayName' -or
+             $craft -notmatch 'CraftCompletionConfirmArea' -or
+             $craft -notmatch '실제 제작 완료창 확인' -or
+             $craft -notmatch 'actual result popup confirm only'){throw 'craft completion popup-only guard missing'}
+          $completionWait = [regex]::Match($craft, 'private async Task WaitForCompletionAsync[\s\S]*?(?=\r?\n    private async Task ClickExactAsync)').Value
+          if([string]::IsNullOrWhiteSpace($completionWait)){throw 'crafting completion wait block missing'}
+          if($completionWait -match 'inventoryIncreased|sawBusy|busySeen|latestInventory > inventoryBefore'){throw 'inventory/busy state must never complete crafting'}
+          if($completionWait -notmatch 'completionPopupVisible' -or
+             $completionWait -notmatch 'freshComplete is null && freshConfirm is null' -or
+             $completionWait -notmatch '재고 증가는 완료 판정에 사용하지 않음'){throw 'real completion popup gating missing'}
+          if($craftAuto -notmatch 'WaitForOutputIncreaseAfterCompletionAsync' -or
+             $craftAuto -notmatch '완료 판정은 완료창 기준'){throw 'post-popup inventory validation ordering missing'}
+          $questText = Get-Content source/FishingAutomation/CraftingQuestText.cs -Raw
+          if($questText -notmatch 'IsTitleNameOnly' -or
+             $questText -notmatch 'IsQuestProgress'){throw 'crafting quest split-title/structure helpers missing'}
+          if($craft -notmatch 'FindQuestTitleCandidate' -or
+             $craft -notmatch '퀘스트 제목 보조 인식' -or
+             $craft -notmatch '준비행\+제작대행 확인'){throw 'crafting right-side quest fallback missing'}
+          if($craft -match '제작 퀘스트를 오른쪽 목록에서 찾지 못했습니다' -or
+             $craft -match 'firstQuest = quest.Value' -or
+             $craft -match 'freshQuest = quest.Value'){throw 'post-create quest opening must not OCR the tiny right-side title'}
+          if($craft -notmatch 'ProductionQuestTopPoint' -or
+             $craft -notmatch '오른쪽 최상단 고정좌표' -or
+             $craft -notmatch '상세창 중복 OCR 생략'){throw 'fixed post-create quest or fast count path missing'}
+          if($craft -match 'var roi = new Rectangle\(70, 130, 670, 520\)' -or
+             $craft -notmatch 'ProductionQuestMaterialArea' -or
+             $craft -notmatch '실제 하단 재료행 기준'){throw 'quest material OCR must use live lower popup ROI'}
+          $ocrRecognizer = Get-Content source/FishingAutomation/dungeon/OcrRecognizer.cs -Raw
+          $readQuest = [regex]::Match($craft, 'public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync[\s\S]*?(?=\r?\n    private static string\? CleanName)').Value
+          if([string]::IsNullOrWhiteSpace($readQuest)){throw 'quest deficit reader block missing'}
+          if($ocrRecognizer -notmatch 'ReadDimLinesAsync' -or
+             $ocrRecognizer -notmatch 'new\[\] \{ 30, 40, 50, 70, 0 \}'){throw 'dim-gray quest material OCR fallback missing'}
+          if($readQuest -notmatch 'ReadDimLinesAsync\(frame, nameRoi, ct\)' -or
+             $readQuest -notmatch '퀘스트 재료명 회색글씨 보강 OCR' -or
+             $readQuest -notmatch 'new Rectangle\(215, Math\.Max\(610, ratio\.Y - 34\), 255, 68\)'){throw 'quest material name must recover from narrow dim row OCR'}
+          $questMatcher = Get-Content source/FishingAutomation/QuestMaterialNameMatcher.cs -Raw
+          if($craft -notmatch 'CanonicalizeQuestMaterialNameAsync' -or
+             $craft -notmatch 'LoadQuestMaterialNameCatalogAsync' -or
+             $craft -notmatch '퀘스트 재료명 OCR 보정' -or
+             $craft -notmatch 'QuestMaterialNameMatcher\.Decide'){throw 'quest material OCR names must be canonicalized against real catalogs'}
+          if($questMatcher -notmatch 'FullEditDistance' -or
+             $questMatcher -notmatch 'StartsWith\(needle' -or
+             $questMatcher -notmatch 'CommonPrefixLength' -or
+             $questMatcher -match 'ContainsApprox'){throw 'quest material matcher must use full-string distance/prefix ranking, not substring fuzzy matching'}
+          if($craft -notmatch 'GetGatherableItemsAsync\(ct\)' -or
+             $craft -notmatch 'GetAlterableItemsAsync\(ct\)' -or
+             $craft -notmatch 'GetCraftableItemsAsync\(recipeName, ct\)'){throw 'quest material canonical catalog sources missing'}
+          if($craft -match 'new Rectangle\(45, 230, 560, 180\)' -or
+             $craft -notmatch 'AcquisitionMethodHeaderArea' -or
+             $craft -notmatch 'AcquisitionMethodRecommendedPoint' -or
+             $craft -notmatch '추천 획득처 선택 · 고정좌표'){throw 'acquisition popup must use live header and fixed recommended row'}
+          $acquire = [regex]::Match($craft, 'public async Task GatherQuestDeficitAsync[\s\S]*?(?=\r?\n    public async Task CloseOverlayAsync)').Value
+          if([string]::IsNullOrWhiteSpace($acquire)){throw 'crafting acquisition block missing'}
+          if($acquire -notmatch 'ClickStableQuestDeficitRowAsync' -or
+             $acquire -notmatch 'AcquisitionMethodOpenChangeRatio' -or
+             $acquire -notmatch '재료명 OCR은 클릭 조건에서 제외'){throw 'acquisition must use stable shortage-row identity while material-name OCR stays optional'}
+          if($acquire -match 'firstMaterialSeen|secondMaterialSeen|firstReady|secondReady|bool ready = header is not null'){throw 'material-name or decorative recommendation OCR must not hard-gate acquisition'}
+          if($craft -match '제작 목록 화면을 확인하지 못했습니다' -or
+             $craft -match '제작 목록 복귀를 확인하지 못했습니다'){throw 'crafting fixed list navigation must not be hard-gated by header OCR'}
+          if($craft -notmatch '헤더 OCR 생략'){throw 'crafting fixed list OCR-skip trace missing'}
+          if($states -notmatch 'enum ProductionStage'){throw 'V3 state machine missing'}
+          if($alter -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력' -or $alter -match '이동 확인 Space 입력 완료'){throw 'facility travel Space regression returned'}
+          if($alter -notmatch '추가 Space 입력 없음'){throw 'passive facility travel rule missing'}
+
+      - name: Quest travel CLI rejection regression guard
+        shell: pwsh
+        run: |
+          $craft = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $data = Get-Content source/FishingAutomation/CraftingCliData.cs -Raw
+          if ($craft -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'crafting travel transient activity rejection guard missing' }
+          if ($craft -notmatch '활동 종료 안정 확인' -or
+              $craft -notmatch '재료 충족 여부는 새 퀘스트의 부족 행으로 재확인') { throw 'crafting must hand unknown/CLI-unverified material state back to quest rows after activity stops' }
+          if ($craft -notmatch 'InventoryOnlyCountWithLoadingRetryAsync') { throw 'crafting material inventory remains an optional verification path when a canonical name exists' }
+          if ($data -notmatch 'get_items CLI 일시 거부') { throw 'crafting inventory transient rejection retry logging missing' }
+
+      - name: Crafting search-only catalog regression guard
+        shell: pwsh
+        run: |
+          $queries = Get-Content source/FishingAutomation/CraftingQueries.cs -Raw
+          $page = Get-Content source/FishingAutomation/MainForm.CraftingPage.cs -Raw
+          if ($queries -notmatch 'ResolveUiCategory') { throw 'search-only crafting station resolver missing' }
+          if ($page -match '제작 분류 탭|제작 아이템|제작 음식|BuildCategoryTabs|SetCategory') { throw 'crafting item/food tabs must stay removed' }
+          if ($page -notmatch '전체 제작 품목을 한 목록에서 검색') { throw 'search-only crafting guidance missing' }
+          if ($page -notmatch 'var visible = _choices') { throw 'crafting search must filter the full catalog' }
+
+      - name: Runtime transition regression guard
+        shell: pwsh
+        run: |
+          $craftScreen = Get-Content source/FishingAutomation/dungeon/CraftingScreen.cs -Raw
+          $alterScreen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          $gatherData = Get-Content source/FishingAutomation/GatheringCliData.cs -Raw
+          $gatherAuto = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
+          if ($craftScreen -notmatch '_lastSingleQuestDeficit' -or $craftScreen -notmatch '직전 마지막 부족 재료 재고 검증 완료') { throw 'crafting final-material empty-row recovery missing' }
+          if ($alterScreen -notmatch 'TryFacilityWorkCountAsync' -or $alterScreen -notmatch 'CLI 작업 감소로 수령 확정') { throw 'altering receipt CLI evidence fallback missing' }
+          $receiptPolicy = Get-Content source/FishingAutomation/AlteringReceiptPolicy.cs -Raw
+          if ($receiptPolicy -notmatch '!travelDialogVisible' -or $receiptPolicy -notmatch '!autoTraveling') { throw 'altering receipt travel veto policy missing' }
+          if ($alterScreen -notmatch '완료품 수령 전 현장 가공대 확인' -or
+              $alterScreen -notmatch 'await TravelToFacilityAsync\(plan, ct\)' -or
+              $alterScreen -notmatch '설비로 이동 없음.*파란 수령 버튼.*Space') { throw 'altering receipt must prove on-site bench before Space' }
+          if ($alterScreen -notmatch 'IsFacilityTravelDialogAsync' -or
+              $alterScreen -notmatch 'AutoTraveling=true · 추가 Space 차단') { throw 'altering completion travel popup/autotravel Space veto missing' }
+          if ($gatherData -notmatch 'IsTransientLoadingRejection' -or $gatherData -notmatch '20회 연속 거절') { throw 'gathering transient CLI retry missing' }
+          if ($gatherAuto -notmatch '이동 중 · 재고 CLI 조회 생략') { throw 'gathering pure-travel inventory skip missing' }
+
+      - name: Crafting UI parity regression guard
+        shell: pwsh
+        run: |
+          $craft = Get-Content source/FishingAutomation/MainForm.CraftingPage.cs -Raw
+          if ($craft -match 'AccessibleName = "제작 분류 탭"' -or
+              $craft -match 'Button\("아이템"' -or
+              $craft -match 'Button\("음식"') { throw 'crafting category controls returned' }
+          if ($craft -notmatch 'Math\.Min\(ClientSize\.Width / 1212f, ClientSize\.Height / 858f\)') { throw 'crafting typography scale does not match production page' }
+          if ($craft -notmatch 'Typography\(header\.Controls\[0\], 36\)') { throw 'crafting title typography mismatch' }
+          if ($craft -notmatch 'BuildLabeledField\("품목 검색", _search, "crafting-field"\)') { throw 'crafting search field missing' }
+
+      - name: Production UI unification regression guard
+        shell: pwsh
+        run: |
+          $prod = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          $craft = Get-Content source/FishingAutomation/MainForm.CraftingPage.cs -Raw
+          if ($prod -notmatch 'internal readonly ListBox Items') { throw 'processing/gathering text list missing' }
+          if ($craft -notmatch 'internal readonly ListBox Items') { throw 'crafting text list missing' }
+          if ($prod -notmatch 'AccessibleName = "실행 상태"') { throw 'production right status column missing' }
+          if ($craft -notmatch 'AccessibleName = "제작 실행 상태"') { throw 'crafting right status column missing' }
+          if ($prod -match '_pageLog' -or $craft -match '_pageLog') { throw 'embedded production log UI must stay removed' }
+          if ($prod -notmatch '_search\.TextChanged \+= \(_, _\) => Filter\(\)') { throw 'shared production search missing' }
+          if ($prod -notmatch 'AccessibleName = "가공 시설 "') { throw 'existing altering facility tabs missing' }
+          if ($craft -match '제작 분류 탭|제작 아이템|제작 음식') { throw 'crafting item/food tabs returned' }
+          if ($craft -notmatch 'var visible = _choices') { throw 'crafting full-catalog search list missing' }
+          if ($prod -match 'summaries\.Controls\.Add' -or $craft -match 'summaryLayout\.Controls\.Add') { throw 'old owned-summary UI returned' }
+          $productionUi = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
+          if ($productionUi -notmatch 'class QuantityTextBox : TextBox') { throw 'plain quantity input missing' }
+          if ($prod -match 'ArrowlessNumericUpDown|UpDownButtons' -or $craft -match 'ArrowlessNumericUpDown|UpDownButtons') { throw 'native quantity spinner artifact path returned' }
+
+      - name: Inline production UI regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/production-ui/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Production UI regressions failed' }
+
+      - name: V3.1.16 fixed processing selection guards
+        shell: pwsh
+        run: |
+          $layout = Get-Content source/FishingAutomation/AlteringRecipeLayout.cs -Raw
+          $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          foreach($point in @(
+            '"물에 불린 쌀", 1\).*new\(340, 724\)',
+            '"목재\+", 1\).*new\(340, 412\)',
+            '"강철괴", 1\).*new\(461, 412\)',
+            '"가죽\+", 1\).*new\(340, 412\)',
+            '"옷감\+", 1\).*new\(461, 412\)'
+          )){
+            if($layout -notmatch $point){throw "fixed processing coordinate missing: $point"}
+          }
+          if($layout -notmatch '"최상급 목재", 2\).*new\(340, 756\)'){throw 'duplicate recipe ordinal fixed coordinate missing'}
+          if($layout -notmatch 'ProcessingSearchIconPoint = new\(39, 117\)' -or
+             $layout -notmatch 'ProcessingSearchInputPoint = new\(400, 862\)' -or
+             $layout -notmatch 'ProcessingSearchFirstResultPoint = new\(219, 412\)'){throw 'medicine search geometry missing'}
+          if($screen -notmatch 'TrySelectFixedRecipeAsync' -or
+             $screen -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'processing selection routes missing'}
+          if($screen -notmatch '카드명 OCR 없음'){throw 'fixed-card OCR bypass trace missing'}
+          if($screen -notmatch '제작과 동일한 검색 흐름'){throw 'medicine crafting-style search trace missing'}
+
+      - name: V3.1.16 facility-first travel guards
+        shell: pwsh
+        run: |
+          $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          $layout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
+          if($layout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
+             $layout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'facility move fixed geometry missing'}
+          if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
+             $screen -notmatch 'remoteConfirmed: true'){throw 'fixed free facility move route missing'}
+          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
+          $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
+          $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
+          if($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex){throw 'facility travel must happen before recipe selection'}
+          if([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 1){throw 'queue registration must allow at most one facility travel'}
+          if($queue -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)'){throw 'first facility move must use fixed free move route'}
+          if($queue -notmatch '품목 선택 전 설비로 이동'){throw 'facility-first move trace missing'}
+          if($queue -notmatch '설비 도착 · 이제 .* 선택'){throw 'post-arrival recipe selection trace missing'}
+          if([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 1){throw 'V3.1.8 queue flow must keep only the two-frame detail/action guard'}
+          if($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지'){throw 'duplicate post-select detail/OCR pass returned'}
+          if($queue -match '품목 상세 기준 설비 이동 필요 확정' -or
+             $queue -match '같은 품목을 다시 선택하고 바로 현장 가공'){throw 'V3.1.12 recipe-first backtrack flow returned'}
+          if($queue -notmatch 'V3\.1\.8 execution model for every processing facility'){throw 'V3.1.8 all-processing execution marker missing'}
+          $travel = [regex]::Match($screen, 'private async Task TravelToFacilityAsync[\s\S]*?(?=\r?\n    // Free navigation only)').Value
+          if($travel -notmatch 'facilityVisible' -or
+             $travel -notmatch '!moveVisible' -or
+             $travel -notmatch 'onsiteStableFrames'){throw 'direct on-site arrival visual gate missing'}
+          if($travel -match 'if \(sawDeparture &&\s*facilityVisible'){throw 'departure evidence must not gate direct facility arrival'}
+          if($travel -notmatch '가공창 유지 \+ 설비로 이동 버튼 없음 2프레임 · 직접 전환 허용'){throw 'direct facility arrival trace missing'}
+          if($screen -notmatch '설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음'){throw 'facility travel must keep Space disabled'}
+          if($layout -notmatch 'OnsiteCloseVisualArea = new\(744, 42, 44, 44\)'){throw 'on-site close-X geometry missing'}
+
+      - name: V3.1.16 manual receive cancel resume guards
+        shell: pwsh
+        run: |
+          $altering = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $tests = Get-Content tests/altering/Program.cs -Raw
+          if($altering -notmatch '이어하기 실상태 재산정' -or
+             $altering -notmatch 'initialExistingCount == 0' -or
+             $altering -notmatch 'gainedSinceStart' -or
+             $altering -notmatch 'completedEquivalent' -or
+             $altering -notmatch 'currentKnownWorks' -or
+             $altering -notmatch '취소/소멸'){throw 'manual receive/cancel resume reconciliation missing'}
+          if($tests -notmatch 'manual receive/cancel reconciliation completes and clears the checkpoint' -or
+             $tests -notmatch 'QueueCalls == 16' -or
+             $tests -notmatch 'Owned == 100'){throw 'manual receive/cancel regression test missing'}
+
+      - name: Publish Windows binaries
+        shell: pwsh
+        run: |
+          New-Item artifacts/app,artifacts/watchdog -ItemType Directory -Force | Out-Null
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/app
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+          if ((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.1.16.0') { throw 'EXE version mismatch' }
+      - name: Smoke test published app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path artifacts/app/FishingAutomation.exe).Path
+          $process=Start-Process $exe -WorkingDirectory (Resolve-Path artifacts/app).Path -WindowStyle Hidden -PassThru
+          Start-Sleep 5
+          $process.Refresh()
+          if($process.HasExited){throw "App exited early: $($process.ExitCode)"}
+          Stop-Process $process.Id -Force
+          Get-Process MacroWatchdog -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg = Join-Path $PWD 'artifacts/package'
+          $release = Join-Path $pkg 'release'
+          $tools = Join-Path $pkg 'tools'
+          $compat = Join-Path $pkg 'FishingAutomation'
+          New-Item $release,$tools,$compat -ItemType Directory -Force | Out-Null
+          Copy-Item artifacts/app/* $release -Recurse -Force
+          Copy-Item source/FishingAutomation/interception.dll (Join-Path $release 'interception.dll') -Force
+          Copy-Item artifacts/watchdog/MacroWatchdog.exe (Join-Path $release 'MacroWatchdog.exe') -Force
+          Copy-Item source/tools/ApplyUpdate.ps1 (Join-Path $tools 'ApplyUpdate.ps1') -Force
+          Copy-Item source/tools/RollbackPrevious.ps1 (Join-Path $tools 'RollbackPrevious.ps1') -Force
+          Copy-Item source/ROLLBACK_PREVIOUS.cmd (Join-Path $pkg 'ROLLBACK_PREVIOUS.cmd') -Force
+          Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
+          Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
+          'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
+          'MABI AUTO V3.1.16 Windows Lite - user ZIP UI, free gathering and read-only CLI diagnostics' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          $required = @(
+            'release/FishingAutomation.exe','release/MacroWatchdog.exe',
+            'release/abyss/config/targets.json','release/abyss/config/scenario.json',
+            'release/abyss/templates/loot_v173/loot_hallucination_stone.png',
+            'release/abyss/templates/loot_v173/loot_mor_corsair_tricorne.png',
+            'release/interception.dll','START.cmd','tools/ApplyUpdate.ps1',
+            'ROLLBACK_PREVIOUS.cmd','tools/RollbackPrevious.ps1')
+          foreach($r in $required){ if(-not (Test-Path (Join-Path $pkg $r))){ throw "missing $r" } }
+          git rev-parse HEAD | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          $winZip = Join-Path $PWD 'artifacts/MabiAuto_V3.1.16_Windows_Lite.zip'
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($pkg,$winZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
+          $sha = (Get-FileHash $winZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  MabiAuto_V3.1.16_Windows_Lite.zip" | Set-Content "$winZip.sha256" -Encoding ASCII
+          $srcStage = Join-Path $PWD 'artifacts/source-package'
+          New-Item $srcStage -ItemType Directory -Force | Out-Null
+          Copy-Item source (Join-Path $srcStage 'source') -Recurse -Force
+          Copy-Item changes (Join-Path $srcStage 'changes') -Recurse -Force
+          Copy-Item BUILD_VERIFY.ps1,README.txt,GITHUB_MIGRATION.md $srcStage -Force
+          Copy-Item tests (Join-Path $srcStage 'tests') -Recurse -Force
+          Copy-Item .github (Join-Path $srcStage '.github') -Recurse -Force
+          git rev-parse HEAD | Set-Content (Join-Path $srcStage 'BUILD_COMMIT.txt') -Encoding ASCII
+          $buildDirs = @(Get-ChildItem $srcStage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') })
+          foreach ($dir in ($buildDirs | Sort-Object { $_.FullName.Length } -Descending)) { if(Test-Path -LiteralPath $dir.FullName){ $resolved=(Resolve-Path -LiteralPath $dir.FullName).Path; if(-not $resolved.StartsWith($srcStage + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe cleanup path'}; Remove-Item -LiteralPath $resolved -Recurse -Force } }
+          $srcZip = Join-Path $PWD 'artifacts/MabiAuto_V3.1.16_Source.zip'
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($srcStage,$srcZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
+      - name: Upload verified release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: V3.1.16-release-packages
+          path: |
+            artifacts/MabiAuto_V3.1.16_Windows_Lite.zip
+            artifacts/MabiAuto_V3.1.16_Windows_Lite.zip.sha256
+            artifacts/MabiAuto_V3.1.16_Source.zip
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list failed'}
+          $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.16' }) | Select-Object -First 1
+
+          $expected=@('MabiAuto_V3.1.16_Windows_Lite.zip','MabiAuto_V3.1.16_Windows_Lite.zip.sha256','MabiAuto_V3.1.16_Source.zip')
+          git fetch origin release-v3116-resume-reconcile-code
+          if($LASTEXITCODE-ne0){throw 'Release code branch fetch failed'}
+          $releaseTarget=(git rev-parse origin/release-v3116-resume-reconcile-code).Trim()
+          if($releaseTarget -ne '3a0c5203a10be59f395cb4b9c55652da8f7263cc'){throw "Release code target mismatch: $releaseTarget"}
+
+          if(-not $r) {
+            $remoteTag = git ls-remote --tags origin refs/tags/V3.1.16
+            if($LASTEXITCODE-ne0){throw 'Tag lookup failed'}
+            if([string]::IsNullOrWhiteSpace(($remoteTag | Out-String).Trim())) {
+              git tag V3.1.16 $releaseTarget
+              if($LASTEXITCODE-ne0){throw 'Local tag creation failed'}
+              git push origin refs/tags/V3.1.16
+              if($LASTEXITCODE-ne0){throw 'Tag push failed'}
+            }
+
+            gh release create V3.1.16 `
+              artifacts/MabiAuto_V3.1.16_Windows_Lite.zip `
+              artifacts/MabiAuto_V3.1.16_Windows_Lite.zip.sha256 `
+              artifacts/MabiAuto_V3.1.16_Source.zip `
+              --draft --verify-tag --title 'Mabi Auto V3.1.16' `
+              --notes-file source/RELEASE_NOTES.md
+            if($LASTEXITCODE-ne0){throw 'Release upload failed'}
+
+            $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+            if($LASTEXITCODE-ne0){throw 'Release list after upload failed'}
+            $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.16' }) | Select-Object -First 1
+          }
+
+          if(-not $r){throw 'V3.1.16 release not found'}
+          $tagLine = (git ls-remote --tags origin refs/tags/V3.1.16 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($tagLine)){throw 'V3.1.16 tag verification failed'}
+          $tagSha = (($tagLine -split "\s+")[0]).Trim()
+          if($tagSha -ne $releaseTarget){throw "V3.1.16 tag mismatch: $tagSha != $releaseTarget"}
+          foreach($name in $expected){if($name -notin $r.assets.name){throw "Missing release asset: $name"}}
+
+          if($r.draft) {
+            gh release edit V3.1.16 --draft=false
+            if($LASTEXITCODE-ne0){throw 'V3.1.16 publish failed'}
+          }
+
+          $published = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list after publish failed'}
+          $published = @($published | Where-Object { $_.tag_name -eq 'V3.1.16' }) | Select-Object -First 1
+          if(-not $published -or $published.draft -or $published.prerelease){throw 'V3.1.16 is not public after publish step'}
+          foreach($name in $expected){if($name -notin $published.assets.name){throw "Published release asset missing: $name"}}
+
