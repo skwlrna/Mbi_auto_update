@@ -879,11 +879,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (!facilityVisible)
                 sawDeparture = true;
 
-            // After a real move click, do not accept an immediate visual false-negative
-            // as arrival. Require departure/travel/loading evidence first, then two
-            // stable facility frames with the teal move button gone.
-            if (sawDeparture &&
-                facilityVisible &&
+            // Restore the V3.1.8 arrival rule. Some facilities transition directly
+            // to the on-site state without exposing auto-travel/loading/departure.
+            // In that valid path the facility window stays visible and only the
+            // "설비로 이동" button disappears. Two stable frames are sufficient.
+            if (facilityVisible &&
                 !moveVisible &&
                 activity?.IsAutoTraveling != true)
             {
@@ -892,7 +892,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 {
                     Log?.Invoke(
                         $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
-                        "설비로 이동 버튼 화면 없음 2프레임 · OCR 없음");
+                        "가공창 유지 + 설비로 이동 버튼 없음 2프레임 · 직접 전환 허용");
                     return;
                 }
             }
