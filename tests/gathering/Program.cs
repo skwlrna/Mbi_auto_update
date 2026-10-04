@@ -97,24 +97,20 @@ Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false),
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true),
     "post-Space completion rejects active fishing");
 
-var staleRevivingIdle = new GatheringActivity(
+var revivingField = new GatheringActivity(
     false, true, false, false, false, false, false,
     "NotInDungeon", false, false, false, false, false, false,
     "Compass", false, "None", "Talk");
-Check(GatheringSafetyPolicy.IsClearlyStaleReviving(staleRevivingIdle) &&
-      GatheringSafetyPolicy.IsSafeField(staleRevivingIdle),
-    "stale Reviving=true with independent normal-field signals does not block gathering start");
-var suspiciousReviving = staleRevivingIdle with { HasTarget = true };
-Check(!GatheringSafetyPolicy.IsSafeField(suspiciousReviving),
-    "Reviving=true is still blocked when independent field signals are not clean");
-var staleRevivingGather = staleRevivingIdle with
-{
-    MainButtonState = "Stop",
-    LastRunningInteractionType = "Gathering",
-    HasTarget = true
-};
-Check(GatheringSafetyPolicy.IsSafeField(staleRevivingGather),
-    "stale Reviving=true does not abort an already-owned gathering action");
+Check(GatheringSafetyPolicy.IsSafeField(revivingField),
+    "Reviving=true is ignored by gathering safety policy");
+Check(GatheringSafetyPolicy.IsSafeField(revivingField with { HasTarget = true }),
+    "Reviving=true never becomes a gathering blocker because of target state");
+Check(!GatheringSafetyPolicy.IsSafeField(revivingField with { IsDead = true }),
+    "real death remains a hard gathering safety gate even though Reviving is ignored");
+var combatField = FakeWorld.Idle with { IsInCombat = true };
+Check(GatheringSafetyPolicy.IsSafeField(combatField) &&
+      GatheringSafetyPolicy.ShouldWaitForCombat(combatField),
+    "combat is a wait state rather than an unsafe gathering failure");
 
 Check(LifeSkillListLayout.TryFixedRowPoint("추수", "밀", out var harvestWheat) &&
       harvestWheat == new System.Drawing.Point(400, 488) &&
@@ -171,10 +167,20 @@ await new GatheringAutomation(silentComplete,silentComplete,(_,_)=>Task.Complete
 Check(silentComplete.Starts==1 && silentComplete.Owned==105 && !silentComplete.State.IsGathering && !silentComplete.State.IsAutoTraveling,
     "inventory target completion succeeds even when activity never exposes gathering/travel");
 
-var staleReviveStartWorld = new FakeWorld { State = staleRevivingIdle };
-await new GatheringAutomation(staleReviveStartWorld,staleReviveStartWorld,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
-Check(staleReviveStartWorld.Starts==1 && staleReviveStartWorld.Owned>=105,
-    "live V3.1.1 stale Reviving flag shape can start and complete safe gathering");
+var revivingStartWorld = new FakeWorld { State = revivingField };
+await new GatheringAutomation(revivingStartWorld,revivingStartWorld,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(revivingStartWorld.Starts==1 && revivingStartWorld.Owned>=105,
+    "Reviving flag does not block gathering start or completion");
+
+var combatBeforeStart = new FakeWorld { PreStartCombatPolls = 2 };
+await new GatheringAutomation(combatBeforeStart,combatBeforeStart,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(combatBeforeStart.Starts==1 && combatBeforeStart.Owned>=105,
+    "combat before gathering start waits without input and starts after combat ends");
+
+var combatDuringGather = new FakeWorld { PostStartCombatPolls = 2 };
+await new GatheringAutomation(combatDuringGather,combatDuringGather,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(combatDuringGather.Starts==1 && combatDuringGather.Stops==1 && combatDuringGather.Owned>=105,
+    "combat during gathering waits and resumes the same gathering flow afterward");
 
 var autoPlayingField = new FakeWorld { State = FakeWorld.Idle with { IsAutoPlaying = true } };
 await new GatheringAutomation(autoPlayingField,autoPlayingField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
@@ -185,7 +191,7 @@ var battlefieldFlagField = new FakeWorld { State = FakeWorld.Idle with { IsInBat
 await new GatheringAutomation(battlefieldFlagField,battlefieldFlagField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(battlefieldFlagField.Starts==1 && battlefieldFlagField.Owned>=105,
     "Battlefield flag alone is allowed when all real hazard flags are clear");
-foreach(var world in new[]{new FakeWorld {Tool=false},new FakeWorld{Full=true},new FakeWorld{State=FakeWorld.Idle with {IsInCombat=true}},new FakeWorld{State=FakeWorld.Idle with {IsDialoguePlaying=true}},new FakeWorld{State=FakeWorld.Idle with {IsAutoTraveling=true}}})
+foreach(var world in new[]{new FakeWorld {Tool=false},new FakeWorld{Full=true},new FakeWorld{State=FakeWorld.Idle with {IsDialoguePlaying=true}},new FakeWorld{State=FakeWorld.Idle with {IsAutoTraveling=true}}})
 {
     try{await new GatheringAutomation(world,world).RunAsync(plan,default);throw new Exception("unsafe start accepted");}
     catch(InvalidOperationException){Check(world.Starts==0,"unavailable tool/full bag/unsafe state cannot start");}
@@ -226,10 +232,25 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen
     internal static GatheringActivity Idle => new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
     internal GatheringActivity State=Idle;
     internal int Starts,Stops,Gain=2;
+    internal int PreStartCombatPolls,PostStartCombatPolls;
     internal long Owned=100;
     internal bool Tool=true,Full,IgnoreStop,TravelOnStart,SilentCompleteOnStart;
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]{new GatherableItem("철 광석",Tool)});}
-    public Task<GatheringActivity> ActivityAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(State);}
+    public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if(Starts==0 && PreStartCombatPolls>0)
+        {
+            PreStartCombatPolls--;
+            return Task.FromResult(State with { IsInCombat=true });
+        }
+        if(Starts>0 && PostStartCombatPolls>0)
+        {
+            PostStartCombatPolls--;
+            return Task.FromResult(State with { IsInCombat=true });
+        }
+        return Task.FromResult(State);
+    }
     public Task<(decimal Current,decimal Maximum)> WeightAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(((decimal)(Full?100:1),100m));}
     public Task<long> ItemCountAsync(string name,CancellationToken ct){ct.ThrowIfCancellationRequested();if(State.IsGathering)Owned+=Gain;return Task.FromResult(Owned);}
     public Task StartAsync(GatheringPlan plan,CancellationToken ct)
