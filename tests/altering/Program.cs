@@ -67,6 +67,10 @@ Check(AlteringRecipeLayout.TryGetFixedCenter(duplicateWood1, out var duplicateWo
 Check(!AlteringRecipeLayout.IsFixedFacility("약품 가공 시설") &&
       AlteringRecipeLayout.IsSafeMedicineSearchGeometry(),
     "medicine uses crafting-style search instead of fixed recipe cards");
+Check(AlteringFacilityLayout.IsSafeMoveGeometry() &&
+      AlteringFacilityLayout.MoveButtonPoint == new System.Drawing.Point(85, 235) &&
+      AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65),
+    "facility move uses user-confirmed fixed 800x1000 visual geometry");
 
 Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("새록 버섯 진액", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
       AlteringFacilityResolver.Resolve(new AlteringRecipe("튼튼 버섯 가루", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
