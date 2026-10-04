@@ -470,8 +470,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            long current = await _data.ItemCountAsync(displayName, ct);
             var activity = await _data.ActivityAsync(ct);
+            if (!GatheringSafetyPolicy.IsSafeField(activity))
+                throw new InvalidOperationException(
+                    "생활 스킬 100회 채집 중 사망·대화·던전 등 진행 불가 상태가 확인되어 정지합니다.");
+            activity = await WaitForCombatEndAsync(activity, $"{displayName} 100회 진행", ct);
+            long current = await _data.ItemCountAsync(displayName, ct);
             long gain = current - before;
 
             if (current < before)
@@ -489,10 +493,6 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
             bool active = IsOwnedLifeSkillActivity(activity);
             sawActive |= active;
-
-            if (!GatheringSafetyPolicy.IsSafeField(activity))
-                throw new InvalidOperationException(
-                    "생활 스킬 100회 채집 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
 
             if (current >= targetTotal)
             {
@@ -564,6 +564,29 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
            activity.IsFishing ||
            activity.MainButtonState == "Stop";
 
+    private async Task<GatheringActivity> WaitForCombatEndAsync(
+        GatheringActivity state,
+        string phase,
+        CancellationToken ct)
+    {
+        int polls = 0;
+        while (GatheringSafetyPolicy.ShouldWaitForCombat(state))
+        {
+            polls++;
+            if (polls == 1 || polls % 5 == 0)
+                Log?.Invoke($"[대량 채집] 전투 중 · 입력 없이 종료 대기 · {phase}");
+            await Task.Delay(1000, ct);
+            state = await _data.ActivityAsync(ct);
+            if (!GatheringSafetyPolicy.IsSafeField(state))
+                throw new InvalidOperationException(
+                    $"{phase} 전투 대기 중 사망·대화·던전 등 진행 불가 상태가 확인되었습니다.");
+        }
+
+        if (polls > 0)
+            Log?.Invoke($"[대량 채집] 전투 종료 · 기존 채집 흐름 계속 · {phase}");
+        return state;
+    }
+
     private async Task ConfirmLifeSkillStoppedAsync(
         string displayName,
         CancellationToken ct)
@@ -575,7 +598,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             var activity = await _data.ActivityAsync(ct);
             if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
-                    $"{displayName} 목표 수량 정지 확인 중 안전하지 않은 상태가 감지되었습니다.");
+                    $"{displayName} 목표 수량 정지 확인 중 사망·대화·던전 등 진행 불가 상태가 감지되었습니다.");
+            activity = await WaitForCombatEndAsync(activity, $"{displayName} 정지 확인", ct);
 
             if (LifeSkillStopPolicy.IsStoppedAfterSpace(activity))
             {
@@ -751,8 +775,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            long current = await _data.ItemCountAsync(displayName, ct);
             var activity = await _data.ActivityAsync(ct);
+            if (!GatheringSafetyPolicy.IsSafeField(activity))
+                throw new InvalidOperationException(
+                    "대량 채집 중 사망·대화·던전 등 진행 불가 상태가 확인되어 정지합니다.");
+            activity = await WaitForCombatEndAsync(activity, $"{displayName} 보조 경로", ct);
+            long current = await _data.ItemCountAsync(displayName, ct);
             long gain = current - before;
 
             if (current != last)
@@ -777,10 +805,6 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             {
                 stableIdle = 0;
             }
-
-            if (!GatheringSafetyPolicy.IsSafeField(activity))
-                throw new InvalidOperationException(
-                    "대량 채집 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
 
             await Task.Delay(1000, ct);
         }
