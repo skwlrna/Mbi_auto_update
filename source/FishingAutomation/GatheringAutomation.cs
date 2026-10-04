@@ -50,9 +50,10 @@ internal sealed class GatheringAutomation
         await CheckToolAsync(plan, ct);
         var initial = await _data.ActivityAsync(ct);
         Log?.Invoke("[자동 채집] 시작 전 상태 · " + DescribeActivity(initial));
-        if (initial.IsReviving && GatheringSafetyPolicy.IsClearlyStaleReviving(initial))
-            Log?.Invoke("[자동 채집] Reviving=true 잔상 제외 · 독립 필드 상태가 정상이라 시작 허용");
-        if (!GatheringSafetyPolicy.IsSafeField(initial) || initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling || initial.MainButtonState == "Stop")
+        if (!GatheringSafetyPolicy.IsSafeField(initial))
+            throw new InvalidOperationException("사망·대화·던전 등 채집을 시작할 수 없는 상태입니다. 상태: " + DescribeActivity(initial));
+        initial = await WaitForCombatEndAsync(initial, "시작 전", ct);
+        if (initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling || initial.MainButtonState == "Stop")
             throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동 채집을 시작하세요. 상태: " + DescribeActivity(initial));
         await CheckWeightAsync(ct);
         long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
@@ -66,6 +67,7 @@ internal sealed class GatheringAutomation
             await _screen.StartAsync(plan, ct);
             int idlePolls = 0;
             int travelPolls = 0;
+            int combatPolls = 0;
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
@@ -73,7 +75,23 @@ internal sealed class GatheringAutomation
                 if (activity.IsFishing)
                     throw new InvalidOperationException("선택 품목이 낚시로 연결되었습니다. 현재 자동 채집에서는 낚시를 지원하지 않아 정지합니다.");
                 if (!GatheringSafetyPolicy.IsSafeField(activity))
-                    throw new InvalidOperationException("전투·사망·대화 등 채집을 계속할 수 없는 상태가 확인되어 정지합니다. 상태: " + DescribeActivity(activity));
+                    throw new InvalidOperationException("사망·대화·던전 등 채집을 계속할 수 없는 상태가 확인되어 정지합니다. 상태: " + DescribeActivity(activity));
+
+                if (GatheringSafetyPolicy.ShouldWaitForCombat(activity))
+                {
+                    combatPolls++;
+                    idlePolls = 0;
+                    travelPolls = 0;
+                    if (combatPolls == 1 || combatPolls % 5 == 0)
+                        Log?.Invoke($"[자동 채집] 전투 중 · 입력 없이 종료 대기 · {plan.DisplayName}");
+                    await _delay(TimeSpan.FromSeconds(2), ct);
+                    continue;
+                }
+                if (combatPolls > 0)
+                {
+                    Log?.Invoke($"[자동 채집] 전투 종료 · 기존 채집 흐름 계속 · {plan.DisplayName}");
+                    combatPolls = 0;
+                }
 
                 travelPolls = activity.IsAutoTraveling ? travelPolls + 1 : 0;
                 if (travelPolls >= 900)
@@ -117,6 +135,7 @@ internal sealed class GatheringAutomation
                 try
                 {
                     var state = await _data.ActivityAsync(stopCts.Token);
+                    state = await WaitForCombatEndAsync(state, "정지 전", stopCts.Token);
                     if (state.IsGathering || state.IsFishing || (state.IsAutoTraveling && GatheringSafetyPolicy.IsSafeField(state)))
                     {
                         await _screen.StopAsync(stopCts.Token);
@@ -140,6 +159,33 @@ internal sealed class GatheringAutomation
         if(finalCount-baseline<Gained) throw new InvalidOperationException("정지 후 재료 수량이 감소해 완료 수량을 확정할 수 없습니다.");
         Gained=finalCount-baseline;
         Log?.Invoke($"[자동 채집] 완료 · {plan.DisplayName} +{Gained}개 · CLI 수량 검증 완료");
+    }
+
+    private async Task<GatheringActivity> WaitForCombatEndAsync(
+        GatheringActivity state,
+        string phase,
+        CancellationToken ct)
+    {
+        if (!GatheringSafetyPolicy.IsSafeField(state))
+            throw new InvalidOperationException(
+                $"사망·대화·던전 등 채집을 계속할 수 없는 상태입니다. 상태: {DescribeActivity(state)}");
+
+        int polls = 0;
+        while (GatheringSafetyPolicy.ShouldWaitForCombat(state))
+        {
+            polls++;
+            if (polls == 1 || polls % 5 == 0)
+                Log?.Invoke($"[자동 채집] 전투 중 · 입력 없이 종료 대기 · {phase}");
+            await _delay(TimeSpan.FromSeconds(2), ct);
+            state = await _data.ActivityAsync(ct);
+            if (!GatheringSafetyPolicy.IsSafeField(state))
+                throw new InvalidOperationException(
+                    $"전투 대기 중 사망·대화·던전 등 진행 불가 상태가 확인되었습니다. 상태: {DescribeActivity(state)}");
+        }
+
+        if (polls > 0)
+            Log?.Invoke($"[자동 채집] 전투 종료 · 기존 채집 흐름 계속 · {phase}");
+        return state;
     }
 
     private static string DescribeActivity(GatheringActivity a)
