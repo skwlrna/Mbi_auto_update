@@ -97,6 +97,25 @@ Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false),
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true),
     "post-Space completion rejects active fishing");
 
+var staleRevivingIdle = new GatheringActivity(
+    false, true, false, false, false, false, false,
+    "NotInDungeon", false, false, false, false, false, false,
+    "Compass", false, "None", "Talk");
+Check(GatheringSafetyPolicy.IsClearlyStaleReviving(staleRevivingIdle) &&
+      GatheringSafetyPolicy.IsSafeField(staleRevivingIdle),
+    "stale Reviving=true with independent normal-field signals does not block gathering start");
+var suspiciousReviving = staleRevivingIdle with { HasTarget = true };
+Check(!GatheringSafetyPolicy.IsSafeField(suspiciousReviving),
+    "Reviving=true is still blocked when independent field signals are not clean");
+var staleRevivingGather = staleRevivingIdle with
+{
+    MainButtonState = "Stop",
+    LastRunningInteractionType = "Gathering",
+    HasTarget = true
+};
+Check(GatheringSafetyPolicy.IsSafeField(staleRevivingGather),
+    "stale Reviving=true does not abort an already-owned gathering action");
+
 Check(LifeSkillListLayout.TryFixedRowPoint("추수", "밀", out var harvestWheat) &&
       harvestWheat == new System.Drawing.Point(400, 488) &&
       LifeSkillListLayout.TryFixedRowPoint("추수", "쌀", out var harvestRice) &&
@@ -151,6 +170,11 @@ var silentComplete=new FakeWorld{SilentCompleteOnStart=true};
 await new GatheringAutomation(silentComplete,silentComplete,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(silentComplete.Starts==1 && silentComplete.Owned==105 && !silentComplete.State.IsGathering && !silentComplete.State.IsAutoTraveling,
     "inventory target completion succeeds even when activity never exposes gathering/travel");
+
+var staleReviveStartWorld = new FakeWorld { State = staleRevivingIdle };
+await new GatheringAutomation(staleReviveStartWorld,staleReviveStartWorld,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(staleReviveStartWorld.Starts==1 && staleReviveStartWorld.Owned>=105,
+    "live V3.1.1 stale Reviving flag shape can start and complete safe gathering");
 
 var autoPlayingField = new FakeWorld { State = FakeWorld.Idle with { IsAutoPlaying = true } };
 await new GatheringAutomation(autoPlayingField,autoPlayingField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);

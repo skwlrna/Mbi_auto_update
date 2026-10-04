@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.1"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.2"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.1</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.2</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -371,7 +371,17 @@ jobs:
           if ($queries -match 'IsSafeField[\s\S]{0,300}!IsInBattlefield') { throw 'Battlefield flag must not be an unsafe-field gate' }
           $automation = Get-Content source/FishingAutomation/GatheringAutomation.cs -Raw
           if ($automation -notmatch 'AutoPlaying=' -or $automation -notmatch 'Battlefield=') { throw 'gathering activity diagnostics missing' }
+          $safetyPolicy = Get-Content source/FishingAutomation/GatheringSafetyPolicy.cs -Raw
+          if ($automation -notmatch 'GatheringSafetyPolicy\.IsSafeField' -or
+              $automation -notmatch 'Reviving=true 잔상 제외') { throw 'stale Reviving live-log policy is not wired to gathering start' }
+          if ($safetyPolicy -notmatch 'IsClearlyStaleReviving' -or
+              $safetyPolicy -notmatch 'MainButtonState == "Compass"' -or
+              $safetyPolicy -notmatch 'LastRunningInteractionType == "Gathering"') { throw 'stale Reviving policy evidence gates missing' }
+          foreach($hardGate in @('IsDead','IsInCombat','IsDialoguePlaying','IsWaitingForSelection','NotInDungeon','IsPlayingMiniGame')){
+            if($safetyPolicy -notmatch $hardGate){throw "gathering hard safety gate missing from stale-revive policy: $hardGate"}
+          }
           $bulkScreen = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          if ($bulkScreen -notmatch 'GatheringSafetyPolicy\.IsSafeField') { throw 'bulk life-skill loop does not use stale-revive aware safety policy' }
           $stopPolicy = Get-Content source/FishingAutomation/LifeSkillStopPolicy.cs -Raw
           $postStop = [regex]::Match($bulkScreen, 'private async Task ConfirmLifeSkillStoppedAsync[\s\S]*?(?=\r?\n    private async Task StartInventoryHundredQuestAsync)').Value
           if ([string]::IsNullOrWhiteSpace($postStop)) { throw 'post-Space life-skill stop confirmation missing' }
@@ -415,9 +425,20 @@ jobs:
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
           $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
+          $multiAlter = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
+          $multiAlterMain = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
           $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
 
           if($crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
+          if($multiAlter -notmatch 'Func<AlteringPlan, CancellationToken, Task>' -or
+             $multiAlter -notmatch 'await runSingle\(plan, ct\)') { throw 'multi-altering coordinator must delegate each job to the single-plan runner' }
+          if($multiAlter -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'multi-altering coordinator must never own direct input' }
+          if($multiAlterMain -notmatch 'StartAlteringAsync\(plan, batchChild: true\)' -or
+             $multiAlterMain -notmatch '다음 품목은 시작하지 않음') { throw 'multi-altering main flow does not reuse single altering or stop between jobs' }
+          if($productionPage -notmatch '다중가공 작업 목록' -or
+             $productionPage -notmatch '다중가공 .*종 시작' -or
+             $productionPage -notmatch 'AddCurrentAlteringQueue') { throw 'visible multi-altering queue UI missing' }
           if($resolver -notmatch 'BuildMultiGatheringPlanAsync' -or
              $resolver -notmatch 'new MultiGatheringCoordinator' -or
              $resolver -notmatch '다중 채집 전 가공 UI 종료') { throw 'recursive multi-gather planning/wiring missing' }

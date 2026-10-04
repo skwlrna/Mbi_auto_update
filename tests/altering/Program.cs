@@ -274,6 +274,41 @@ await skipCoordinator.RunAsync(
 Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
 
+var multiAltering = new MultiAlteringCoordinator();
+var multiAlteringRan = new List<string>();
+await multiAltering.RunAsync(
+    new[]
+    {
+        new AlteringPlan("금속 가공 시설", "철괴(철 광석)", 10, 3, false),
+        new AlteringPlan("목재 가공 시설", "목재", 10, 3, false),
+        new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 10, 5, false)
+    },
+    (job, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        multiAlteringRan.Add(job.DisplayName);
+        return Task.CompletedTask;
+    },
+    default);
+Check(multiAlteringRan.SequenceEqual(new[] { "철괴(철 광석)", "목재", "물에 불린 쌀" }),
+    "multi-altering preserves the user queue order and delegates every job to the single-plan runner");
+try
+{
+    await multiAltering.RunAsync(
+        new[]
+        {
+            new AlteringPlan("목재 가공 시설", "목재", 10, 3, false),
+            new AlteringPlan("목재 가공 시설", "목재", 20, 3, false)
+        },
+        (_, _) => Task.CompletedTask,
+        default);
+    throw new Exception("duplicate multi-altering plan accepted");
+}
+catch (InvalidOperationException)
+{
+    Check(true, "multi-altering rejects duplicate recipe entries instead of producing twice accidentally");
+}
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }

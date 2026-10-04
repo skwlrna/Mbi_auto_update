@@ -490,7 +490,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             bool active = IsOwnedLifeSkillActivity(activity);
             sawActive |= active;
 
-            if (!activity.IsSafeField)
+            if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
                     "생활 스킬 100회 채집 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
 
@@ -573,7 +573,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         {
             ct.ThrowIfCancellationRequested();
             var activity = await _data.ActivityAsync(ct);
-            if (!activity.IsSafeField)
+            if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
                     $"{displayName} 목표 수량 정지 확인 중 안전하지 않은 상태가 감지되었습니다.");
 
@@ -778,7 +778,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 stableIdle = 0;
             }
 
-            if (!activity.IsSafeField)
+            if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
                     "대량 채집 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
 

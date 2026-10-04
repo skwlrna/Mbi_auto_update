@@ -6,13 +6,25 @@ public sealed partial class MainForm
 {
     private string _alteringDisplay = "시설·품목·수량 선택";
 
-    private async Task StartAlteringAsync()
+    private async Task StartAlteringAsync(
+        AlteringPlan? requestedPlan = null,
+        bool batchChild = false)
     {
+        if (requestedPlan is null && !batchChild)
+        {
+            var queued = _alteringPage.QueuedAlteringPlans;
+            if (queued.Count > 0)
+            {
+                await StartMultiAlteringAsync(queued);
+                return;
+            }
+        }
+
         _starting = true;
         _cancelStart = false;
         try
         {
-            var plan = SelectedAlteringPlan();
+            var plan = requestedPlan ?? SelectedAlteringPlan();
             plan.Validate();
 
             string[] requiredCommands =
@@ -233,13 +245,27 @@ public sealed partial class MainForm
                         Ui(() =>
                         {
                             _dungeonStoppedAt = DateTime.Now;
-                            _activeMode = null;
-                            _mode.Enabled = true;
-                            UpdateAbyssSelectorVisibility();
-                            RefreshModeStatus();
-                            if (_runError is not null)
-                                SetStatus("오류: " + _runError, Color.Salmon);
-                            UpdateStats();
+                            if (batchChild && _multiAlteringRunning)
+                            {
+                                // The batch coordinator owns the outer mode lifetime.
+                                // Keep controls locked between jobs so a completed child
+                                // cannot briefly expose another start/mode switch.
+                                _activeMode = "가공";
+                                _mode.Enabled = false;
+                                if (_runError is not null)
+                                    SetStatus("오류: " + _runError, Color.Salmon);
+                                UpdateStats();
+                            }
+                            else
+                            {
+                                _activeMode = null;
+                                _mode.Enabled = true;
+                                UpdateAbyssSelectorVisibility();
+                                RefreshModeStatus();
+                                if (_runError is not null)
+                                    SetStatus("오류: " + _runError, Color.Salmon);
+                                UpdateStats();
+                            }
                         });
                     }
                 }
@@ -247,6 +273,7 @@ public sealed partial class MainForm
         }
         catch (Exception ex)
         {
+            _runError = ex.Message;
             _log.Write("[자동 가공] 시작 실패: " + ex.Message);
             SetStatus("가공 시작 실패", Color.Salmon);
             _ = SendRuntimeAlertAsync("자동 가공 시작 실패", ex.Message, true);
