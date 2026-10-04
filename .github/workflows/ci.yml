@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.4"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.5"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.4</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.5</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -612,10 +612,18 @@ jobs:
              $lifeSkillStart -match 'ClickExactAsync\(\s*source\.Category'){throw 'life-skill/profile category navigation must use fixed coordinates, not OCR clicks'}
           if($lifeSkillStart -notmatch '_ui\.ClickFresh\(ProfileLifeSkillPoint, ct\)' -or
              $lifeSkillStart -notmatch '_ui\.ClickFresh\(categoryPoint, ct\)'){throw 'fixed life-skill/category clicks missing'}
-          if($bulkScreen -notmatch 'LifeSkillNearestLocationPoint = new\(300, 534\)' -or
-             $lifeSkillStart -notmatch '_ui\.ClickFresh\(LifeSkillNearestLocationPoint, ct\)'){throw 'fixed nearest-location life-skill click missing'}
-          if($lifeSkillStart -match 'ClickExactAsync\(\s*"가까운 위치 찾기"' -or
-             $lifeSkillStart -match 'FindUniqueAsync\([\s\S]{0,300}"100회 채집"'){throw 'life-skill start must not OCR-click nearest location or search for a visible 100회 control'}
+          if($bulkScreen -match 'LifeSkillNearestLocationPoint = new\(300, 534\)'){throw 'obsolete fixed nearest-location coordinate returned'}
+          if($bulkScreen -notmatch 'LifeSkillNearestQuestionTemplate' -or
+             $bulkScreen -notmatch 'life_skill_nearest_question\.png' -or
+             $lifeSkillStart -notmatch 'ClickOffsetFromStableTemplateAsync' -or
+             $lifeSkillStart -notmatch 'LifeSkillNearestClickOffsetX'){throw 'question-mark anchored nearest-location click missing'}
+          if(-not (Test-Path source/FishingAutomation/dungeon/templates/life_skill_nearest_question.png)){throw 'nearest-location question-mark template missing'}
+          if($lifeSkillStart -match 'ClickStableExactAsync\(\s*"가까운 위치 찾기"' -or
+             $lifeSkillStart -match 'ClickExactAsync\(\s*"가까운 위치 찾기"' -or
+             $lifeSkillStart -match 'FindUniqueAsync\([\s\S]{0,300}"가까운 위치 찾기"' -or
+             $lifeSkillStart -match 'FindUniqueAsync\([\s\S]{0,300}"100회 채집"'){throw 'life-skill nearest-location/100회 text must not hard-gate with OCR'}
+          if($runtime -notmatch 'ClickOffsetFromStableTemplateAsync' -or
+             $runtime -notmatch 'FindTemplate\('){throw 'stable production template-anchor input helper missing'}
           if($lifeSkillStart -match 'detailTarget' -or
              $lifeSkillStart -match '생활 스킬 상세 팝업을 확인하지 못해'){throw 'life-skill target name must not be OCR-reconfirmed after row selection'}
           if($lifeSkillStart -notmatch '상세 품목명 OCR 재확인 생략'){throw 'life-skill post-click OCR removal trace missing'}
