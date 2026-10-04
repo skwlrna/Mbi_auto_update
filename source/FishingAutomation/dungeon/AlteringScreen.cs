@@ -430,7 +430,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 돋보기 · 고정좌표 " +
-            $"({ProcessingSearchIconPoint.X},{ProcessingSearchIconPoint.Y})");
+            $"({AlteringRecipeLayout.ProcessingSearchIconPoint.X},{AlteringRecipeLayout.ProcessingSearchIconPoint.Y})");
         await Task.Delay(450, ct);
 
         using var searchDialog = Capture(ct);
@@ -461,7 +461,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             AlteringRecipeLayout.ProcessingSearchResultArea);
         var exact = await _ui.Ocr.FindAlteringLabelsAsync(
             resultFrame,
-            ProcessingSearchResultArea,
+            AlteringRecipeLayout.ProcessingSearchResultArea,
             plan.DisplayName,
             ct,
             cardCandidate: true);
@@ -482,7 +482,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 첫 결과 선택 · 고정좌표 " +
-            $"({ProcessingSearchFirstResultPoint.X},{ProcessingSearchFirstResultPoint.Y})");
+            $"({AlteringRecipeLayout.ProcessingSearchFirstResultPoint.X},{AlteringRecipeLayout.ProcessingSearchFirstResultPoint.Y})");
         await Task.Delay(400, ct);
 
         using var popup = Capture(ct);
