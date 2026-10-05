@@ -504,11 +504,13 @@ jobs:
           $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
 
           if($crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
-          if($multiAlter -notmatch 'Func<AlteringPlan, CancellationToken, Task>' -or
-             $multiAlter -notmatch 'await runSingle\(plan, ct\)') { throw 'multi-altering coordinator must delegate each job to the single-plan runner' }
+          if($multiAlter -notmatch 'Func<AlteringPlan, CancellationToken, Task<bool>>' -or
+             $multiAlter -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
+             $multiAlter -notmatch '배치 전체 완료 전 이동 없음') { throw 'multi-altering must use whole-facility batch scheduling' }
           if($multiAlter -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'multi-altering coordinator must never own direct input' }
-          if($multiAlterMain -notmatch 'StartAlteringAsync\(plan, batchChild: true\)' -or
-             $multiAlterMain -notmatch '다음 품목은 시작하지 않음') { throw 'multi-altering main flow does not reuse single altering or stop between jobs' }
+          if($multiAlterMain -notmatch 'RunBatchAsync\(plan, coordinatorToken\)' -or
+             $multiAlterMain -notmatch '시설별 최대 7칸 배치 병렬 운용' -or
+             $multiAlterMain -match 'StartAlteringAsync\(plan, batchChild: true\)') { throw 'multi-altering runtime must use batch-yield engine instead of full sequential child runs' }
           if($productionPage -notmatch '다중가공 작업 목록' -or
              $productionPage -notmatch '다중가공 .*종 시작' -or
              $productionPage -notmatch 'AddCurrentAlteringQueue') { throw 'visible multi-altering queue UI missing' }
