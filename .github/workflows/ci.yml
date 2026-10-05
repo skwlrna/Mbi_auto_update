@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.19"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.20"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.19</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.20</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -218,8 +218,16 @@ jobs:
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
           $fixedSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectFixedRecipeAsync[\s\S]*?(?=\r?\n    private async Task<bool> TrySelectMedicineRecipeBySearchAsync)').Value
           $medicineSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectMedicineRecipeBySearchAsync[\s\S]*?(?=\r?\n    private async Task SelectRecipeAsync)').Value
-          if($fixedSelect -match 'HasFacilityMoveButtonVisual' -or $fixedSelect -match '원격 .*고정좌표 입력을 차단'){throw 'fixed recipe selection must be allowed before facility travel'}
-          if($medicineSelect -match 'HasFacilityMoveButtonVisual' -or $medicineSelect -match '원격 약품 가공 화면에서는 검색 입력을 시작하지 않습니다'){throw 'medicine search must be allowed before facility travel'}
+          if($fixedSelect -notmatch 'HasFacilityMoveButtonVisual' -or
+             $fixedSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정'){throw 'fixed recipe remote-screen veto missing'}
+          if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
+             $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
+             $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
+          if($screen -notmatch 'strongMoveShape' -or
+             $screen -notmatch 'teal \* 100 >= sampled \* 10' -or
+             $screen -notmatch 'width >= 96' -or
+             $screen -notmatch 'height >= 22' -or
+             $screen -notmatch 'return !HasOnsiteCloseButtonVisual\(frame\)'){throw 'strong remote move-button override missing'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
