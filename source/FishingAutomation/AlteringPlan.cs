@@ -86,6 +86,12 @@ internal interface IAlteringSupplyResolver
     Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct);
 }
 
+internal enum AlteringRunResult
+{
+    Completed,
+    BatchQueued
+}
+
 internal sealed class AlteringAutomation
 {
     private readonly IAlteringData _data;
@@ -122,6 +128,15 @@ internal sealed class AlteringAutomation
     }
 
     internal async Task RunAsync(AlteringPlan plan, CancellationToken ct)
+        => _ = await RunCoreAsync(plan, yieldAtBatchBoundary: false, ct);
+
+    internal Task<AlteringRunResult> RunBatchAsync(AlteringPlan plan, CancellationToken ct)
+        => RunCoreAsync(plan, yieldAtBatchBoundary: true, ct);
+
+    private async Task<AlteringRunResult> RunCoreAsync(
+        AlteringPlan plan,
+        bool yieldAtBatchBoundary,
+        CancellationToken ct)
     {
         plan.Validate();
         QueuedWorks = 0;
@@ -343,7 +358,7 @@ internal sealed class AlteringAutomation
                 Progress?.Invoke(new(
                     plan.TargetQuantity, plan.TargetQuantity, QueuedWorks, plan.RequiredWorks,
                     0, null, "완료"));
-                return;
+                return AlteringRunResult.Completed;
             }
 
             int facilityCount = works.Count(x => x.FacilityName == plan.FacilityName);
@@ -451,8 +466,18 @@ internal sealed class AlteringAutomation
                 }
 
                 if (queuedThisBatch > 0)
+                {
                     Log?.Invoke(
                         $"[자동 가공] 일괄 등록 완료 · {queuedThisBatch}작업 / {queuedThisBatch * plan.ProducedPerWork}개 생산 예약");
+
+                    if (yieldAtBatchBoundary)
+                    {
+                        SaveStage("다중가공 배치 대기");
+                        Log?.Invoke(
+                            $"[자동 가공] 다중가공 배치 양보 · {plan.DisplayName} · 시설 대기열을 채운 뒤 다른 시설로 전환");
+                        return AlteringRunResult.BatchQueued;
+                    }
+                }
 
                 continue;
             }
@@ -465,6 +490,15 @@ internal sealed class AlteringAutomation
                 .Select(x => x.RemainingSeconds).DefaultIfEmpty(10).Min();
             SaveStage("완료 대기");
             Log?.Invoke($"[자동 가공] 완료 대기 · 등록 {QueuedWorks}/{plan.RequiredWorks} · 남은 시간 {remaining}초");
+
+            if (yieldAtBatchBoundary)
+            {
+                SaveStage("다중가공 배치 대기");
+                Log?.Invoke(
+                    $"[자동 가공] 다중가공 배치 양보 · {plan.DisplayName} · 현재 시설 배치 전체 완료 전 재방문 없음");
+                return AlteringRunResult.BatchQueued;
+            }
+
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
         }
     }
