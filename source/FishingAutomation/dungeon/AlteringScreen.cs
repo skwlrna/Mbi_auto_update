@@ -143,11 +143,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
     private static bool HasFacilityMoveButtonVisual(Bitmap frame)
     {
-        // The on-site X is authoritative. V3.1.9 live evidence showed that the
-        // dark slot/background could satisfy the permissive teal gate for one frame.
-        // Never let that color false-positive override a visible on-site X.
-        if (HasOnsiteCloseButtonVisual(frame))
-            return false;
+        // Detect the broad remote "설비로 이동" pill first. The on-site close-X
+        // detector shares the top-right area with currency digits, so a false X
+        // must never override a strong, wide teal move-button signal.
         var roi = Rectangle.Intersect(
             AlteringFacilityLayout.MoveButtonVisualArea,
             new Rectangle(Point.Empty, frame.Size));
@@ -184,7 +182,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
         int width = maxX - minX;
         int height = maxY - minY;
-        return width >= 90 && height >= 18;
+        bool moveShape = width >= 90 && height >= 18;
+        if (!moveShape)
+            return false;
+
+        // A real remote move button occupies a large continuous part of this ROI.
+        // Let that strong geometry win even if the close-X detector is confused by
+        // the white currency digits that sit in its small top-right ROI.
+        bool strongMoveShape =
+            teal * 100 >= sampled * 10 &&
+            width >= 96 &&
+            height >= 22;
+        if (strongMoveShape)
+            return true;
+
+        // Keep the close-X veto only for marginal teal candidates. This preserves
+        // the original protection against dark on-site slot/background false hits.
+        return !HasOnsiteCloseButtonVisual(frame);
     }
 
     private async Task<bool> WaitForCollectPromptAsync(
@@ -473,6 +487,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         {
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, $"{plan.ScreenTitle} 고정좌표 입력 전 시설 화면을 확인하지 못했습니다.");
+
+            if (HasFacilityMoveButtonVisual(frame))
+                Fail(frame,
+                    $"{plan.ScreenTitle} 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. " +
+                    "품목 고정좌표 입력 없이 정지합니다.");
         }
 
         Log?.Invoke(
@@ -505,6 +524,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         using var beforeSearch = Capture(ct);
         if (await FindFacilityHeaderAsync(beforeSearch, plan.ScreenTitle, ct) is null)
             Fail(beforeSearch, "약품 검색 전 약품 가공 화면을 확인하지 못했습니다.");
+        if (HasFacilityMoveButtonVisual(beforeSearch))
+            Fail(beforeSearch,
+                "약품 가공 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. 검색 입력을 차단합니다.");
 
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
