@@ -70,10 +70,10 @@ public sealed partial class MainForm
             WindowTools.EnsureClientSizeAndTopRight(windows[0].Handle, 800, 1000);
             await Task.Delay(500, token);
 
-            using var visualAltering = new AlteringScreen(
+            var visualAltering = new AlteringScreen(
                 windows[0].Handle, settings,
                 Path.Combine(AppContext.BaseDirectory, "debug", "altering"), _cli);
-            using var visualGathering = new InventoryBulkGatheringScreen(
+            var visualGathering = new InventoryBulkGatheringScreen(
                 windows[0].Handle, settings,
                 Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, gatheringData);
             using var screen = new ZeroWingAlteringScreen(visualAltering, _cli, identity);
