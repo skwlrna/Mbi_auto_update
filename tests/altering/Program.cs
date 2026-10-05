@@ -390,23 +390,78 @@ Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
 
 var multiAltering = new MultiAlteringCoordinator();
-var multiAlteringRan = new List<string>();
+var multiPlans = new[]
+{
+    new AlteringPlan("금속 가공 시설", "철괴(철 광석)", 21, 3, false),
+    new AlteringPlan("목재 가공 시설", "목재", 21, 3, false),
+    new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 35, 5, false)
+};
+var multiWorks = new List<AlteringWork>();
+var multiBatchRuns = new List<string>();
+int multiDelayCalls = 0;
+int runsAtFirstPartialCompletion = -1;
+
 await multiAltering.RunAsync(
-    new[]
-    {
-        new AlteringPlan("금속 가공 시설", "철괴(철 광석)", 10, 3, false),
-        new AlteringPlan("목재 가공 시설", "목재", 10, 3, false),
-        new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 10, 5, false)
-    },
+    multiPlans,
     (job, token) =>
     {
         token.ThrowIfCancellationRequested();
-        multiAlteringRan.Add(job.DisplayName);
+        multiBatchRuns.Add(job.DisplayName);
+        var lane = multiWorks.Where(x => x.FacilityName == job.FacilityName).ToArray();
+        if (lane.Length > 0 && lane.All(x => x.IsCompleted))
+        {
+            multiWorks.RemoveAll(x => x.FacilityName == job.FacilityName);
+            return Task.FromResult(true);
+        }
+
+        if (lane.Length != 0)
+            throw new Exception("multi-altering revisited a facility before its whole batch completed");
+
+        for (int i = 0; i < 7; i++)
+            multiWorks.Add(new(job.OutputName, job.FacilityName, i == 0 ? "InProgress" : "NotStarted", false, 10 + i));
+        return Task.FromResult(false);
+    },
+    token =>
+    {
+        token.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<AlteringWork>>(multiWorks.ToArray());
+    },
+    (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        multiDelayCalls++;
+        if (multiDelayCalls == 1)
+        {
+            int first = multiWorks.FindIndex(x => x.FacilityName == "금속 가공 시설");
+            multiWorks[first] = multiWorks[first] with
+            {
+                State = "Completed",
+                IsCompleted = true,
+                RemainingSeconds = 0
+            };
+            runsAtFirstPartialCompletion = multiBatchRuns.Count;
+        }
+        else
+        {
+            for (int i = 0; i < multiWorks.Count; i++)
+                multiWorks[i] = multiWorks[i] with
+                {
+                    State = "Completed",
+                    IsCompleted = true,
+                    RemainingSeconds = 0
+                };
+        }
         return Task.CompletedTask;
     },
     default);
-Check(multiAlteringRan.SequenceEqual(new[] { "철괴(철 광석)", "목재", "물에 불린 쌀" }),
-    "multi-altering preserves the user queue order and delegates every job to the single-plan runner");
+
+Check(multiBatchRuns.Take(3).SequenceEqual(
+        new[] { "철괴(철 광석)", "목재", "물에 불린 쌀" }),
+    "multi-altering seeds every independent facility before waiting");
+Check(runsAtFirstPartialCompletion == 3 &&
+      multiBatchRuns.Count == 6,
+    "multi-altering does not revisit/refill a facility for a single completed slot and revisits only whole completed batches");
+
 try
 {
     await multiAltering.RunAsync(
@@ -415,6 +470,8 @@ try
             new AlteringPlan("목재 가공 시설", "목재", 10, 3, false),
             new AlteringPlan("목재 가공 시설", "목재", 20, 3, false)
         },
+        (_, _) => Task.FromResult(false),
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
         (_, _) => Task.CompletedTask,
         default);
     throw new Exception("duplicate multi-altering plan accepted");
