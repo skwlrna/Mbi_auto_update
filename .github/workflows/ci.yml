@@ -223,22 +223,19 @@ jobs:
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
-          if($screen -notmatch 'strongMoveShape' -or
-             $screen -notmatch 'teal \* 100 >= sampled \* 10' -or
-             $screen -notmatch 'width >= 96' -or
-             $screen -notmatch 'height >= 22' -or
-             $screen -notmatch 'return !HasOnsiteCloseButtonVisual\(frame\)'){throw 'strong remote move-button override missing'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
-          if($facilityLayout -notmatch 'OnsiteCloseVisualArea = new\(744, 42, 44, 44\)'){throw 'on-site close-X geometry missing'}
+          if($facilityLayout -notmatch 'OnsiteCloseVisualArea = new\(744, 42, 44, 44\)' -or
+             $facilityLayout -notmatch 'ShouldAcceptMoveButton'){throw 'on-site close-X move veto policy missing'}
+          if($screen -match 'strongMoveShape'){throw 'unsafe strong move-button override returned'}
           if($screen -notmatch 'HasOnsiteCloseButtonVisual' -or
-             $screen -notmatch 'return !HasOnsiteCloseButtonVisual\(frame\)' -or
-             $screen -notmatch 'bright < 28' -or
-             $screen -notmatch 'width >= 14 && height >= 14'){throw 'on-site close-X marginal-veto detector missing'}
+             $screen -notmatch 'centerBright >= 4' -or
+             $screen -notmatch 'diagonal >= 18' -or
+             $screen -notmatch 'q1 >= 3 && q2 >= 3 && q3 >= 3 && q4 >= 3' -or
+             $screen -notmatch 'ShouldAcceptMoveButton'){throw 'on-site close-X/currency-digit discriminator missing'}
           if($screen -notmatch '우측 상단 X 우선 판정 · 설비 이동 오탐 차단'){throw 'on-site close-X reuse diagnostic missing'}
           if($screen -notmatch 'HasFacilityMoveButtonVisual' -or
-             $screen -notmatch 'remoteConfirmed: true' -or
              $screen -notmatch '품목 선택 전 설비로 이동' -or
              $screen -notmatch '설비 도착 · 이제'){throw 'facility-first processing route missing'}
           if($screen -match 'FindAsync\([^\r\n]*FacilityMoveButton[^\r\n]*"설비로 이동"'){throw 'small facility move label OCR returned to processing flow'}
@@ -252,7 +249,8 @@ jobs:
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'facility travel must happen before recipe selection' }
           if ([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 1) { throw 'queue registration must allow at most one facility travel' }
-          if ($queue -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)') { throw 'first facility move must use the fixed free move route' }
+          if ($queue -notmatch 'TravelToFacilityAsync\(plan, ct\)') { throw 'facility travel must re-check remote vs on-site immediately before input' }
+          if ($queue -match 'remoteConfirmed:\s*true') { throw 'queue registration must not force a second facility travel from an on-site screen' }
           if ($queue -notmatch '품목 선택 전 설비로 이동') { throw 'facility-first move trace missing' }
           if ($queue -notmatch '설비 도착 · 이제 .* 선택') { throw 'post-arrival recipe selection trace missing' }
           if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 1) { throw 'V3.1.8 queue flow must keep only the two-frame detail/action guard' }
