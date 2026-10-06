@@ -8,6 +8,7 @@
     <Compile Include="../../source/FishingAutomation/AlteringDetailPolicy.cs" Link="AlteringDetailPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringReceiptPolicy.cs" Link="AlteringReceiptPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringSession.cs" Link="AlteringSession.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringStatus.cs" Link="AlteringStatus.cs" />
     <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/LivingSkillGatheringCatalog.cs" Link="LivingSkillGatheringCatalog.cs" />

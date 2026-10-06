@@ -29,6 +29,7 @@ public sealed partial class MainForm
         _productionCurrentQuantity = 0;
         _productionFacilityName = "시설별 병렬 배치";
         _productionProgressSummary = $"다중가공 준비 · {plans.Count}종 · 시설별 7칸 배치";
+        ResetAlteringStatus(plans);
         SetStatus($"다중가공 병렬 배치 준비 · {plans.Count}종", Blue);
         _log.Write(
             $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 배치 병렬 운용 · 한 칸 완료마다 이동하지 않음");
@@ -166,6 +167,7 @@ public sealed partial class MainForm
                 });
                 automation.Progress += p => Ui(() =>
                 {
+                    UpdateAlteringStatus(plan, p);
                     progress[key] = p.ConfirmedQuantity;
                     _productionCurrentQuantity = progress.Values.Sum();
                     _productionProgressSummary =
