@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.24"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.25"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.23</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.25</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -706,13 +706,24 @@ jobs:
           if($lifeSkillStart -match 'detailTarget' -or
              $lifeSkillStart -match '생활 스킬 상세 팝업을 확인하지 못해'){throw 'life-skill target name must not be OCR-reconfirmed after row selection'}
           if($lifeSkillStart -notmatch '상세 품목명/가까운 위치 문구 OCR 생략'){throw 'life-skill post-click OCR removal trace missing'}
-          $nearestHelper = [regex]::Match($bulkScreen, 'private async Task ClickLifeSkillNearestLocationAsync[\s\S]*?(?=\r?\n    private async Task ResolveLifeSkillNearestResultAsync)').Value
+          $nearestPoint = [regex]::Match($bulkScreen, 'private static Point LifeSkillNearestClickPoint[\s\S]*?(?=\r?\n    private async Task ClickLifeSkillNearestLocationAsync)').Value
+          if([string]::IsNullOrWhiteSpace($nearestPoint) -or
+             $nearestPoint -notmatch 'nominalLeftOffset' -or
+             $nearestPoint -notmatch 'clickPoint\.X < 140' -or
+             $nearestPoint -notmatch 'clickPoint\.X > 390'){throw 'nearest-location safe offset policy missing'}
+          $nearestHelper = [regex]::Match($bulkScreen, 'private async Task ClickLifeSkillNearestLocationAsync[\s\S]*?(?=\r?\n    private async Task<bool> TryRetryLifeSkillNearestLocationAsync)').Value
           if([string]::IsNullOrWhiteSpace($nearestHelper)){throw 'nearest-location help-icon helper missing'}
-          if($nearestHelper -match 'FindUniqueAsync|FindCompact|ClickStableExact|FindBrightGlyphMultiScale'){throw 'nearest-location helper must delegate final-frame template validation to shared runtime and never depend on OCR'}
+          if($nearestHelper -match 'FindUniqueAsync|FindCompact|ClickStableExact|FindBrightGlyphMultiScale'){throw 'nearest-location initial helper must delegate final-frame template validation to shared runtime and never depend on OCR'}
           if($nearestHelper -notmatch 'ClickOffsetFromStableBrightTemplateAsync' -or
              $nearestHelper -notmatch 'threshold: 0\.78' -or
-             $nearestHelper -notmatch 'leftOffset' -or
+             $nearestHelper -notmatch 'LifeSkillNearestClickPoint' -or
              $nearestHelper -notmatch '클릭 직전 재확인'){throw 'nearest-location final-frame validated template/offset guard missing'}
+          $nearestRetry = [regex]::Match($bulkScreen, 'private async Task<bool> TryRetryLifeSkillNearestLocationAsync[\s\S]*?(?=\r?\n    private async Task ResolveLifeSkillNearestResultAsync)').Value
+          if([string]::IsNullOrWhiteSpace($nearestRetry) -or
+             $nearestRetry -notmatch 'FindBrightTemplate' -or
+             $nearestRetry -notmatch 'ProductionUiRuntime\.Stable' -or
+             $nearestRetry -notmatch '_ui\.ClickFresh' -or
+             $nearestRetry -notmatch '상세창 \? 기준이 계속 보일 때만 입력'){throw 'nearest-location ignored-click stable-anchor retry missing'}
           if($runtime -notmatch 'ClickOffsetFromStableBrightTemplateAsync' -or
              $runtime -notmatch 'FindBrightTemplate\(' -or
              $runtime -notmatch '클릭 직전 템플릿 위치가 바뀌었습니다' -or
@@ -726,6 +737,10 @@ jobs:
              $nearestResult -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow' -or
              $nearestResult -notmatch '가까운 위치 결과=바로 이동형' -or
              $nearestResult -notmatch '가까운 위치 결과=추천 장소형'){throw 'nearest-location CLI direct/recommended split is incomplete'}
+          if($nearestResult -notmatch 'poll == 4 \|\| poll == 8' -or
+             $nearestResult -notmatch 'retryOffset = retryNumber == 1 \? 56 : 84' -or
+             $nearestResult -notmatch 'TryRetryLifeSkillNearestLocationAsync' -or
+             $nearestResult -notmatch '기존 상세창 \? 기준이 더 이상 안정적으로 보이지 않아 추가 입력 없음'){throw 'nearest-location no-response retry schedule/safety guard missing'}
           $cliRouteIndex = $nearestResult.IndexOf('if (activity.IsAutoTraveling')
           $placeRouteIndex = $nearestResult.IndexOf('_navigationVision.FirstPlaceAsync')
           if($cliRouteIndex -lt 0 -or $placeRouteIndex -lt 0 -or $cliRouteIndex -gt $placeRouteIndex){throw 'CLI direct-travel decision must run before recommended-place screen input'}
