@@ -49,6 +49,12 @@ internal sealed class MultiAlteringConsumptionLedger : IAlteringInternalConsumpt
                 $"다중가공 내부 재료 추적에서 동일 결과물을 둘 이상 구분할 수 없습니다: {plan.OutputName}");
     }
 
+    internal void UnregisterProducer(AlteringPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        _creditByOutput.Remove(plan.OutputName);
+    }
+
     public async Task<AlteringInternalConsumptionSnapshot> CaptureBeforeRegistrationAsync(
         AlteringPlan consumerPlan,
         CancellationToken ct)
