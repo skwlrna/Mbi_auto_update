@@ -37,6 +37,24 @@ Check(!AlteringRemoteProcessGuard.ShouldBlock(false, true),
     "non-consecutive remote processing spike never blocks input");
 Check(AlteringRemoteProcessGuard.ShouldBlock(true, true),
     "two consecutive remote processing observations block input");
+Check(!AlteringRemoteProcessGuard.ShouldBlock(
+        true, true,
+        onsiteFacilityConfirmed: true,
+        firstOnsiteActionVisible: true,
+        secondOnsiteActionVisible: true),
+    "two-frame remote OCR is ignored only when the same proven onsite facility also shows the onsite action button in both frames");
+Check(AlteringRemoteProcessGuard.ShouldBlock(
+        true, true,
+        onsiteFacilityConfirmed: false,
+        firstOnsiteActionVisible: true,
+        secondOnsiteActionVisible: true),
+    "onsite action visuals cannot override remote OCR without a proven onsite facility");
+Check(AlteringRemoteProcessGuard.ShouldBlock(
+        true, true,
+        onsiteFacilityConfirmed: true,
+        firstOnsiteActionVisible: true,
+        secondOnsiteActionVisible: false),
+    "one missing onsite action frame preserves the two-frame remote safety veto");
 
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");
