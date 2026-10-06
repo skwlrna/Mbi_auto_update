@@ -31,6 +31,36 @@ Check(!AlteringReceiptPolicy.CanRetryCompletionClose(true, true, false, false),
 Check(!AlteringReceiptPolicy.CanRetryCompletionClose(true, false, true, false) &&
       !AlteringReceiptPolicy.CanRetryCompletionClose(true, false, false, true),
     "travel dialog or active travel blocks completion-close retry");
+Check(AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+        greenConfirmVisible: true,
+        facilityVisible: false,
+        travelDialogVisible: false),
+    "CLI-confirmed receipt may close a proven completion modal without consulting stale AutoTraveling");
+Check(!AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+        greenConfirmVisible: true,
+        facilityVisible: true,
+        travelDialogVisible: false),
+    "CLI-confirmed receipt never closes the facility screen");
+Check(!AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+        greenConfirmVisible: true,
+        facilityVisible: false,
+        travelDialogVisible: true),
+    "real facility travel confirmation still blocks CLI-confirmed receipt completion Space");
+Check(!AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+        greenConfirmVisible: false,
+        facilityVisible: false,
+        travelDialogVisible: false),
+    "CLI receipt evidence alone cannot authorize Space without the green completion modal");
+Check(AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+        greenConfirmVisible: true,
+        facilityVisible: false,
+        travelDialogVisible: false),
+    "CLI-confirmed completion modal may receive the existing single guarded close retry");
+Check(!AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+        greenConfirmVisible: true,
+        facilityVisible: false,
+        travelDialogVisible: true),
+    "travel dialog blocks CLI-confirmed completion-close retry");
 Check(!AlteringRemoteProcessGuard.ShouldBlock(true, false),
     "single-frame remote processing spike is ignored after clean confirmation");
 Check(!AlteringRemoteProcessGuard.ShouldBlock(false, true),

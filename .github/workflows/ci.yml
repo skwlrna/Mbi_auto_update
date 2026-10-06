@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.34"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.35"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.34</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.35</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -347,11 +347,15 @@ jobs:
               $screen -match '결과창 인식 생략 · 다음 가공 진입에서 화면 재검증') { throw 'receipt result verified close/retry-and-return gate missing' }
           if ($receiptPolicy -notmatch 'IsCliReceiptConfirmed' -or
               $receiptPolicy -notmatch 'after < before' -or
-              $receiptPolicy -notmatch 'CanRetryCompletionClose') { throw 'CLI receipt decrease / completion-close retry policy missing' }
+              $receiptPolicy -notmatch 'CanRetryCompletionClose' -or
+              $receiptPolicy -notmatch 'CanConfirmCliReceiptCompletion' -or
+              $receiptPolicy -notmatch 'CanRetryCliReceiptCompletionClose') { throw 'CLI receipt decrease / completion-close retry policy missing' }
           $closeHelper = [regex]::Match($screen, 'private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync[\s\S]*?(?=\r?\n    private async Task<bool> ConfirmCompletionResultAsync)').Value
           if ([string]::IsNullOrWhiteSpace($closeHelper) -or
               $closeHelper -notmatch 'Task\.Delay\(450, ct\)' -or
               $closeHelper -notmatch 'AlteringReceiptPolicy\.CanRetryCompletionClose' -or
+              $closeHelper -notmatch 'AlteringReceiptPolicy\.CanRetryCliReceiptCompletionClose' -or
+              $closeHelper -notmatch 'cliReceiptConfirmed' -or
               [regex]::Matches($closeHelper, '_ui\.TapFresh\(0x39, ct\)').Count -ne 2 -or
               $closeHelper -notmatch 'WaitForReceiptFacilityReturnAsync\(plan, ct\)') { throw 'completion close helper must verify first Space, allow one safe retry, then wait for facility return' }
           $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
@@ -359,7 +363,11 @@ jobs:
           if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님' -or
               $screen -notmatch '완료창 닫기 Space 1차 입력 후 완료창 이탈 확인') { throw 'safe completion result Space verification log missing' }
           if ($screen -notmatch '가공 완료 확인창 닫기 완료') { throw 'completion result facility-return log missing' }
-          if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion') { throw 'completion result must use travel-safe receipt policy' }
+          if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion' -or
+              $screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCliReceiptCompletion' -or
+              $screen -notmatch 'AutoTraveling 잔류값 무시 · 완료창 Space 허용' -or
+              $screen -notmatch '실제 이동 확인창 감지 · 완료창 Space 차단' -or
+              $screen -notmatch 'cliReceiptConfirmed: true') { throw 'CLI-confirmed receipt stale AutoTraveling override missing' }
           if ($screen -notmatch 'facilityFrames >= 2') { throw 'facility return must be stable before continuing' }
           if ($screen -notmatch '_ui\.TapFresh\(0x39, ct\)') { throw 'verified completion/receipt Space path missing' }
           if ($screen -notmatch '"필요한 재료"' -or $screen -notmatch '"가공하기"' -or $screen -notmatch '"가공하러 가기"') { throw 'detail fallback structure gates missing' }
