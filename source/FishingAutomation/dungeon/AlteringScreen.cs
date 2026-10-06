@@ -788,7 +788,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     Fail(confirm, "원격 상태 재확인 중 품목 상세 화면이 사라졌습니다.");
 
                 var remoteConfirmed = await DetectRemoteProcessStateAsync(confirm, ct);
-                if (remoteConfirmed.IsRemote)
+                if (AlteringRemoteProcessGuard.ShouldBlock(
+                        remoteCandidate.IsRemote,
+                        remoteConfirmed.IsRemote))
                     Fail(
                         confirm,
                         "원격 가공 상태가 2프레임 연속 감지되어 현장 가공 입력을 차단했습니다. " +
