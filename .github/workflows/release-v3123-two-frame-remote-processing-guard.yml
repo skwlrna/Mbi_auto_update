@@ -7,14 +7,14 @@ on:
   push:
     branches: [ main ]
     paths:
-      - '.github/workflows/release-v3123-processing-status-onsite-reuse.yml'
+      - '.github/workflows/release-v3123-two-frame-remote-processing-guard.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-v3123-processing-status-onsite-reuse
+  group: release-v3123-two-frame-remote-processing-guard
   cancel-in-progress: false
 
 jobs:
