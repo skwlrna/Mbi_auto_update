@@ -83,23 +83,39 @@ public sealed partial class MainForm
 
             _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
 
+            string sessionDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MabiAuto", "multi-altering");
+            Directory.CreateDirectory(sessionDir);
+
+            var dependencyScheduler = new MultiAlteringDependencyScheduler(
+                rawAlteringData,
+                screen,
+                identity.Baseline,
+                sessionDir);
             var resolver = new RecursiveAlteringSupplyResolver(
-                rawAlteringData, gatheringData, screen, gatheringScreen);
+                rawAlteringData,
+                gatheringData,
+                screen,
+                gatheringScreen,
+                dependencyScheduler: dependencyScheduler);
+
             visualAltering.Log += text => Ui(() => _log.Write(text));
             visualGathering.Log += text => Ui(() => _log.Write(text));
             screen.Log += text => Ui(() => _log.Write(text));
             gatheringScreen.Log += text => Ui(() => _log.Write(text));
+            dependencyScheduler.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                SetStatus(text.Replace("[중간재료 스케줄] ", ""), Blue);
+                RefreshProductionDashboard();
+            });
             resolver.Log += text => Ui(() =>
             {
                 _log.Write(text);
                 SetStatus(text.Replace("[재료 해결] ", ""), Blue);
                 RefreshProductionDashboard();
             });
-
-            string sessionDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MabiAuto", "multi-altering");
-            Directory.CreateDirectory(sessionDir);
 
             var automations = new Dictionary<(string Facility, string Display, int Ordinal), AlteringAutomation>();
             var stores = new List<AlteringSessionStore>();

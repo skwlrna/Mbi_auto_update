@@ -415,6 +415,68 @@ Check(recursiveWorld.Count("강철괴") == 3 &&
 Check(steelAuto.ReservedWings == 0 && recursiveWorld.ReserveCallbackCalls == 0,
     "recursive steel production never reserves Spirit Wings");
 
+var scheduledWorld = new RecursiveProductionWorld();
+scheduledWorld.AddExternalWork(
+    "강철괴",
+    "금속 가공 시설",
+    "InProgress",
+    isCompleted: false,
+    remainingSeconds: 8);
+int dependencyBoundaryWaits = 0;
+string dependencySessionDir = Path.Combine(
+    Path.GetTempPath(),
+    "mabi-dependency-scheduler-" + Guid.NewGuid().ToString("N"));
+var dependencyScheduler = new MultiAlteringDependencyScheduler(
+    scheduledWorld,
+    scheduledWorld,
+    testIdentity,
+    dependencySessionDir,
+    (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        dependencyBoundaryWaits++;
+        scheduledWorld.CompleteAllWorks();
+        return Task.CompletedTask;
+    },
+    verificationAttempts: 4);
+bool sawIntegratedDependencyLog = false;
+dependencyScheduler.Log += text =>
+    sawIntegratedDependencyLog |= text.Contains(
+        "메인과 동일한 시설 7칸 Coordinator 시작",
+        StringComparison.Ordinal);
+var scheduledResolver = new RecursiveAlteringSupplyResolver(
+    scheduledWorld,
+    scheduledWorld,
+    scheduledWorld,
+    scheduledWorld,
+    delay: (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    },
+    verificationAttempts: 4,
+    dependencyScheduler: dependencyScheduler);
+var scheduledSteelAuto = new AlteringAutomation(
+    scheduledWorld,
+    scheduledWorld,
+    (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    },
+    4,
+    scheduledResolver);
+await scheduledSteelAuto.RunAsync(steelPlan, default);
+Check(dependencyBoundaryWaits > 0 &&
+      sawIntegratedDependencyLog &&
+      scheduledWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)", "강철괴" }),
+    "multi dependency scheduler waits for the whole existing facility batch, then schedules intermediate processing through the shared seven-slot coordinator");
+Check(scheduledWorld.Count("강철괴") == 6 &&
+      scheduledWorld.Count("철괴") == 0,
+    "existing completed root work is received before dependency ownership and intermediate stock is consumed only by the resumed parent");
+if (Directory.Exists(dependencySessionDir))
+    Directory.Delete(dependencySessionDir, recursive: true);
+
 var multiWorld = new RecursiveProductionWorld();
 multiWorld.SetCount("석탄", 0);
 var multiResolver = new RecursiveAlteringSupplyResolver(
@@ -674,6 +736,29 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
+    internal void AddExternalWork(
+        string displayName,
+        string facilityName,
+        string state,
+        bool isCompleted,
+        long remainingSeconds)
+        => _works.Add(new(
+            displayName,
+            facilityName,
+            state,
+            isCompleted,
+            remainingSeconds));
+
+    internal void CompleteAllWorks()
+    {
+        for (int i = 0; i < _works.Count; i++)
+            _works[i] = _works[i] with
+            {
+                State = "Completed",
+                IsCompleted = true,
+                RemainingSeconds = 0
+            };
+    }
 
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
@@ -733,9 +818,23 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        int completed = _works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
-        if (completed > 0)
-            _items[plan.OutputName] = Count(plan.OutputName) + (long)completed * plan.ProducedPerWork;
+        var completed = _works
+            .Where(x => x.FacilityName == plan.FacilityName && x.IsCompleted)
+            .ToArray();
+        foreach (var work in completed)
+        {
+            int produced = work.DisplayName switch
+            {
+                "강철괴" => 3,
+                "철괴" => 3,
+                "철괴(철 광석)" => 3,
+                _ => plan.ProducedPerWork
+            };
+            string output = System.Text.RegularExpressions.Regex
+                .Replace(work.DisplayName, @"\([^()]*\)$", "")
+                .Trim();
+            _items[output] = Count(output) + produced;
+        }
         _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         return Task.FromResult(true);
     }
