@@ -1,5 +1,41 @@
 namespace FishingAutomation;
 
+internal static class AlteringEtaEstimator
+{
+    internal static long? Estimate(
+        int requiredWorks,
+        int queuedWorks,
+        int activeItemSlots,
+        long? batchRemainingSeconds,
+        long? estimatedWorkSeconds)
+    {
+        if (requiredWorks <= 0 || queuedWorks < 0 || queuedWorks > requiredWorks)
+            return null;
+
+        int futureWorks = Math.Max(0, requiredWorks - queuedWorks);
+        long? cycle = estimatedWorkSeconds ?? batchRemainingSeconds;
+
+        if (futureWorks == 0)
+            return batchRemainingSeconds ?? 0;
+
+        if (!cycle.HasValue || cycle.Value <= 0)
+            return null;
+
+        int slots = Math.Max(1, activeItemSlots);
+        long futureCycles = (futureWorks + (long)slots - 1) / slots;
+        long currentBatch = Math.Max(0, batchRemainingSeconds ?? 0);
+
+        try
+        {
+            return checked(currentBatch + futureCycles * cycle.Value);
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+}
+
 internal sealed record AlteringStatusItem(
     string Key,
     string DisplayName,
@@ -59,7 +95,7 @@ internal static class AlteringStatusFormatter
             bool completed = item.ConfirmedQuantity >= item.TargetQuantity;
             lines.Add(
                 $"{item.DisplayName}: {item.ConfirmedQuantity:N0}/{item.TargetQuantity:N0} 완료 · " +
-                $"남은시간 {FormatRemaining(item.RemainingNow(now), completed)}");
+                $"남은시간(예상) {FormatRemaining(item.RemainingNow(now), completed)}");
         }
 
         return string.Join(Environment.NewLine, lines);
