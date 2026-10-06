@@ -1,11 +1,11 @@
 namespace FishingAutomation;
 
 /// <summary>
-/// Batch scheduler for multi-altering. It owns no screen/input. Each facility is
-/// treated as an independent seven-slot lane: fill a lane, leave it running, and
-/// revisit it only after the whole current lane batch has completed (or is empty).
-/// This keeps different facilities working in parallel without moving for every
-/// single completed slot.
+/// Batch scheduler for multi-altering. Each facility is an independent seven-slot
+/// lane. Different facilities run in parallel, while plans that share one facility
+/// are round-robin mixed into the same seven-slot batch. A facility is revisited only
+/// after its whole current lane has completed, so one completed slot never causes an
+/// extra trip.
 /// </summary>
 internal sealed class MultiAlteringCoordinator
 {
@@ -13,7 +13,7 @@ internal sealed class MultiAlteringCoordinator
 
     internal async Task RunAsync(
         IReadOnlyList<AlteringPlan> plans,
-        Func<AlteringPlan, CancellationToken, Task<bool>> runBatch,
+        Func<AlteringPlan, int, CancellationToken, Task<bool>> runBatch,
         Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
         Func<TimeSpan, CancellationToken, Task> delay,
         CancellationToken ct)
@@ -47,19 +47,41 @@ internal sealed class MultiAlteringCoordinator
             .Select(x => x.FacilityName)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        var plansByFacility = orderedFacilities.ToDictionary(
+            facility => facility,
+            facility => plans.Where(x => x.FacilityName == facility).ToArray(),
+            StringComparer.Ordinal);
+        var nextPlanIndex = orderedFacilities.ToDictionary(
+            facility => facility,
+            _ => 0,
+            StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
 
         (string Facility, string Display, int Ordinal) Key(AlteringPlan p)
             => (p.FacilityName, p.DisplayName, p.RecipeOrdinal);
 
-        AlteringPlan? NextPlan(string facility)
-            => plans.FirstOrDefault(x =>
-                x.FacilityName == facility && !completed.Contains(Key(x)));
+        int FindNextPendingIndex(string facility)
+        {
+            var facilityPlans = plansByFacility[facility];
+            int start = nextPlanIndex[facility] % facilityPlans.Length;
+            for (int offset = 0; offset < facilityPlans.Length; offset++)
+            {
+                int index = (start + offset) % facilityPlans.Length;
+                if (!completed.Contains(Key(facilityPlans[index])))
+                    return index;
+            }
+            return -1;
+        }
+
+        int PendingCount(string facility)
+            => plansByFacility[facility].Count(x => !completed.Contains(Key(x)));
 
         Log?.Invoke(
-            $"[다중가공] 병렬 배치 계획 확정 · {plans.Count}종 / {orderedFacilities.Length}시설 · " +
+            $"[다중가공] 혼합 병렬 배치 계획 확정 · {plans.Count}종 / {orderedFacilities.Length}시설 · " +
             string.Join(" → ", plans.Select(x => $"{x.DisplayName} {x.TargetQuantity}개")));
-        Log?.Invoke("[다중가공] 운용 방식 · 시설별 최대 7칸 배치 등록 · 한 칸 완료마다 이동하지 않음 · 현재 배치 전체 완료 후 묶음 수령/재충전");
+        Log?.Invoke(
+            "[다중가공] 운용 방식 · 시설별 최대 7칸 · 같은 시설 여러 품목은 라운드로빈 혼합 · " +
+            "한 칸 완료마다 이동하지 않음 · 현재 배치 전체 완료 후 묶음 수령/재충전");
 
         while (completed.Count < plans.Count)
         {
@@ -70,8 +92,7 @@ internal sealed class MultiAlteringCoordinator
             foreach (string facility in orderedFacilities)
             {
                 ct.ThrowIfCancellationRequested();
-                var plan = NextPlan(facility);
-                if (plan is null)
+                if (PendingCount(facility) == 0)
                     continue;
 
                 var facilityWorks = works
@@ -87,46 +108,75 @@ internal sealed class MultiAlteringCoordinator
 
                 if (facilityWorks.Length > 0)
                     Log?.Invoke(
-                        $"[다중가공] {plan.ScreenTitle} 배치 완료 · {facilityWorks.Length}건 모아서 수령 후 재충전");
+                        $"[다중가공] {facility.Replace(" 시설", "")} 배치 완료 · " +
+                        $"{facilityWorks.Length}건 모아서 수령 후 혼합 재충전");
                 else
                     Log?.Invoke(
-                        $"[다중가공] {plan.ScreenTitle} 빈 대기열 · {plan.DisplayName} 배치 등록 시작");
+                        $"[다중가공] {facility.Replace(" 시설", "")} 빈 대기열 · 혼합 배치 등록 시작");
 
-                bool planCompleted = await runBatch(plan, ct);
-                acted = true;
-                if (planCompleted)
+                int idleSelections = 0;
+
+                while (PendingCount(facility) > 0)
                 {
-                    completed.Add(Key(plan));
-                    Log?.Invoke(
-                        $"[다중가공] 품목 완료 {completed.Count}/{plans.Count} · {plan.DisplayName}");
+                    ct.ThrowIfCancellationRequested();
+                    works = await readWorks(ct);
+                    facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
+                    if (facilityWorks.Length >= 7)
+                        break;
 
-                    // If finishing the plan left this facility empty, seed the next
-                    // queued plan in the same facility without leaving/revisiting it.
-                    while (completed.Count < plans.Count)
+                    int pendingBefore = PendingCount(facility);
+                    int index = FindNextPendingIndex(facility);
+                    if (index < 0)
+                        break;
+
+                    var plan = plansByFacility[facility][index];
+                    int beforeCount = facilityWorks.Length;
+
+                    // One registration per turn is deliberate. Repeated turns fill
+                    // the seven-slot lane A/B/A/B... without changing the proven
+                    // single-plan registration/receipt implementation.
+                    bool planCompleted = await runBatch(plan, 1, ct);
+                    acted = true;
+                    nextPlanIndex[facility] = (index + 1) % plansByFacility[facility].Length;
+
+                    if (planCompleted)
                     {
-                        works = await readWorks(ct);
-                        if (works.Any(x => x.FacilityName == facility))
-                            break;
-
-                        var next = NextPlan(facility);
-                        if (next is null)
-                            break;
-
+                        completed.Add(Key(plan));
                         Log?.Invoke(
-                            $"[다중가공] 같은 시설 다음 품목 즉시 배치 · {next.DisplayName}");
-                        bool nextCompleted = await runBatch(next, ct);
-                        if (!nextCompleted)
-                            break;
+                            $"[다중가공] 품목 완료 {completed.Count}/{plans.Count} · {plan.DisplayName}");
+                    }
 
-                        completed.Add(Key(next));
-                        Log?.Invoke(
-                            $"[다중가공] 품목 완료 {completed.Count}/{plans.Count} · {next.DisplayName}");
+                    works = await readWorks(ct);
+                    int afterCount = works.Count(x => x.FacilityName == facility);
+
+                    if (planCompleted || afterCount != beforeCount)
+                    {
+                        idleSelections = 0;
+                    }
+                    else
+                    {
+                        idleSelections++;
+                        if (idleSelections >= Math.Max(1, pendingBefore))
+                        {
+                            Log?.Invoke(
+                                $"[다중가공] {facility.Replace(" 시설", "")} 혼합 배치 추가 등록 없음 · " +
+                                "남은 품목은 이미 전량 등록되었거나 현재 슬롯 상태를 기다리는 중");
+                            break;
+                        }
                     }
                 }
 
-                // Refresh after each UI action so another facility decision never
-                // uses stale queue state.
                 works = await readWorks(ct);
+                facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
+                if (facilityWorks.Length > 0)
+                {
+                    string composition = string.Join(", ",
+                        facilityWorks
+                            .GroupBy(x => x.DisplayName, StringComparer.Ordinal)
+                            .Select(g => $"{g.Key} {g.Count()}칸"));
+                    Log?.Invoke(
+                        $"[다중가공] {facility.Replace(" 시설", "")} 현재 배치 {facilityWorks.Length}/7 · {composition}");
+                }
             }
 
             if (completed.Count >= plans.Count)
