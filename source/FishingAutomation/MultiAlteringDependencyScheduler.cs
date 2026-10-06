@@ -118,9 +118,16 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         var plan = requestedPlan with { TargetQuantity = (int)remainingLong };
 
         var emptyCheck = await _data.WorksAsync(ct);
-        if (emptyCheck.Any(x => x.FacilityName == plan.FacilityName))
+        var emptyFacilityCheck = emptyCheck
+            .Where(x => x.FacilityName == plan.FacilityName)
+            .ToArray();
+        if (emptyFacilityCheck.Length > 0)
             throw new InvalidOperationException(
                 $"{plan.FacilityName} 중간재료 배치 시작 직전에 다른 작업이 생겨 시설 소유권을 확보하지 못했습니다.");
+
+        _laneState?.AcquireIntermediate(
+            plan.FacilityName,
+            emptyFacilityCheck);
 
         string dependencyDir = Path.Combine(_sessionDirectory, "dependencies");
         Directory.CreateDirectory(dependencyDir);
