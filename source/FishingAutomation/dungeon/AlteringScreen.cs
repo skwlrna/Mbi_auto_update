@@ -712,6 +712,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         Fail(missing, "고정된 가공 목록 위치에서 선택 품목/제법을 확인하지 못했습니다. 화면을 드래그하지 않고 정지합니다.");
     }
 
+    private async Task<(bool IsRemote, string Evidence)> DetectRemoteProcessStateAsync(
+        Bitmap frame,
+        CancellationToken ct)
+    {
+        bool moveVisual = HasFacilityMoveButtonVisual(frame);
+        var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
+
+        string evidence = moveVisual && paid is not null
+            ? "설비로 이동 화면 + 가공하러 가기 OCR"
+            : moveVisual
+                ? "설비로 이동 화면"
+                : paid is not null
+                    ? "가공하러 가기 OCR"
+                    : "없음";
+
+        return (moveVisual || paid is not null, evidence);
+    }
+
     public async Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
     {
         plan.Validate();
@@ -757,13 +775,36 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (!await IsRecipeDetailStructureAsync(frame, ct))
                 Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
 
-            bool moveVisual = HasFacilityMoveButtonVisual(frame);
-            var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-            if (moveVisual || paid is not null)
-                Fail(frame, "원격 가공 상태가 감지되어 현장 가공 입력을 차단했습니다.");
+            var remoteCandidate = await DetectRemoteProcessStateAsync(frame, ct);
+            if (remoteCandidate.IsRemote)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] 작업 등록 직전 원격 상태 후보 1/2 · {remoteCandidate.Evidence} · " +
+                    "단일 프레임으로 중단하지 않고 200ms 후 재확인");
+                await Task.Delay(200, ct);
 
-            if (!TryFindFreeProcessButtonVisual(frame, out visualActionCenter))
+                using var confirm = Capture(ct);
+                if (!await IsRecipeDetailStructureAsync(confirm, ct))
+                    Fail(confirm, "원격 상태 재확인 중 품목 상세 화면이 사라졌습니다.");
+
+                var remoteConfirmed = await DetectRemoteProcessStateAsync(confirm, ct);
+                if (remoteConfirmed.IsRemote)
+                    Fail(
+                        confirm,
+                        "원격 가공 상태가 2프레임 연속 감지되어 현장 가공 입력을 차단했습니다. " +
+                        $"1차={remoteCandidate.Evidence} · 2차={remoteConfirmed.Evidence}");
+
+                Log?.Invoke(
+                    $"[자동 가공] 작업 등록 직전 원격 상태 1회 오탐 해제 · " +
+                    $"1차={remoteCandidate.Evidence} · 2차=없음 · 현장 가공 계속");
+
+                if (!TryFindFreeProcessButtonVisual(confirm, out visualActionCenter))
+                    Fail(confirm, "원격 상태 오탐 해제 후 하단 현장 가공 실행 버튼을 확인하지 못했습니다.");
+            }
+            else if (!TryFindFreeProcessButtonVisual(frame, out visualActionCenter))
+            {
                 Fail(frame, "설비 도착 후 하단 현장 가공 실행 버튼을 화면에서 확인하지 못했습니다.");
+            }
 
             if (pass == 0)
             {
