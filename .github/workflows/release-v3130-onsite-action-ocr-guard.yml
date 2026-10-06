@@ -595,12 +595,12 @@ jobs:
              $queue -notmatch '단일 프레임으로 중단하지 않고 200ms 후 재확인' -or
              $queue -notmatch '원격 상태 1회 오탐 해제' -or
              $queue -notmatch 'AlteringRemoteProcessGuard\.ShouldBlock'){throw 'two-frame remote processing veto confirmation missing'}
-          if($remoteGuard -notmatch 'onsiteFacilityConfirmed' -or
-             $remoteGuard -notmatch 'firstOnsiteActionVisible' -or
-             $remoteGuard -notmatch 'secondOnsiteActionVisible' -or
-             $remoteGuard -notmatch 'provenOnsiteAction' -or
-             $queue -notmatch '가공하러 가기 OCR 2프레임 오탐 억제' -or
-             $queue -notmatch '해당 시설 현장 확인 \+ 하단 현장 가공 버튼 2프레임 우선'){throw 'V3.1.31 onsite action must outrank remote OCR false positives'}
+          if($queue -notmatch 'AlteringRemoteProcessGuard\.CanRecover\(true, remoteRecoveryUsed\)' -or
+             $queue -notmatch '원격 상세 2프레임 확정' -or
+             $queue -notmatch 'restartAfterRemoteRecovery' -or
+             [string]::IsNullOrWhiteSpace($remoteRecovery) -or
+             $remoteRecovery -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)' -or
+             [regex]::Matches($remoteRecovery, 'TravelToFacilityAsync').Count -ne 1){throw 'V3.1.31 bounded remote detail recovery missing'}
           $remoteDetailGuard = [regex]::Match($screen, 'private async Task<\(bool IsRemote, string Evidence\)> DetectRemoteProcessStateAsync[\s\S]*?(?=\r?\n    public async Task QueueAsync)').Value
           if([string]::IsNullOrWhiteSpace($remoteDetailGuard)){throw 'confirmed-detail remote processing guard missing'}
           if($remoteDetailGuard -match 'HasFacilityMoveButtonVisual'){throw 'confirmed recipe detail must not reuse facility move-button colour detection'}
