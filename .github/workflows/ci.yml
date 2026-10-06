@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.33"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.34"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.33</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.34</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -308,8 +308,13 @@ jobs:
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
-          if ($screen -notmatch '설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음') { throw 'facility travel must explicitly skip Space' }
-          if ($screen -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력' -or $screen -match '이동 확인 Space 입력 완료') { throw 'facility travel Space regression returned' }
+          $travelConfirmPolicy = Get-Content source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs -Raw
+          if ($screen -notmatch 'ConfirmFacilityTravelDialogIfPresentAsync' -or
+              $screen -notmatch '설비 이동 확인창 감지 · Space 1회 확인' -or
+              $screen -notmatch '설비 이동 확인창 없음 · Space 생략') { throw 'optional facility travel confirmation flow missing' }
+          if ($travelConfirmPolicy -notmatch 'greenConfirmationVisible' -or
+              $travelConfirmPolicy -notmatch 'travelDialogVisible' -or
+              $travelConfirmPolicy -notmatch '!confirmationAlreadySent') { throw 'facility travel confirmation safety policy missing' }
           if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'completion-result visual detector missing' }
           $receiptPolicy = Get-Content source/FishingAutomation/AlteringReceiptPolicy.cs -Raw
           if ($receiptPolicy -notmatch '!travelDialogVisible' -or $receiptPolicy -notmatch '!autoTraveling') { throw 'receipt Space travel veto policy missing' }
@@ -872,9 +877,9 @@ jobs:
              $multiGather -notmatch 'await automation\.RunAsync\(plan, ct\)'){throw 'multi-gather must delegate execution to verified single-gather automation'}
           if($multiGather -match 'TapFresh|ClickFresh|DragFresh|0x39'){throw 'multi-gather coordinator must not own direct input or Space'}
 
-          if($alterScreen -match '이동 확인 Space 입력 완료' -or
-             $alterScreen -match '늦게 표시된 하단 확인 팝업 감지 · Space 입력'){throw 'facility travel Space regression returned'}
-          if($alterScreen -notmatch '설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음'){throw 'facility travel must remain passive after click'}
+          if($alterScreen -notmatch 'ConfirmFacilityTravelDialogIfPresentAsync' -or
+             $alterScreen -notmatch '설비 이동 확인창 감지 · Space 1회 확인' -or
+             $alterScreen -notmatch '설비 이동 확인창 없음 · Space 생략'){throw 'optional facility travel confirmation handling missing'}
 
           foreach($source in @($craftScreen,$gatherScreen,$bulkScreen,$alterScreen,$resolver,$multiGather)){
             if($source -match 'execute_gathering|execute_altering|execute_crafting'){throw 'paid production CLI action leaked into V3 production execution'}
