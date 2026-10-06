@@ -186,19 +186,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (!moveShape)
             return false;
 
-        // A real remote move button occupies a large continuous part of this ROI.
-        // Let that strong geometry win even if the close-X detector is confused by
-        // the white currency digits that sit in its small top-right ROI.
-        bool strongMoveShape =
-            teal * 100 >= sampled * 10 &&
-            width >= 96 &&
-            height >= 22;
-        if (strongMoveShape)
-            return true;
-
-        // Keep the close-X veto only for marginal teal candidates. This preserves
-        // the original protection against dark on-site slot/background false hits.
-        return !HasOnsiteCloseButtonVisual(frame);
+        // The user-confirmed on-site screen has a top-right X. It is authoritative:
+        // the left-side "모두 받기" control can overlap this move-button ROI and must
+        // never win merely because it is a strong blue/teal shape.
+        bool onsiteCloseVisible = HasOnsiteCloseButtonVisual(frame);
+        return AlteringFacilityLayout.ShouldAcceptMoveButton(
+            onsiteCloseVisible,
+            moveShapeVisible: true);
     }
 
     private async Task<bool> WaitForCollectPromptAsync(
@@ -702,10 +696,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             Log?.Invoke(
                 $"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동");
 
-            // The user-selected facility screen is already authoritative here.
-            // Skip the old pre-move visual false-negative check and click the known
-            // free facility-move coordinate exactly once.
-            await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
+            // Re-check remote vs on-site state immediately before input. In a
+            // consecutive batch the facility screen may already be on-site; never
+            // force the fixed move coordinate merely because reuse validation failed.
+            await TravelToFacilityAsync(plan, ct);
 
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility = plan.FacilityName;
