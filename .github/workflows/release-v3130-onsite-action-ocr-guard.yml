@@ -578,7 +578,8 @@ jobs:
           if($layout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $layout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'facility move fixed geometry missing'}
           if($screen -notmatch '설비로 이동 고정좌표 클릭'){throw 'fixed free facility move route missing'}
-          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
+          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync)').Value
+          $remoteRecovery = [regex]::Match($screen, 'private async Task RecoverRemoteDetailToOnsiteAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex){throw 'facility travel must happen before recipe selection'}
