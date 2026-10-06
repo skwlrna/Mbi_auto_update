@@ -56,6 +56,37 @@ Check(AlteringRemoteProcessGuard.ShouldBlock(
         secondOnsiteActionVisible: false),
     "one missing onsite action frame preserves the two-frame remote safety veto");
 
+Check(AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: false,
+        retryAlreadyUsed: false),
+    "fixed recipe retry is allowed only when the same on-site facility list is still visible");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: true,
+        facilityVisible: true,
+        moveButtonVisible: false,
+        retryAlreadyUsed: false),
+    "delayed detail opening blocks a duplicate fixed recipe click");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: false,
+        moveButtonVisible: false,
+        retryAlreadyUsed: false),
+    "unknown transition screen never receives a fixed recipe retry");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: true,
+        retryAlreadyUsed: false),
+    "remote facility state never receives a fixed recipe retry");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: false,
+        retryAlreadyUsed: true),
+    "fixed recipe retry is strictly one-shot");
+
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(1, 0),
