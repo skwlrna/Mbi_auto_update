@@ -1002,8 +1002,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · OCR 없음");
         _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
 
+        bool travelConfirmSent = await ConfirmFacilityTravelDialogIfPresentAsync(
+            plan, ct);
         Log?.Invoke(
-            $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 클릭 완료 · 게임 자동이동 대기 · 추가 Space 입력 없음");
+            travelConfirmSent
+                ? $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 처리 완료 · Space 1회 · 게임 자동이동 대기"
+                : $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 없음 · Space 생략 · 게임 자동이동 대기");
 
         bool sawDeparture = false;
         bool sawTravel = false;
@@ -1151,6 +1155,47 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         // green button. Distinguish them by the travel wording inside the dialog.
         return await FindAsync(frame, FacilityTravelDialog, "설비로 이동", ct) is not null ||
                await FindAsync(frame, FacilityTravelDialog, "이동", ct) is not null;
+    }
+
+    private async Task<bool> ConfirmFacilityTravelDialogIfPresentAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        bool confirmationSent = false;
+
+        // Nearby facilities can transition immediately with no confirmation dialog.
+        // When no nearby facility exists, the game may show an optional travel
+        // confirmation. Watch briefly and press Space only for that proven dialog.
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(attempt == 0 ? 180 : 140, ct);
+
+            using var frame = Capture(ct);
+            bool greenConfirm = HasBottomConfirmationModal(frame);
+            bool travelDialog = greenConfirm &&
+                await IsFacilityTravelDialogAsync(frame, ct);
+
+            if (AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
+                    greenConfirm,
+                    travelDialog,
+                    confirmationSent))
+            {
+                _ui.TapFresh(0x39, ct); // Space = confirm travel
+                confirmationSent = true;
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 감지 · Space 1회 확인");
+                await Task.Delay(250, ct);
+                return true;
+            }
+
+            // If the facility header disappeared, direct travel/loading already began,
+            // so no confirmation Space is needed and we must not inject one later.
+            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
+                return false;
+        }
+
+        return false;
     }
 
     private async Task<bool> WaitForReceiptFacilityReturnAsync(
