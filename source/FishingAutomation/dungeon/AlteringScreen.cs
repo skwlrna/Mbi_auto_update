@@ -149,6 +149,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         double centerX = (minX + maxX) / 2.0;
         double centerY = (minY + maxY) / 2.0;
         int diagonal = 0;
+        int centerBright = 0;
         int q1 = 0, q2 = 0, q3 = 0, q4 = 0;
 
         for (int y = minY; y <= maxY; y++)
@@ -159,6 +160,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
             double dx = x - centerX;
             double dy = y - centerY;
+            if (Math.Abs(dx) <= 4 && Math.Abs(dy) <= 4)
+                centerBright++;
             if (Math.Abs(Math.Abs(dx) - Math.Abs(dy)) > 3.5)
                 continue;
 
@@ -169,7 +172,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             else q4++;
         }
 
-        return diagonal >= 18 &&
+        return centerBright >= 4 &&
+            diagonal >= 18 &&
             diagonal * 100 >= bright * 35 &&
             q1 >= 3 && q2 >= 3 && q3 >= 3 && q4 >= 3;
     }
