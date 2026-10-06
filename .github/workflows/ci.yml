@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.23"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.24"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
           if ($p -notmatch '<Version>3\.1\.23</Version>') { throw 'project version mismatch' }
@@ -265,8 +265,11 @@ jobs:
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
           if ($queue -match 'FindAsync\([^\r\n]*RecipeActionButton[^\r\n]*"가공하기"') { throw 'queue execution must not depend on 가공하기 OCR' }
           if ($queue -notmatch 'TryFindFreeProcessButtonVisual') { throw 'queue must use visual process action detection' }
-          if ($queue -notmatch 'HasFacilityMoveButtonVisual' -or
-              $queue -notmatch '"가공하러 가기"') { throw 'remote-state visual/text veto missing before process click' }
+          $remoteDetailGuard = [regex]::Match($screen, 'private async Task<\(bool IsRemote, string Evidence\)> DetectRemoteProcessStateAsync[\s\S]*?(?=\r?\n    public async Task QueueAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($remoteDetailGuard)) { throw 'confirmed-detail remote processing guard missing' }
+          if ($remoteDetailGuard -match 'HasFacilityMoveButtonVisual') { throw 'confirmed recipe detail must not reuse facility move-button colour detection' }
+          if ($remoteDetailGuard -notmatch '"가공하러 가기"' -or
+              $remoteDetailGuard -notmatch 'paid is not null') { throw 'confirmed-detail remote veto must rely on the remote-only paid action signal' }
           if ($queue -notmatch 'visualActionCenter') { throw 'visual action coordinates must drive the on-site click' }
           if ($queue -notmatch 'TryReuseOnsiteFacilityAsync') { throw 'consecutive on-site facility reuse missing' }
           if ($screen -notmatch '_confirmedOnsiteFacility' -or $screen -notmatch '연속 등록 · 현장 상태 유지 확인') { throw 'stable on-site facility cache missing' }
