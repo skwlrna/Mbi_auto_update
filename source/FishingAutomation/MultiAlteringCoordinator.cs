@@ -9,7 +9,18 @@ namespace FishingAutomation;
 /// </summary>
 internal sealed class MultiAlteringCoordinator
 {
+    private readonly FacilityLaneState? _laneState;
+    private readonly FacilityLaneOwner _laneOwner;
+
     internal event Action<string>? Log;
+
+    internal MultiAlteringCoordinator(
+        FacilityLaneState? laneState = null,
+        FacilityLaneOwner laneOwner = FacilityLaneOwner.Main)
+    {
+        _laneState = laneState;
+        _laneOwner = laneOwner;
+    }
 
     internal async Task RunAsync(
         IReadOnlyList<AlteringPlan> plans,
@@ -98,6 +109,7 @@ internal sealed class MultiAlteringCoordinator
                 var facilityWorks = works
                     .Where(x => x.FacilityName == facility)
                     .ToArray();
+                _laneState?.Observe(facility, facilityWorks, allowShrink: false);
 
                 bool laneReady =
                     facilityWorks.Length == 0 ||
@@ -121,6 +133,7 @@ internal sealed class MultiAlteringCoordinator
                     ct.ThrowIfCancellationRequested();
                     works = await readWorks(ct);
                     facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
+                    _laneState?.Observe(facility, facilityWorks, allowShrink: false);
                     bool completedLaneNeedsCollection =
                         facilityWorks.Length > 0 &&
                         facilityWorks.All(x => x.IsCompleted);
@@ -138,6 +151,7 @@ internal sealed class MultiAlteringCoordinator
                     // One registration per turn is deliberate. Repeated turns fill
                     // the seven-slot lane A/B/A/B... without changing the proven
                     // single-plan registration/receipt implementation.
+                    _laneState?.AssertAccess(facility, _laneOwner);
                     bool planCompleted = await runBatch(plan, 1, ct);
                     acted = true;
                     nextPlanIndex[facility] = (index + 1) % plansByFacility[facility].Length;
@@ -150,7 +164,11 @@ internal sealed class MultiAlteringCoordinator
                     }
 
                     works = await readWorks(ct);
-                    int afterCount = works.Count(x => x.FacilityName == facility);
+                    var afterFacilityWorks = works
+                        .Where(x => x.FacilityName == facility)
+                        .ToArray();
+                    _laneState?.Observe(facility, afterFacilityWorks, allowShrink: true);
+                    int afterCount = afterFacilityWorks.Length;
 
                     if (planCompleted || afterCount != beforeCount)
                     {
@@ -171,14 +189,18 @@ internal sealed class MultiAlteringCoordinator
 
                 works = await readWorks(ct);
                 facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
+                _laneState?.Observe(facility, facilityWorks, allowShrink: false);
                 if (facilityWorks.Length > 0)
                 {
                     string composition = string.Join(", ",
                         facilityWorks
                             .GroupBy(x => x.DisplayName, StringComparer.Ordinal)
                             .Select(g => $"{g.Key} {g.Count()}칸"));
+                    string ownership = _laneState is null
+                        ? ""
+                        : $" · 소유권 {_laneState.Describe(facility)}";
                     Log?.Invoke(
-                        $"[다중가공] {facility.Replace(" 시설", "")} 현재 배치 {facilityWorks.Length}/7 · {composition}");
+                        $"[다중가공] {facility.Replace(" 시설", "")} 현재 배치 {facilityWorks.Length}/7 · {composition}{ownership}");
                 }
             }
 
@@ -189,6 +211,14 @@ internal sealed class MultiAlteringCoordinator
                 continue;
 
             works = await readWorks(ct);
+            foreach (string facility in orderedFacilities)
+            {
+                var facilityWorks = works
+                    .Where(x => x.FacilityName == facility)
+                    .ToArray();
+                _laneState?.Observe(facility, facilityWorks, allowShrink: false);
+            }
+
             var active = works
                 .Where(x => orderedFacilities.Contains(x.FacilityName, StringComparer.Ordinal))
                 .ToArray();
