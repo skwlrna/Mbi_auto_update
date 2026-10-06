@@ -1,5 +1,6 @@
 name: Release V3.1.22 Processing Status + On-site Reuse Fix
 # Pinned V3.1.22 source snapshot. Adds per-item Telegram processing status and prevents repeated facility travel during on-site batched registration while preserving remote-arrival detection.
+# release trigger: V3.1.22 final ETA build
 
 on:
   push:
