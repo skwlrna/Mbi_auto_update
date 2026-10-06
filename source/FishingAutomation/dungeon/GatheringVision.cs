@@ -57,6 +57,15 @@ internal sealed class GatheringVision
     }
     internal Task<DetectionResult?> FindMaterialAsync(Bitmap frame, string name, CancellationToken ct)
         => FindExactAsync(frame, MaterialTitle, name, ct, dim: true);
+
+    internal async Task<bool> HasPlaceListHeaderAsync(Bitmap frame, CancellationToken ct)
+    {
+        var header = await FindExactAsync(frame, ListHeader, "구하는 방법", ct);
+        return header is not null &&
+               header.Value.Bounds.Left <= 210 &&
+               header.Value.Bounds.Width >= 75;
+    }
+
     internal async Task<(Rectangle Bounds, string Text)?> FirstPlaceAsync(Bitmap frame, CancellationToken ct)
     {
         var header = await FindExactAsync(frame, ListHeader, "구하는 방법", ct);
