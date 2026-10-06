@@ -164,7 +164,7 @@ public sealed partial class MainForm
             header.Controls.Add(owner.SectionTitle(AccessibleName, 26), 0, 0);
             header.Controls.Add(new Label
             {
-                Text = altering ? "품목과 목표 수량을 작업 목록에 담으면 다중가공으로 순서대로 실행합니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
+                Text = altering ? "품목과 목표 수량을 담으면 시설별로 병렬 실행하고, 같은 시설 품목은 7칸에 섞어 가공합니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
                 Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft
             }, 0, 1);
             root.Controls.Add(header, 0, 0);
