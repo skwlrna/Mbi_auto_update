@@ -307,7 +307,10 @@ public sealed partial class MainForm
                         plan,
                         slotBudget,
                         coordinatorToken);
-                    return result == AlteringRunResult.Completed;
+                    bool planCompleted = result == AlteringRunResult.Completed;
+                    if (planCompleted)
+                        consumptionLedger.UnregisterProducer(plan);
+                    return planCompleted;
                 },
                 rawAlteringData.WorksAsync,
                 Task.Delay,
