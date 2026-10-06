@@ -256,6 +256,16 @@ var estimateRecipe = new AlteringRecipe("강철괴", false, 3, "not_enough_ingre
 string estimate = AlteringMaterialEstimate.Describe(estimatePlan, estimateRecipe);
 Check(estimate.Contains("철괴 예상 8") && estimate.Contains("부족 약 5"),
     "material preview projects remaining-work ingredient shortage without inventing hidden materials");
+Check(MultiAlteringMaterialPreflightPolicy.CanRun(
+        hasResumableSession: false,
+        hasSelectedFacilityWorks: false) &&
+      !MultiAlteringMaterialPreflightPolicy.CanRun(
+        hasResumableSession: true,
+        hasSelectedFacilityWorks: false) &&
+      !MultiAlteringMaterialPreflightPolicy.CanRun(
+        hasResumableSession: false,
+        hasSelectedFacilityWorks: true),
+    "whole-plan material preflight runs only for a clean fresh multi-altering start");
 
 string sessionPath = Path.Combine(Path.GetTempPath(), "mabi-altering-" + Guid.NewGuid().ToString("N") + ".json");
 var sessionStore = new AlteringSessionStore(sessionPath);
@@ -662,6 +672,42 @@ Check(multiWorld.Count("강철괴") == 3 &&
     "multi-gather batches iron ore and coal in one field transition before recursive processing");
 Check(multiWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)", "강철괴" }),
     "multi-gather preserves recursive caller return: intermediate iron then final steel");
+
+var wholePlanWorld = new RecursiveProductionWorld();
+wholePlanWorld.SetCount("석탄", 0);
+wholePlanWorld.SetCount("철 광석", 0);
+var wholePlanResolver = new RecursiveAlteringSupplyResolver(
+    wholePlanWorld, wholePlanWorld, wholePlanWorld, wholePlanWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var wholeSteelRecipe = (await wholePlanWorld.RecipesAsync(default))
+    .Single(x => x.DisplayName == "강철괴");
+var alloyPlan = new AlteringPlan("금속 가공 시설", "합금괴", 3, 3, false);
+var alloyRecipe = new AlteringRecipe(
+    "합금괴",
+    false,
+    3,
+    "not_enough_ingredient",
+    new[]
+    {
+        new AlteringIngredient("철괴", 3, 0),
+        new AlteringIngredient("석탄", 2, 0)
+    },
+    "금속 가공 시설");
+await wholePlanResolver.PreGatherKnownShortagesAsync(
+    new[]
+    {
+        new MultiAlteringSupplyPreflight(steelPlan, wholeSteelRecipe, 1),
+        new MultiAlteringSupplyPreflight(alloyPlan, alloyRecipe, 1)
+    },
+    default);
+Check(wholePlanWorld.FieldExitCalls == 1 &&
+      wholePlanWorld.GatherStarts == 2 &&
+      wholePlanWorld.Gathered.Count(x => x == "철 광석") == 1 &&
+      wholePlanWorld.Gathered.Count(x => x == "석탄") == 1 &&
+      wholePlanWorld.Count("철 광석") >= 20 &&
+      wholePlanWorld.Count("석탄") >= 6,
+    "whole-plan material preflight merges shared proven raw shortages into one field gathering session");
 
 var skipWorld = new RecursiveProductionWorld();
 skipWorld.SetCount("철 광석", 20);
