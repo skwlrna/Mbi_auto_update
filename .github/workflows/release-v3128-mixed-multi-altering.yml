@@ -34,7 +34,7 @@ jobs:
           $releaseSource = '03bac8664495a735aca10b80f65363f920dea987'
           if ((git rev-parse HEAD) -ne $releaseSource) { throw 'release source snapshot mismatch' }
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.27"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.28"') { throw 'version constant mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
           foreach ($field in @('Version','AssemblyVersion','FileVersion')) {
             $expected = if ($field -eq 'Version') { '3.1.28' } else { '3.1.28.0' }
