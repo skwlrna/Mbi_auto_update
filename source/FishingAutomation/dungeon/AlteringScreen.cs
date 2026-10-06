@@ -748,6 +748,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
         bool remoteRecoveryUsed = false;
 
+        // V3.1.8 execution model for every processing facility remains the base:
+        // select only after facility arrival, then validate fresh detail frames.
+        // V3.1.31 only adds one bounded recovery when the paid remote state persists.
         while (true)
         {
             await SelectRecipeAsync(plan, ct);
