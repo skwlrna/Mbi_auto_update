@@ -244,7 +244,8 @@ jobs:
           if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
              $screen -notmatch '작은 설비로 이동 문구 OCR 생략'){throw 'fixed move click/OCR-skip trace missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
-          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
+          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync)').Value
+          $remoteRecovery = [regex]::Match($screen, 'private async Task RecoverRemoteDetailToOnsiteAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'facility travel must happen before recipe selection' }
