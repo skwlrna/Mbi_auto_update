@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.32"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.33"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.32</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.33</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -220,6 +220,17 @@ jobs:
           $medicineSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectMedicineRecipeBySearchAsync[\s\S]*?(?=\r?\n    private async Task SelectRecipeAsync)').Value
           if($fixedSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $fixedSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정'){throw 'fixed recipe remote-screen veto missing'}
+          $fixedRetry = Get-Content source/FishingAutomation/AlteringFixedRecipeRetryPolicy.cs -Raw
+          if($fixedSelect -notmatch 'Task\.Delay\(300, ct\)' -or
+             $fixedSelect -notmatch '상세 전환 지연 확인 · 추가 클릭 없이 계속' -or
+             $fixedSelect -notmatch 'AlteringFixedRecipeRetryPolicy\.ShouldRetry' -or
+             $fixedSelect -notmatch '동일 좌표 재클릭 1/1' -or
+             $fixedSelect -notmatch '재클릭 1/1 성공 · 추가 재시도 없음' -or
+             [regex]::Matches($fixedSelect, '_ui\.ClickFresh\(center, ct\)').Count -ne 2){throw 'bounded fixed recipe click retry missing'}
+          if($fixedRetry -notmatch '!detailVisible' -or
+             $fixedRetry -notmatch 'facilityVisible' -or
+             $fixedRetry -notmatch '!moveButtonVisible' -or
+             $fixedRetry -notmatch '!retryAlreadyUsed'){throw 'fixed recipe retry safety policy missing'}
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
