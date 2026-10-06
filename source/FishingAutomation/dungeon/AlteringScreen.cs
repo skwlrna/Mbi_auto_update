@@ -1232,7 +1232,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync(
         AlteringPlan plan,
         CancellationToken ct,
-        string reason)
+        string reason,
+        bool cliReceiptConfirmed = false)
     {
         Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
         _ui.TapFresh(0x39, ct);
@@ -1247,11 +1248,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 await IsFacilityTravelDialogAsync(verify, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
-            if (AlteringReceiptPolicy.CanRetryCompletionClose(
+            bool canRetryClose = cliReceiptConfirmed
+                ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+                    greenConfirm,
+                    facilityVisible,
+                    travelDialog)
+                : AlteringReceiptPolicy.CanRetryCompletionClose(
                     greenConfirm,
                     facilityVisible,
                     travelDialog,
-                    autoTraveling == true))
+                    autoTraveling == true);
+
+            if (canRetryClose)
             {
                 Log?.Invoke(
                     "[자동 가공] 완료창 닫기 Space 1차 입력 후에도 실제 완료창 유지 · " +
@@ -1266,11 +1274,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     await IsFacilityTravelDialogAsync(retryFrame, ct);
                 bool? retryAutoTraveling = await TryAutoTravelingAsync(ct);
 
-                if (AlteringReceiptPolicy.CanRetryCompletionClose(
+                bool canRetryAgain = cliReceiptConfirmed
+                    ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+                        retryGreenConfirm,
+                        retryFacilityVisible,
+                        retryTravelDialog)
+                    : AlteringReceiptPolicy.CanRetryCompletionClose(
                         retryGreenConfirm,
                         retryFacilityVisible,
                         retryTravelDialog,
-                        retryAutoTraveling == true))
+                        retryAutoTraveling == true);
+
+                if (canRetryAgain)
                 {
                     _ui.TapFresh(0x39, ct);
                     Log?.Invoke("[자동 가공] 완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음");
@@ -1304,11 +1319,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 await IsFacilityTravelDialogAsync(closedCheck, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
-            if (AlteringReceiptPolicy.CanRetryCompletionClose(
+            bool completionStillVisible = cliReceiptConfirmed
+                ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+                    greenConfirm,
+                    facilityVisible,
+                    travelDialog)
+                : AlteringReceiptPolicy.CanRetryCompletionClose(
                     greenConfirm,
                     facilityVisible,
                     travelDialog,
-                    autoTraveling == true))
+                    autoTraveling == true);
+
+            if (completionStillVisible)
             {
                 Fail(
                     closedCheck,
@@ -1359,14 +1381,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     return true;
                 }
 
-                bool travelDialogAfterReceipt = await IsFacilityTravelDialogAsync(frame, ct);
+                bool travelDialogAfterReceipt = greenConfirm &&
+                    await IsFacilityTravelDialogAsync(frame, ct);
                 bool? autoTravelAfterReceipt = await TryAutoTravelingAsync(ct);
-                if (travelDialogAfterReceipt || autoTravelAfterReceipt == true)
+
+                if (!AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+                        greenConfirm,
+                        facilityVisible,
+                        travelDialogAfterReceipt))
                 {
                     cliReceiptStableFrames = 0;
-                    Log?.Invoke(
-                        $"[자동 가공] CLI 수령 확정 후 완료창 닫기 대기 · 이동 상태라 Space 차단 · " +
-                        $"이동팝업={travelDialogAfterReceipt} · AutoTraveling={autoTravelAfterReceipt == true}");
+                    if (travelDialogAfterReceipt)
+                    {
+                        Log?.Invoke(
+                            "[자동 가공] CLI 수령 확정 후 실제 이동 확인창 감지 · 완료창 Space 차단");
+                    }
                     continue;
                 }
 
@@ -1374,19 +1403,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 if (cliReceiptStableFrames < 2)
                     continue;
 
-                bool? freshTravelAfterReceipt = await TryAutoTravelingAsync(ct);
-                if (freshTravelAfterReceipt == true)
+                if (autoTravelAfterReceipt == true)
                 {
-                    cliReceiptStableFrames = 0;
-                    Log?.Invoke("[자동 가공] CLI 수령 확정 후 완료창 닫기 직전 AutoTraveling=true · Space 차단");
-                    continue;
+                    Log?.Invoke(
+                        "[자동 가공] CLI 수령 확정 + 완료창 2프레임 + 이동팝업 없음 · " +
+                        "AutoTraveling 잔류값 무시 · 완료창 Space 허용");
                 }
 
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
                 if (await CloseCompletionResultAndWaitForFacilityAsync(
                         plan,
                         ct,
-                        $"첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}"))
+                        $"첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}",
+                        cliReceiptConfirmed: true))
                     return true;
 
                 using var cliFailed = Capture(ct);
