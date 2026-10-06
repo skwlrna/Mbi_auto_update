@@ -53,7 +53,7 @@ public sealed partial class MainForm
             plan.DisplayName,
             Math.Clamp(progress.ConfirmedQuantity, 0, progress.TargetQuantity),
             progress.TargetQuantity,
-            progress.NextCompletionSeconds,
+            progress.BatchRemainingSeconds ?? progress.NextCompletionSeconds,
             DateTimeOffset.Now);
     }
 
