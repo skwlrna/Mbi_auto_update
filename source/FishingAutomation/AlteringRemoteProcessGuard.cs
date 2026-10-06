@@ -13,4 +13,24 @@ internal static class AlteringRemoteProcessGuard
     // still confirmed after that, input must stop instead of looping or re-clicking.
     internal static bool CanRecover(bool remoteConfirmed, bool recoveryAlreadyUsed)
         => remoteConfirmed && !recoveryAlreadyUsed;
+
+    // Compatibility overload retained for the existing regression project.
+    // Production QueueAsync no longer uses this branch in V3.1.31.
+    internal static bool ShouldBlock(
+        bool firstRemote,
+        bool secondRemote,
+        bool onsiteFacilityConfirmed,
+        bool firstOnsiteActionVisible,
+        bool secondOnsiteActionVisible)
+    {
+        if (!firstRemote || !secondRemote)
+            return false;
+
+        bool provenOnsiteAction =
+            onsiteFacilityConfirmed &&
+            firstOnsiteActionVisible &&
+            secondOnsiteActionVisible;
+
+        return !provenOnsiteAction;
+    }
 }
