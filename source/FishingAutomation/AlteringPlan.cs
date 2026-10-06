@@ -567,11 +567,17 @@ internal sealed class AlteringAutomation
         long confirmed = Math.Max(0, current - baseline - oldMinimum);
         confirmed = Math.Min(plan.TargetQuantity, confirmed);
 
-        long? next = works
-            .Where(x => x.FacilityName == plan.FacilityName && x.State == "InProgress")
+        var matchingInProgress = Matching(works, plan)
+            .Where(x => x.State == "InProgress")
+            .ToArray();
+        long? next = matchingInProgress
             .Select(x => (long?)x.RemainingSeconds)
             .DefaultIfEmpty(null)
             .Min();
+        long? batchRemaining = matchingInProgress
+            .Select(x => (long?)x.RemainingSeconds)
+            .DefaultIfEmpty(null)
+            .Max();
 
         Progress.Invoke(new(
             confirmed,
@@ -580,7 +586,8 @@ internal sealed class AlteringAutomation
             plan.RequiredWorks,
             works.Count(x => x.FacilityName == plan.FacilityName),
             next,
-            materialState));
+            materialState,
+            batchRemaining));
     }
 
     private static string ProgressSignature(
