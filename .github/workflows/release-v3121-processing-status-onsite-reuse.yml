@@ -732,9 +732,10 @@ jobs:
           $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.21' }) | Select-Object -First 1
 
           $expected=@('MabiAuto_V3.1.21_Windows_Lite.zip','MabiAuto_V3.1.21_Windows_Lite.zip.sha256','MabiAuto_V3.1.21_Source.zip')
-          git fetch origin release-v3121-processing-status-onsite-reuse-code
-          if($LASTEXITCODE-ne0){throw 'Release code branch fetch failed'}
-          $releaseTarget=(git rev-parse origin/release-v3121-processing-status-onsite-reuse-code).Trim()
+          # This workflow already checks out the immutable V3.1.21 source commit above.
+          # Do not depend on a separately-created release branch: a missing helper
+          # branch must never block publishing an otherwise verified build.
+          $releaseTarget=(git rev-parse HEAD).Trim()
           if($releaseTarget -ne '4630ceafe4a5b85fe3b59bdeb96bd8f9b0edb77f'){throw "Release code target mismatch: $releaseTarget"}
 
           if(-not $r) {
