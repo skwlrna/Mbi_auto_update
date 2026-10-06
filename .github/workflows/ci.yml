@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.36"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.37"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.36</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.37</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -559,6 +559,7 @@ jobs:
           $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
           $multiAlter = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
           $dependencyScheduler = Get-Content source/FishingAutomation/MultiAlteringDependencyScheduler.cs -Raw
+          $laneOwnership = Get-Content source/FishingAutomation/FacilityLaneState.cs -Raw
           $consumptionLedger = Get-Content source/FishingAutomation/MultiAlteringConsumptionLedger.cs -Raw
           $multiAlterMain = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
           $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
@@ -591,6 +592,26 @@ jobs:
              $dependencyScheduler -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $dependencyScheduler -notmatch '배치 전체 완료 전 이동 없음') { throw 'intermediate processing must share whole-facility seven-slot scheduling' }
           if($dependencyScheduler -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'dependency scheduler must not own direct input' }
+          if($laneOwnership -notmatch 'FacilityLaneOwner' -or
+             $laneOwnership -notmatch 'InitialObservedWorks' -or
+             $laneOwnership -notmatch 'ExpectedGrowth' -or
+             $laneOwnership -notmatch 'AcquireIntermediate' -or
+             $laneOwnership -notmatch 'ReleaseIntermediate' -or
+             $laneOwnership -notmatch '외부 수령 또는 취소 가능성' -or
+             $laneOwnership -notmatch '자동화가 등록하지 않은 작업 증가') { throw 'facility lane ownership ledger safety rules missing' }
+          if($laneOwnership -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'facility ownership ledger must never own direct input' }
+          if($multiAlter -notmatch 'FacilityLaneState' -or
+             $multiAlter -notmatch 'AssertAccess' -or
+             $multiAlter -notmatch 'allowShrink: false' -or
+             $multiAlter -notmatch 'allowShrink: true') { throw 'multi coordinator facility ownership observation missing' }
+          if($multiAlterMain -notmatch 'new FacilityLaneState\(currentWorks\)' -or
+             $multiAlterMain -notmatch 'laneState: laneState' -or
+             $multiAlterMain -notmatch 'ConfirmedRegistrationsThisRun' -or
+             $multiAlterMain -notmatch 'FacilityLaneOwner\.Main') { throw 'main multi-altering ownership wiring missing' }
+          if($dependencyScheduler -notmatch 'AcquireIntermediate' -or
+             $dependencyScheduler -notmatch 'ReleaseIntermediate' -or
+             $dependencyScheduler -notmatch 'FacilityLaneOwner\.Intermediate' -or
+             $dependencyScheduler -notmatch 'ConfirmedRegistrationsThisRun') { throw 'intermediate facility ownership wiring missing' }
           if($multiAlterMain -notmatch 'new MultiAlteringConsumptionLedger' -or
              $multiAlterMain -notmatch 'internalConsumptionObserver: consumptionLedger' -or
              $multiAlterMain -notmatch 'CreditInternalConsumption' -or

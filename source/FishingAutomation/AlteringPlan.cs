@@ -145,6 +145,7 @@ internal sealed class AlteringAutomation
     internal event Action<string>? Log;
     internal event Action<AlteringProgress>? Progress;
     internal int QueuedWorks { get; private set; }
+    internal int ConfirmedRegistrationsThisRun { get; private set; }
     internal long ReservedWings { get; private set; }
 
     internal AlteringAutomation(IAlteringData data, IAlteringScreen screen,
@@ -526,6 +527,7 @@ internal sealed class AlteringAutomation
                             plan, consumptionBefore, ct);
 
                     QueuedWorks++;
+                    ConfirmedRegistrationsThisRun++;
                     queuedThisBatch++;
                     SaveConfirmedRegistration();
                     Log?.Invoke(

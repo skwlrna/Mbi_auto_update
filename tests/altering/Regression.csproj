@@ -20,6 +20,7 @@
     <Compile Include="../../source/FishingAutomation/GatheringSafetyPolicy.cs" Link="GatheringSafetyPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/MultiGatheringCoordinator.cs" Link="MultiGatheringCoordinator.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringCoordinator.cs" Link="MultiAlteringCoordinator.cs" />
+    <Compile Include="../../source/FishingAutomation/FacilityLaneState.cs" Link="FacilityLaneState.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringDependencyScheduler.cs" Link="MultiAlteringDependencyScheduler.cs" />
     <Compile Include="../../source/FishingAutomation/RecursiveAlteringSupplyResolver.cs" Link="RecursiveAlteringSupplyResolver.cs" />
     <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />

@@ -88,11 +88,13 @@ public sealed partial class MainForm
                 "MabiAuto", "multi-altering");
             Directory.CreateDirectory(sessionDir);
 
+            var laneState = new FacilityLaneState(currentWorks);
             var dependencyScheduler = new MultiAlteringDependencyScheduler(
                 rawAlteringData,
                 screen,
                 identity.Baseline,
-                sessionDir);
+                sessionDir,
+                laneState: laneState);
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData,
                 gatheringData,
@@ -110,6 +112,12 @@ public sealed partial class MainForm
             {
                 _log.Write(text);
                 SetStatus(text.Replace("[중간재료 스케줄] ", ""), Blue);
+                RefreshProductionDashboard();
+            });
+            laneState.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                SetStatus(text.Replace("[시설 소유권] ", ""), Blue);
                 RefreshProductionDashboard();
             });
             consumptionLedger.Log += text => Ui(() =>
@@ -334,7 +342,9 @@ public sealed partial class MainForm
                 }
             }
 
-            var coordinator = new MultiAlteringCoordinator();
+            var coordinator = new MultiAlteringCoordinator(
+                laneState,
+                FacilityLaneOwner.Main);
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
@@ -348,10 +358,17 @@ public sealed partial class MainForm
                 {
                     coordinatorToken.ThrowIfCancellationRequested();
                     var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
-                    var result = await automations[key].RunBatchAsync(
+                    var automation = automations[key];
+                    int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
+                    var result = await automation.RunBatchAsync(
                         plan,
                         slotBudget,
                         coordinatorToken);
+                    int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
+                    laneState.NoteRegistration(
+                        plan,
+                        FacilityLaneOwner.Main,
+                        registered);
                     bool planCompleted = result == AlteringRunResult.Completed;
                     if (planCompleted)
                         consumptionLedger.UnregisterProducer(plan);
