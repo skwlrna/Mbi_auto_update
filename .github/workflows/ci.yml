@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.26"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.27"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.26</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.27</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -514,6 +514,7 @@ jobs:
           $craftEngine = Get-Content source/FishingAutomation/CraftingAutomation.cs -Raw
           $gatherScreen = Get-Content source/FishingAutomation/dungeon/GatheringScreen.cs -Raw
           $bulkScreen = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          $gatherVision = Get-Content source/FishingAutomation/dungeon/GatheringVision.cs -Raw
           $alterScreen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
           $runtime = Get-Content source/FishingAutomation/dungeon/ProductionUiRuntime.cs -Raw
           $search = Get-Content source/FishingAutomation/dungeon/ProductionSearchFlow.cs -Raw
@@ -742,19 +743,25 @@ jobs:
 
           $nearestResult = [regex]::Match($bulkScreen, 'private async Task ResolveLifeSkillNearestResultAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Confirmed)').Value
           if([string]::IsNullOrWhiteSpace($nearestResult)){throw 'nearest-location direct/recommended routing helper missing'}
-          if($nearestResult -notmatch 'activity\.IsAutoTraveling' -or
-             $nearestResult -notmatch 'activity\.IsGathering' -or
+          if($nearestResult -notmatch 'IsOwnedLifeSkillActivity\(activity\)' -or
              $nearestResult -notmatch '_navigationVision\.FirstPlaceAsync' -or
+             $nearestResult -notmatch '_navigationVision\.HasPlaceListHeaderAsync' -or
              $nearestResult -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow' -or
              $nearestResult -notmatch '가까운 위치 결과=바로 이동형' -or
-             $nearestResult -notmatch '가까운 위치 결과=추천 장소형'){throw 'nearest-location CLI direct/recommended split is incomplete'}
+             $nearestResult -notmatch '가까운 위치 결과=추천 장소형' -or
+             $nearestResult -notmatch '가까운 위치 결과=직접 전환형'){throw 'nearest-location direct/recommended/transition split is incomplete'}
           if($nearestResult -notmatch 'poll == 4 \|\| poll == 8' -or
              $nearestResult -notmatch 'retryOffset = retryNumber == 1 \? 56 : 84' -or
              $nearestResult -notmatch 'TryRetryLifeSkillNearestLocationAsync' -or
-             $nearestResult -notmatch '기존 상세창 \? 기준이 더 이상 안정적으로 보이지 않아 추가 입력 없음'){throw 'nearest-location no-response retry schedule/safety guard missing'}
-          $cliRouteIndex = $nearestResult.IndexOf('if (activity.IsAutoTraveling')
+             $nearestResult -notmatch '상세창 \? 2프레임 소실' -or
+             $nearestResult -notmatch '상세창 \? 소실 4초 유지 \+ 추천 장소 헤더 없음'){throw 'nearest-location no-response retry/transition safety guard missing'}
+          if($gatherVision -notmatch 'HasPlaceListHeaderAsync' -or
+             $gatherVision -notmatch '"구하는 방법"'){throw 'recommendation-list header detector missing'}
+          if($bulkScreen -notmatch 'TimeSpan\.FromSeconds\(90\)' -or
+             $bulkScreen -notmatch '생활 스킬 이동/채집 상태나 재고 증가를 확인하지 못했습니다'){throw 'direct-transition startup timeout guard missing'}
+          $cliRouteIndex = $nearestResult.IndexOf('if (IsOwnedLifeSkillActivity(activity))')
           $placeRouteIndex = $nearestResult.IndexOf('_navigationVision.FirstPlaceAsync')
-          if($cliRouteIndex -lt 0 -or $placeRouteIndex -lt 0 -or $cliRouteIndex -gt $placeRouteIndex){throw 'CLI direct-travel decision must run before recommended-place screen input'}
+          if($cliRouteIndex -lt 0 -or $placeRouteIndex -lt 0 -or $cliRouteIndex -gt $placeRouteIndex){throw 'CLI/main-button direct-travel decision must run before recommended-place screen input'}
           if($lifeSkillStart -notmatch 'ResolveLifeSkillNearestResultAsync\(source\.TargetName, ct\)'){throw 'life-skill start does not route nearest-location result'}
           if($lifeSkillStart -notmatch '100회는 행동 횟수이며 획득 수량과 분리'){throw '100-action vs item-count separation trace missing'}
 
