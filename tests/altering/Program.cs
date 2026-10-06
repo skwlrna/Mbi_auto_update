@@ -828,7 +828,10 @@ await skipCoordinator.RunAsync(
 Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
 
-var multiAltering = new MultiAlteringCoordinator();
+var mixedLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
+var multiAltering = new MultiAlteringCoordinator(
+    mixedLaneState,
+    FacilityLaneOwner.Main);
 var mixedPlans = new[]
 {
     new AlteringPlan("목재 가공 시설", "목재", 4, 1, false),
@@ -876,6 +879,10 @@ await multiAltering.RunAsync(
                 10));
             mixedRegistered[job.DisplayName]++;
         }
+        mixedLaneState.NoteRegistration(
+            job,
+            FacilityLaneOwner.Main,
+            toRegister);
 
         return Task.FromResult(false);
     },
@@ -925,6 +932,9 @@ Check(mixedRegistered["목재"] == 4 &&
       mixedRegistered["목재+"] == 3 &&
       mixedRegistered["강철괴"] == 7,
     "mixed scheduler registers each plan only to its required work count");
+Check(mixedLaneState.Snapshot("목재 가공 시설").MainRegisteredWorks == 7 &&
+      mixedLaneState.Snapshot("금속 가공 시설").MainRegisteredWorks == 7,
+    "main facility ownership ledger matches confirmed round-robin registrations");
 Check(callsAtPartialCompletion == callsBeforeWholeBatchCompletion,
     "one completed slot never causes a facility revisit before the whole mixed batch completes");
 Check(mixedCalls.Take(14).Count(x => x == "강철괴") == 7,
