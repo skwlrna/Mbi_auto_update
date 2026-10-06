@@ -267,6 +267,102 @@ Check(MultiAlteringMaterialPreflightPolicy.CanRun(
         hasSelectedFacilityWorks: true),
     "whole-plan material preflight runs only for a clean fresh multi-altering start");
 
+var lanePlan = plan with { TargetQuantity = 3 };
+var laneInitial = new[]
+{
+    new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "InProgress", false, 10)
+};
+var laneOwnership = new FacilityLaneState(laneInitial);
+Check(laneOwnership.Snapshot(lanePlan.FacilityName).InitialObservedWorks == 1,
+    "facility ownership captures works that existed before automation start");
+laneOwnership.NoteRegistration(lanePlan, FacilityLaneOwner.Main, 1);
+laneOwnership.Observe(
+    lanePlan.FacilityName,
+    new[]
+    {
+        laneInitial[0],
+        new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "NotStarted", false, 20)
+    },
+    allowShrink: false);
+Check(laneOwnership.Snapshot(lanePlan.FacilityName).MainRegisteredWorks == 1,
+    "facility ownership records only confirmed main registrations");
+
+var foreignGrowthOwnership = new FacilityLaneState(Array.Empty<AlteringWork>());
+try
+{
+    foreignGrowthOwnership.Observe(
+        lanePlan.FacilityName,
+        new[] { new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "InProgress", false, 10) },
+        allowShrink: false);
+    throw new Exception("unowned facility growth accepted");
+}
+catch (InvalidOperationException)
+{
+    Check(true, "facility ownership stops on a queue increase not explained by automation");
+}
+
+var foreignShrinkOwnership = new FacilityLaneState(laneInitial);
+try
+{
+    foreignShrinkOwnership.Observe(
+        lanePlan.FacilityName,
+        Array.Empty<AlteringWork>(),
+        allowShrink: false);
+    throw new Exception("unowned facility shrink accepted");
+}
+catch (InvalidOperationException)
+{
+    Check(true, "facility ownership stops on manual receipt/cancel during a no-input wait");
+}
+foreignShrinkOwnership.Observe(
+    lanePlan.FacilityName,
+    Array.Empty<AlteringWork>(),
+    allowShrink: true);
+foreignShrinkOwnership.AcquireIntermediate(
+    lanePlan.FacilityName,
+    Array.Empty<AlteringWork>());
+try
+{
+    foreignShrinkOwnership.AssertAccess(
+        lanePlan.FacilityName,
+        FacilityLaneOwner.Main);
+    throw new Exception("main input accepted during intermediate ownership");
+}
+catch (InvalidOperationException)
+{
+    Check(true, "intermediate facility lease blocks main multi-altering input");
+}
+foreignShrinkOwnership.NoteRegistration(
+    lanePlan,
+    FacilityLaneOwner.Intermediate,
+    1);
+foreignShrinkOwnership.Observe(
+    lanePlan.FacilityName,
+    new[] { new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "Completed", true, 0) },
+    allowShrink: false);
+try
+{
+    foreignShrinkOwnership.ReleaseIntermediate(
+        lanePlan.FacilityName,
+        new[] { new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "Completed", true, 0) });
+    throw new Exception("intermediate ownership released with live work");
+}
+catch (InvalidOperationException)
+{
+    Check(true, "intermediate facility lease is retained while its work remains");
+}
+foreignShrinkOwnership.Observe(
+    lanePlan.FacilityName,
+    Array.Empty<AlteringWork>(),
+    allowShrink: true);
+foreignShrinkOwnership.ReleaseIntermediate(
+    lanePlan.FacilityName,
+    Array.Empty<AlteringWork>());
+var releasedLane = foreignShrinkOwnership.Snapshot(lanePlan.FacilityName);
+Check(!releasedLane.IntermediateLease &&
+      releasedLane.IntermediateRegisteredWorks == 1,
+    "intermediate facility ownership releases only after the lane is empty");
+
 string sessionPath = Path.Combine(Path.GetTempPath(), "mabi-altering-" + Guid.NewGuid().ToString("N") + ".json");
 var sessionStore = new AlteringSessionStore(sessionPath);
 var testIdentity = new CliIdentityContext("char-1", "테스트", "account-1", "서버A");
@@ -376,7 +472,10 @@ async Task<(FakeWorld World, AlteringAutomation Automation)> Run(AlteringPlan p,
     return (world, auto);
 }
 var success = await Run(plan);
-Check(success.Automation.QueuedWorks == 34 && success.World.QueueCalls == 34, "one registration per required work");
+Check(success.Automation.QueuedWorks == 34 &&
+      success.Automation.ConfirmedRegistrationsThisRun == 34 &&
+      success.World.QueueCalls == 34,
+    "one registration per required work and ownership counts only confirmed inputs");
 Check(success.World.Owned == 102 && success.World.MaxQueue <= 7, "full queue waits and all results collected");
 Check(success.Automation.ReservedWings == 0, "successful altering reserves zero Spirit Wings");
 success = await Run(plan with { DisplayName = "철괴(광석)", TargetQuantity = 2 });
@@ -599,6 +698,8 @@ scheduledWorld.AddExternalWork(
     "InProgress",
     isCompleted: false,
     remainingSeconds: 8);
+var scheduledLaneState = new FacilityLaneState(
+    await scheduledWorld.WorksAsync(default));
 int dependencyBoundaryWaits = 0;
 string dependencySessionDir = Path.Combine(
     Path.GetTempPath(),
@@ -615,7 +716,8 @@ var dependencyScheduler = new MultiAlteringDependencyScheduler(
         scheduledWorld.CompleteAllWorks();
         return Task.CompletedTask;
     },
-    verificationAttempts: 4);
+    verificationAttempts: 4,
+    laneState: scheduledLaneState);
 bool sawIntegratedDependencyLog = false;
 dependencyScheduler.Log += text =>
     sawIntegratedDependencyLog |= text.Contains(
@@ -651,6 +753,11 @@ Check(dependencyBoundaryWaits > 0 &&
 Check(scheduledWorld.Count("강철괴") == 6 &&
       scheduledWorld.Count("철괴") == 0,
     "existing completed root work is received before dependency ownership and intermediate stock is consumed only by the resumed parent");
+var scheduledOwnership = scheduledLaneState.Snapshot("금속 가공 시설");
+Check(scheduledOwnership.InitialObservedWorks == 1 &&
+      scheduledOwnership.IntermediateRegisteredWorks == 1 &&
+      !scheduledOwnership.IntermediateLease,
+    "dependency scheduler owns the empty facility lane only for its intermediate batch and releases it after receipt");
 if (Directory.Exists(dependencySessionDir))
     Directory.Delete(dependencySessionDir, recursive: true);
 
