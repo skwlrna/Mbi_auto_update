@@ -1,6 +1,6 @@
-name: Release V3.1.36 Integrated Material Preflight
-# Pinned V3.1.36 source snapshot. Mixes same-facility altering lanes, stabilizes resume keys, and reports full-plan ETA.
-# release trigger: V3.1.36 mixed multi-altering build
+name: Release V3.1.37 Facility Lane Ownership
+# Pinned V3.1.37 source snapshot. Mixes same-facility altering lanes, stabilizes resume keys, and reports full-plan ETA.
+# release trigger: V3.1.37 mixed multi-altering build
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-v3136-integrated-material-preflight
+  group: release-v3137-facility-lane-ownership
   cancel-in-progress: false
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: f9a84e9d48cae6036752992f4ce8682658b68d4b
+          ref: aec6023305e63d6bf4f941746de3656f535469fd
           fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
@@ -31,13 +31,13 @@ jobs:
       - name: Verify release source and versions
         shell: pwsh
         run: |
-          $releaseSource = 'f9a84e9d48cae6036752992f4ce8682658b68d4b'
+          $releaseSource = 'aec6023305e63d6bf4f941746de3656f535469fd'
           if ((git rev-parse HEAD) -ne $releaseSource) { throw 'release source snapshot mismatch' }
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.36"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.37"') { throw 'version constant mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
           foreach ($field in @('Version','AssemblyVersion','FileVersion')) {
-            $expected = if ($field -eq 'Version') { '3.1.36' } else { '3.1.36.0' }
+            $expected = if ($field -eq 'Version') { '3.1.37' } else { '3.1.37.0' }
             if ($p -notmatch [regex]::Escape("<$field>$expected</$field>")) { throw "$field mismatch" }
           }
       - name: Restore and test
@@ -103,7 +103,7 @@ jobs:
           dotnet run --project tests/crafting/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Crafting regressions failed' }
 
-      - name: V3.1.36 behavior guards
+      - name: V3.1.37 behavior guards
         shell: pwsh
         run: |
           $bulk = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
@@ -277,7 +277,7 @@ jobs:
              $lifeLayout -notmatch 'NeverScroll' -or
              $lifeLayout -notmatch 'SafeDragStart = new\(580, 760\)' -or
              $lifeLayout -notmatch 'SafeDragEnd = new\(580, 350\)'){throw 'fixed harvest/wool or safe drag layout missing'}
-      - name: V3.1.36 new behavior guards
+      - name: V3.1.37 new behavior guards
         shell: pwsh
         run: |
           $multi = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
@@ -539,7 +539,7 @@ jobs:
           dotnet run --project tests/production-ui/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Production UI regressions failed' }
 
-      - name: V3.1.36 fixed processing selection guards
+      - name: V3.1.37 fixed processing selection guards
         shell: pwsh
         run: |
           $layout = Get-Content source/FishingAutomation/AlteringRecipeLayout.cs -Raw
@@ -564,18 +564,18 @@ jobs:
           $fixedSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectFixedRecipeAsync[\s\S]*?(?=\r?\n    private async Task<bool> TrySelectMedicineRecipeBySearchAsync)').Value
           $medicineSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectMedicineRecipeBySearchAsync[\s\S]*?(?=\r?\n    private async Task SelectRecipeAsync)').Value
           if($fixedSelect -notmatch 'HasFacilityMoveButtonVisual' -or
-             $fixedSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정'){throw 'V3.1.36 fixed recipe remote-screen veto missing'}
+             $fixedSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정'){throw 'V3.1.37 fixed recipe remote-screen veto missing'}
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
-             $medicineSelect -notmatch '검색 입력을 차단'){throw 'V3.1.36 medicine remote-screen veto missing'}
+             $medicineSelect -notmatch '검색 입력을 차단'){throw 'V3.1.37 medicine remote-screen veto missing'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'ShouldAcceptMoveButton' -or
              $screen -match 'strongMoveShape' -or
              $screen -notmatch 'centerBright >= 4' -or
              $screen -notmatch 'diagonal >= 18' -or
              $screen -notmatch 'q1 >= 3 && q2 >= 3 && q3 >= 3 && q4 >= 3' -or
-             $screen -notmatch 'ShouldAcceptMoveButton'){throw 'V3.1.36 on-site close-X/currency-digit discriminator missing'}
+             $screen -notmatch 'ShouldAcceptMoveButton'){throw 'V3.1.37 on-site close-X/currency-digit discriminator missing'}
 
-      - name: V3.1.36 fixed card click retry guards
+      - name: V3.1.37 fixed card click retry guards
         shell: pwsh
         run: |
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
@@ -598,7 +598,7 @@ jobs:
              $tests -notmatch 'remote facility state never receives a fixed recipe retry' -or
              $tests -notmatch 'fixed recipe retry is strictly one-shot'){throw 'fixed recipe retry regression coverage missing'}
 
-      - name: V3.1.36 optional facility travel confirmation guards
+      - name: V3.1.37 optional facility travel confirmation guards
         shell: pwsh
         run: |
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
@@ -615,7 +615,7 @@ jobs:
              $tests -notmatch 'generic green modal is never enough to authorize facility travel Space' -or
              $tests -notmatch 'facility travel confirmation is strictly one-shot'){throw 'facility travel confirmation regression coverage missing'}
 
-      - name: V3.1.36 facility-first travel guards
+      - name: V3.1.37 facility-first travel guards
         shell: pwsh
         run: |
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
@@ -645,7 +645,7 @@ jobs:
              $queue -notmatch 'restartAfterRemoteRecovery' -or
              [string]::IsNullOrWhiteSpace($remoteRecovery) -or
              $remoteRecovery -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)' -or
-             [regex]::Matches($remoteRecovery, 'TravelToFacilityAsync').Count -ne 1){throw 'V3.1.36 bounded remote detail recovery missing'}
+             [regex]::Matches($remoteRecovery, 'TravelToFacilityAsync').Count -ne 1){throw 'V3.1.37 bounded remote detail recovery missing'}
           $remoteDetailGuard = [regex]::Match($screen, 'private async Task<\(bool IsRemote, string Evidence\)> DetectRemoteProcessStateAsync[\s\S]*?(?=\r?\n    public async Task QueueAsync)').Value
           if([string]::IsNullOrWhiteSpace($remoteDetailGuard)){throw 'confirmed-detail remote processing guard missing'}
           if($remoteDetailGuard -match 'HasFacilityMoveButtonVisual'){throw 'confirmed recipe detail must not reuse facility move-button colour detection'}
@@ -666,7 +666,7 @@ jobs:
              $screen -notmatch '설비 이동 확인창 없음 · Space 생략'){throw 'optional facility travel confirmation handling missing'}
           if($layout -notmatch 'OnsiteCloseVisualArea = new\(744, 42, 44, 44\)'){throw 'on-site close-X geometry missing'}
 
-      - name: V3.1.36 Telegram processing status guards
+      - name: V3.1.37 Telegram processing status guards
         shell: pwsh
         run: |
           $status = Get-Content source/FishingAutomation/AlteringStatus.cs -Raw
@@ -694,7 +694,7 @@ jobs:
           if($queue -notmatch 'TravelToFacilityAsync\(plan, ct\)' -or
              $queue -match 'remoteConfirmed:\s*true'){throw 'batch registration must re-check travel state without forcing a move'}
 
-      - name: V3.1.36 manual receive cancel resume guards
+      - name: V3.1.37 manual receive cancel resume guards
         shell: pwsh
         run: |
           $altering = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
@@ -709,7 +709,7 @@ jobs:
              $tests -notmatch 'QueueCalls == 16' -or
              $tests -notmatch 'Owned == 100'){throw 'manual receive/cancel regression test missing'}
 
-      - name: V3.1.36 CLI receipt confirmation guards
+      - name: V3.1.37 CLI receipt confirmation guards
         shell: pwsh
         run: |
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
@@ -732,7 +732,7 @@ jobs:
              $tests -notmatch 'CLI-confirmed receipt may close a proven completion modal without consulting stale AutoTraveling' -or
              $tests -notmatch 'real facility travel confirmation still blocks CLI-confirmed receipt completion Space'){throw 'CLI receipt regression tests missing'}
 
-      - name: V3.1.36 facility batch scheduling guards
+      - name: V3.1.37 facility batch scheduling guards
         shell: pwsh
         run: |
           $multi = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
@@ -755,7 +755,7 @@ jobs:
              $tests -notmatch 'independent facility is fully seeded in parallel before waiting'){throw 'mixed multi-altering batch regression tests missing'}
           if($multi -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime'){throw 'multi scheduler owns direct input'}
 
-      - name: V3.1.36 internal material consumption guards
+      - name: V3.1.37 internal material consumption guards
         shell: pwsh
         run: |
           $ledger = Get-Content source/FishingAutomation/MultiAlteringConsumptionLedger.cs -Raw
@@ -780,7 +780,7 @@ jobs:
           if($tests -notmatch 'steel registration credits the observed 239 to 236 iron decrease as internal consumption' -or
              $tests -notmatch 'persisted internal consumption credit lets iron resume after steel consumed three iron'){throw 'internal consumption regression tests missing'}
 
-      - name: V3.1.36 receipt result close retry guards
+      - name: V3.1.37 receipt result close retry guards
         shell: pwsh
         run: |
           $screen = Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
@@ -806,7 +806,7 @@ jobs:
              $tests -notmatch 'CLI-confirmed completion modal may receive the existing single guarded close retry'){throw 'completion-close retry policy regression coverage missing'}
           if($screen -match '결과창 인식 생략 · 다음 가공 진입에서 화면 재검증'){throw 'early return after CLI receipt confirmation returned'}
 
-      - name: V3.1.36 integrated material preflight guards
+      - name: V3.1.37 integrated material preflight guards
         shell: pwsh
         run: |
           $resolver = Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
@@ -815,14 +815,50 @@ jobs:
           if($resolver -notmatch 'MultiAlteringMaterialPreflightPolicy' -or
              $resolver -notmatch 'PreGatherKnownShortagesAsync' -or
              $resolver -notmatch '전체 품목 통합 채집 준비' -or
-             $resolver -notmatch 'every selected root and every sibling branch'){throw 'V3.1.36 integrated material planner missing'}
+             $resolver -notmatch 'every selected root and every sibling branch'){throw 'V3.1.37 integrated material planner missing'}
           if($multiMain -notmatch 'MultiAlteringMaterialPreflightPolicy\.CanRun' -or
              $multiMain -notmatch 'hasResumableSessionForPreflight' -or
              $multiMain -notmatch 'hasSelectedFacilityWorksForPreflight' -or
              $multiMain -notmatch 'PreGatherKnownShortagesAsync' -or
-             $multiMain -notmatch '전체 품목 통합 선행채집 생략'){throw 'V3.1.36 safe preflight gating/wiring missing'}
+             $multiMain -notmatch '전체 품목 통합 선행채집 생략'){throw 'V3.1.37 safe preflight gating/wiring missing'}
           if($tests -notmatch 'whole-plan material preflight runs only for a clean fresh multi-altering start' -or
-             $tests -notmatch 'whole-plan material preflight merges shared proven raw shortages into one field gathering session'){throw 'V3.1.36 material preflight regression coverage missing'}
+             $tests -notmatch 'whole-plan material preflight merges shared proven raw shortages into one field gathering session'){throw 'V3.1.37 material preflight regression coverage missing'}
+
+      - name: V3.1.37 facility lane ownership guards
+        shell: pwsh
+        run: |
+          $lane = Get-Content source/FishingAutomation/FacilityLaneState.cs -Raw
+          $multi = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
+          $dependency = Get-Content source/FishingAutomation/MultiAlteringDependencyScheduler.cs -Raw
+          $main = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $altering = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $tests = Get-Content tests/altering/Program.cs -Raw
+          if($lane -notmatch 'enum FacilityLaneOwner' -or
+             $lane -notmatch 'InitialObservedWorks' -or
+             $lane -notmatch 'MainRegisteredWorks' -or
+             $lane -notmatch 'IntermediateRegisteredWorks' -or
+             $lane -notmatch 'ExpectedGrowth' -or
+             $lane -notmatch 'AcquireIntermediate' -or
+             $lane -notmatch 'ReleaseIntermediate' -or
+             $lane -notmatch '자동화가 등록하지 않은 작업 증가' -or
+             $lane -notmatch '외부 수령 또는 취소 가능성'){throw 'V3.1.37 facility ownership ledger missing'}
+          if($lane -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime'){throw 'facility ownership ledger must not own direct input'}
+          if($multi -notmatch 'FacilityLaneState' -or
+             $multi -notmatch 'AssertAccess' -or
+             $multi -notmatch 'allowShrink: false' -or
+             $multi -notmatch 'allowShrink: true'){throw 'V3.1.37 coordinator ownership observation missing'}
+          if($dependency -notmatch 'AcquireIntermediate' -or
+             $dependency -notmatch 'ReleaseIntermediate' -or
+             $dependency -notmatch 'FacilityLaneOwner\.Intermediate' -or
+             $dependency -notmatch 'ConfirmedRegistrationsThisRun'){throw 'V3.1.37 intermediate ownership wiring missing'}
+          if($main -notmatch 'new FacilityLaneState\(currentWorks\)' -or
+             $main -notmatch 'laneState: laneState' -or
+             $main -notmatch 'FacilityLaneOwner\.Main' -or
+             $main -notmatch 'ConfirmedRegistrationsThisRun'){throw 'V3.1.37 main ownership wiring missing'}
+          if($altering -notmatch 'ConfirmedRegistrationsThisRun\+\+' -or
+             $tests -notmatch 'facility ownership stops on a queue increase not explained by automation' -or
+             $tests -notmatch 'intermediate facility lease blocks main multi-altering input' -or
+             $tests -notmatch 'dependency scheduler owns the empty facility lane only for its intermediate batch and releases it after receipt'){throw 'V3.1.37 ownership regression coverage missing'}
 
       - name: Publish Windows binaries
         shell: pwsh
@@ -832,7 +868,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
-          if ((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.1.36.0') { throw 'EXE version mismatch' }
+          if ((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.1.37.0') { throw 'EXE version mismatch' }
       - name: Smoke test published app
         shell: pwsh
         run: |
@@ -864,7 +900,7 @@ jobs:
           Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
           Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
           'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
-          'MABI AUTO V3.1.36 Windows Lite - user ZIP UI, free gathering and read-only CLI diagnostics' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          'MABI AUTO V3.1.37 Windows Lite - user ZIP UI, free gathering and read-only CLI diagnostics' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
           $required = @(
             'release/FishingAutomation.exe','release/MacroWatchdog.exe',
             'release/abyss/config/targets.json','release/abyss/config/scenario.json',
@@ -874,10 +910,10 @@ jobs:
             'ROLLBACK_PREVIOUS.cmd','tools/RollbackPrevious.ps1')
           foreach($r in $required){ if(-not (Test-Path (Join-Path $pkg $r))){ throw "missing $r" } }
           git rev-parse HEAD | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
-          $winZip = Join-Path $PWD 'artifacts/MabiAuto_V3.1.36_Windows_Lite.zip'
+          $winZip = Join-Path $PWD 'artifacts/MabiAuto_V3.1.37_Windows_Lite.zip'
           [System.IO.Compression.ZipFile]::CreateFromDirectory($pkg,$winZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
           $sha = (Get-FileHash $winZip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$sha  MabiAuto_V3.1.36_Windows_Lite.zip" | Set-Content "$winZip.sha256" -Encoding ASCII
+          "$sha  MabiAuto_V3.1.37_Windows_Lite.zip" | Set-Content "$winZip.sha256" -Encoding ASCII
           $srcStage = Join-Path $PWD 'artifacts/source-package'
           New-Item $srcStage -ItemType Directory -Force | Out-Null
           Copy-Item source (Join-Path $srcStage 'source') -Recurse -Force
@@ -888,16 +924,16 @@ jobs:
           git rev-parse HEAD | Set-Content (Join-Path $srcStage 'BUILD_COMMIT.txt') -Encoding ASCII
           $buildDirs = @(Get-ChildItem $srcStage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') })
           foreach ($dir in ($buildDirs | Sort-Object { $_.FullName.Length } -Descending)) { if(Test-Path -LiteralPath $dir.FullName){ $resolved=(Resolve-Path -LiteralPath $dir.FullName).Path; if(-not $resolved.StartsWith($srcStage + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe cleanup path'}; Remove-Item -LiteralPath $resolved -Recurse -Force } }
-          $srcZip = Join-Path $PWD 'artifacts/MabiAuto_V3.1.36_Source.zip'
+          $srcZip = Join-Path $PWD 'artifacts/MabiAuto_V3.1.37_Source.zip'
           [System.IO.Compression.ZipFile]::CreateFromDirectory($srcStage,$srcZip,[System.IO.Compression.CompressionLevel]::Optimal,$false)
       - name: Upload verified release packages
         uses: actions/upload-artifact@v4
         with:
-          name: V3.1.36-release-packages
+          name: V3.1.37-release-packages
           path: |
-            artifacts/MabiAuto_V3.1.36_Windows_Lite.zip
-            artifacts/MabiAuto_V3.1.36_Windows_Lite.zip.sha256
-            artifacts/MabiAuto_V3.1.36_Source.zip
+            artifacts/MabiAuto_V3.1.37_Windows_Lite.zip
+            artifacts/MabiAuto_V3.1.37_Windows_Lite.zip.sha256
+            artifacts/MabiAuto_V3.1.37_Source.zip
       - name: Publish GitHub release
         shell: pwsh
         env:
@@ -906,53 +942,53 @@ jobs:
           $ErrorActionPreference='Stop'
           $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
           if($LASTEXITCODE-ne0){throw 'Release list failed'}
-          $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.36' }) | Select-Object -First 1
+          $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.37' }) | Select-Object -First 1
 
-          $expected=@('MabiAuto_V3.1.36_Windows_Lite.zip','MabiAuto_V3.1.36_Windows_Lite.zip.sha256','MabiAuto_V3.1.36_Source.zip')
-          # This workflow already checks out the immutable V3.1.36 source commit above.
+          $expected=@('MabiAuto_V3.1.37_Windows_Lite.zip','MabiAuto_V3.1.37_Windows_Lite.zip.sha256','MabiAuto_V3.1.37_Source.zip')
+          # This workflow already checks out the immutable V3.1.37 source commit above.
           # Do not depend on a separately-created release branch: a missing helper
           # branch must never block publishing an otherwise verified build.
           $releaseTarget=(git rev-parse HEAD).Trim()
-          if($releaseTarget -ne 'f9a84e9d48cae6036752992f4ce8682658b68d4b'){throw "Release code target mismatch: $releaseTarget"}
+          if($releaseTarget -ne 'aec6023305e63d6bf4f941746de3656f535469fd'){throw "Release code target mismatch: $releaseTarget"}
 
           if(-not $r) {
-            $remoteTag = git ls-remote --tags origin refs/tags/V3.1.36
+            $remoteTag = git ls-remote --tags origin refs/tags/V3.1.37
             if($LASTEXITCODE-ne0){throw 'Tag lookup failed'}
             if([string]::IsNullOrWhiteSpace(($remoteTag | Out-String).Trim())) {
-              git tag V3.1.36 $releaseTarget
+              git tag V3.1.37 $releaseTarget
               if($LASTEXITCODE-ne0){throw 'Local tag creation failed'}
-              git push origin refs/tags/V3.1.36
+              git push origin refs/tags/V3.1.37
               if($LASTEXITCODE-ne0){throw 'Tag push failed'}
             }
 
-            gh release create V3.1.36 `
-              artifacts/MabiAuto_V3.1.36_Windows_Lite.zip `
-              artifacts/MabiAuto_V3.1.36_Windows_Lite.zip.sha256 `
-              artifacts/MabiAuto_V3.1.36_Source.zip `
-              --draft --verify-tag --title 'Mabi Auto V3.1.36' `
+            gh release create V3.1.37 `
+              artifacts/MabiAuto_V3.1.37_Windows_Lite.zip `
+              artifacts/MabiAuto_V3.1.37_Windows_Lite.zip.sha256 `
+              artifacts/MabiAuto_V3.1.37_Source.zip `
+              --draft --verify-tag --title 'Mabi Auto V3.1.37' `
               --notes-file source/RELEASE_NOTES.md
             if($LASTEXITCODE-ne0){throw 'Release upload failed'}
 
             $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
             if($LASTEXITCODE-ne0){throw 'Release list after upload failed'}
-            $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.36' }) | Select-Object -First 1
+            $r = @($releases | Where-Object { $_.tag_name -eq 'V3.1.37' }) | Select-Object -First 1
           }
 
-          if(-not $r){throw 'V3.1.36 release not found'}
-          $tagLine = (git ls-remote --tags origin refs/tags/V3.1.36 | Select-Object -First 1)
-          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($tagLine)){throw 'V3.1.36 tag verification failed'}
+          if(-not $r){throw 'V3.1.37 release not found'}
+          $tagLine = (git ls-remote --tags origin refs/tags/V3.1.37 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($tagLine)){throw 'V3.1.37 tag verification failed'}
           $tagSha = (($tagLine -split "\s+")[0]).Trim()
-          if($tagSha -ne $releaseTarget){throw "V3.1.36 tag mismatch: $tagSha != $releaseTarget"}
+          if($tagSha -ne $releaseTarget){throw "V3.1.37 tag mismatch: $tagSha != $releaseTarget"}
           foreach($name in $expected){if($name -notin $r.assets.name){throw "Missing release asset: $name"}}
 
           if($r.draft) {
-            gh release edit V3.1.36 --draft=false
-            if($LASTEXITCODE-ne0){throw 'V3.1.36 publish failed'}
+            gh release edit V3.1.37 --draft=false
+            if($LASTEXITCODE-ne0){throw 'V3.1.37 publish failed'}
           }
 
           $published = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=50" | ConvertFrom-Json
           if($LASTEXITCODE-ne0){throw 'Release list after publish failed'}
-          $published = @($published | Where-Object { $_.tag_name -eq 'V3.1.36' }) | Select-Object -First 1
-          if(-not $published -or $published.draft -or $published.prerelease){throw 'V3.1.36 is not public after publish step'}
+          $published = @($published | Where-Object { $_.tag_name -eq 'V3.1.37' }) | Select-Object -First 1
+          if(-not $published -or $published.draft -or $published.prerelease){throw 'V3.1.37 is not public after publish step'}
           foreach($name in $expected){if($name -notin $published.assets.name){throw "Published release asset missing: $name"}}
 
