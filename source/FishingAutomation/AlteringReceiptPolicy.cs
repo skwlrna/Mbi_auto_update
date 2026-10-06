@@ -14,4 +14,14 @@ internal static class AlteringReceiptPolicy
            !facilityVisible &&
            !travelDialogVisible &&
            !autoTraveling;
+
+    internal static bool CanRetryCompletionClose(
+        bool greenConfirmVisible,
+        bool facilityVisible,
+        bool travelDialogVisible,
+        bool autoTraveling)
+        => greenConfirmVisible &&
+           !facilityVisible &&
+           !travelDialogVisible &&
+           !autoTraveling;
 }
