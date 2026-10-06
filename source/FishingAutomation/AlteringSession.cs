@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace FishingAutomation;
@@ -83,6 +85,24 @@ internal sealed class AlteringSessionStore
 
     internal string Path => _path;
 
+    internal static string MultiPlanPath(string directory, AlteringPlan plan)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        string identity =
+            $"{plan.FacilityName}\u001f{plan.DisplayName}\u001f{plan.RecipeOrdinal}";
+        string hash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(identity)))
+            .ToLowerInvariant()[..24];
+        return System.IO.Path.Combine(directory, $"plan-{hash}.json");
+    }
+
+    internal static bool IsLegacyMultiPath(string path)
+        => int.TryParse(
+            System.IO.Path.GetFileNameWithoutExtension(path),
+            out _);
+
     internal AlteringSessionState? Load()
     {
         if (!File.Exists(_path)) return null;
@@ -138,7 +158,8 @@ internal sealed record AlteringProgress(
     int FacilityWorks,
     long? NextCompletionSeconds,
     string MaterialState,
-    long? BatchRemainingSeconds = null)
+    long? BatchRemainingSeconds = null,
+    long? TotalRemainingSeconds = null)
 {
     internal string Summary(string displayName)
     {
