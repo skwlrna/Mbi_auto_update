@@ -80,6 +80,10 @@ Check(AlteringFacilityLayout.IsSafeMoveGeometry() &&
       AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65) &&
       AlteringFacilityLayout.OnsiteCloseVisualArea == new System.Drawing.Rectangle(744, 42, 44, 44),
     "facility move uses user-confirmed remote button and on-site close-X geometry");
+Check(!AlteringFacilityLayout.ShouldAcceptMoveButton(true, true),
+    "on-site close X vetoes a strong blue receive-control false move match");
+Check(AlteringFacilityLayout.ShouldAcceptMoveButton(false, true),
+    "real remote move shape remains accepted when the on-site close X is absent");
 
 Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("새록 버섯 진액", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
       AlteringFacilityResolver.Resolve(new AlteringRecipe("튼튼 버섯 가루", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
@@ -104,6 +108,20 @@ using (var ingredientOnlyDoc = System.Text.Json.JsonDocument.Parse(
     Check(AlteringFacilityResolver.FromJson(ingredientOnlyDoc.RootElement, "미지 제법") is null,
         "ingredient names never misclassify an unknown recipe facility");
 }
+var statusNow = new DateTimeOffset(2026, 10, 6, 12, 0, 0, TimeSpan.FromHours(9));
+var statusItems = new[]
+{
+    new AlteringStatusItem("metal", "철괴(철 광석)", 21, 100, 95, statusNow.AddSeconds(-5)),
+    new AlteringStatusItem("wood", "목재", 50, 100, null, statusNow),
+    new AlteringStatusItem("rice", "물에 불린 쌀", 100, 100, 0, statusNow)
+};
+string remoteStatus = AlteringStatusFormatter.Format(statusItems, 171, 300, statusNow);
+Check(remoteStatus.Contains("전체 171/300 완료") &&
+      remoteStatus.Contains("철괴(철 광석): 21/100 완료 · 남은시간 1분 30초") &&
+      remoteStatus.Contains("목재: 50/100 완료 · 남은시간 계산 중") &&
+      remoteStatus.Contains("물에 불린 쌀: 100/100 완료 · 남은시간 완료"),
+    "processing status shows per-item completed/target counts and live remaining time");
+
 var estimatePlan = plan with { TargetQuantity = 10 };
 var estimateRecipe = new AlteringRecipe("강철괴", false, 3, "not_enough_ingredient",
     new[] { new AlteringIngredient("철괴", 2, 3) }, plan.FacilityName);
