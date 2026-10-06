@@ -135,6 +135,7 @@ internal sealed class AlteringAutomation
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _verificationAttempts;
     private readonly IAlteringSupplyResolver? _supplyResolver;
+    private readonly IAlteringInternalConsumptionObserver? _internalConsumptionObserver;
     private readonly AlteringSessionStore? _sessionStore;
     private AlteringSessionState? _session;
     private long? _estimatedWorkSeconds;
@@ -150,7 +151,8 @@ internal sealed class AlteringAutomation
         Func<TimeSpan, CancellationToken, Task>? delay = null, int verificationAttempts = 120,
         IAlteringSupplyResolver? supplyResolver = null,
         AlteringSessionStore? sessionStore = null,
-        AlteringSessionState? session = null)
+        AlteringSessionState? session = null,
+        IAlteringInternalConsumptionObserver? internalConsumptionObserver = null)
     {
         if ((sessionStore is null) != (session is null))
             throw new ArgumentException("이어하기 저장소와 세션 상태는 함께 제공해야 합니다.");
@@ -160,6 +162,7 @@ internal sealed class AlteringAutomation
         _delay = delay ?? Task.Delay;
         _verificationAttempts = verificationAttempts;
         _supplyResolver = supplyResolver;
+        _internalConsumptionObserver = internalConsumptionObserver;
         _sessionStore = sessionStore;
         _session = session;
     }
@@ -229,7 +232,8 @@ internal sealed class AlteringAutomation
                     $"이어하기 대기열에 저장 기록보다 많은 동일 품목 작업이 있습니다: 저장 기준 최대 {maximumKnownWorks}건 / 현재 {currentKnownWorks}건. " +
                     "외부에서 추가 등록된 작업과 목표 작업을 구분할 수 없어 정지합니다.");
 
-            long currentOutput = await _data.ItemCountAsync(plan.OutputName, ct);
+            long currentOutput = EffectiveOutputQuantity(
+                await _data.ItemCountAsync(plan.OutputName, ct));
             if (currentOutput < _session.LastObservedOutputQuantity)
                 throw new InvalidOperationException(
                     $"이어하기 확인 중 {plan.OutputName} 보유량이 감소했습니다: 마지막 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {currentOutput:N0}. " +
@@ -398,7 +402,8 @@ internal sealed class AlteringAutomation
             var outstanding = Matching(works, plan).ToArray();
             if (QueuedWorks == plan.RequiredWorks && outstanding.Length == 0)
             {
-                long grossGained = await _data.ItemCountAsync(plan.OutputName, ct) - baseline;
+                long grossGained = EffectiveOutputQuantity(
+                    await _data.ItemCountAsync(plan.OutputName, ct)) - baseline;
                 long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
                 long targetGained = Math.Max(0, grossGained - oldMinimum);
                 if (targetGained < plan.ExpectedQuantity)
@@ -489,6 +494,11 @@ internal sealed class AlteringAutomation
                     int previous = Matching(works, plan).Count();
                     SavePendingRegistration(previous);
 
+                    AlteringInternalConsumptionSnapshot? consumptionBefore = null;
+                    if (_internalConsumptionObserver is not null)
+                        consumptionBefore = await _internalConsumptionObserver
+                            .CaptureBeforeRegistrationAsync(plan, ct);
+
                     bool reserved = false;
                     await _screen.QueueAsync(plan, () =>
                     {
@@ -510,6 +520,10 @@ internal sealed class AlteringAutomation
                         return count == previous + 1;
                     }, "작업 등록을 확인하지 못했습니다. 재화 중복 사용을 막기 위해 재클릭하지 않고 정지합니다.",
                     ct, TimeSpan.FromSeconds(1));
+
+                    if (_internalConsumptionObserver is not null && consumptionBefore is not null)
+                        await _internalConsumptionObserver.CommitAfterRegistrationAsync(
+                            plan, consumptionBefore, ct);
 
                     QueuedWorks++;
                     queuedThisBatch++;
@@ -561,6 +575,34 @@ internal sealed class AlteringAutomation
 
     internal void NoteStage(string stage) => SaveStage(stage);
 
+    internal void CreditInternalConsumption(long quantity, string consumerDisplayName)
+    {
+        if (quantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(quantity));
+        if (_session is null || _sessionStore is null)
+            throw new InvalidOperationException(
+                "다중가공 내부 재료 소비를 기록할 이어하기 세션이 없습니다.");
+
+        long credited = checked(
+            _session.CreditedInternalConsumptionQuantity + quantity);
+        SaveSession(_session with
+        {
+            CreditedInternalConsumptionQuantity = credited
+        });
+
+        Log?.Invoke(
+            $"[자동 가공] 내부 재료 소비 보정 · {consumerDisplayName} 등록으로 " +
+            $"{_session.DisplayName} 결과물 {quantity:N0}개 소비 인정 · 누적 {credited:N0}개");
+    }
+
+    private long EffectiveOutputQuantity(long actualQuantity)
+    {
+        if (_session is null)
+            return actualQuantity;
+        return checked(
+            actualQuantity + _session.CreditedInternalConsumptionQuantity);
+    }
+
     private void SaveStage(string stage)
     {
         if (_session is null || _sessionStore is null) return;
@@ -606,7 +648,8 @@ internal sealed class AlteringAutomation
         string materialState,
         CancellationToken ct)
     {
-        long current = await _data.ItemCountAsync(plan.OutputName, ct);
+        long current = EffectiveOutputQuantity(
+            await _data.ItemCountAsync(plan.OutputName, ct));
         if (_session is not null)
         {
             if (current < _session.LastObservedOutputQuantity)

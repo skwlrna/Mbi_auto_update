@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.31"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.32"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.31</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.32</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -355,6 +355,7 @@ jobs:
           if ($session -notmatch 'PendingRegistration' -or $session -notmatch 'PendingBeforeMatchingCount') { throw 'duplicate-safe pending-registration checkpoint missing' }
           if ($session -notmatch 'InitialExistingWorks' -or $session -notmatch 'BaselineQuantity') { throw 'resume baseline/legacy-work accounting missing' }
           if ($session -notmatch 'LastObservedOutputQuantity') { throw 'last observed output checkpoint missing from resume state' }
+          if ($session -notmatch 'CreditedInternalConsumptionQuantity') { throw 'internal material consumption credit missing from resume state' }
           if ($session -notmatch 'MatchesPlan' -or $session -notmatch 'MatchesIdentity') { throw 'resume plan/identity validation missing' }
           if ($session -notmatch 'AlteringProgress' -or $session -notmatch '대기열.*7' -or $session -notmatch '다음 완료') { throw 'one-line altering progress summary missing' }
           if ($session -notmatch 'AlteringMaterialEstimate' -or $session -notmatch '전체 재료표는 CLI가 부족 항목만 제공') { throw 'honest material estimate preview missing' }
@@ -534,6 +535,7 @@ jobs:
           $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
           $multiAlter = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
           $dependencyScheduler = Get-Content source/FishingAutomation/MultiAlteringDependencyScheduler.cs -Raw
+          $consumptionLedger = Get-Content source/FishingAutomation/MultiAlteringConsumptionLedger.cs -Raw
           $multiAlterMain = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
           $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
           $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
@@ -565,6 +567,19 @@ jobs:
              $dependencyScheduler -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $dependencyScheduler -notmatch '배치 전체 완료 전 이동 없음') { throw 'intermediate processing must share whole-facility seven-slot scheduling' }
           if($dependencyScheduler -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'dependency scheduler must not own direct input' }
+          if($multiAlterMain -notmatch 'new MultiAlteringConsumptionLedger' -or
+             $multiAlterMain -notmatch 'internalConsumptionObserver: consumptionLedger' -or
+             $multiAlterMain -notmatch 'CreditInternalConsumption' -or
+             $multiAlterMain -notmatch 'UnregisterProducer') { throw 'multi-altering internal material consumption accounting wiring missing' }
+          if($consumptionLedger -notmatch 'CaptureBeforeRegistrationAsync' -or
+             $consumptionLedger -notmatch 'CommitAfterRegistrationAsync' -or
+             $consumptionLedger -notmatch 'previous - current' -or
+             $consumptionLedger -notmatch 'RegisterProducer') { throw 'registration-window internal material consumption ledger missing' }
+          if($consumptionLedger -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'internal consumption ledger must never own direct input' }
+          if($alteringPlan -notmatch 'CreditedInternalConsumptionQuantity' -or
+             $alteringPlan -notmatch 'EffectiveOutputQuantity' -or
+             $alteringPlan -notmatch 'CaptureBeforeRegistrationAsync' -or
+             $alteringPlan -notmatch 'CommitAfterRegistrationAsync') { throw 'altering engine does not apply persisted internal consumption credit' }
           if($productionPage -notmatch '다중가공 작업 목록' -or
              $productionPage -notmatch '다중가공 .*종 시작' -or
              $productionPage -notmatch 'AddCurrentAlteringQueue') { throw 'visible multi-altering queue UI missing' }

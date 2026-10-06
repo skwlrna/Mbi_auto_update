@@ -99,6 +99,8 @@ public sealed partial class MainForm
                 screen,
                 gatheringScreen,
                 dependencyScheduler: dependencyScheduler);
+            var consumptionLedger = new MultiAlteringConsumptionLedger(
+                rawAlteringData.ItemCountsAsync);
 
             visualAltering.Log += text => Ui(() => _log.Write(text));
             visualGathering.Log += text => Ui(() => _log.Write(text));
@@ -108,6 +110,12 @@ public sealed partial class MainForm
             {
                 _log.Write(text);
                 SetStatus(text.Replace("[중간재료 스케줄] ", ""), Blue);
+                RefreshProductionDashboard();
+            });
+            consumptionLedger.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                SetStatus(text.Replace("[다중가공] ", ""), Blue);
                 RefreshProductionDashboard();
             });
             resolver.Log += text => Ui(() =>
@@ -209,15 +217,22 @@ public sealed partial class MainForm
                     screen,
                     supplyResolver: resolver,
                     sessionStore: store,
-                    session: session);
+                    session: session,
+                    internalConsumptionObserver: consumptionLedger);
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);
+                consumptionLedger.RegisterProducer(
+                    plan,
+                    (quantity, consumerDisplayName) =>
+                        automation.CreditInternalConsumption(
+                            quantity, consumerDisplayName));
 
                 long currentOutputForStatus =
                     await rawAlteringData.ItemCountAsync(plan.OutputName, token);
                 long restoredConfirmed = Math.Clamp(
-                    currentOutputForStatus -
+                    currentOutputForStatus +
+                        session.CreditedInternalConsumptionQuantity -
                         session.BaselineQuantity -
                         session.InitialExistingMinimum,
                     0,
@@ -292,7 +307,10 @@ public sealed partial class MainForm
                         plan,
                         slotBudget,
                         coordinatorToken);
-                    return result == AlteringRunResult.Completed;
+                    bool planCompleted = result == AlteringRunResult.Completed;
+                    if (planCompleted)
+                        consumptionLedger.UnregisterProducer(plan);
+                    return planCompleted;
                 },
                 rawAlteringData.WorksAsync,
                 Task.Delay,
