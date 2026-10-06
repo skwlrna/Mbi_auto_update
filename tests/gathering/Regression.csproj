@@ -2,6 +2,7 @@
   <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>GatheringRegression</AssemblyName><UseAppHost>false</UseAppHost><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringConsumptionLedger.cs" Link="MultiAlteringConsumptionLedger.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringQueries.cs" Link="AlteringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringSession.cs" Link="AlteringSession.cs" />
     <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
