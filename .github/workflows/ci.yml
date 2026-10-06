@@ -542,7 +542,7 @@ jobs:
           if($session -notmatch 'MultiPlanPath' -or
              $session -notmatch 'SHA256.HashData' -or
              $session -notmatch 'IsLegacyMultiPath') { throw 'stable per-plan multi-altering session key missing' }
-          if($status -notmatch 'AlteringEtaEstimator' -or
+          if($alteringPlan -notmatch 'AlteringEtaEstimator' -or
              $status -notmatch '남은시간\(예상\)') { throw 'full-plan altering ETA status missing' }
           if($multiAlterMain -notmatch 'RunBatchAsync\(' -or
              $multiAlterMain -notmatch 'slotBudget' -or
