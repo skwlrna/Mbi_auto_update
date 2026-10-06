@@ -9,6 +9,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
     private readonly int _maxDepth;
     private readonly Func<TimeSpan, CancellationToken, Task>? _delay;
     private readonly int _verificationAttempts;
+    private readonly IAlteringDependencyScheduler? _dependencyScheduler;
     private readonly HashSet<string> _active = new(StringComparer.Ordinal);
 
     internal event Action<string>? Log;
@@ -20,7 +21,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         IGatheringScreen gatheringScreen,
         int maxDepth = 8,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        int verificationAttempts = 120)
+        int verificationAttempts = 120,
+        IAlteringDependencyScheduler? dependencyScheduler = null)
     {
         _altering = altering;
         _gathering = gathering;
@@ -29,6 +31,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         _maxDepth = Math.Clamp(maxDepth, 1, 16);
         _delay = delay;
         _verificationAttempts = Math.Clamp(verificationAttempts, 1, 120);
+        _dependencyScheduler = dependencyScheduler;
     }
 
     public async Task ResolveAsync(
@@ -188,14 +191,34 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 
             long outputBefore = await _altering.ItemCountAsync(subPlan.OutputName, ct);
             Log?.Invoke($"[재료 해결] 중간 가공 시작 · {subPlan.DisplayName} 추가 {quantity}개 · 정령의 날개 0개 원칙");
-            var nested = new AlteringAutomation(
-                _altering,
-                _alteringScreen,
-                _delay,
-                _verificationAttempts,
-                this);
-            nested.Log += text => Log?.Invoke(text);
-            await nested.RunAsync(subPlan, ct);
+
+            if (_dependencyScheduler is not null)
+            {
+                Log?.Invoke(
+                    $"[재료 해결] 중간 가공을 메인 시설 배치 스케줄러에 위임 · " +
+                    $"{subPlan.DisplayName} · {subPlan.FacilityName.Replace(" 시설", "")}");
+                await _dependencyScheduler.RunAsync(
+                    subPlan,
+                    outputBefore,
+                    checked((int)quantity),
+                    this,
+                    ct);
+            }
+            else
+            {
+                // Single-altering keeps the proven recursive fallback. Multi-altering
+                // injects a dependency scheduler and never enters this independent
+                // full-run path.
+                var nested = new AlteringAutomation(
+                    _altering,
+                    _alteringScreen,
+                    _delay,
+                    _verificationAttempts,
+                    this);
+                nested.Log += text => Log?.Invoke(text);
+                await nested.RunAsync(subPlan, ct);
+            }
+
             long outputAfter = await _altering.ItemCountAsync(subPlan.OutputName, ct);
             if (outputAfter - outputBefore < quantity)
                 throw new InvalidOperationException(
