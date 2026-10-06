@@ -121,7 +121,10 @@ internal sealed class MultiAlteringCoordinator
                     ct.ThrowIfCancellationRequested();
                     works = await readWorks(ct);
                     facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
-                    if (facilityWorks.Length >= 7)
+                    bool completedLaneNeedsCollection =
+                        facilityWorks.Length > 0 &&
+                        facilityWorks.All(x => x.IsCompleted);
+                    if (facilityWorks.Length >= 7 && !completedLaneNeedsCollection)
                         break;
 
                     int pendingBefore = PendingCount(facility);
