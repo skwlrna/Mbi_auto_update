@@ -371,14 +371,22 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
     {
         Rectangle? firstPlaceBounds = null;
         string? firstPlaceText = null;
+        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
+        DateTime? detailAnchorGoneSince = null;
+        DateTime? placeListFirstSeenAt = null;
+        int helpGoneFrames = 0;
+        int poll = 0;
+        bool directTransitionLogged = false;
 
-        // Some materials (for example rice) start auto-travel immediately.
-        // Others open the existing gathering-place list and require one more
-        // first-row selection. Let CLI activity win first; only touch the screen
-        // when that activity did not start and the place list is stably visible.
-        for (int poll = 1; poll <= 12; poll++)
+        // "가까운 위치" has two legitimate outcomes:
+        // 1) direct travel/gathering begins without a place list;
+        // 2) "구하는 방법" opens and the first recommended place must be clicked.
+        // The detail '?' disappearing is also meaningful: it proves the click changed
+        // the screen, so do not treat a slow CLI activity update as a click failure.
+        while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
+            poll++;
 
             var activity = await _data.ActivityAsync(ct);
             if (!GatheringSafetyPolicy.IsSafeField(activity))
@@ -390,16 +398,28 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                 $"{targetName} 가까운 위치 결과 확인",
                 ct);
 
-            if (activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing)
+            if (IsOwnedLifeSkillActivity(activity))
             {
                 Log?.Invoke(
                     $"[대량 채집] 가까운 위치 결과=바로 이동형 · {targetName} · " +
-                    $"AutoTraveling={activity.IsAutoTraveling}, Gathering={activity.IsGathering}, Fishing={activity.IsFishing} · 추가 장소 클릭 없음");
+                    $"AutoTraveling={activity.IsAutoTraveling}, Gathering={activity.IsGathering}, " +
+                    $"Fishing={activity.IsFishing}, MainButton={activity.MainButtonState} · 추가 장소 클릭 없음");
                 return;
             }
 
             using var frame = Capture(ct);
             var firstPlace = await _navigationVision.FirstPlaceAsync(frame, ct);
+            bool placeListVisible = firstPlace is not null ||
+                await _navigationVision.HasPlaceListHeaderAsync(frame, ct);
+
+            if (placeListVisible && placeListFirstSeenAt is null)
+            {
+                placeListFirstSeenAt = DateTime.UtcNow;
+                Log?.Invoke(
+                    $"[대량 채집] 가까운 위치 결과 후보=추천 장소형 · {targetName} · " +
+                    "구하는 방법 헤더 확인 · 첫 장소 행 안정화 대기");
+            }
+
             if (firstPlace is not null)
             {
                 if (firstPlaceBounds is null)
@@ -435,37 +455,87 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             firstPlaceBounds = null;
             firstPlaceText = null;
 
-            // The life-skill detail link can occasionally ignore the first click
-            // even though the '?' anchor was stable. Retry only while that same
-            // detail anchor is still visible, so a slow transition can never receive
-            // an unrelated second click on the destination screen.
-            if (poll == 4 || poll == 8)
+            var help = _ui.FindBrightTemplate(
+                frame,
+                LifeSkillNearestHelpArea,
+                LifeSkillNearestHelpTemplate,
+                threshold: 0.78,
+                minScale: 0.75,
+                maxScale: 1.35,
+                step: 0.05);
+
+            if (help.Found)
             {
-                int retryNumber = poll == 4 ? 1 : 2;
-                int retryOffset = retryNumber == 1 ? 56 : 84;
-                bool retried = await TryRetryLifeSkillNearestLocationAsync(
-                    targetName,
-                    retryNumber,
-                    retryOffset,
-                    ct);
-                if (retried)
+                helpGoneFrames = 0;
+                detailAnchorGoneSince = null;
+                directTransitionLogged = false;
+
+                // Retry only while the original detail '?' is still present and the
+                // recommendation list has not appeared. Never click during a transition.
+                if (!placeListVisible && (poll == 4 || poll == 8))
                 {
-                    await Task.Delay(500, ct);
-                    continue;
+                    int retryNumber = poll == 4 ? 1 : 2;
+                    int retryOffset = retryNumber == 1 ? 56 : 84;
+                    bool retried = await TryRetryLifeSkillNearestLocationAsync(
+                        targetName,
+                        retryNumber,
+                        retryOffset,
+                        ct);
+                    if (retried)
+                    {
+                        await Task.Delay(500, ct);
+                        continue;
+                    }
+                }
+            }
+            else
+            {
+                helpGoneFrames++;
+                if (helpGoneFrames >= 2 && detailAnchorGoneSince is null)
+                {
+                    detailAnchorGoneSince = DateTime.UtcNow;
+                    Log?.Invoke(
+                        $"[대량 채집] 가까운 위치 클릭 반영 후보 · {targetName} · " +
+                        "상세창 ? 2프레임 소실 · CLI/추천 장소 늦은 반영 대기");
                 }
 
-                Log?.Invoke(
-                    $"[대량 채집] 가까운 위치 재클릭 {retryNumber}/2 보류 · " +
-                    "기존 상세창 ? 기준이 더 이상 안정적으로 보이지 않아 추가 입력 없음");
+                if (!placeListVisible &&
+                    detailAnchorGoneSince is DateTime goneAt &&
+                    DateTime.UtcNow - goneAt >= TimeSpan.FromSeconds(4))
+                {
+                    if (!directTransitionLogged)
+                    {
+                        directTransitionLogged = true;
+                        Log?.Invoke(
+                            $"[대량 채집] 가까운 위치 결과=직접 전환형 · {targetName} · " +
+                            "상세창 ? 소실 4초 유지 + 추천 장소 헤더 없음 · " +
+                            "클릭 성공으로 인계하고 CLI 활동/재고 증가는 100회 진행 감시에서 계속 확인");
+                    }
+                    return;
+                }
             }
 
-            await Task.Delay(300, ct);
+            if (placeListFirstSeenAt is DateTime listSeenAt &&
+                DateTime.UtcNow - listSeenAt >= TimeSpan.FromSeconds(12))
+            {
+                using var listFailed = Capture(ct);
+                throw Fail(
+                    listFailed,
+                    $"{targetName} 추천 장소 목록의 구하는 방법 헤더는 확인했지만 첫 장소 행을 12초 안에 안정적으로 확인하지 못했습니다.");
+            }
+
+            await Task.Delay(350, ct);
         }
 
         using var failed = Capture(ct);
+        if (detailAnchorGoneSince is not null)
+            throw Fail(
+                failed,
+                $"{targetName} 가까운 위치 클릭으로 상세창 ?는 사라졌지만 20초 안에 직접 이동/채집 또는 추천 장소 분기를 확정하지 못했습니다.");
+
         throw Fail(
             failed,
-            $"{targetName} 가까운 위치 클릭 후 CLI 자동이동/채집도 추천 장소 목록도 확인하지 못했습니다.");
+            $"{targetName} 가까운 위치 클릭 후 상세창 ?가 계속 남아 있고 CLI 자동이동/채집이나 추천 장소 목록도 확인하지 못했습니다.");
     }
 
     private async Task<(bool Confirmed, bool MayRetryToggle, string Evidence)> WaitForProfileOpenAsync(
@@ -695,6 +765,16 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
             bool active = IsOwnedLifeSkillActivity(activity);
             sawActive |= active;
+
+            // Direct-nearest transitions can be visually confirmed before the CLI
+            // publishes AutoTraveling/Gathering. Give that handoff time to settle,
+            // but do not wait the full 30-minute cycle if neither activity nor
+            // inventory gain ever appears.
+            if (!sawActive &&
+                !sawGain &&
+                DateTime.UtcNow - startedAt >= TimeSpan.FromSeconds(90))
+                throw new InvalidOperationException(
+                    $"{displayName} 가까운 위치 전환 후 90초 동안 생활 스킬 이동/채집 상태나 재고 증가를 확인하지 못했습니다.");
 
             if (current >= targetTotal)
             {
