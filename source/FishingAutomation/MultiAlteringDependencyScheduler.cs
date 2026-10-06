@@ -25,6 +25,7 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
     private readonly string _sessionDirectory;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _verificationAttempts;
+    private readonly FacilityLaneState? _laneState;
 
     internal event Action<string>? Log;
 
@@ -34,7 +35,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         CliIdentityContext identity,
         string sessionDirectory,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        int verificationAttempts = 120)
+        int verificationAttempts = 120,
+        FacilityLaneState? laneState = null)
     {
         _data = data;
         _screen = screen;
@@ -42,6 +44,7 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         _sessionDirectory = sessionDirectory;
         _delay = delay ?? Task.Delay;
         _verificationAttempts = Math.Clamp(verificationAttempts, 1, 120);
+        _laneState = laneState;
     }
 
     public async Task RunAsync(
@@ -79,7 +82,14 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                     $"{requestedPlan.FacilityName}의 완료 배치를 중간재료 전환 전에 수령하지 못했습니다.");
 
             var afterCollection = await _data.WorksAsync(ct);
-            if (afterCollection.Any(x => x.FacilityName == requestedPlan.FacilityName))
+            var afterFacilityCollection = afterCollection
+                .Where(x => x.FacilityName == requestedPlan.FacilityName)
+                .ToArray();
+            _laneState?.Observe(
+                requestedPlan.FacilityName,
+                afterFacilityCollection,
+                allowShrink: true);
+            if (afterFacilityCollection.Length > 0)
                 throw new InvalidOperationException(
                     $"{requestedPlan.FacilityName} 완료 배치 수령 후에도 작업이 남아 있어 중간재료가 시설을 소유하지 않습니다.");
         }
@@ -155,7 +165,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             session);
         automation.Log += text => Log?.Invoke(text);
 
-        var coordinator = new MultiAlteringCoordinator();
+        var coordinator = new MultiAlteringCoordinator(
+            _laneState,
+            FacilityLaneOwner.Intermediate);
         coordinator.Log += text => Log?.Invoke(text);
 
         Log?.Invoke(
@@ -166,12 +178,26 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             new[] { plan },
             async (job, slotBudget, token) =>
             {
+                int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
                 var result = await automation.RunBatchAsync(job, slotBudget, token);
+                int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
+                _laneState?.NoteRegistration(
+                    job,
+                    FacilityLaneOwner.Intermediate,
+                    registered);
                 return result == AlteringRunResult.Completed;
             },
             _data.WorksAsync,
             _delay,
             ct);
+
+        var finalWorks = await _data.WorksAsync(ct);
+        var finalFacilityWorks = finalWorks
+            .Where(x => x.FacilityName == plan.FacilityName)
+            .ToArray();
+        _laneState?.ReleaseIntermediate(
+            plan.FacilityName,
+            finalFacilityWorks);
 
         long outputAfter = await _data.ItemCountAsync(plan.OutputName, ct);
         long totalGain = outputAfter - requestBaselineQuantity;
@@ -197,6 +223,10 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             var facilityWorks = works
                 .Where(x => x.FacilityName == plan.FacilityName)
                 .ToArray();
+            _laneState?.Observe(
+                plan.FacilityName,
+                facilityWorks,
+                allowShrink: false);
 
             if (facilityWorks.Length == 0 ||
                 facilityWorks.All(x => x.IsCompleted))
