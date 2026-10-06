@@ -551,13 +551,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             }
             else
             {
-                if (await FindFacilityHeaderAsync(retryGate, plan.ScreenTitle, ct) is null)
-                    Fail(retryGate,
-                        $"{plan.ScreenTitle} 고정좌표 1차 클릭 후 상세창도 시설 목록도 확인되지 않아 재클릭하지 않고 정지합니다.");
+                bool facilityVisible =
+                    await FindFacilityHeaderAsync(retryGate, plan.ScreenTitle, ct) is not null;
+                bool moveVisible = facilityVisible && HasFacilityMoveButtonVisual(retryGate);
 
-                if (HasFacilityMoveButtonVisual(retryGate))
+                if (!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+                        detailVisible: false,
+                        facilityVisible,
+                        moveVisible,
+                        retryAlreadyUsed: false))
+                {
+                    if (!facilityVisible)
+                        Fail(retryGate,
+                            $"{plan.ScreenTitle} 고정좌표 1차 클릭 후 상세창도 시설 목록도 확인되지 않아 재클릭하지 않고 정지합니다.");
+
                     Fail(retryGate,
                         $"{plan.ScreenTitle} 고정좌표 1차 클릭 후 설비로 이동 버튼이 보여 원격 상태로 판정했습니다. 재클릭하지 않고 정지합니다.");
+                }
 
                 Log?.Invoke(
                     $"[자동 가공] {plan.DisplayName} 고정좌표 1차 클릭 미반영 확인 · " +
