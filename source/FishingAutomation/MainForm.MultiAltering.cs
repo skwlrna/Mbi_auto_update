@@ -28,11 +28,12 @@ public sealed partial class MainForm
         _productionTargetQuantity = checked(plans.Sum(x => x.TargetQuantity));
         _productionCurrentQuantity = 0;
         _productionFacilityName = "시설별 병렬 배치";
-        _productionProgressSummary = $"다중가공 준비 · {plans.Count}종 · 시설별 7칸 배치";
+        _productionProgressSummary = $"다중가공 준비 · {plans.Count}종 · 시설별 혼합 7칸 배치";
         ResetAlteringStatus(plans);
         SetStatus($"다중가공 병렬 배치 준비 · {plans.Count}종", Blue);
         _log.Write(
-            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 배치 병렬 운용 · 한 칸 완료마다 이동하지 않음");
+            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 혼합 병렬 운용 · " +
+            "같은 시설 품목 라운드로빈 · 한 칸 완료마다 이동하지 않음");
 
         try
         {
@@ -104,6 +105,39 @@ public sealed partial class MainForm
             var stores = new List<AlteringSessionStore>();
             var progress = new Dictionary<(string Facility, string Display, int Ordinal), long>();
 
+            AlteringSessionState? TryMigrateLegacySession(
+                AlteringPlan plan,
+                AlteringSessionStore stableStore)
+            {
+                var matches = new List<(AlteringSessionStore Store, AlteringSessionState State)>();
+                foreach (string path in Directory.EnumerateFiles(sessionDir, "*.json"))
+                {
+                    if (!AlteringSessionStore.IsLegacyMultiPath(path))
+                        continue;
+
+                    var legacyStore = new AlteringSessionStore(path);
+                    var legacy = legacyStore.Load();
+                    if (legacy is not null &&
+                        legacy.MatchesPlan(plan) &&
+                        legacy.MatchesIdentity(identity.Baseline))
+                        matches.Add((legacyStore, legacy));
+                }
+
+                if (matches.Count > 1)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}의 이전 다중가공 이어하기 기록이 여러 개라 자동 이관하지 않습니다.");
+
+                if (matches.Count == 0)
+                    return null;
+
+                stableStore.Save(matches[0].State);
+                matches[0].Store.Delete();
+                _log.Write(
+                    $"[다중가공] 이전 순번 세션을 품목 고유키로 이관 · {plan.DisplayName} · " +
+                    $"등록 {matches[0].State.QueuedWorks}/{matches[0].State.RequiredWorks}");
+                return matches[0].State;
+            }
+
             for (int index = 0; index < plans.Count; index++)
             {
                 token.ThrowIfCancellationRequested();
@@ -115,9 +149,15 @@ public sealed partial class MainForm
                         $"{plan.DisplayName} 시작 직전 제법 조회 결과가 선택 내용과 달라졌습니다. 목록을 새로고침하세요.");
 
                 var store = new AlteringSessionStore(
-                    Path.Combine(sessionDir, $"{index:D2}.json"));
+                    AlteringSessionStore.MultiPlanPath(sessionDir, plan));
                 stores.Add(store);
                 var saved = store.Load();
+                if (saved is null ||
+                    !saved.MatchesPlan(plan) ||
+                    !saved.MatchesIdentity(identity.Baseline))
+                {
+                    saved = TryMigrateLegacySession(plan, store) ?? saved;
+                }
                 AlteringSessionState session;
 
                 if (saved is not null &&
@@ -157,7 +197,38 @@ public sealed partial class MainForm
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);
-                progress[key] = 0;
+
+                long currentOutputForStatus =
+                    await rawAlteringData.ItemCountAsync(plan.OutputName, token);
+                long restoredConfirmed = Math.Clamp(
+                    currentOutputForStatus -
+                        session.BaselineQuantity -
+                        session.InitialExistingMinimum,
+                    0,
+                    plan.TargetQuantity);
+                var matchingWorks = currentWorks.Where(x =>
+                    x.FacilityName == plan.FacilityName &&
+                    (x.DisplayName == plan.DisplayName ||
+                     x.DisplayName == plan.OutputName)).ToArray();
+                long? batchRemaining = matchingWorks
+                    .Where(x => x.State == "InProgress")
+                    .Select(x => (long?)x.RemainingSeconds)
+                    .DefaultIfEmpty(null)
+                    .Max();
+                long? restoredEta = AlteringEtaEstimator.Estimate(
+                    plan.RequiredWorks,
+                    session.QueuedWorks,
+                    matchingWorks.Length,
+                    batchRemaining,
+                    batchRemaining);
+
+                progress[key] = restoredConfirmed;
+                SeedAlteringStatus(plan, restoredConfirmed, restoredEta);
+                _log.Write(
+                    $"[다중가공] 시작 상태 복원 · {plan.DisplayName} " +
+                    $"{restoredConfirmed:N0}/{plan.TargetQuantity:N0} · " +
+                    $"등록 {session.QueuedWorks}/{plan.RequiredWorks} · " +
+                    $"ETA={(restoredEta?.ToString() ?? "계산 중")}초");
 
                 automation.Log += text => Ui(() =>
                 {
@@ -179,6 +250,13 @@ public sealed partial class MainForm
                 });
             }
 
+            _productionCurrentQuantity = progress.Values.Sum();
+            _productionProgressSummary =
+                $"다중가공 시작 상태 복원 · {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
+                $"시설별 혼합 7칸 배치";
+            UpdateStats();
+            RefreshProductionDashboard();
+
             var coordinator = new MultiAlteringCoordinator();
             coordinator.Log += text => Ui(() =>
             {
@@ -189,11 +267,14 @@ public sealed partial class MainForm
 
             await coordinator.RunAsync(
                 plans,
-                async (plan, coordinatorToken) =>
+                async (plan, slotBudget, coordinatorToken) =>
                 {
                     coordinatorToken.ThrowIfCancellationRequested();
                     var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
-                    var result = await automations[key].RunBatchAsync(plan, coordinatorToken);
+                    var result = await automations[key].RunBatchAsync(
+                        plan,
+                        slotBudget,
+                        coordinatorToken);
                     return result == AlteringRunResult.Completed;
                 },
                 rawAlteringData.WorksAsync,
@@ -203,8 +284,8 @@ public sealed partial class MainForm
             completed = true;
             _productionCurrentQuantity = _productionTargetQuantity;
             _productionProgressSummary =
-                $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 배치 운용 완료";
-            _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 배치 병렬 운용");
+                $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 혼합 배치 운용 완료";
+            _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 혼합 배치 병렬 운용");
             SetStatus("다중가공 완료", Green);
 
             foreach (var store in stores)
