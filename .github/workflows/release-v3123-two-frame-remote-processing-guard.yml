@@ -1,5 +1,6 @@
 name: Release V3.1.23 Two-frame Remote Processing Guard
 # Pinned V3.1.23 source snapshot. Requires two consecutive remote-state observations before blocking an on-site processing click, while preserving prior multi-altering and Telegram status fixes.
+# release trigger: V3.1.23 final two-frame guard build
 # release trigger: V3.1.23 final ETA build
 
 on:
