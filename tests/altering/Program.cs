@@ -87,6 +87,27 @@ Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
         retryAlreadyUsed: true),
     "fixed recipe retry is strictly one-shot");
 
+Check(AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
+        greenConfirmationVisible: true,
+        travelDialogVisible: true,
+        confirmationAlreadySent: false),
+    "facility travel dialog receives one Space confirmation when it actually appears");
+Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
+        greenConfirmationVisible: false,
+        travelDialogVisible: false,
+        confirmationAlreadySent: false),
+    "direct facility travel without a confirmation dialog never receives Space");
+Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
+        greenConfirmationVisible: true,
+        travelDialogVisible: false,
+        confirmationAlreadySent: false),
+    "generic green modal is never enough to authorize facility travel Space");
+Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
+        greenConfirmationVisible: true,
+        travelDialogVisible: true,
+        confirmationAlreadySent: true),
+    "facility travel confirmation is strictly one-shot");
+
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(1, 0),
