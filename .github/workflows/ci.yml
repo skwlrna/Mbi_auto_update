@@ -261,12 +261,12 @@ jobs:
               $queue -notmatch '단일 프레임으로 중단하지 않고 200ms 후 재확인' -or
               $queue -notmatch '원격 상태 1회 오탐 해제' -or
               $queue -notmatch 'AlteringRemoteProcessGuard\.ShouldBlock') { throw 'two-frame remote processing veto confirmation missing' }
-          if ($remoteGuard -notmatch 'onsiteFacilityConfirmed' -or
-              $remoteGuard -notmatch 'firstOnsiteActionVisible' -or
-              $remoteGuard -notmatch 'secondOnsiteActionVisible' -or
-              $remoteGuard -notmatch 'provenOnsiteAction' -or
-              $queue -notmatch '가공하러 가기 OCR 2프레임 오탐 억제' -or
-              $queue -notmatch '해당 시설 현장 확인 \+ 하단 현장 가공 버튼 2프레임 우선') { throw 'proven onsite action must outrank remote OCR false positives' }
+          if ($queue -notmatch 'AlteringRemoteProcessGuard\.CanRecover\(true, remoteRecoveryUsed\)' -or
+              $queue -notmatch '원격 상세 2프레임 확정' -or
+              $queue -notmatch 'restartAfterRemoteRecovery' -or
+              [string]::IsNullOrWhiteSpace($remoteRecovery) -or
+              $remoteRecovery -notmatch 'TravelToFacilityAsync\(plan, ct, remoteConfirmed: true\)' -or
+              [regex]::Matches($remoteRecovery, 'TravelToFacilityAsync').Count -ne 1) { throw 'bounded remote detail recovery missing' }
           if ($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'duplicate post-select detail/OCR pass returned' }
           if ($queue -match '품목 상세 기준 설비 이동 필요 확정' -or $queue -match '같은 품목을 다시 선택') { throw 'recipe-first backtrack flow returned' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
