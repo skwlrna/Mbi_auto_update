@@ -730,9 +730,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
-        // Restore the facility-first order that was used through V3.1.11:
-        // open the processing facility, move to the real bench first, then select
-        // the recipe. Never open a recipe detail before the first facility move.
         bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
         if (reusedOnsite)
         {
@@ -742,111 +739,119 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         {
             _confirmedOnsiteFacility = null;
             await EnterFacilityAsync(plan, ct);
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동");
-
-            // Re-check remote vs on-site state immediately before input. In a
-            // consecutive batch the facility screen may already be on-site; never
-            // force the fixed move coordinate merely because reuse validation failed.
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동");
             await TravelToFacilityAsync(plan, ct);
-
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility = plan.FacilityName;
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
         }
 
-        await SelectRecipeAsync(plan, ct);
+        bool remoteRecoveryUsed = false;
 
-        // V3.1.8 execution model for every processing facility:
-        // recipe selection performs the first detail confirmation, then the only
-        // remaining registration guard is the two-fresh-frame action check below.
-        // Do not add a separate duplicate detail/OCR pass here.
-        Point visualActionCenter = Point.Empty;
-        for (int pass = 0; pass < 2; pass++)
+        // V3.1.8 execution model for every processing facility remains the base:
+        // select only after facility arrival, then validate fresh detail frames.
+        // V3.1.31 only adds one bounded recovery when the paid remote state persists.
+        while (true)
         {
-            using var frame = Capture(ct);
-            if (!await IsRecipeDetailStructureAsync(frame, ct))
-                Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
+            await SelectRecipeAsync(plan, ct);
+            Point visualActionCenter = Point.Empty;
+            bool restartAfterRemoteRecovery = false;
 
-            bool firstOnsiteAction = TryFindFreeProcessButtonVisual(
-                frame,
-                out Point firstOnsiteActionCenter);
-            var remoteCandidate = await DetectRemoteProcessStateAsync(frame, ct);
-            if (remoteCandidate.IsRemote)
+            for (int pass = 0; pass < 2; pass++)
             {
-                Log?.Invoke(
-                    $"[자동 가공] 작업 등록 직전 원격 상태 후보 1/2 · {remoteCandidate.Evidence} · " +
-                    $"현장버튼={(firstOnsiteAction ? "확인" : "없음")} · " +
-                    "단일 프레임으로 중단하지 않고 200ms 후 재확인");
-                await Task.Delay(200, ct);
+                using var frame = Capture(ct);
+                if (!await IsRecipeDetailStructureAsync(frame, ct))
+                    Fail(frame, "설비 도착 후 품목 상세 화면을 확인하지 못했습니다.");
 
-                using var confirm = Capture(ct);
-                if (!await IsRecipeDetailStructureAsync(confirm, ct))
-                    Fail(confirm, "원격 상태 재확인 중 품목 상세 화면이 사라졌습니다.");
+                bool firstOnsiteAction = TryFindFreeProcessButtonVisual(
+                    frame,
+                    out Point firstOnsiteActionCenter);
+                var remoteCandidate = await DetectRemoteProcessStateAsync(frame, ct);
 
-                bool secondOnsiteAction = TryFindFreeProcessButtonVisual(
-                    confirm,
-                    out Point secondOnsiteActionCenter);
-                var remoteConfirmed = await DetectRemoteProcessStateAsync(confirm, ct);
-                bool onsiteFacilityConfirmed = string.Equals(
-                    _confirmedOnsiteFacility,
-                    plan.FacilityName,
-                    StringComparison.Ordinal);
-
-                if (AlteringRemoteProcessGuard.ShouldBlock(
-                        remoteCandidate.IsRemote,
-                        remoteConfirmed.IsRemote,
-                        onsiteFacilityConfirmed,
-                        firstOnsiteAction,
-                        secondOnsiteAction))
-                    Fail(
-                        confirm,
-                        "원격 가공 상태가 2프레임 연속 감지되어 현장 가공 입력을 차단했습니다. " +
-                        $"1차={remoteCandidate.Evidence} · 2차={remoteConfirmed.Evidence} · " +
-                        $"현장버튼={firstOnsiteAction}/{secondOnsiteAction}");
-
-                if (remoteCandidate.IsRemote &&
-                    remoteConfirmed.IsRemote &&
-                    onsiteFacilityConfirmed &&
-                    firstOnsiteAction &&
-                    secondOnsiteAction)
+                if (remoteCandidate.IsRemote)
                 {
-                    visualActionCenter = secondOnsiteActionCenter;
                     Log?.Invoke(
-                        "[자동 가공] 가공하러 가기 OCR 2프레임 오탐 억제 · " +
-                        "해당 시설 현장 확인 + 하단 현장 가공 버튼 2프레임 우선 · 현장 가공 계속");
-                }
-                else
-                {
+                        $"[자동 가공] 작업 등록 직전 원격 상태 후보 1/2 · {remoteCandidate.Evidence} · " +
+                        "단일 프레임으로 중단하지 않고 200ms 후 재확인");
+                    await Task.Delay(200, ct);
+
+                    using var confirm = Capture(ct);
+                    if (!await IsRecipeDetailStructureAsync(confirm, ct))
+                        Fail(confirm, "원격 상태 재확인 중 품목 상세 화면이 사라졌습니다.");
+
+                    bool secondOnsiteAction = TryFindFreeProcessButtonVisual(
+                        confirm,
+                        out Point secondOnsiteActionCenter);
+                    var remoteConfirmed = await DetectRemoteProcessStateAsync(confirm, ct);
+                    bool remoteTwoFrames = AlteringRemoteProcessGuard.ShouldBlock(
+                        remoteCandidate.IsRemote,
+                        remoteConfirmed.IsRemote);
+
+                    if (remoteTwoFrames)
+                    {
+                        if (!AlteringRemoteProcessGuard.CanRecover(true, remoteRecoveryUsed))
+                            Fail(confirm,
+                                "무료 설비 이동 복구 후에도 가공하러 가기 상태가 2프레임 연속 확인되어 현장 가공 입력 없이 정지합니다.");
+
+                        Log?.Invoke(
+                            "[자동 가공] 원격 상세 2프레임 확정 · 현장 버튼 색상만으로 누르지 않음 · 무료 설비 이동 1회 복구");
+                        await RecoverRemoteDetailToOnsiteAsync(plan, ct);
+                        remoteRecoveryUsed = true;
+                        restartAfterRemoteRecovery = true;
+                        break;
+                    }
+
                     Log?.Invoke(
                         $"[자동 가공] 작업 등록 직전 원격 상태 1회 오탐 해제 · " +
-                        $"1차={remoteCandidate.Evidence} · 2차={(remoteConfirmed.IsRemote ? remoteConfirmed.Evidence : "없음")} · 현장 가공 계속");
+                        $"1차={remoteCandidate.Evidence} · 2차=없음 · 현장 가공 계속");
 
                     if (!secondOnsiteAction)
                         Fail(confirm, "원격 상태 오탐 해제 후 하단 현장 가공 실행 버튼을 확인하지 못했습니다.");
 
                     visualActionCenter = secondOnsiteActionCenter;
                 }
-            }
-            else
-            {
-                if (!firstOnsiteAction)
-                    Fail(frame, "설비 도착 후 하단 현장 가공 실행 버튼을 화면에서 확인하지 못했습니다.");
+                else
+                {
+                    if (!firstOnsiteAction)
+                        Fail(frame, "설비 도착 후 하단 현장 가공 실행 버튼을 화면에서 확인하지 못했습니다.");
 
-                visualActionCenter = firstOnsiteActionCenter;
+                    visualActionCenter = firstOnsiteActionCenter;
+                }
+
+                if (pass == 0)
+                {
+                    await Task.Delay(200, ct);
+                    continue;
+                }
+
+                _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 작업 등록");
+                Log?.Invoke(
+                    "[자동 가공] 설비 도착 후 현장 가공 버튼 화면 확인 · 가공하러 가기 2프레임 아님 · 정령의 날개 버튼 입력 없음");
+                _ui.ClickFresh(visualActionCenter, ct);
             }
 
-            if (pass == 0)
-            {
-                await Task.Delay(200, ct);
+            if (restartAfterRemoteRecovery)
                 continue;
-            }
 
-            _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 작업 등록");
-            Log?.Invoke("[자동 가공] 설비 도착 후 현장 가공 버튼 화면 확인 · 숫자/아이콘 무시 · 정령의 날개 버튼 입력 없음");
-            _ui.ClickFresh(visualActionCenter, ct);
+            return;
         }
+    }
+
+    private async Task RecoverRemoteDetailToOnsiteAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        _confirmedOnsiteFacility = null;
+
+        // EnterFacilityAsync already owns the bounded detail-close transition.
+        await EnterFacilityAsync(plan, ct);
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 원격 상세 복구 · 무료 설비 이동 1회 실행");
+
+        await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
+        await EnterFacilityAsync(plan, ct);
+
+        _confirmedOnsiteFacility = plan.FacilityName;
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 무료 설비 이동 복구 완료 · {plan.DisplayName} 다시 선택");
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
