@@ -531,10 +531,50 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         _ui.ClickFresh(center, ct);
         await Task.Delay(350, ct);
 
-        using var popup = Capture(ct);
-        if (!await IsRecipeDetailStructureAsync(popup, ct))
-            Fail(popup,
-                $"{plan.ScreenTitle} 고정좌표 ({center.X},{center.Y}) 클릭 후 품목 상세 구조를 확인하지 못했습니다.");
+        bool detailConfirmed;
+        using (var popup = Capture(ct))
+            detailConfirmed = await IsRecipeDetailStructureAsync(popup, ct);
+
+        if (!detailConfirmed)
+        {
+            // A field/gathering return can leave the processing list visually valid
+            // while the first card click is dropped or the detail transition is slow.
+            // Re-observe before any retry so a delayed detail opening is never double-clicked.
+            await Task.Delay(300, ct);
+            using var retryGate = Capture(ct);
+
+            if (await IsRecipeDetailStructureAsync(retryGate, ct))
+            {
+                detailConfirmed = true;
+                Log?.Invoke(
+                    $"[자동 가공] {plan.DisplayName} 상세 전환 지연 확인 · 추가 클릭 없이 계속");
+            }
+            else
+            {
+                if (await FindFacilityHeaderAsync(retryGate, plan.ScreenTitle, ct) is null)
+                    Fail(retryGate,
+                        $"{plan.ScreenTitle} 고정좌표 1차 클릭 후 상세창도 시설 목록도 확인되지 않아 재클릭하지 않고 정지합니다.");
+
+                if (HasFacilityMoveButtonVisual(retryGate))
+                    Fail(retryGate,
+                        $"{plan.ScreenTitle} 고정좌표 1차 클릭 후 설비로 이동 버튼이 보여 원격 상태로 판정했습니다. 재클릭하지 않고 정지합니다.");
+
+                Log?.Invoke(
+                    $"[자동 가공] {plan.DisplayName} 고정좌표 1차 클릭 미반영 확인 · " +
+                    $"시설 목록 유지 + 원격 버튼 없음 · 동일 좌표 재클릭 1/1");
+                _ui.ClickFresh(center, ct);
+                await Task.Delay(450, ct);
+
+                using var retryPopup = Capture(ct);
+                if (!await IsRecipeDetailStructureAsync(retryPopup, ct))
+                    Fail(retryPopup,
+                        $"{plan.ScreenTitle} 고정좌표 ({center.X},{center.Y}) 1회 재클릭 후에도 품목 상세 구조를 확인하지 못했습니다. 추가 입력 없이 정지합니다.");
+
+                detailConfirmed = true;
+                Log?.Invoke(
+                    $"[자동 가공] {plan.DisplayName} 고정좌표 재클릭 1/1 성공 · 추가 재시도 없음");
+            }
+        }
 
         _stage.Move(ProductionStage.Detail, plan.DisplayName);
         Log?.Invoke(
