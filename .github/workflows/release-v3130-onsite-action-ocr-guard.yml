@@ -6,7 +6,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - '.github/workflows/release-v3131-remote-detail-recovery.yml'
+      - '.github/workflows/release-v3130-onsite-action-ocr-guard.yml'
   workflow_dispatch:
 
 permissions:
