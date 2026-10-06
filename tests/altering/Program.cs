@@ -24,6 +24,13 @@ Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, true),
     "AutoTraveling state never authorizes completion Space");
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, true, false, false),
     "facility screen itself is not a completion result");
+Check(AlteringReceiptPolicy.CanRetryCompletionClose(true, false, false, false),
+    "unchanged real completion modal may receive exactly one guarded close retry");
+Check(!AlteringReceiptPolicy.CanRetryCompletionClose(true, true, false, false),
+    "facility screen never receives a completion-close retry");
+Check(!AlteringReceiptPolicy.CanRetryCompletionClose(true, false, true, false) &&
+      !AlteringReceiptPolicy.CanRetryCompletionClose(true, false, false, true),
+    "travel dialog or active travel blocks completion-close retry");
 Check(!AlteringRemoteProcessGuard.ShouldBlock(true, false),
     "single-frame remote processing spike is ignored after clean confirmation");
 Check(!AlteringRemoteProcessGuard.ShouldBlock(false, true),
