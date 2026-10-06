@@ -672,6 +672,15 @@ internal sealed class AlteringAutomation
         return $"{queuedWorks}#{queue}";
     }
 
+    internal async Task<bool> CollectReadyBatchAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        plan.Validate();
+        var works = await _data.WorksAsync(ct);
+        return await CollectIfReadyAsync(plan, works, ct);
+    }
+
     private static IEnumerable<AlteringWork> Matching(IEnumerable<AlteringWork> works, AlteringPlan plan)
         => works.Where(x => (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName) &&
             x.FacilityName == plan.FacilityName);
