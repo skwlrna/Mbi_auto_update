@@ -2,35 +2,15 @@ namespace FishingAutomation;
 
 internal static class AlteringRemoteProcessGuard
 {
-    // A single visual/OCR spike on a proven on-site detail screen is not enough
-    // to veto processing. Only two consecutive remote-state observations block input.
+    // A single OCR spike is not enough to prove the remote paid-action state.
+    // Two consecutive fresh observations are required before changing navigation.
     internal static bool ShouldBlock(bool firstRemote, bool secondRemote)
-        => ShouldBlock(
-            firstRemote,
-            secondRemote,
-            onsiteFacilityConfirmed: false,
-            firstOnsiteActionVisible: false,
-            secondOnsiteActionVisible: false);
+        => firstRemote && secondRemote;
 
-    // If the facility itself was already proven on-site and the dedicated on-site
-    // action button body is visible in both fresh frames, a simultaneous
-    // "가공하러 가기" OCR read is treated as a text false-positive. This preserves
-    // the two-frame remote veto everywhere else.
-    internal static bool ShouldBlock(
-        bool firstRemote,
-        bool secondRemote,
-        bool onsiteFacilityConfirmed,
-        bool firstOnsiteActionVisible,
-        bool secondOnsiteActionVisible)
-    {
-        if (!firstRemote || !secondRemote)
-            return false;
-
-        bool provenOnsiteAction =
-            onsiteFacilityConfirmed &&
-            firstOnsiteActionVisible &&
-            secondOnsiteActionVisible;
-
-        return !provenOnsiteAction;
-    }
+    // A confirmed remote-detail state gets exactly one bounded recovery attempt:
+    // close the detail, return to the facility screen, perform the known free
+    // facility move once, then reselect the recipe. If the paid-action state is
+    // still confirmed after that, input must stop instead of looping or re-clicking.
+    internal static bool CanRecover(bool remoteConfirmed, bool recoveryAlreadyUsed)
+        => remoteConfirmed && !recoveryAlreadyUsed;
 }
