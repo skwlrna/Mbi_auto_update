@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.27"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.28"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.27</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.28</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -531,12 +531,22 @@ jobs:
           $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
 
           if($crafting -notmatch 'CraftingAutomation'){throw 'crafting automation wiring missing'}
-          if($multiAlter -notmatch 'Func<AlteringPlan, CancellationToken, Task<bool>>' -or
+          if($multiAlter -notmatch 'Func<AlteringPlan, int, CancellationToken, Task<bool>>' -or
              $multiAlter -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $multiAlter -notmatch '배치 전체 완료 전 이동 없음') { throw 'multi-altering must use whole-facility batch scheduling' }
           if($multiAlter -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'multi-altering coordinator must never own direct input' }
-          if($multiAlterMain -notmatch 'RunBatchAsync\(plan, coordinatorToken\)' -or
-             $multiAlterMain -notmatch '시설별 최대 7칸 배치 병렬 운용' -or
+          if($multiAlter -notmatch '같은 시설 여러 품목은 라운드로빈 혼합' -or
+             $multiAlter -notmatch 'runBatch\(plan, 1, ct\)') { throw 'same-facility round-robin slot mixing missing' }
+          $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
+          $status = Get-Content source/FishingAutomation/AlteringStatus.cs -Raw
+          if($session -notmatch 'MultiPlanPath' -or
+             $session -notmatch 'SHA256.HashData' -or
+             $session -notmatch 'IsLegacyMultiPath') { throw 'stable per-plan multi-altering session key missing' }
+          if($status -notmatch 'AlteringEtaEstimator' -or
+             $status -notmatch '남은시간\(예상\)') { throw 'full-plan altering ETA status missing' }
+          if($multiAlterMain -notmatch 'RunBatchAsync\(' -or
+             $multiAlterMain -notmatch 'slotBudget' -or
+             $multiAlterMain -notmatch '시설별 최대 7칸 혼합 병렬 운용' -or
              $multiAlterMain -match 'StartAlteringAsync\(plan, batchChild: true\)') { throw 'multi-altering runtime must use batch-yield engine instead of full sequential child runs' }
           if($productionPage -notmatch '다중가공 작업 목록' -or
              $productionPage -notmatch '다중가공 .*종 시작' -or
