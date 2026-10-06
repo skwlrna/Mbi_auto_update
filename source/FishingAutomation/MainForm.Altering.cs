@@ -120,6 +120,8 @@ public sealed partial class MainForm
             _productionProgressSummary = resuming
                 ? $"이어하기 준비 · {plan.DisplayName} {_productionCurrentQuantity:N0}/{plan.TargetQuantity:N0} · 등록 {session.QueuedWorks}/{plan.RequiredWorks}"
                 : $"{plan.DisplayName} 0/{plan.TargetQuantity:N0} · 등록 0/{plan.RequiredWorks} · 시작 준비";
+            ResetAlteringStatus(new[] { plan });
+            SeedAlteringStatus(plan, _productionCurrentQuantity);
             RefreshProductionDashboard();
 
             var windows = WindowTools.EnumerateVisibleWindows();
@@ -186,6 +188,7 @@ public sealed partial class MainForm
             });
             automation.Progress += progress => Ui(() =>
             {
+                UpdateAlteringStatus(plan, progress);
                 _productionCurrentQuantity = progress.ConfirmedQuantity;
                 _productionProgressSummary = progress.Summary(plan.DisplayName);
                 _dungeonCycles = progress.QueuedWorks;
