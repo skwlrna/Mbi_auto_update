@@ -1094,6 +1094,96 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return false;
     }
 
+    private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync(
+        AlteringPlan plan,
+        CancellationToken ct,
+        string reason)
+    {
+        Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
+        _ui.TapFresh(0x39, ct);
+        await Task.Delay(450, ct);
+
+        using (var verify = Capture(ct))
+        {
+            bool facilityVisible = await FindFacilityHeaderAsync(
+                verify, plan.ScreenTitle, ct) is not null;
+            bool greenConfirm = HasBottomConfirmationModal(verify);
+            bool travelDialog = greenConfirm &&
+                await IsFacilityTravelDialogAsync(verify, ct);
+            bool? autoTraveling = await TryAutoTravelingAsync(ct);
+
+            if (AlteringReceiptPolicy.CanRetryCompletionClose(
+                    greenConfirm,
+                    facilityVisible,
+                    travelDialog,
+                    autoTraveling == true))
+            {
+                Log?.Invoke(
+                    "[자동 가공] 완료창 닫기 Space 1차 입력 후에도 실제 완료창 유지 · " +
+                    "이동 상태 아님 재확인 · Space 1회 재시도");
+
+                await Task.Delay(180, ct);
+                using var retryFrame = Capture(ct);
+                bool retryFacilityVisible = await FindFacilityHeaderAsync(
+                    retryFrame, plan.ScreenTitle, ct) is not null;
+                bool retryGreenConfirm = HasBottomConfirmationModal(retryFrame);
+                bool retryTravelDialog = retryGreenConfirm &&
+                    await IsFacilityTravelDialogAsync(retryFrame, ct);
+                bool? retryAutoTraveling = await TryAutoTravelingAsync(ct);
+
+                if (AlteringReceiptPolicy.CanRetryCompletionClose(
+                        retryGreenConfirm,
+                        retryFacilityVisible,
+                        retryTravelDialog,
+                        retryAutoTraveling == true))
+                {
+                    _ui.TapFresh(0x39, ct);
+                    Log?.Invoke("[자동 가공] 완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음");
+                    await Task.Delay(450, ct);
+                }
+                else
+                {
+                    Log?.Invoke(
+                        "[자동 가공] 완료창 닫기 재시도 직전 화면 상태 변경 · " +
+                        "추가 Space 입력 없이 복귀 상태 확인");
+                }
+            }
+            else if (greenConfirm && (travelDialog || autoTraveling == true))
+            {
+                Log?.Invoke(
+                    $"[자동 가공] 완료창 닫기 1차 입력 후 초록창/이동 상태 감지 · " +
+                    $"이동팝업={travelDialog} · AutoTraveling={autoTraveling == true} · 추가 Space 없음");
+            }
+            else
+            {
+                Log?.Invoke("[자동 가공] 완료창 닫기 Space 1차 입력 후 완료창 이탈 확인");
+            }
+        }
+
+        using (var closedCheck = Capture(ct))
+        {
+            bool facilityVisible = await FindFacilityHeaderAsync(
+                closedCheck, plan.ScreenTitle, ct) is not null;
+            bool greenConfirm = HasBottomConfirmationModal(closedCheck);
+            bool travelDialog = greenConfirm &&
+                await IsFacilityTravelDialogAsync(closedCheck, ct);
+            bool? autoTraveling = await TryAutoTravelingAsync(ct);
+
+            if (AlteringReceiptPolicy.CanRetryCompletionClose(
+                    greenConfirm,
+                    facilityVisible,
+                    travelDialog,
+                    autoTraveling == true))
+            {
+                Fail(
+                    closedCheck,
+                    "가공 완료 확인창이 Space 2회 입력 후에도 그대로 남아 있어 추가 입력 없이 정지합니다.");
+            }
+        }
+
+        return await WaitForReceiptFacilityReturnAsync(plan, ct);
+    }
+
     private async Task<bool> ConfirmCompletionResultAsync(
         AlteringPlan plan,
         CancellationToken ct,
@@ -1158,18 +1248,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 }
 
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
-                Log?.Invoke(
-                    $"[자동 가공] 첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow} · " +
-                    "완료창 닫기 Space 입력");
-                _ui.TapFresh(0x39, ct);
-
-                if (await WaitForReceiptFacilityReturnAsync(plan, ct))
+                if (await CloseCompletionResultAndWaitForFacilityAsync(
+                        plan,
+                        ct,
+                        $"첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}"))
                     return true;
 
                 using var cliFailed = Capture(ct);
                 Fail(
                     cliFailed,
-                    "CLI로 수령은 확인했지만 완료창 닫기 Space 후 가공 시설 화면 복귀를 확인하지 못했습니다.");
+                    "CLI로 수령은 확인했고 완료창 닫기 입력도 처리했지만 가공 시설 화면 복귀를 확인하지 못했습니다.");
             }
 
             bool travelDialogVisible = greenConfirm && await IsFacilityTravelDialogAsync(frame, ct);
@@ -1200,20 +1288,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
                 int? workCountBefore = receiptWorkCountBefore ?? await TryMatchingWorkCountAsync(plan, ct);
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
-                Log?.Invoke(
-                    "[자동 가공] 가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · Space 입력 · " +
-                    $"첫 수령 전 동일 품목 작업수={(workCountBefore?.ToString() ?? "확인불가")}");
-                _ui.TapFresh(0x39, ct);
-
-                // Receipt success and UI recovery are separate. After the result
-                // confirmation Space, do not begin another registration until the same
-                // facility screen has actually returned for two stable frames.
-                if (await WaitForReceiptFacilityReturnAsync(plan, ct))
+                if (await CloseCompletionResultAndWaitForFacilityAsync(
+                        plan,
+                        ct,
+                        "가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · " +
+                        $"첫 수령 전 동일 품목 작업수={(workCountBefore?.ToString() ?? "확인불가")}"))
                     return true;
 
                 using var failed = Capture(ct);
                 Fail(failed,
-                    "가공 완료 확인창 닫기 Space 후 가공 시설 화면 복귀를 확인하지 못했습니다.");
+                    "가공 완료 확인창 닫기 입력 후 가공 시설 화면 복귀를 확인하지 못했습니다.");
             }
             else
             {
