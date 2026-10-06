@@ -244,7 +244,8 @@ public sealed partial class MainForm
                     _productionProgressSummary =
                         $"다중가공 {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
                         $"{plan.DisplayName} {p.ConfirmedQuantity:N0}/{p.TargetQuantity:N0} · " +
-                        $"대기열 {p.FacilityWorks}/7 · 다음 완료 {(p.NextCompletionSeconds?.ToString() ?? "—")}초";
+                        $"대기열 {p.FacilityWorks}/7 · 전체 ETA " +
+                        $"{(p.TotalRemainingSeconds?.ToString() ?? "계산 중")}초";
                     UpdateStats();
                     RefreshProductionDashboard();
                 });
@@ -290,6 +291,9 @@ public sealed partial class MainForm
 
             foreach (var store in stores)
                 store.Delete();
+            foreach (string legacyPath in Directory.EnumerateFiles(sessionDir, "*.json")
+                         .Where(AlteringSessionStore.IsLegacyMultiPath))
+                new AlteringSessionStore(legacyPath).Delete();
         }
         catch (OperationCanceledException)
         {
