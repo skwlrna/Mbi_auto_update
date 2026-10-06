@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 4630ceafe4a5b85fe3b59bdeb96bd8f9b0edb77f
+          ref: 03b4475f17b2990dc5cb04d0186583b7a5ccafb1
           fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
@@ -30,7 +30,7 @@ jobs:
       - name: Verify release source and versions
         shell: pwsh
         run: |
-          $releaseSource = '4630ceafe4a5b85fe3b59bdeb96bd8f9b0edb77f'
+          $releaseSource = '03b4475f17b2990dc5cb04d0186583b7a5ccafb1'
           if ((git rev-parse HEAD) -ne $releaseSource) { throw 'release source snapshot mismatch' }
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
           if ($u -notmatch 'CurrentVersion = "V3\.1\.21"') { throw 'version constant mismatch' }
@@ -736,7 +736,7 @@ jobs:
           # Do not depend on a separately-created release branch: a missing helper
           # branch must never block publishing an otherwise verified build.
           $releaseTarget=(git rev-parse HEAD).Trim()
-          if($releaseTarget -ne '4630ceafe4a5b85fe3b59bdeb96bd8f9b0edb77f'){throw "Release code target mismatch: $releaseTarget"}
+          if($releaseTarget -ne '03b4475f17b2990dc5cb04d0186583b7a5ccafb1'){throw "Release code target mismatch: $releaseTarget"}
 
           if(-not $r) {
             $remoteTag = git ls-remote --tags origin refs/tags/V3.1.21
