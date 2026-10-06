@@ -1,5 +1,16 @@
 namespace FishingAutomation;
 
+internal sealed record MultiAlteringSupplyPreflight(
+    AlteringPlan Plan,
+    AlteringRecipe Recipe,
+    int RemainingWorks);
+
+internal static class MultiAlteringMaterialPreflightPolicy
+{
+    internal static bool CanRun(bool hasResumableSession, bool hasSelectedFacilityWorks)
+        => !hasResumableSession && !hasSelectedFacilityWorks;
+}
+
 internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 {
     private readonly IAlteringData _altering;
@@ -81,6 +92,49 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                         $"(현재 {current} / 남은 작업 기준 {requiredTotal})");
             await ResolveItemAsync(missing.DisplayName, deficit, parentPlan, 0, ct);
         }
+    }
+
+    internal async Task PreGatherKnownShortagesAsync(
+        IReadOnlyList<MultiAlteringSupplyPreflight> requests,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+
+        var eligible = requests
+            .Where(x => x.RemainingWorks > 0 && x.Recipe.MissingIngredients.Count > 0)
+            .ToArray();
+        if (eligible.Length == 0)
+            return;
+
+        foreach (var request in eligible)
+            request.Plan.Validate();
+
+        var multiGather = await BuildMultiGatheringPlanAsync(eligible, ct);
+        if (multiGather.Count == 0)
+        {
+            Log?.Invoke(
+                "[재료 해결] 전체 품목 통합 계획 · 현재 CLI가 확정한 원재료 부족분 없음 · " +
+                "숨은 재료는 각 품목 실행 시 기존 재귀 검증으로 재확인");
+            return;
+        }
+
+        if (_alteringScreen is not IAlteringFieldExitScreen fieldExit)
+            throw new InvalidOperationException(
+                "전체 품목 통합 채집 전에 가공 UI를 안전하게 종료할 수 없는 화면 구현입니다.");
+
+        Log?.Invoke(
+            $"[재료 해결] 전체 품목 통합 채집 준비 · {eligible.Length}종 확정 부족분 · " +
+            string.Join(", ", multiGather.Select(x => $"{x.DisplayName} 목표 {x.TargetTotal}")));
+        await fieldExit.ExitToFieldAsync(ct);
+        Log?.Invoke("[재료 해결] 전체 품목 통합 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
+
+        var coordinator = new MultiGatheringCoordinator(
+            _gathering, _gatheringScreen, _delay, _verificationAttempts);
+        coordinator.Log += text => Log?.Invoke(text);
+        await coordinator.RunAsync(multiGather, ct);
+
+        Log?.Invoke(
+            "[재료 해결] 전체 품목 통합 채집 완료 · 각 품목 시작 직전 실제 재고/부족분을 다시 검증");
     }
 
     internal Task ResolveExternalAsync(string itemName, long quantity, CancellationToken ct)
@@ -231,10 +285,17 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         }
     }
 
-    private async Task<IReadOnlyList<MultiGatheringRequest>> BuildMultiGatheringPlanAsync(
+    private Task<IReadOnlyList<MultiGatheringRequest>> BuildMultiGatheringPlanAsync(
         AlteringPlan parentPlan,
         AlteringRecipe blockedRecipe,
         int remainingWorks,
+        CancellationToken ct)
+        => BuildMultiGatheringPlanAsync(
+            new[] { new MultiAlteringSupplyPreflight(parentPlan, blockedRecipe, remainingWorks) },
+            ct);
+
+    private async Task<IReadOnlyList<MultiGatheringRequest>> BuildMultiGatheringPlanAsync(
+        IReadOnlyList<MultiAlteringSupplyPreflight> roots,
         CancellationToken ct)
     {
         var catalog = await _gathering.CatalogAsync(ct);
@@ -328,19 +389,26 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             }
         }
 
-        foreach (var missing in blockedRecipe.MissingIngredients)
+        foreach (var root in roots)
         {
             ct.ThrowIfCancellationRequested();
-            long demand = checked(missing.Required * (long)remainingWorks);
-            await PlanItemAsync(
-                missing.DisplayName,
-                demand,
-                parentPlan,
-                0);
+            if (root.RemainingWorks <= 0)
+                continue;
+
+            foreach (var missing in root.Recipe.MissingIngredients)
+            {
+                long demand = checked(missing.Required * (long)root.RemainingWorks);
+                await PlanItemAsync(
+                    missing.DisplayName,
+                    demand,
+                    root.Plan,
+                    0);
+            }
         }
 
         // The virtual inventory ledger applies the current stock only once across
-        // sibling branches. Duplicate raw leaves therefore become one summed request.
+        // every selected root and every sibling branch. Duplicate raw leaves therefore
+        // become one summed request without counting the same current stock twice.
         var merged = new List<MultiGatheringRequest>();
         foreach (var group in requests.GroupBy(x => x.DisplayName, StringComparer.Ordinal))
         {
