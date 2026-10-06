@@ -15,6 +15,11 @@ internal static class AlteringFacilityLayout
     // highest-priority visual veto against false remote detection.
     internal static readonly Rectangle OnsiteCloseVisualArea = new(744, 42, 44, 44);
 
+    // The on-site top-right X is authoritative. A blue/teal fragment from the
+    // on-site receive control must never override it and trigger another travel.
+    internal static bool ShouldAcceptMoveButton(bool onsiteCloseVisible, bool moveShapeVisible)
+        => moveShapeVisible && !onsiteCloseVisible;
+
     internal static bool IsSafeMoveGeometry()
         => MoveButtonVisualArea.Contains(MoveButtonPoint) &&
            MoveButtonVisualArea.Left >= 0 &&
