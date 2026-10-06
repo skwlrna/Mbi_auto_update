@@ -128,6 +128,10 @@ public sealed partial class MainForm
             var automations = new Dictionary<(string Facility, string Display, int Ordinal), AlteringAutomation>();
             var stores = new List<AlteringSessionStore>();
             var progress = new Dictionary<(string Facility, string Display, int Ordinal), long>();
+            var materialPreflight = new List<MultiAlteringSupplyPreflight>();
+            bool hasResumableSessionForPreflight = false;
+            bool hasSelectedFacilityWorksForPreflight = currentWorks.Any(work =>
+                plans.Any(plan => plan.FacilityName == work.FacilityName));
 
             AlteringSessionState? TryMigrateLegacySession(
                 AlteringPlan plan,
@@ -171,6 +175,7 @@ public sealed partial class MainForm
                     selected[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
                     throw new InvalidOperationException(
                         $"{plan.DisplayName} 시작 직전 제법 조회 결과가 선택 내용과 달라졌습니다. 목록을 새로고침하세요.");
+                var selectedRecipe = selected[plan.RecipeOrdinal - 1];
 
                 var store = new AlteringSessionStore(
                     AlteringSessionStore.MultiPlanPath(sessionDir, plan));
@@ -189,6 +194,7 @@ public sealed partial class MainForm
                     saved.MatchesIdentity(identity.Baseline))
                 {
                     session = saved;
+                    hasResumableSessionForPreflight = true;
                     _log.Write(
                         $"[다중가공] 배치 이어하기 · {plan.DisplayName} · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 단계={saved.Stage}");
                 }
@@ -210,6 +216,14 @@ public sealed partial class MainForm
                     store.Save(session);
                     _log.Write(
                         $"[다중가공] 배치 저장 시작 · {plan.DisplayName} · 기준 보유 {baseline:N0}개 · 기존 작업 {initialExisting}건");
+                }
+
+                if (selectedRecipe.MissingIngredients.Count > 0)
+                {
+                    materialPreflight.Add(new MultiAlteringSupplyPreflight(
+                        plan,
+                        selectedRecipe,
+                        plan.RequiredWorks));
                 }
 
                 var automation = new AlteringAutomation(
@@ -288,6 +302,37 @@ public sealed partial class MainForm
                 $"시설별 혼합 7칸 배치";
             UpdateStats();
             RefreshProductionDashboard();
+
+            if (materialPreflight.Count > 0)
+            {
+                bool canRunMaterialPreflight = MultiAlteringMaterialPreflightPolicy.CanRun(
+                    hasResumableSessionForPreflight,
+                    hasSelectedFacilityWorksForPreflight);
+
+                if (canRunMaterialPreflight)
+                {
+                    _productionProgressSummary =
+                        $"다중가공 전체 품목 확정 부족분 통합 채집 · {materialPreflight.Count}종 점검";
+                    UpdateStats();
+                    RefreshProductionDashboard();
+                    _log.Write(
+                        $"[다중가공] 전체 품목 통합 재료 계획 시작 · " +
+                        $"CLI가 현재 부족으로 확정한 {materialPreflight.Count}종만 선행 계산 · " +
+                        "현재 충분해서 숨겨진 재료는 실행 중 재검증");
+                    await resolver.PreGatherKnownShortagesAsync(materialPreflight, token);
+                    _log.Write(
+                        "[다중가공] 전체 품목 통합 재료 계획 완료 · 실제 등록 직전 재료 검증은 기존 로직 유지");
+                }
+                else
+                {
+                    string reason = hasResumableSessionForPreflight
+                        ? "이어하기 세션 존재"
+                        : "선택 시설에 기존 작업 존재";
+                    _log.Write(
+                        $"[다중가공] 전체 품목 통합 선행채집 생략 · {reason} · " +
+                        "기존 재귀 재료 해결로 실제 부족분만 처리");
+                }
+            }
 
             var coordinator = new MultiAlteringCoordinator();
             coordinator.Log += text => Ui(() =>
