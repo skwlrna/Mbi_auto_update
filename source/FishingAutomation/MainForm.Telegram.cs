@@ -45,10 +45,12 @@ public sealed partial class MainForm
         string mode = _activeMode ?? SelectedMode;
         string running = AnyRunning ? "실행 중" : "대기 중";
         string dungeon = mode == "어비스" ? $"\n던전: {SelectedAbyssDungeon}" : "";
-        string started = mode is "던전" or "어비스"
+        string started = mode is "던전" or "어비스" or "가공"
             ? _dungeonStartedAt?.ToString("HH:mm:ss") ?? "—"
             : _fishingStartedAt?.ToString("HH:mm:ss") ?? "—";
+        string altering = mode == "가공" ? GetAlteringRemoteStatus() : "";
+        string alteringBlock = string.IsNullOrWhiteSpace(altering) ? "" : $"\n{altering}";
 
-        return $"MABI AUTO {UpdateManager.CurrentVersion}\n상태: {running}\n모드: {mode}{dungeon}\n화면 상태: {_statusValue.Text}\n시작: {started}\n성공: {_successValue.Text} / 진행: {_roundValue.Text}\n실패: {_failureValue.Text}";
+        return $"MABI AUTO {UpdateManager.CurrentVersion}\n상태: {running}\n모드: {mode}{dungeon}\n화면 상태: {_statusValue.Text}{alteringBlock}\n시작: {started}\n성공: {_successValue.Text} / 진행: {_roundValue.Text}\n실패: {_failureValue.Text}";
     }
 }
