@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.25"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.26"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.25</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.26</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -316,14 +316,25 @@ jobs:
               $screen -notmatch 'IsCliReceiptConfirmed' -or
               $screen -notmatch '첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정') { throw 'pre-receipt same-item CLI confirmation path missing' }
           if ($screen -notmatch 'WaitForReceiptFacilityReturnAsync' -or
-              $screen -notmatch '완료창 닫기 Space 입력' -or
-              $screen -notmatch 'CLI로 수령은 확인했지만 완료창 닫기 Space 후 가공 시설 화면 복귀를 확인하지 못했습니다' -or
-              $screen -match '결과창 인식 생략 · 다음 가공 진입에서 화면 재검증') { throw 'receipt result close-and-return gate missing' }
+              $screen -notmatch 'CloseCompletionResultAndWaitForFacilityAsync' -or
+              $screen -notmatch '완료창 닫기 Space 1차 입력' -or
+              $screen -notmatch 'Space 1회 재시도' -or
+              $screen -notmatch '완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음' -or
+              $screen -notmatch 'Space 2회 입력 후에도 그대로 남아 있어 추가 입력 없이 정지' -or
+              $screen -match '결과창 인식 생략 · 다음 가공 진입에서 화면 재검증') { throw 'receipt result verified close/retry-and-return gate missing' }
           if ($receiptPolicy -notmatch 'IsCliReceiptConfirmed' -or
-              $receiptPolicy -notmatch 'after < before') { throw 'CLI receipt decrease policy missing' }
+              $receiptPolicy -notmatch 'after < before' -or
+              $receiptPolicy -notmatch 'CanRetryCompletionClose') { throw 'CLI receipt decrease / completion-close retry policy missing' }
+          $closeHelper = [regex]::Match($screen, 'private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync[\s\S]*?(?=\r?\n    private async Task<bool> ConfirmCompletionResultAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($closeHelper) -or
+              $closeHelper -notmatch 'Task\.Delay\(450, ct\)' -or
+              $closeHelper -notmatch 'AlteringReceiptPolicy\.CanRetryCompletionClose' -or
+              [regex]::Matches($closeHelper, '_ui\.TapFresh\(0x39, ct\)').Count -ne 2 -or
+              $closeHelper -notmatch 'WaitForReceiptFacilityReturnAsync\(plan, ct\)') { throw 'completion close helper must verify first Space, allow one safe retry, then wait for facility return' }
           $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
           if ($collectFlow -notmatch 'return true;') { throw 'on-site receive must return only after confirmed collection' }
-          if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · Space 입력') { throw 'safe completion result Space confirmation log missing' }
+          if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님' -or
+              $screen -notmatch '완료창 닫기 Space 1차 입력 후 완료창 이탈 확인') { throw 'safe completion result Space verification log missing' }
           if ($screen -notmatch '가공 완료 확인창 닫기 완료') { throw 'completion result facility-return log missing' }
           if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion') { throw 'completion result must use travel-safe receipt policy' }
           if ($screen -notmatch 'facilityFrames >= 2') { throw 'facility return must be stable before continuing' }
