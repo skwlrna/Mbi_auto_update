@@ -137,7 +137,8 @@ internal sealed record AlteringProgress(
     int RequiredWorks,
     int FacilityWorks,
     long? NextCompletionSeconds,
-    string MaterialState)
+    string MaterialState,
+    long? BatchRemainingSeconds = null)
 {
     internal string Summary(string displayName)
     {
