@@ -716,18 +716,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         Bitmap frame,
         CancellationToken ct)
     {
-        bool moveVisual = HasFacilityMoveButtonVisual(frame);
+        // This helper is called only after IsRecipeDetailStructureAsync has already
+        // confirmed the recipe detail screen. The remote facility move-button ROI
+        // belongs to the facility list screen and overlaps unrelated colours on the
+        // detail popup, so it must never be used as a veto at this stage.
         var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
-
-        string evidence = moveVisual && paid is not null
-            ? "설비로 이동 화면 + 가공하러 가기 OCR"
-            : moveVisual
-                ? "설비로 이동 화면"
-                : paid is not null
-                    ? "가공하러 가기 OCR"
-                    : "없음";
-
-        return (moveVisual || paid is not null, evidence);
+        return (paid is not null, paid is not null ? "가공하러 가기 OCR" : "없음");
     }
 
     public async Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
