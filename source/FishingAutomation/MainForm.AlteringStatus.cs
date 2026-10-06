@@ -27,7 +27,10 @@ public sealed partial class MainForm
         }
     }
 
-    private void SeedAlteringStatus(AlteringPlan plan, long confirmedQuantity)
+    private void SeedAlteringStatus(
+        AlteringPlan plan,
+        long confirmedQuantity,
+        long? remainingSeconds = null)
     {
         string key = AlteringStatusKey(plan);
         if (!_alteringStatusItems.ContainsKey(key))
@@ -38,7 +41,7 @@ public sealed partial class MainForm
             plan.DisplayName,
             Math.Clamp(confirmedQuantity, 0, plan.TargetQuantity),
             plan.TargetQuantity,
-            null,
+            remainingSeconds,
             DateTimeOffset.Now);
     }
 
@@ -53,7 +56,9 @@ public sealed partial class MainForm
             plan.DisplayName,
             Math.Clamp(progress.ConfirmedQuantity, 0, progress.TargetQuantity),
             progress.TargetQuantity,
-            progress.BatchRemainingSeconds ?? progress.NextCompletionSeconds,
+            progress.TotalRemainingSeconds ??
+                progress.BatchRemainingSeconds ??
+                progress.NextCompletionSeconds,
             DateTimeOffset.Now);
     }
 

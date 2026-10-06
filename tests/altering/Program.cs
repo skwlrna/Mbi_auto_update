@@ -130,10 +130,25 @@ var statusItems = new[]
 };
 string remoteStatus = AlteringStatusFormatter.Format(statusItems, 171, 300, statusNow);
 Check(remoteStatus.Contains("전체 171/300 완료") &&
-      remoteStatus.Contains("철괴(철 광석): 21/100 완료 · 남은시간 1분 30초") &&
-      remoteStatus.Contains("목재: 50/100 완료 · 남은시간 계산 중") &&
-      remoteStatus.Contains("물에 불린 쌀: 100/100 완료 · 남은시간 완료"),
+      remoteStatus.Contains("철괴(철 광석): 21/100 완료 · 남은시간(예상) 1분 30초") &&
+      remoteStatus.Contains("목재: 50/100 완료 · 남은시간(예상) 계산 중") &&
+      remoteStatus.Contains("물에 불린 쌀: 100/100 완료 · 남은시간(예상) 완료"),
     "processing status shows per-item completed/target counts and live remaining time");
+
+Check(AlteringEtaEstimator.Estimate(
+        requiredWorks: 10,
+        queuedWorks: 4,
+        activeItemSlots: 2,
+        batchRemainingSeconds: 90,
+        estimatedWorkSeconds: 100) == 390,
+    "full-plan ETA includes the current batch plus future batches at the active slot share");
+Check(AlteringEtaEstimator.Estimate(
+        requiredWorks: 7,
+        queuedWorks: 7,
+        activeItemSlots: 3,
+        batchRemainingSeconds: 45,
+        estimatedWorkSeconds: 100) == 45,
+    "full-plan ETA does not add future cycles after every work is already queued");
 
 var estimatePlan = plan with { TargetQuantity = 10 };
 var estimateRecipe = new AlteringRecipe("강철괴", false, 3, "not_enough_ingredient",
@@ -159,6 +174,17 @@ Check(loadedSession is not null && loadedSession.MatchesPlan(plan) &&
     "altering session persists plan, identity, baseline, progress, and recursive stage");
 sessionStore.Delete();
 Check(!File.Exists(sessionPath), "completed session cleanup removes persisted resume state");
+string multiKeyDir = Path.Combine(Path.GetTempPath(), "mabi-multi-key-test");
+string stablePathA = AlteringSessionStore.MultiPlanPath(multiKeyDir, plan);
+string stablePathARepeat = AlteringSessionStore.MultiPlanPath(multiKeyDir, plan);
+string stablePathB = AlteringSessionStore.MultiPlanPath(
+    multiKeyDir,
+    plan with { DisplayName = "철괴(철 광석)" });
+Check(stablePathA == stablePathARepeat &&
+      stablePathA != stablePathB &&
+      !AlteringSessionStore.IsLegacyMultiPath(stablePathA) &&
+      AlteringSessionStore.IsLegacyMultiPath(Path.Combine(multiKeyDir, "00.json")),
+    "multi-altering session path is stable by plan identity and independent of queue order");
 try { (plan with { AllowPaidButton = true }).Validate(); throw new Exception("paid altering plan accepted"); }
 catch (InvalidDataException) { Check(true, "paid altering plans are rejected before execution"); }
 foreach (var bad in new[] { plan with { TargetQuantity = 0 }, plan with { ProducedPerWork = 0 }, plan with { FacilityName = "none" } })
@@ -421,77 +447,106 @@ Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
 
 var multiAltering = new MultiAlteringCoordinator();
-var multiPlans = new[]
+var mixedPlans = new[]
 {
-    new AlteringPlan("금속 가공 시설", "철괴(철 광석)", 21, 3, false),
-    new AlteringPlan("목재 가공 시설", "목재", 21, 3, false),
-    new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 35, 5, false)
+    new AlteringPlan("목재 가공 시설", "목재", 4, 1, false),
+    new AlteringPlan("목재 가공 시설", "목재+", 3, 1, false),
+    new AlteringPlan("금속 가공 시설", "강철괴", 7, 1, false)
 };
-var multiWorks = new List<AlteringWork>();
-var multiBatchRuns = new List<string>();
-int multiDelayCalls = 0;
-int runsAtFirstPartialCompletion = -1;
+var mixedWorks = new List<AlteringWork>();
+var mixedCalls = new List<string>();
+var mixedRegistered = mixedPlans.ToDictionary(x => x.DisplayName, _ => 0, StringComparer.Ordinal);
+int mixedDelayCalls = 0;
+int callsAtPartialCompletion = -1;
+int callsBeforeWholeBatchCompletion = -1;
 
 await multiAltering.RunAsync(
-    multiPlans,
-    (job, token) =>
+    mixedPlans,
+    (job, slotBudget, token) =>
     {
         token.ThrowIfCancellationRequested();
-        multiBatchRuns.Add(job.DisplayName);
-        var lane = multiWorks.Where(x => x.FacilityName == job.FacilityName).ToArray();
+        Check(slotBudget == 1, "multi-altering coordinator yields one registration slot per mixed turn");
+        mixedCalls.Add(job.DisplayName);
+
+        var lane = mixedWorks.Where(x => x.FacilityName == job.FacilityName).ToArray();
         if (lane.Length > 0 && lane.All(x => x.IsCompleted))
-        {
-            multiWorks.RemoveAll(x => x.FacilityName == job.FacilityName);
+            mixedWorks.RemoveAll(x => x.FacilityName == job.FacilityName);
+
+        bool hasOwnWork = mixedWorks.Any(x =>
+            x.FacilityName == job.FacilityName &&
+            x.DisplayName == job.OutputName);
+        if (mixedRegistered[job.DisplayName] >= job.RequiredWorks && !hasOwnWork)
             return Task.FromResult(true);
+
+        int facilityCount = mixedWorks.Count(x => x.FacilityName == job.FacilityName);
+        int toRegister = Math.Min(
+            slotBudget,
+            Math.Min(
+                7 - facilityCount,
+                job.RequiredWorks - mixedRegistered[job.DisplayName]));
+        for (int i = 0; i < toRegister; i++)
+        {
+            mixedWorks.Add(new(
+                job.OutputName,
+                job.FacilityName,
+                "InProgress",
+                false,
+                10));
+            mixedRegistered[job.DisplayName]++;
         }
 
-        if (lane.Length != 0)
-            throw new Exception("multi-altering revisited a facility before its whole batch completed");
-
-        for (int i = 0; i < 7; i++)
-            multiWorks.Add(new(job.OutputName, job.FacilityName, i == 0 ? "InProgress" : "NotStarted", false, 10 + i));
         return Task.FromResult(false);
     },
     token =>
     {
         token.ThrowIfCancellationRequested();
-        return Task.FromResult<IReadOnlyList<AlteringWork>>(multiWorks.ToArray());
+        return Task.FromResult<IReadOnlyList<AlteringWork>>(mixedWorks.ToArray());
     },
     (_, token) =>
     {
         token.ThrowIfCancellationRequested();
-        multiDelayCalls++;
-        if (multiDelayCalls == 1)
+        mixedDelayCalls++;
+
+        if (mixedDelayCalls == 1)
         {
-            int first = multiWorks.FindIndex(x => x.FacilityName == "금속 가공 시설");
-            multiWorks[first] = multiWorks[first] with
+            int firstWood = mixedWorks.FindIndex(x => x.FacilityName == "목재 가공 시설");
+            mixedWorks[firstWood] = mixedWorks[firstWood] with
             {
                 State = "Completed",
                 IsCompleted = true,
                 RemainingSeconds = 0
             };
-            runsAtFirstPartialCompletion = multiBatchRuns.Count;
+            callsAtPartialCompletion = mixedCalls.Count;
         }
         else
         {
-            for (int i = 0; i < multiWorks.Count; i++)
-                multiWorks[i] = multiWorks[i] with
+            if (mixedDelayCalls == 2)
+                callsBeforeWholeBatchCompletion = mixedCalls.Count;
+
+            for (int i = 0; i < mixedWorks.Count; i++)
+                mixedWorks[i] = mixedWorks[i] with
                 {
                     State = "Completed",
                     IsCompleted = true,
                     RemainingSeconds = 0
                 };
         }
+
         return Task.CompletedTask;
     },
     default);
 
-Check(multiBatchRuns.Take(3).SequenceEqual(
-        new[] { "철괴(철 광석)", "목재", "물에 불린 쌀" }),
-    "multi-altering seeds every independent facility before waiting");
-Check(runsAtFirstPartialCompletion == 3 &&
-      multiBatchRuns.Count == 6,
-    "multi-altering does not revisit/refill a facility for a single completed slot and revisits only whole completed batches");
+Check(mixedCalls.Take(7).SequenceEqual(
+        new[] { "목재", "목재+", "목재", "목재+", "목재", "목재+", "목재" }),
+    "same-facility plans are round-robin mixed across the seven-slot lane");
+Check(mixedRegistered["목재"] == 4 &&
+      mixedRegistered["목재+"] == 3 &&
+      mixedRegistered["강철괴"] == 7,
+    "mixed scheduler registers each plan only to its required work count");
+Check(callsAtPartialCompletion == callsBeforeWholeBatchCompletion,
+    "one completed slot never causes a facility revisit before the whole mixed batch completes");
+Check(mixedCalls.Take(14).Count(x => x == "강철괴") == 7,
+    "independent facility is fully seeded in parallel before waiting");
 
 try
 {
@@ -501,7 +556,7 @@ try
             new AlteringPlan("목재 가공 시설", "목재", 10, 3, false),
             new AlteringPlan("목재 가공 시설", "목재", 20, 3, false)
         },
-        (_, _) => Task.FromResult(false),
+        (_, _, _) => Task.FromResult(false),
         _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
         (_, _) => Task.CompletedTask,
         default);

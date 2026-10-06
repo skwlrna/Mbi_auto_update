@@ -3,6 +3,42 @@ using System.Text.RegularExpressions;
 
 namespace FishingAutomation;
 
+internal static class AlteringEtaEstimator
+{
+    internal static long? Estimate(
+        int requiredWorks,
+        int queuedWorks,
+        int activeItemSlots,
+        long? batchRemainingSeconds,
+        long? estimatedWorkSeconds)
+    {
+        if (requiredWorks <= 0 || queuedWorks < 0 || queuedWorks > requiredWorks)
+            return null;
+
+        int futureWorks = Math.Max(0, requiredWorks - queuedWorks);
+        long? cycle = estimatedWorkSeconds ?? batchRemainingSeconds;
+
+        if (futureWorks == 0)
+            return batchRemainingSeconds ?? 0;
+
+        if (!cycle.HasValue || cycle.Value <= 0)
+            return null;
+
+        int slots = Math.Max(1, activeItemSlots);
+        long futureCycles = (futureWorks + (long)slots - 1) / slots;
+        long currentBatch = Math.Max(0, batchRemainingSeconds ?? 0);
+
+        try
+        {
+            return checked(currentBatch + futureCycles * cycle.Value);
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+}
+
 internal sealed record AlteringPlan(string FacilityName, string DisplayName, int TargetQuantity,
     int ProducedPerWork, bool AllowPaidButton, int RecipeOrdinal = 1)
 {
@@ -101,6 +137,7 @@ internal sealed class AlteringAutomation
     private readonly IAlteringSupplyResolver? _supplyResolver;
     private readonly AlteringSessionStore? _sessionStore;
     private AlteringSessionState? _session;
+    private long? _estimatedWorkSeconds;
     private static readonly TimeSpan StallThreshold = TimeSpan.FromSeconds(60);
     private const int MaxStallRecoveries = 3;
 
@@ -128,14 +165,31 @@ internal sealed class AlteringAutomation
     }
 
     internal async Task RunAsync(AlteringPlan plan, CancellationToken ct)
-        => _ = await RunCoreAsync(plan, yieldAtBatchBoundary: false, ct);
+        => _ = await RunCoreAsync(plan, yieldAtBatchBoundary: false, batchRegistrationLimit: null, ct);
 
     internal Task<AlteringRunResult> RunBatchAsync(AlteringPlan plan, CancellationToken ct)
-        => RunCoreAsync(plan, yieldAtBatchBoundary: true, ct);
+        => RunCoreAsync(plan, yieldAtBatchBoundary: true, batchRegistrationLimit: null, ct);
+
+    internal Task<AlteringRunResult> RunBatchAsync(
+        AlteringPlan plan,
+        int maxRegistrations,
+        CancellationToken ct)
+    {
+        if (maxRegistrations is < 1 or > 7)
+            throw new ArgumentOutOfRangeException(
+                nameof(maxRegistrations),
+                "다중가공 한 번의 배치 등록 제한은 1~7칸이어야 합니다.");
+        return RunCoreAsync(
+            plan,
+            yieldAtBatchBoundary: true,
+            batchRegistrationLimit: maxRegistrations,
+            ct);
+    }
 
     private async Task<AlteringRunResult> RunCoreAsync(
         AlteringPlan plan,
         bool yieldAtBatchBoundary,
+        int? batchRegistrationLimit,
         CancellationToken ct)
     {
         plan.Validate();
@@ -366,6 +420,8 @@ internal sealed class AlteringAutomation
             if (QueuedWorks < plan.RequiredWorks && freeSlots > 0)
             {
                 int batchGoal = Math.Min(freeSlots, plan.RequiredWorks - QueuedWorks);
+                if (yieldAtBatchBoundary && batchRegistrationLimit.HasValue)
+                    batchGoal = Math.Min(batchGoal, batchRegistrationLimit.Value);
                 int queuedThisBatch = 0;
                 Log?.Invoke($"[자동 가공] 일괄 등록 시작 · 빈 슬롯 {freeSlots}칸 · 이번 묶음 {batchGoal}작업 / 최대 {batchGoal * plan.ProducedPerWork}개");
 
@@ -567,7 +623,8 @@ internal sealed class AlteringAutomation
         long confirmed = Math.Max(0, current - baseline - oldMinimum);
         confirmed = Math.Min(plan.TargetQuantity, confirmed);
 
-        var matchingInProgress = Matching(works, plan)
+        var matching = Matching(works, plan).ToArray();
+        var matchingInProgress = matching
             .Where(x => x.State == "InProgress")
             .ToArray();
         long? next = matchingInProgress
@@ -579,6 +636,17 @@ internal sealed class AlteringAutomation
             .DefaultIfEmpty(null)
             .Max();
 
+        if (batchRemaining is > 0 &&
+            (!_estimatedWorkSeconds.HasValue || batchRemaining > _estimatedWorkSeconds.Value))
+            _estimatedWorkSeconds = batchRemaining;
+
+        long? totalRemaining = AlteringEtaEstimator.Estimate(
+            plan.RequiredWorks,
+            QueuedWorks,
+            matching.Length,
+            batchRemaining,
+            _estimatedWorkSeconds);
+
         Progress.Invoke(new(
             confirmed,
             plan.TargetQuantity,
@@ -587,7 +655,8 @@ internal sealed class AlteringAutomation
             works.Count(x => x.FacilityName == plan.FacilityName),
             next,
             materialState,
-            batchRemaining));
+            batchRemaining,
+            totalRemaining));
     }
 
     private static string ProgressSignature(

@@ -59,7 +59,7 @@ internal static class AlteringStatusFormatter
             bool completed = item.ConfirmedQuantity >= item.TargetQuantity;
             lines.Add(
                 $"{item.DisplayName}: {item.ConfirmedQuantity:N0}/{item.TargetQuantity:N0} 완료 · " +
-                $"남은시간 {FormatRemaining(item.RemainingNow(now), completed)}");
+                $"남은시간(예상) {FormatRemaining(item.RemainingNow(now), completed)}");
         }
 
         return string.Join(Environment.NewLine, lines);
