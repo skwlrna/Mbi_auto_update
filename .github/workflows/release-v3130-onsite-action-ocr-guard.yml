@@ -643,7 +643,7 @@ jobs:
           if($screen -notmatch 'centerBright >= 4' -or
              $screen -notmatch 'q1 >= 3 && q2 >= 3 && q3 >= 3 && q4 >= 3' -or
              $layout -notmatch 'ShouldAcceptMoveButton'){throw 'on-site X must veto false move-button geometry'}
-          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task TravelToFacilityAsync)').Value
+          $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync)').Value
           if($queue -notmatch 'TravelToFacilityAsync\(plan, ct\)' -or
              $queue -match 'remoteConfirmed:\s*true'){throw 'batch registration must re-check travel state without forcing a move'}
 
