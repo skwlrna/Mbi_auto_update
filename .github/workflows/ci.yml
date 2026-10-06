@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.22"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.23"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.22</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.23</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -253,7 +253,13 @@ jobs:
           if ($queue -match 'remoteConfirmed:\s*true') { throw 'queue registration must not force a second facility travel from an on-site screen' }
           if ($queue -notmatch '품목 선택 전 설비로 이동') { throw 'facility-first move trace missing' }
           if ($queue -notmatch '설비 도착 · 이제 .* 선택') { throw 'post-arrival recipe selection trace missing' }
-          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 1) { throw 'V3.1.8 queue flow must keep only the two-frame detail/action guard' }
+          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 2) { throw 'queue must keep the base detail check plus one remote-candidate confirmation detail check' }
+          $remoteGuard = Get-Content source/FishingAutomation/AlteringRemoteProcessGuard.cs -Raw
+          if ($remoteGuard -notmatch 'firstRemote && secondRemote' -or
+              $queue -notmatch '작업 등록 직전 원격 상태 후보 1/2' -or
+              $queue -notmatch '단일 프레임으로 중단하지 않고 200ms 후 재확인' -or
+              $queue -notmatch '원격 상태 1회 오탐 해제' -or
+              $queue -notmatch 'AlteringRemoteProcessGuard\.ShouldBlock') { throw 'two-frame remote processing veto confirmation missing' }
           if ($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'duplicate post-select detail/OCR pass returned' }
           if ($queue -match '품목 상세 기준 설비 이동 필요 확정' -or $queue -match '같은 품목을 다시 선택') { throw 'recipe-first backtrack flow returned' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
