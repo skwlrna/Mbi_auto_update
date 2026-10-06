@@ -181,6 +181,7 @@ var testIdentity = new CliIdentityContext("char-1", "테스트", "account-1", "�
 var persisted = AlteringSessionState.Create(plan, testIdentity, 123, 2) with
 {
     QueuedWorks = 5,
+    CreditedInternalConsumptionQuantity = 3,
     Stage = "재료 해결 · 철괴"
 };
 sessionStore.Save(persisted);
@@ -188,8 +189,10 @@ var loadedSession = sessionStore.Load();
 Check(loadedSession is not null && loadedSession.MatchesPlan(plan) &&
       loadedSession.MatchesIdentity(testIdentity) &&
       loadedSession.QueuedWorks == 5 && loadedSession.BaselineQuantity == 123 &&
-      loadedSession.LastObservedOutputQuantity == 123 && loadedSession.Stage.Contains("철괴"),
-    "altering session persists plan, identity, baseline, progress, and recursive stage");
+      loadedSession.LastObservedOutputQuantity == 123 &&
+      loadedSession.CreditedInternalConsumptionQuantity == 3 &&
+      loadedSession.Stage.Contains("철괴"),
+    "altering session persists plan, identity, baseline, internal consumption credit, progress, and recursive stage");
 sessionStore.Delete();
 Check(!File.Exists(sessionPath), "completed session cleanup removes persisted resume state");
 string multiKeyDir = Path.Combine(Path.GetTempPath(), "mabi-multi-key-test");
@@ -203,6 +206,70 @@ Check(stablePathA == stablePathARepeat &&
       !AlteringSessionStore.IsLegacyMultiPath(stablePathA) &&
       AlteringSessionStore.IsLegacyMultiPath(Path.Combine(multiKeyDir, "00.json")),
     "multi-altering session path is stable by plan identity and independent of queue order");
+
+var internalIronPlan = new AlteringPlan(
+    "금속 가공 시설", "철괴(철 광석)", 10, 3, false);
+var internalSteelPlan = new AlteringPlan(
+    "금속 가공 시설", "강철괴", 10, 3, false);
+string internalSessionPath = Path.Combine(
+    Path.GetTempPath(), "mabi-internal-consumption-" + Guid.NewGuid().ToString("N") + ".json");
+var internalStore = new AlteringSessionStore(internalSessionPath);
+var internalSession = AlteringSessionState.Create(
+    internalIronPlan, testIdentity, baseline: 239, initialExistingWorks: 0);
+internalStore.Save(internalSession);
+var internalWorld = new FakeWorld(internalIronPlan) { Owned = 236 };
+var internalIronAutomation = new AlteringAutomation(
+    internalWorld,
+    internalWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    sessionStore: internalStore,
+    session: internalSession);
+var accountingInventory = new Dictionary<string, long>(StringComparer.Ordinal)
+{
+    ["철괴"] = 239,
+    ["강철괴"] = 1519
+};
+var internalLedger = new MultiAlteringConsumptionLedger(
+    (names, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        IReadOnlyDictionary<string, long> snapshot = names.ToDictionary(
+            name => name,
+            name => accountingInventory[name],
+            StringComparer.Ordinal);
+        return Task.FromResult(snapshot);
+    });
+internalLedger.RegisterProducer(
+    internalIronPlan,
+    (quantity, consumer) =>
+        internalIronAutomation.CreditInternalConsumption(quantity, consumer));
+internalLedger.RegisterProducer(
+    internalSteelPlan,
+    (_, _) => throw new Exception("steel output should not be credited in this test"));
+
+var beforeSteelRegistration = await internalLedger.CaptureBeforeRegistrationAsync(
+    internalSteelPlan, default);
+accountingInventory["철괴"] = 236;
+await internalLedger.CommitAfterRegistrationAsync(
+    internalSteelPlan, beforeSteelRegistration, default);
+
+var creditedIronSession = internalStore.Load()
+    ?? throw new Exception("internal consumption session missing");
+Check(creditedIronSession.CreditedInternalConsumptionQuantity == 3,
+    "steel registration credits the observed 239 to 236 iron decrease as internal consumption");
+
+var restartedIronAutomation = new AlteringAutomation(
+    internalWorld,
+    internalWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    sessionStore: internalStore,
+    session: creditedIronSession);
+await restartedIronAutomation.RunBatchAsync(internalIronPlan, 1, default);
+Check(internalWorld.QueueCalls == 1,
+    "persisted internal consumption credit lets iron resume after steel consumed three iron");
+internalStore.Delete();
 try { (plan with { AllowPaidButton = true }).Validate(); throw new Exception("paid altering plan accepted"); }
 catch (InvalidDataException) { Check(true, "paid altering plans are rejected before execution"); }
 foreach (var bad in new[] { plan with { TargetQuantity = 0 }, plan with { ProducedPerWork = 0 }, plan with { FacilityName = "none" } })
