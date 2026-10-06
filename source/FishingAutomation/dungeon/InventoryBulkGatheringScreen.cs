@@ -256,9 +256,39 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         await Task.Delay(350, ct);
     }
 
+    private static Point LifeSkillNearestClickPoint(
+        DetectionResult current,
+        string targetName,
+        int nominalLeftOffset)
+    {
+        // The supplied rice/tree captures place the clickable link immediately
+        // left of the help icon. Scale the offset with the matched icon width so
+        // render-scale differences do not shift the click onto the '?' itself.
+        double scale = current.Bounds.Width / 16.0;
+        int minOffset = Math.Max(36, nominalLeftOffset - 14);
+        int maxOffset = Math.Min(118, nominalLeftOffset + 18);
+        int leftOffset = Math.Clamp(
+            (int)Math.Round(nominalLeftOffset * scale),
+            minOffset,
+            maxOffset);
+        Point clickPoint = new(
+            current.Center.X - leftOffset,
+            current.Center.Y);
+
+        if (!LifeSkillNearestHelpArea.Contains(current.Center) ||
+            clickPoint.X < 140 || clickPoint.X > 390 ||
+            clickPoint.Y < 400 || clickPoint.Y > 650)
+            throw new InvalidOperationException(
+                $"{targetName} 가까운 위치 기준 ? 이미지/클릭 좌표가 안전 영역을 벗어났습니다.");
+
+        return clickPoint;
+    }
+
     private async Task ClickLifeSkillNearestLocationAsync(
         string targetName,
-        CancellationToken ct)
+        CancellationToken ct,
+        int nominalLeftOffset = 56,
+        string phase = "초기")
     {
         Point clickPoint = Point.Empty;
         var found = await _ui.ClickOffsetFromStableBrightTemplateAsync(
@@ -266,21 +296,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             LifeSkillNearestHelpArea,
             current =>
             {
-                // The supplied rice/tree captures place the clickable link immediately
-                // left of the help icon. Scale the offset with the matched icon width so
-                // render-scale differences do not shift the click onto the '?' itself.
-                double scale = current.Bounds.Width / 16.0;
-                int leftOffset = Math.Clamp((int)Math.Round(56 * scale), 42, 74);
-                clickPoint = new Point(
-                    current.Center.X - leftOffset,
-                    current.Center.Y);
-
-                if (!LifeSkillNearestHelpArea.Contains(current.Center) ||
-                    clickPoint.X < 140 || clickPoint.X > 390 ||
-                    clickPoint.Y < 400 || clickPoint.Y > 650)
-                    throw new InvalidOperationException(
-                        $"{targetName} 가까운 위치 기준 ? 이미지/클릭 좌표가 안전 영역을 벗어났습니다.");
-
+                clickPoint = LifeSkillNearestClickPoint(
+                    current,
+                    targetName,
+                    nominalLeftOffset);
                 return clickPoint;
             },
             ct,
@@ -292,9 +311,58 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
             settleMs: 160);
 
         Log?.Invoke(
-            $"[대량 채집] 가까운 위치 찾기 · ? 이미지 2프레임 + 클릭 직전 재확인 · " +
+            $"[대량 채집] 가까운 위치 찾기 · {phase} · ? 이미지 2프레임 + 클릭 직전 재확인 · " +
             $"score={found.Score:F3} · ?=({found.Center.X},{found.Center.Y}) · " +
-            $"클릭=({clickPoint.X},{clickPoint.Y}) · OCR 없음");
+            $"클릭=({clickPoint.X},{clickPoint.Y}) · offset={nominalLeftOffset} · OCR 없음");
+    }
+
+    private async Task<bool> TryRetryLifeSkillNearestLocationAsync(
+        string targetName,
+        int retryNumber,
+        int nominalLeftOffset,
+        CancellationToken ct)
+    {
+        DetectionResult? first = null;
+        DetectionResult second = DetectionResult.NotFound;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            var found = _ui.FindBrightTemplate(
+                frame,
+                LifeSkillNearestHelpArea,
+                LifeSkillNearestHelpTemplate,
+                threshold: 0.78,
+                minScale: 0.75,
+                maxScale: 1.35,
+                step: 0.05);
+
+            if (!found.Found)
+                return false;
+
+            if (pass == 0)
+            {
+                first = found;
+                await Task.Delay(160, ct);
+                continue;
+            }
+
+            if (first is null || !ProductionUiRuntime.Stable(first.Value.Bounds, found.Bounds))
+                return false;
+
+            second = found;
+        }
+
+        Point clickPoint = LifeSkillNearestClickPoint(
+            second,
+            targetName,
+            nominalLeftOffset);
+        _ui.ClickFresh(clickPoint, ct);
+        Log?.Invoke(
+            $"[대량 채집] 가까운 위치 무반응 재클릭 {retryNumber}/2 · " +
+            $"?=({second.Center.X},{second.Center.Y}) · 클릭=({clickPoint.X},{clickPoint.Y}) · " +
+            $"offset={nominalLeftOffset} · 상세창 ? 기준이 계속 보일 때만 입력");
+        return true;
     }
 
     private async Task ResolveLifeSkillNearestResultAsync(
@@ -366,6 +434,31 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
 
             firstPlaceBounds = null;
             firstPlaceText = null;
+
+            // The life-skill detail link can occasionally ignore the first click
+            // even though the '?' anchor was stable. Retry only while that same
+            // detail anchor is still visible, so a slow transition can never receive
+            // an unrelated second click on the destination screen.
+            if (poll == 4 || poll == 8)
+            {
+                int retryNumber = poll == 4 ? 1 : 2;
+                int retryOffset = retryNumber == 1 ? 56 : 84;
+                bool retried = await TryRetryLifeSkillNearestLocationAsync(
+                    targetName,
+                    retryNumber,
+                    retryOffset,
+                    ct);
+                if (retried)
+                {
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                Log?.Invoke(
+                    $"[대량 채집] 가까운 위치 재클릭 {retryNumber}/2 보류 · " +
+                    "기존 상세창 ? 기준이 더 이상 안정적으로 보이지 않아 추가 입력 없음");
+            }
+
             await Task.Delay(300, ct);
         }
 
