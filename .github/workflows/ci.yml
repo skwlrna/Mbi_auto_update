@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.28"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.29"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.28</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.29</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -526,6 +526,7 @@ jobs:
           $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
           $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
           $multiAlter = Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
+          $dependencyScheduler = Get-Content source/FishingAutomation/MultiAlteringDependencyScheduler.cs -Raw
           $multiAlterMain = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
           $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
           $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
@@ -548,6 +549,15 @@ jobs:
              $multiAlterMain -notmatch 'slotBudget' -or
              $multiAlterMain -notmatch '시설별 최대 7칸 혼합 병렬 운용' -or
              $multiAlterMain -match 'StartAlteringAsync\(plan, batchChild: true\)') { throw 'multi-altering runtime must use batch-yield engine instead of full sequential child runs' }
+          if($multiAlterMain -notmatch 'new MultiAlteringDependencyScheduler' -or
+             $multiAlterMain -notmatch 'dependencyScheduler: dependencyScheduler') { throw 'multi-altering intermediate dependency scheduler wiring missing' }
+          if($resolver -notmatch 'IAlteringDependencyScheduler' -or
+             $resolver -notmatch '_dependencyScheduler\.RunAsync') { throw 'recursive altering does not delegate multi-mode intermediate processing' }
+          if($dependencyScheduler -notmatch 'new MultiAlteringCoordinator' -or
+             $dependencyScheduler -notmatch 'CollectReadyBatchAsync' -or
+             $dependencyScheduler -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
+             $dependencyScheduler -notmatch '배치 전체 완료 전 이동 없음') { throw 'intermediate processing must share whole-facility seven-slot scheduling' }
+          if($dependencyScheduler -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'dependency scheduler must not own direct input' }
           if($productionPage -notmatch '다중가공 작업 목록' -or
              $productionPage -notmatch '다중가공 .*종 시작' -or
              $productionPage -notmatch 'AddCurrentAlteringQueue') { throw 'visible multi-altering queue UI missing' }
