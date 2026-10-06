@@ -7,14 +7,14 @@ on:
   push:
     branches: [ main ]
     paths:
-      - '.github/workflows/release-v3124-two-frame-remote-processing-guard.yml'
+      - '.github/workflows/release-v3124-recipe-detail-remote-guard.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-v3124-two-frame-remote-processing-guard
+  group: release-v3124-recipe-detail-remote-guard
   cancel-in-progress: false
 
 jobs:
