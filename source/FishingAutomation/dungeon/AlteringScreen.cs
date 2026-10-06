@@ -109,21 +109,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (roi.Width < 30 || roi.Height < 30)
             return false;
 
+        static bool NeutralWhite(Color p)
+        {
+            int max = Math.Max(p.R, Math.Max(p.G, p.B));
+            int min = Math.Min(p.R, Math.Min(p.G, p.B));
+            return p.R >= 150 && p.G >= 150 && p.B >= 150 &&
+                max - min <= 45;
+        }
+
         int bright = 0;
         int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
 
         for (int y = roi.Top; y < roi.Bottom; y++)
         for (int x = roi.Left; x < roi.Right; x++)
         {
-            Color p = frame.GetPixel(x, y);
-            int max = Math.Max(p.R, Math.Max(p.G, p.B));
-            int min = Math.Min(p.R, Math.Min(p.G, p.B));
-
-            // On-site close X is a compact neutral-white glyph. The surrounding
-            // machine/currency art does not occupy this tight top-right ROI.
-            bool white = p.R >= 150 && p.G >= 150 && p.B >= 150 &&
-                max - min <= 45;
-            if (!white)
+            if (!NeutralWhite(frame.GetPixel(x, y)))
                 continue;
 
             bright++;
@@ -136,16 +136,49 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (bright < 28)
             return false;
 
-        int width = maxX - minX;
-        int height = maxY - minY;
-        return width >= 14 && height >= 14;
+        int width = maxX - minX + 1;
+        int height = maxY - minY + 1;
+
+        // V3.1.20 showed that the remote currency digits can enter this ROI.
+        // A real close X is compact, roughly square, and has white pixels on both
+        // diagonals in all four quadrants; a trailing price digit must not qualify.
+        if (width < 16 || height < 16 || width > 34 || height > 34 ||
+            Math.Abs(width - height) > 10)
+            return false;
+
+        double centerX = (minX + maxX) / 2.0;
+        double centerY = (minY + maxY) / 2.0;
+        int diagonal = 0;
+        int q1 = 0, q2 = 0, q3 = 0, q4 = 0;
+
+        for (int y = minY; y <= maxY; y++)
+        for (int x = minX; x <= maxX; x++)
+        {
+            if (!NeutralWhite(frame.GetPixel(x, y)))
+                continue;
+
+            double dx = x - centerX;
+            double dy = y - centerY;
+            if (Math.Abs(Math.Abs(dx) - Math.Abs(dy)) > 3.5)
+                continue;
+
+            diagonal++;
+            if (dx >= 0 && dy >= 0) q1++;
+            else if (dx < 0 && dy >= 0) q2++;
+            else if (dx < 0 && dy < 0) q3++;
+            else q4++;
+        }
+
+        return diagonal >= 18 &&
+            diagonal * 100 >= bright * 35 &&
+            q1 >= 3 && q2 >= 3 && q3 >= 3 && q4 >= 3;
     }
 
     private static bool HasFacilityMoveButtonVisual(Bitmap frame)
     {
-        // Detect the broad remote "설비로 이동" pill first. The on-site close-X
-        // detector shares the top-right area with currency digits, so a false X
-        // must never override a strong, wide teal move-button signal.
+        // Detect the broad remote "설비로 이동" pill first. The close-X detector
+        // separately validates real diagonal X geometry so remote currency digits
+        // cannot mask a genuine move button.
         var roi = Rectangle.Intersect(
             AlteringFacilityLayout.MoveButtonVisualArea,
             new Rectangle(Point.Empty, frame.Size));
