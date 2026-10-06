@@ -24,6 +24,12 @@ Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, true),
     "AutoTraveling state never authorizes completion Space");
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, true, false, false),
     "facility screen itself is not a completion result");
+Check(!AlteringRemoteProcessGuard.ShouldBlock(true, false),
+    "single-frame remote processing spike is ignored after clean confirmation");
+Check(!AlteringRemoteProcessGuard.ShouldBlock(false, true),
+    "non-consecutive remote processing spike never blocks input");
+Check(AlteringRemoteProcessGuard.ShouldBlock(true, true),
+    "two consecutive remote processing observations block input");
 
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");
