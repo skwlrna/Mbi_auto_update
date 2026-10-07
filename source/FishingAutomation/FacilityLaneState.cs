@@ -43,6 +43,7 @@ internal sealed class FacilityLaneState
 
     private readonly Dictionary<string, Lane> _lanes =
         new(StringComparer.Ordinal);
+    private string? _confirmedOnsiteFacility;
 
     internal event Action<string>? Log;
 
@@ -95,6 +96,50 @@ internal sealed class FacilityLaneState
         // so a zero/negative net delta still consumes the one-observation allowance.
         lane.ExpectedGrowth = 0;
     }
+
+    internal AlteringFacilityEntryDirective QueueDirectiveFor(string facilityName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        return string.Equals(_confirmedOnsiteFacility, facilityName, StringComparison.Ordinal)
+            ? AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite
+            : AlteringFacilityEntryDirective.FreshMoveRequired;
+    }
+
+    internal void ConfirmOnsite(string facilityName, string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        bool changed = !string.Equals(
+            _confirmedOnsiteFacility,
+            facilityName,
+            StringComparison.Ordinal);
+        _confirmedOnsiteFacility = facilityName;
+
+        Log?.Invoke(
+            $"[시설 소유권] {facilityName.Replace(" 시설", "")} · 현장확정" +
+            (changed ? " 갱신" : " 유지") +
+            $" · 중간관리자 근거={reason} · 다음 같은 시설 등록은 설비 이동 재판정 금지");
+    }
+
+    internal void InvalidateOnsite(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        if (_confirmedOnsiteFacility is null)
+            return;
+
+        string previous = _confirmedOnsiteFacility;
+        _confirmedOnsiteFacility = null;
+        Log?.Invoke(
+            $"[시설 소유권] {previous.Replace(" 시설", "")} · 현장확정 해제 · " +
+            $"중간관리자 근거={reason} · 다음 등록은 새 시설 이동 경로 사용");
+    }
+
+    internal bool IsOnsiteConfirmed(string facilityName)
+        => string.Equals(
+            _confirmedOnsiteFacility,
+            facilityName,
+            StringComparison.Ordinal);
 
     internal void AssertAccess(string facilityName, FacilityLaneOwner owner)
     {
