@@ -2,6 +2,28 @@ namespace FishingAutomation;
 
 internal static class AlteringReceiptPolicy
 {
+
+    // After a receipt path has already sent the one-shot facility move input,
+    // the broad teal detector is no longer authoritative by itself. The 04:05
+    // V3.1.50 live failure showed the on-site screen can still contain enough teal
+    // pixels to mimic the old remote button shape. Keep the exact label as the
+    // second, independent signal before treating that post-click screen as remote.
+    internal static bool IsRemoteMoveButtonAfterReceiptMove(
+        bool visualMoveButton,
+        bool exactMoveLabelVisible)
+        => visualMoveButton && exactMoveLabelVisible;
+
+    // Before on-site receipt state is proven, the legacy visual detector remains a
+    // hard veto. After TravelToFacilityAsync has completed its stable on-site proof,
+    // a visual-only teal false positive may not block the blue receive control;
+    // an exact "설비로 이동" label still blocks Space.
+    internal static bool ShouldBlockReceiptForMoveButton(
+        bool trustedOnsiteFacility,
+        bool visualMoveButton,
+        bool exactMoveLabelVisible)
+        => exactMoveLabelVisible ||
+           (visualMoveButton && !trustedOnsiteFacility);
+
     internal static bool IsCliReceiptConfirmed(int before, int after)
         => before >= 0 && after >= 0 && after < before;
 
