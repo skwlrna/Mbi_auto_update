@@ -490,7 +490,9 @@ jobs:
           if ($recovery -notmatch 'TapFresh\(0x01, ct\)' -or $recovery -match 'TapFresh\(0x39, ct\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
 
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
-          if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose guarded stall recovery' }
+          if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or
+    $zeroWing -notmatch 'IAlteringCoordinatorQueueScreen' -or
+    $zeroWing -notmatch 'IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose coordinator queue and guarded stall recovery' }
           if ($zeroWing -notmatch 'GuardAsync\("\[자동 가공\] 정체 화면 재판정"') { throw 'stall recovery is not wrapped in currency verification' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
