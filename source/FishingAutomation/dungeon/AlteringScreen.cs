@@ -1281,6 +1281,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 return true;
             }
 
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 없음 · Space 생략 · 입력 반응 재확인");
+
             await Task.Delay(
                 AlteringFacilityTravelConfirmPolicy.MoveReactionProbeDelay,
                 ct);
