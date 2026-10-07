@@ -45,6 +45,7 @@ $receiptPolicy = Read-Source 'source/FishingAutomation/AlteringReceiptPolicy.cs'
 $travelPolicy = Read-Source 'source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs'
 $gatherTests = Read-Source 'tests/gathering/Program.cs'
 $alterTests = Read-Source 'tests/altering/Program.cs'
+$zeroWing = Read-Source 'source/FishingAutomation/ZeroWingScreenGuards.cs'
 
 # 1) Coordinators schedule verified engines only. They never acquire direct-input authority.
 Match-Required $multiGather 'new GatheringAutomation\(' 'multi-gather delegates every material to GatheringAutomation'
@@ -80,6 +81,18 @@ Match-Required $alter 'ShouldBlockReceiptForMoveButton' 'receive Space uses trus
 Match-Required $receiptPolicy 'visualMoveButton && exactMoveLabelVisible' 'post-move teal shape alone cannot prove remote during receipt'
 Match-Required $receiptPolicy 'visualMoveButton && !trustedOnsiteFacility' 'legacy visual veto remains conservative before onsite proof'
 Match-Required $alterTests '04:05 receipt regression' '04:05 teal false-positive receipt failure remains executable coverage'
+
+# 1e) V3.1.52: the multi-altering facility manager owns location decisions.
+Match-Required $lane 'QueueDirectiveFor' 'facility manager issues the next facility-entry directive'
+Match-Required $lane 'ConfirmOnsite' 'facility manager records proven same-facility onsite state'
+Match-Required $lane 'InvalidateOnsite' 'facility manager explicitly clears onsite authority on departures/recovery'
+Match-Required $lane 'ReuseCoordinatorConfirmedOnsite' 'same-facility continuation is a coordinator decision'
+Match-Required $alterPlan '_facilityState.QueueDirectiveFor' 'multi-altering automation requests facility decisions from the manager'
+Match-Required $alterPlan '완료품 수령 후 같은 시설창 복귀 확인' 'receipt completion returns onsite authority to the manager'
+Match-Required $alter 'IAlteringCoordinatorQueueScreen' 'altering screen exposes a coordinator-command execution path'
+Match-Required $alter '설비 이동 버튼 색상/형태 재판정 없음' 'coordinator-confirmed reuse cannot be downgraded by teal move-button heuristics'
+Match-Required $zeroWing 'IAlteringCoordinatorQueueScreen' 'zero-wing safety wrapper forwards coordinator facility commands'
+Match-Required $alterTests '07:01 regression' '07:01 repeated facility-move regression remains executable coverage'
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
