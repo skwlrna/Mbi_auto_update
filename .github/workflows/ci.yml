@@ -628,6 +628,18 @@ jobs:
              $laneOwnership -notmatch '외부 수령 또는 취소 가능성' -or
              $laneOwnership -notmatch '자동화가 등록하지 않은 작업 증가') { throw 'facility lane ownership ledger safety rules missing' }
           if($laneOwnership -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'facility ownership ledger must never own direct input' }
+          if($laneOwnership -notmatch 'QueueDirectiveFor' -or
+             $laneOwnership -notmatch 'ConfirmOnsite' -or
+             $laneOwnership -notmatch 'InvalidateOnsite' -or
+             $laneOwnership -notmatch 'ReuseCoordinatorConfirmedOnsite') { throw 'multi-altering facility location authority is not centralized in the manager' }
+          if($alteringPlan -notmatch '_facilityState\.QueueDirectiveFor' -or
+             $alteringPlan -notmatch '완료품 수령 후 같은 시설창 복귀 확인' -or
+             $multiAlterMain -notmatch 'facilityState: laneState' -or
+             $dependencyScheduler -notmatch 'facilityState: _laneState') { throw 'multi-altering workers are not wired to the shared facility manager' }
+          if($alterScreen -notmatch 'IAlteringCoordinatorQueueScreen' -or
+             $alterScreen -notmatch 'ReuseCoordinatorConfirmedOnsite' -or
+             $alterScreen -notmatch '설비 이동 버튼 색상/형태 재판정 없음' -or
+             $zeroWing -notmatch 'IAlteringCoordinatorQueueScreen') { throw 'lower altering screen is not a coordinator-command executor' }
           if($laneOwnership -notmatch 'IntermediateOwners' -or $laneOwnership -notmatch 'IntermediateDepth') { throw 'nested facility lease stack missing' }
           if($dependencyScheduler -notmatch 'completedSession = store.Load' -or $dependencyScheduler -notmatch 'completedSession.MatchesIdentity') { throw 'satisfied dependency session cleanup missing' }
           if($alteringPlan -notmatch '_onConfirmedReceipt' -or $multiAlterMain -notmatch 'onConfirmedReceipt:' -or $dependencyScheduler -notmatch 'onConfirmedReceipt:') { throw 'confirmed altering receipt must reconcile facility ownership before nested material work' }
