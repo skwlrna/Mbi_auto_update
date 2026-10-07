@@ -201,7 +201,7 @@ Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
       !AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
         TimeSpan.FromMilliseconds(2999)),
-    "facility arrival cannot be authorized by a short move-button disappearance");
+    "16:43 arrival regression: facility arrival cannot be authorized by a short move-button disappearance");
 Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
         TimeSpan.FromSeconds(3)),
