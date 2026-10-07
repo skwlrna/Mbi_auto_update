@@ -357,7 +357,7 @@ jobs:
               $closeHelper -notmatch 'AlteringReceiptPolicy\.CanRetryCliReceiptCompletionClose' -or
               $closeHelper -notmatch 'cliReceiptConfirmed' -or
               [regex]::Matches($closeHelper, '_ui\.TapFresh\(0x39, ct\)').Count -ne 2 -or
-              $closeHelper -notmatch 'WaitForReceiptFacilityReturnAsync\(plan, ct\)') { throw 'completion close helper must verify first Space, allow one safe retry, then wait for facility return' }
+              $closeHelper -notmatch 'WaitForReceiptFacilityReturnAsync\(plan, receiptWorkCountBefore, ct\)') { throw 'completion close helper must verify first Space, allow one safe retry, then wait for facility return' }
           $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
           if ($collectFlow -notmatch 'return true;') { throw 'on-site receive must return only after confirmed collection' }
           if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님' -or
