@@ -199,9 +199,10 @@ jobs:
              $bulk -notmatch '토글키 C를 다시 누르지 않고 안전하게 정지'){throw 'safe profile C-toggle recovery missing'}
           if($bulk -match 'attempt <= 3'){throw 'profile recognition must not blindly toggle C three times'}
           if($bulk -notmatch '목표 재료 확보' -or
-             $bulk -notmatch 'Stop 버튼\+CLI 상태 확인 후 Space 정지 입력' -or
-             $bulk -notmatch '채집/이동 종료 CLI 2회 확인' -or
-             $bulk -notmatch '호출한 가공 단계로 복귀'){throw 'target-quantity bulk gathering safe stop/return trace missing'}
+             $bulk -notmatch '화면 Stop 버튼\+CLI 2회 확인 후 Space 정지 입력 전송' -or
+             $bulk -notmatch '채집/이동 종료 CLI\+화면 2회 확인' -or
+             $bulk -notmatch 'await StopAsync\(ct\);\s*await ConfirmLifeSkillStoppedAsync' -or
+             $bulk -notmatch '호출한 가공 단계로 복귀'){throw 'target-quantity bulk gathering visual-stop safety trace missing'}
           $stopPolicy = Get-Content source/FishingAutomation/LifeSkillStopPolicy.cs -Raw
           $postStop = [regex]::Match($bulk, 'private async Task ConfirmLifeSkillStoppedAsync[\s\S]*?(?=\r?\n    private async Task StartInventoryHundredQuestAsync)').Value
           if([string]::IsNullOrWhiteSpace($postStop)){throw 'post-Space stop confirmation missing'}
