@@ -123,7 +123,7 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecover
     public void Dispose() => _inner.Dispose();
 }
 
-internal sealed class ZeroWingGatheringScreen : IGatheringScreen
+internal sealed class ZeroWingGatheringScreen : IGatheringScreen, IGatheringStopVisualProbe
 {
     private readonly IGatheringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -214,6 +214,11 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen
 
     private async Task<decimal> CurrentWingsAsync(CancellationToken ct)
         => SpiritWingSafety.Read(await CliAutomationGuards.CurrencySnapshotWithLoadingRetryAsync(_cli, ct).ConfigureAwait(false));
+
+    public Task<bool> IsStopButtonVisibleAsync(CancellationToken ct)
+        => _inner is IGatheringStopVisualProbe probe
+            ? probe.IsStopButtonVisibleAsync(ct)
+            : Task.FromResult(true); // Unsupported screen: fail closed.
 
     public void Dispose() => _inner.Dispose();
 }

@@ -8,7 +8,7 @@ namespace DungeonVisionBot;
 /// as a fallback/helper route when a direct life-skill mapping is unavailable.
 /// CLI is read-only and inventory quantity is the source of truth.
 /// </summary>
-internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
+internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatheringStopVisualProbe
 {
     private readonly MabinogiMobileCli _cli;
     private readonly GatheringCliData _data;
@@ -782,13 +782,9 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                     $"[대량 채집] 목표 재료 확보 · {displayName} 현재 {current} / 목표 {targetTotal} · " +
                     "100회 자연 종료를 기다리지 않고 안전 정지");
 
-                if (active)
-                {
-                    await StopAsync(ct);
-                    Log?.Invoke(
-                        $"[대량 채집] 목표 수량 도달 · Stop 버튼+CLI 상태 확인 후 Space 정지 입력 · {displayName}");
-                }
-
+                // IsGathering can become false before the actual Stop control
+                // disappears. Never skip stop inspection based on CLI flags.
+                await StopAsync(ct);
                 await ConfirmLifeSkillStoppedAsync(displayName, ct);
                 long final = await _data.ItemCountAsync(displayName, ct);
                 if (final < targetTotal)
@@ -874,7 +870,9 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         CancellationToken ct)
     {
         int stableStopped = 0;
-        for (int attempt = 1; attempt <= 12; attempt++)
+        int stableVisibleStop = 0;
+        bool retriedStop = false;
+        for (int attempt = 1; attempt <= 18; attempt++)
         {
             ct.ThrowIfCancellationRequested();
             var activity = await _data.ActivityAsync(ct);
@@ -883,31 +881,49 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
                     $"{displayName} 목표 수량 정지 확인 중 사망·대화·던전 등 진행 불가 상태가 감지되었습니다.");
             activity = await WaitForCombatEndAsync(activity, $"{displayName} 정지 확인", ct);
 
-            if (LifeSkillStopPolicy.IsStoppedAfterSpace(activity))
+            // Two independent fresh captures make a missing Stop icon
+            // meaningful, instead of trusting a momentary hidden overlay.
+            bool stopVisible = await IsStopButtonVisibleAsync(ct);
+            if (LifeSkillStopPolicy.IsStoppedAfterSpace(activity, stopVisible))
             {
                 stableStopped++;
+                stableVisibleStop = 0;
                 Log?.Invoke(
                     $"[대량 채집] Space 후 종료 확인 {stableStopped}/2 · " +
                     $"Gathering={activity.IsGathering}, AutoTraveling={activity.IsAutoTraveling}, Fishing={activity.IsFishing}, " +
-                    $"MainButton={activity.MainButtonState}(판정 제외)");
+                    $"StopUI=없음, MainButton={activity.MainButtonState}(CLI 잔상 가능)");
                 if (stableStopped >= 2)
                 {
                     Log?.Invoke(
-                        $"[대량 채집] 채집/이동 종료 CLI 2회 확인 · {displayName} · " +
-                        "MainButtonState 잔상은 종료 판정에서 제외");
+                        $"[대량 채집] 채집/이동 종료 CLI+화면 2회 확인 · {displayName} · " +
+                        "MainButtonState 잔상은 종료 판정에서 제외 (Stop UI 부재 확인)");
                     return;
                 }
             }
             else
             {
                 stableStopped = 0;
-            }
+                stableVisibleStop = stopVisible && activity.MainButtonState == "Stop"
+                    ? stableVisibleStop + 1 : 0;
 
+                // A missed first Space may leave the genuine Stop UI active.
+                // Retry at most ONCE after a cooldown, and only with another
+                // fresh CLI + visual verification inside StopAsync.
+                if (!retriedStop && attempt >= 6 && stableVisibleStop >= 2)
+                {
+                    Log?.Invoke(
+                        $"[대량 채집] 정지 UI 지속 감지 · {displayName} · 안전 재확인 후 Space 1회 재시도");
+                    await StopAsync(ct);
+                    retriedStop = true;
+                    stableVisibleStop = 0;
+                }
+            }
             await Task.Delay(500, ct);
         }
 
         throw new InvalidOperationException(
-            $"{displayName} 목표 수량 도달 후 Space 정지 입력은 보냈지만 채집/이동 종료를 확인하지 못했습니다.");
+            $"{displayName} 목표 수량 도달 후 실제 채집 종료가 확인되지 않았습니다. " +
+            "CLI와 Stop 화면을 모두 확인했으나 정지되지 않아 다음 재료로 넘어가지 않습니다.");
     }
 
     private async Task StartInventoryHundredQuestAsync(string displayName, CancellationToken ct)
@@ -1122,17 +1138,57 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen
         CancellationToken ct)
         => _ui.FindUniqueAsync(frame, roi, text, ct, dimText: true);
 
+    // A two-frame probe is also used before the NEXT material starts: a
+    // stale CLI MainButton=Stop must not block a genuinely idle field.
+    public async Task<bool> IsStopButtonVisibleAsync(CancellationToken ct)
+    {
+        using var first = Capture(ct);
+        bool firstVisible = GatheringVision.HasStopButton(first);
+        await Task.Delay(200, ct);
+        using var second = Capture(ct);
+        return firstVisible || GatheringVision.HasStopButton(second);
+    }
+
     public async Task StopAsync(CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var state = await _data.ActivityAsync(ct);
-        if (!state.IsGathering && !state.IsAutoTraveling && !state.IsFishing)
-            return;
+        if (!GatheringSafetyPolicy.IsSafeField(state))
+            throw new InvalidOperationException("정지 전 안전하지 않은 필드 상태입니다.");
 
+        // Do not return merely because CLI Gathering/Travel/Fishing is false.
+        // This was the real-world failure at 13:14 on 2026-10-07.
         using var frame = Capture(ct);
-        if (state.MainButtonState != "Stop" || !GatheringVision.HasStopButton(frame))
+        if (!GatheringVision.HasStopButton(frame))
+        {
+            Log?.Invoke(
+                $"[대량 채집] 정지 버튼 화면 미검출 · MainButton={state.MainButtonState}, " +
+                $"Gathering={state.IsGathering}, AutoPlaying={state.IsAutoPlaying} · 종료 재확인");
+            return;
+        }
+
+        if (state.MainButtonState != "Stop")
             throw Fail(frame,
-                "대량 채집 정지 버튼을 확인하지 못했습니다. 게임에서 직접 정지하세요.");
+                "정지 버튼은 보이지만 CLI Stop 상태가 아니므로 Space를 누르지 않습니다.");
+
+        // The control and the CLI must still agree on a second, fresh frame
+        // immediately before any keyboard input.
+        await Task.Delay(200, ct);
+        var fresh = await _data.ActivityAsync(ct);
+        if (!GatheringSafetyPolicy.IsSafeField(fresh))
+            throw new InvalidOperationException("정지 입력 직전 안전하지 않은 필드 상태입니다.");
+        using var confirmFrame = Capture(ct);
+        if (!GatheringVision.HasStopButton(confirmFrame))
+        {
+            Log?.Invoke("[대량 채집] 정지 버튼이 재확인 중 사라져 Space 입력 생략 · 종료 확인 대기");
+            return;
+        }
+        if (fresh.MainButtonState != "Stop")
+            throw Fail(confirmFrame,
+                "정지 버튼 재확인 중 CLI Stop 상태가 변하여 Space 입력을 보류합니다.");
+
         _ui.TapFresh(0x39, ct);
+        Log?.Invoke("[대량 채집] 화면 Stop 버튼+CLI 2회 확인 후 Space 정지 입력 전송");
     }
 
     private InvalidOperationException Fail(Bitmap frame, string message)

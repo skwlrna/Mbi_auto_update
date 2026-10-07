@@ -31,6 +31,13 @@ internal interface IGatheringScreen : IDisposable
     Task StopAsync(CancellationToken ct);
 }
 
+// Optional read-only visual check used ONLY to disambiguate a stale CLI Stop
+// before starting a subsequent material. Without this proof, remain blocked.
+internal interface IGatheringStopVisualProbe
+{
+    Task<bool> IsStopButtonVisibleAsync(CancellationToken ct);
+}
+
 internal sealed class GatheringAutomation
 {
     private readonly IGatheringData _data;
@@ -53,8 +60,24 @@ internal sealed class GatheringAutomation
         if (!GatheringSafetyPolicy.IsSafeField(initial))
             throw new InvalidOperationException("사망·대화·던전 등 채집을 시작할 수 없는 상태입니다. 상태: " + DescribeActivity(initial));
         initial = await WaitForCombatEndAsync(initial, "시작 전", ct);
-        if (initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling || initial.MainButtonState == "Stop")
+        if (initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling)
             throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동 채집을 시작하세요. 상태: " + DescribeActivity(initial));
+        if (initial.MainButtonState == "Stop")
+        {
+            // A previous material may have ended while CLI MainButton=Stop
+            // lingers. Only the visually guarded bulk route may override it.
+            if (_screen is not IGatheringStopVisualProbe probe ||
+                await probe.IsStopButtonVisibleAsync(ct))
+                throw new InvalidOperationException("정지 버튼이 남아 있어 새 채집을 시작하지 않습니다. 상태: " + DescribeActivity(initial));
+
+            var checkedAgain = await _data.ActivityAsync(ct);
+            if (checkedAgain.IsGathering || checkedAgain.IsFishing || checkedAgain.IsAutoTraveling ||
+                (checkedAgain.MainButtonState == "Stop" &&
+                 await probe.IsStopButtonVisibleAsync(ct)))
+                throw new InvalidOperationException("채집 시작 전 정지 상태가 재확인되지 않았습니다. 상태: " + DescribeActivity(checkedAgain));
+
+            Log?.Invoke("[자동 채집] CLI MainButton=Stop 잔상 확인 · 화면 Stop 버튼 2회 부재로 다음 재료 시작 허용");
+        }
         await CheckWeightAsync(ct);
         long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
         bool started = false;

@@ -82,19 +82,23 @@ Check(!LifeSkillProfilePolicy.MayRetryToggle(0.20, 0.10),
     "C toggle is never retried after a meaningful profile-like screen transition");
 Check(LifeSkillProfilePolicy.MayRetryToggle(0.01, 0.01),
     "C may retry only when both profile regions remain effectively unchanged");
-Check(LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false),
-    "post-Space completion accepts all real gathering activities stopped");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false, false),
+    "post-Space completion requires idle CLI and no visible Stop icon");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, false, true),
+    "13:14 regression: CLI flags idle while the real Stop icon is still visible");
 var staleStopButton = new GatheringActivity(
     false, false, false, false, false, false, false,
     "NotInDungeon", false, false, false, false, false, false,
     "Stop", false, "None", "None");
-Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton),
-    "post-Space completion ignores stale MainButtonState Stop when all real activities ended");
-Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false),
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, false),
+    "post-Space completion ignores stale MainButtonState ONLY when Stop UI is absent");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, true),
+    "stale CLI stop with visible Stop UI must not authorize the next material");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false, false),
     "post-Space completion rejects active gathering");
-Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false),
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false, false),
     "post-Space completion rejects active travel");
-Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true),
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true, false),
     "post-Space completion rejects active fishing");
 
 var revivingField = new GatheringActivity(
@@ -182,6 +186,14 @@ await new GatheringAutomation(combatDuringGather,combatDuringGather,(_,_)=>Task.
 Check(combatDuringGather.Starts==1 && combatDuringGather.Stops==1 && combatDuringGather.Owned>=105,
     "combat during gathering waits and resumes the same gathering flow afterward");
 
+var staleStopNoIcon = new FakeWorld { State = FakeWorld.Idle with { MainButtonState = "Stop", IsAutoPlaying = true } };
+await new GatheringAutomation(staleStopNoIcon,staleStopNoIcon,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
+Check(staleStopNoIcon.Starts == 1 && staleStopNoIcon.Owned >= 105,
+    "next material starts when CLI Stop lingers but two visual checks show no Stop UI");
+var liveStopIcon = new FakeWorld { State = FakeWorld.Idle with { MainButtonState = "Stop", IsAutoPlaying = true }, StopVisible = true };
+try { await new GatheringAutomation(liveStopIcon,liveStopIcon,(_,_)=>Task.CompletedTask).RunAsync(plan,default); throw new Exception("live Stop icon incorrectly ignored"); }
+catch (InvalidOperationException) { Check(liveStopIcon.Starts == 0, "next material blocked while Stop icon is still shown"); }
+
 var autoPlayingField = new FakeWorld { State = FakeWorld.Idle with { IsAutoPlaying = true } };
 await new GatheringAutomation(autoPlayingField,autoPlayingField,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(autoPlayingField.Starts==1 && autoPlayingField.Owned>=105,
@@ -227,14 +239,14 @@ Console.WriteLine($"PASS {checks} gathering checks");
 }
 catch(Exception ex){Console.Error.WriteLine(ex.Message);Environment.ExitCode=1;}
 
-internal sealed class FakeWorld : IGatheringData, IGatheringScreen
+internal sealed class FakeWorld : IGatheringData, IGatheringScreen, IGatheringStopVisualProbe
 {
     internal static GatheringActivity Idle => new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
     internal GatheringActivity State=Idle;
     internal int Starts,Stops,Gain=2;
     internal int PreStartCombatPolls,PostStartCombatPolls;
     internal long Owned=100;
-    internal bool Tool=true,Full,IgnoreStop,TravelOnStart,SilentCompleteOnStart;
+    internal bool Tool=true,Full,IgnoreStop,TravelOnStart,SilentCompleteOnStart,StopVisible;
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]{new GatherableItem("철 광석",Tool)});}
     public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
     {
@@ -267,5 +279,6 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen
         return Task.CompletedTask;
     }
     public Task StopAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();Stops++;if(!IgnoreStop)State=Idle;return Task.CompletedTask;}
+    public Task<bool> IsStopButtonVisibleAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(StopVisible);}
     public void Dispose(){}
 }
