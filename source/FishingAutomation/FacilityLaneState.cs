@@ -12,7 +12,8 @@ internal sealed record FacilityLaneSnapshot(
     int MainRegisteredWorks,
     int IntermediateRegisteredWorks,
     int LiveWorks,
-    bool IntermediateLease);
+    bool IntermediateLease,
+    int IntermediateDepth);
 
 /// <summary>
 /// Conservative ownership ledger for one seven-slot altering facility lane.
@@ -37,7 +38,7 @@ internal sealed class FacilityLaneState
         internal int IntermediateRegisteredWorks;
         internal int LastObservedWorks;
         internal int ExpectedGrowth;
-        internal bool IntermediateLease;
+        internal readonly List<string> IntermediateOwners = new();
     }
 
     private readonly Dictionary<string, Lane> _lanes =
@@ -100,11 +101,11 @@ internal sealed class FacilityLaneState
         ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
         var lane = GetLane(facilityName);
 
-        if (owner == FacilityLaneOwner.Main && lane.IntermediateLease)
+        if (owner == FacilityLaneOwner.Main && lane.IntermediateOwners.Count > 0)
             throw new InvalidOperationException(
                 $"{facilityName}은(는) 중간재료 작업이 소유 중이라 메인 다중가공 입력을 허용하지 않습니다.");
 
-        if (owner == FacilityLaneOwner.Intermediate && !lane.IntermediateLease)
+        if (owner == FacilityLaneOwner.Intermediate && lane.IntermediateOwners.Count == 0)
             throw new InvalidOperationException(
                 $"{facilityName} 중간재료 작업이 시설 소유권을 확보하지 않은 상태에서 입력을 시도했습니다.");
     }
@@ -142,42 +143,69 @@ internal sealed class FacilityLaneState
             $"시작 전 기존 {lane.InitialObservedWorks}건");
     }
 
+    /// <summary>
+    /// The dependency scheduler invokes nested production synchronously while the
+    /// parent waits. A child may borrow the same facility only after every parent
+    /// work has completed and been received. Preserve the parent lease on a stack;
+    /// never release it merely because the nested child's queue is empty.
+    /// </summary>
     internal void AcquireIntermediate(
         string facilityName,
-        IReadOnlyList<AlteringWork> liveWorks)
+        IReadOnlyList<AlteringWork> liveWorks,
+        string? ownerKey = null)
     {
-        Observe(facilityName, liveWorks, allowShrink: true);
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        string key = ownerKey ?? facilityName;
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         var lane = GetLane(facilityName);
 
-        if (lane.IntermediateLease)
+        // Do not mutate the ledger before checking for recursive/double ownership.
+        if (lane.IntermediateOwners.Contains(key, StringComparer.Ordinal))
             throw new InvalidOperationException(
-                $"{facilityName} 중간재료 시설 소유권이 이미 활성화되어 있습니다.");
+                $"{facilityName} 중간재료 {key} 소유권이 이미 활성화되어 있습니다.");
+
+        Observe(facilityName, liveWorks, allowShrink: true);
         if (lane.LastObservedWorks != 0)
             throw new InvalidOperationException(
                 $"{facilityName}에 {lane.LastObservedWorks}건의 작업이 남아 있어 중간재료가 시설을 소유할 수 없습니다.");
 
-        lane.IntermediateLease = true;
+        lane.IntermediateOwners.Add(key);
         Log?.Invoke(
-            $"[시설 소유권] {facilityName.Replace(" 시설", "")} · 중간재료 전용 소유권 확보 · 현재 대기열 0/7");
+            $"[시설 소유권] {facilityName.Replace(" 시설", "")} · 중간재료 소유권 확보 · " +
+            $"중첩 깊이 {lane.IntermediateOwners.Count} · 현재 대기열 0/7");
     }
 
     internal void ReleaseIntermediate(
         string facilityName,
-        IReadOnlyList<AlteringWork> liveWorks)
+        IReadOnlyList<AlteringWork> liveWorks,
+        string? ownerKey = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        string key = ownerKey ?? facilityName;
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
         var lane = GetLane(facilityName);
-        if (!lane.IntermediateLease)
+
+        if (lane.IntermediateOwners.Count == 0)
             throw new InvalidOperationException(
                 $"{facilityName} 중간재료 시설 소유권이 없는 상태에서 해제를 시도했습니다.");
+
+        string currentOwner = lane.IntermediateOwners[^1];
+        if (!currentOwner.Equals(key, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"{facilityName} 소유권 해제 순서 불일치: 현재 {currentOwner} / 요청 {key}. " +
+                "자식 중간재료가 소유 중에는 부모 소유권을 해제하지 않습니다.");
 
         Observe(facilityName, liveWorks, allowShrink: true);
         if (lane.LastObservedWorks != 0)
             throw new InvalidOperationException(
                 $"{facilityName} 중간재료 작업 {lane.LastObservedWorks}건이 남아 있어 시설 소유권을 해제하지 않습니다.");
 
-        lane.IntermediateLease = false;
+        lane.IntermediateOwners.RemoveAt(lane.IntermediateOwners.Count - 1);
         Log?.Invoke(
-            $"[시설 소유권] {facilityName.Replace(" 시설", "")} · 중간재료 소유권 해제 · 메인 다중가공 사용 가능");
+            $"[시설 소유권] {facilityName.Replace(" 시설", "")} · 중간재료 소유권 해제 · " +
+            (lane.IntermediateOwners.Count > 0
+                ? $"부모 중간재료 소유권 복원 · 깊이 {lane.IntermediateOwners.Count}"
+                : "메인 다중가공 사용 가능"));
     }
 
     internal FacilityLaneSnapshot Snapshot(string facilityName)
@@ -190,7 +218,8 @@ internal sealed class FacilityLaneState
             lane.MainRegisteredWorks,
             lane.IntermediateRegisteredWorks,
             lane.LastObservedWorks,
-            lane.IntermediateLease);
+            lane.IntermediateOwners.Count > 0,
+            lane.IntermediateOwners.Count);
     }
 
     internal string Describe(string facilityName)
@@ -199,7 +228,7 @@ internal sealed class FacilityLaneState
         return
             $"기존 {s.InitialObservedWorks} · 메인등록 {s.MainRegisteredWorks} · " +
             $"중간재료등록 {s.IntermediateRegisteredWorks} · 현재 {s.LiveWorks}/7" +
-            (s.IntermediateLease ? " · 중간재료 소유중" : "");
+            (s.IntermediateLease ? $" · 중간재료 소유중({s.IntermediateDepth}단계)" : "");
     }
 
     private Lane GetLane(string facilityName)
