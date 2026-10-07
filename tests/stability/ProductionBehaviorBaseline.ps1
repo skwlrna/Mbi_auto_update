@@ -65,6 +65,13 @@ Match-Required $alter 'WaitForProcessingNavigationReadyAsync' 'K/menu navigation
 Match-Required $multiAlter 'Math\.Clamp\(waitSeconds, 1, 30\)' 'multi-altering batch completion minimum poll is 1s'
 Match-Required $multiAlterDependency 'Math\.Clamp\(waitSeconds, 1, 30\)' 'dependency batch completion minimum poll is 1s'
 
+# 1c) V3.1.50 receipt input waits for the visible blue button to become input-stable.
+Match-Required $alter '파란 수령 버튼 입력 전 400ms 안정화' 'receipt waits 400ms after the proven blue collect button'
+Match-Required $alter 'Task\.Delay\(400, ct\)' 'receipt stabilization delay remains 400ms'
+Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct\)' 'receipt state is re-proven immediately before Space'
+Match-Required $alter '현장 수령 화면 재확인 완료' 'receipt Space is emitted only after the post-delay recheck'
+Match-Required $alter 'Space 1회' 'receipt input remains a single Space after stabilization'
+
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
     Match-Required $lane ([regex]::Escape($required)) "facility ownership keeps $required"
