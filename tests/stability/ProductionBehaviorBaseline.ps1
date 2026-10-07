@@ -136,6 +136,17 @@ Match-Required $facilityTravel 'if \(shouldClickMove\)' 'facility move click occ
 Match-Required $facilityTravel 'HasStableOnsiteEvidence' 'non-click initial path reaches the same long onsite proof'
 Match-Required $alterTests '18:16 sufficient-material regression' '18:16 sufficient-material fast-path failure remains an executable regression case'
 
+# 4e) 18:33 real-world regression: newly opened facility UI may not accept an immediate fixed-coordinate click.
+Match-Required $travelPolicy 'InitialMoveClickSettleDelay = TimeSpan\.FromMilliseconds\(900\)' 'facility move waits 0.9s before fixed-coordinate input'
+Match-Required $travelPolicy 'MaxMoveClickAttempts = 2' 'facility move retry is bounded to exactly one retry'
+Match-Required $travelPolicy 'MoveReactionProbeDelay = TimeSpan\.FromMilliseconds\(700\)' 'facility move probes actual reaction after input'
+Match-Required $facilityTravel 'ClickFacilityMoveWithRetryAsync' 'facility travel delegates fixed-coordinate input to guarded retry flow'
+Match-Required $alter 'HasFacilityMoveButtonPositiveEvidenceAsync' 'exact move-label OCR is retained as a positive-only remote veto'
+Match-Required $alter '0\.9초 안정대기 \+ 새 화면 버튼 재확인' 'fresh pre-click move-button proof remains required'
+Match-Required $alter '설비 이동 입력 무반응' 'unchanged remote button triggers the one bounded retry'
+Match-Required $alter '확인창/자동이동/화면이탈 없이 버튼이 그대로 남아' 'two unconsumed clicks stop before recipe input'
+Match-Required $alterTests '18:33 click-timing regression' '18:33 early-click failure remains executable regression coverage'
+
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'
 Match-Required $fieldExit '일반 필드 2프레임 확인' 'processing UI exit still requires stable field confirmation'

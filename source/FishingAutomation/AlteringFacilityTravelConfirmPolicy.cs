@@ -3,8 +3,11 @@ namespace FishingAutomation;
 internal static class AlteringFacilityTravelConfirmPolicy
 {
     internal const int RequiredOnsiteStableFrames = 7;
+    internal const int MaxMoveClickAttempts = 2;
     internal static readonly TimeSpan RequiredOnsiteStableDuration = TimeSpan.FromSeconds(3);
     internal static readonly TimeSpan FinalOnsiteRecheckDelay = TimeSpan.FromMilliseconds(1200);
+    internal static readonly TimeSpan InitialMoveClickSettleDelay = TimeSpan.FromMilliseconds(900);
+    internal static readonly TimeSpan MoveReactionProbeDelay = TimeSpan.FromMilliseconds(700);
 
     internal static bool ShouldConfirm(
         bool greenConfirmationVisible,

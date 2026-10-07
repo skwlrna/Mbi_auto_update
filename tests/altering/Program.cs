@@ -206,6 +206,11 @@ Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.Fr
 Check(AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames > 2 &&
       AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableDuration >= TimeSpan.FromSeconds(3),
     "18:16 sufficient-material regression: initial missing move-button frames can never prove onsite by themselves");
+Check(AlteringFacilityTravelConfirmPolicy.InitialMoveClickSettleDelay >= TimeSpan.FromMilliseconds(800),
+    "18:33 click-timing regression: facility move waits for the newly opened screen to become input-ready");
+Check(AlteringFacilityTravelConfirmPolicy.MaxMoveClickAttempts == 2 &&
+      AlteringFacilityTravelConfirmPolicy.MoveReactionProbeDelay >= TimeSpan.FromMilliseconds(500),
+    "18:33 click-timing regression: an unconsumed facility move click gets exactly one bounded retry after reaction probing");
 
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");

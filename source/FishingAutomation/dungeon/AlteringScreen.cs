@@ -973,7 +973,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                     Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
 
-                bool moveVisible = HasFacilityMoveButtonVisual(frame);
+                bool moveVisible = await HasFacilityMoveButtonPositiveEvidenceAsync(frame, ct);
                 if (moveVisible)
                 {
                     moveFrames++;
@@ -1014,20 +1014,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 "작은 설비로 이동 문구 OCR 생략");
         }
 
+        bool moveClickReactionProven = false;
         if (shouldClickMove)
         {
             _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
-                $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · OCR 없음");
-            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
-
-            bool travelConfirmSent = await ConfirmFacilityTravelDialogIfPresentAsync(
-                plan, ct);
-            Log?.Invoke(
-                travelConfirmSent
-                    ? $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 처리 완료 · Space 1회 · 게임 자동이동 대기"
-                    : $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 없음 · Space 생략 · 게임 자동이동 대기");
+            moveClickReactionProven = await ClickFacilityMoveWithRetryAsync(plan, ct);
         }
 
         bool sawDeparture = false;
@@ -1104,7 +1095,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     bool finalFacilityVisible =
                         await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null;
                     bool finalMoveVisible =
-                        finalFacilityVisible && HasFacilityMoveButtonVisual(finalFrame);
+                        finalFacilityVisible &&
+                        await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
                     bool finalOnsite =
                         finalActivity is not null &&
                         GatheringSafetyPolicy.IsSafeField(finalActivity) &&
@@ -1118,7 +1110,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         Log?.Invoke(
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
                             $"가공창 유지 + 설비로 이동 버튼 없음 {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
-                            "+ 1.2초 후행 재확인 · CLI AutoTraveling=false");
+                            $"+ 1.2초 후행 재확인 · CLI AutoTraveling=false · " +
+                            $"이동입력반응={(moveClickReactionProven ? "확인" : "동일화면 직접전환")}");
                         return;
                     }
 
@@ -1217,6 +1210,143 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         // green button. Distinguish them by the travel wording inside the dialog.
         return await FindAsync(frame, FacilityTravelDialog, "설비로 이동", ct) is not null ||
                await FindAsync(frame, FacilityTravelDialog, "이동", ct) is not null;
+    }
+
+    private async Task<bool> HasFacilityMoveButtonPositiveEvidenceAsync(
+        Bitmap frame,
+        CancellationToken ct)
+    {
+        if (HasFacilityMoveButtonVisual(frame))
+            return true;
+
+        // OCR is a positive-only fallback. Missing OCR never proves on-site, but
+        // seeing the exact label must veto a false "button disappeared" decision.
+        return await FindAsync(
+            frame,
+            AlteringFacilityLayout.MoveButtonVisualArea,
+            "설비로 이동",
+            ct) is not null;
+    }
+
+    private async Task<bool> ClickFacilityMoveWithRetryAsync(
+        AlteringPlan plan,
+        CancellationToken ct)
+    {
+        for (int clickAttempt = 1;
+             clickAttempt <= AlteringFacilityTravelConfirmPolicy.MaxMoveClickAttempts;
+             clickAttempt++)
+        {
+            // V3.1.45 live log (18:33): the facility screen was confirmed and the
+            // fixed coordinate was clicked only ~0.4s later. Give the screen time
+            // to become input-ready, then re-prove the button on a fresh frame.
+            await Task.Delay(
+                AlteringFacilityTravelConfirmPolicy.InitialMoveClickSettleDelay,
+                ct);
+
+            using (var ready = Capture(ct))
+            {
+                bool facilityVisible =
+                    await FindFacilityHeaderAsync(ready, plan.ScreenTitle, ct) is not null;
+                if (!facilityVisible)
+                {
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 설비 이동 클릭 전 화면 이탈 확인 · 이동 시작으로 인정");
+                    return true;
+                }
+
+                if (!await HasFacilityMoveButtonPositiveEvidenceAsync(ready, ct))
+                {
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 설비 이동 클릭 전 0.9초 안정대기 후 버튼 미검출 · " +
+                        "입력 생략하고 현장 장기 검증으로 전환");
+                    return false;
+                }
+            }
+
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 설비 이동 클릭 준비 완료 · " +
+                $"0.9초 안정대기 + 새 화면 버튼 재확인 · 입력 {clickAttempt}/2");
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
+                $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
+                $"입력 {clickAttempt}/2");
+            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+
+            bool travelConfirmSent = await ConfirmFacilityTravelDialogIfPresentAsync(
+                plan, ct);
+            if (travelConfirmSent)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 처리 완료 · Space 1회 · 게임 자동이동 확인");
+                return true;
+            }
+
+            await Task.Delay(
+                AlteringFacilityTravelConfirmPolicy.MoveReactionProbeDelay,
+                ct);
+
+            var activityResponse = await _cli!.GetActivityAsync(ct);
+            if (activityResponse.Success)
+            {
+                var activity = GatheringQueries.ParseActivity(activityResponse);
+                if (!activity.IsSafeField)
+                    throw new InvalidOperationException(
+                        "설비 이동 입력 확인 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+
+                if (activity.IsAutoTraveling)
+                {
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 반응 확인 · CLI AutoTraveling=true");
+                    return true;
+                }
+            }
+            else if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
+            {
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 반응 확인 · 지역 이동 로딩 CLI 일시 거부");
+                return true;
+            }
+            else
+            {
+                _ = GatheringQueries.ParseActivity(activityResponse);
+            }
+
+            using var reacted = Capture(ct);
+            bool reactedFacilityVisible =
+                await FindFacilityHeaderAsync(reacted, plan.ScreenTitle, ct) is not null;
+            if (!reactedFacilityVisible)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 반응 확인 · 시설 화면 이탈/로딩");
+                return true;
+            }
+
+            bool moveStillVisible =
+                await HasFacilityMoveButtonPositiveEvidenceAsync(reacted, ct);
+            if (!moveStillVisible)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 후 버튼 소실 · " +
+                    "동일화면 직접전환 후보 · 장기 현장 검증으로 전환");
+                return false;
+            }
+
+            if (clickAttempt <
+                AlteringFacilityTravelConfirmPolicy.MaxMoveClickAttempts)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 무반응 · " +
+                    "버튼이 그대로 보여 0.9초 안정대기 후 1회 재클릭");
+                continue;
+            }
+
+            Fail(
+                reacted,
+                "설비로 이동 버튼을 0.9초 안정대기 후 2회 클릭했지만 " +
+                "확인창/자동이동/화면이탈 없이 버튼이 그대로 남아 있어 품목을 선택하지 않고 정지합니다.");
+        }
+
+        return false;
     }
 
     private async Task<bool> ConfirmFacilityTravelDialogIfPresentAsync(
