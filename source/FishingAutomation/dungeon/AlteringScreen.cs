@@ -1791,9 +1791,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
         int? receiptWorkCountBefore = await TryMatchingWorkCountAsync(plan, ct);
 
+        // The receive button can become visible slightly before the game starts
+        // accepting Space. Give the UI one short stabilization window, then prove
+        // the exact receive state again before the single receive input.
+        Log?.Invoke(
+            $"[자동 가공] 파란 수령 버튼 입력 전 400ms 안정화 · {plan.ScreenTitle} · " +
+            $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+        await Task.Delay(400, ct);
+
+        if (!await WaitForCollectPromptAsync(plan, attempts: 2, delayMs: 100, ct))
+        {
+            using var failed = Capture(ct);
+            Fail(failed,
+                "파란 수령 버튼 입력 직전 400ms 안정화 후 수령 가능 상태를 다시 확인하지 못했습니다. Space 입력 없이 정지합니다.");
+        }
+
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
         Log?.Invoke(
-            $"[자동 가공] 현장 수령 화면 확인 · {plan.ScreenTitle} + 설비로 이동 없음 + CLI 완료 작업 + 파란 수령 버튼 · Space · " +
+            $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 설비로 이동 없음 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
             $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
