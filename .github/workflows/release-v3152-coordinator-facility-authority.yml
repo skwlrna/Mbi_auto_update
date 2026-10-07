@@ -735,7 +735,12 @@ jobs:
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex){throw 'facility travel must happen before recipe selection'}
-          if([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 1){throw 'queue registration must allow at most one facility travel'}
+          $coordinatorReuse = [regex]::Match(
+              $queue,
+              'if \(directive == AlteringFacilityEntryDirective\.ReuseCoordinatorConfirmedOnsite\)[\s\S]*?(?=\r?\n        else if \(directive == AlteringFacilityEntryDirective\.FreshMoveRequired\))').Value
+          if([string]::IsNullOrWhiteSpace($coordinatorReuse) -or
+             $coordinatorReuse -match 'TravelToFacilityAsync|TryReuseOnsiteFacilityAsync|HasFacilityMoveButtonVisual'){throw 'coordinator-confirmed onsite reuse must not re-decide or re-run facility travel'}
+          if([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 2){throw 'queue must keep one fresh-directive move path plus one legacy automatic fallback path'}
           if($queue -notmatch 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)'){throw 'fresh facility registration must force one move before recipe selection'}
           if($queue -notmatch '새 시설 첫 등록' -or
              $queue -notmatch '품목 선택보다 설비 이동 1회 우선'){throw 'forced facility-first move trace missing'}
