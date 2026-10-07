@@ -305,7 +305,7 @@ jobs:
           if ($screen -match '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창') { throw 'unsafe initial two-frame onsite shortcut returned' }
           $travel = [regex]::Match($screen, 'private async Task TravelToFacilityAsync[\s\S]*?(?=\r?\n    // Free navigation only)').Value
           if ($travel -notmatch 'facilityVisible' -or
-              $travel -notmatch '!moveVisible' -or
+              $travel -notmatch 'AlteringFacilityTravelConfirmPolicy\.IsOnsiteObservation' -or
               $travel -notmatch 'onsiteStableFrames' -or
               $travel -notmatch '2프레임 현장 확정 금지' -or
               $travel -notmatch 'if \(shouldClickMove\)') { throw 'unified initial facility arrival gate missing' }
