@@ -18,7 +18,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
     private static readonly Rectangle CollectVisualButton = new(10, 270, 110, 85);
-    private static readonly Rectangle FacilityTravelDialog = new(120, 700, 560, 290);
+    private static readonly Rectangle FacilityTravelDialog = new(80, 260, 640, 700);
+    private static readonly Rectangle FacilityTravelConfirmVisual = new(120, 340, 560, 620);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
     internal string InputMode => _ui.InputMode;
@@ -921,6 +922,47 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 무료 설비 이동 복구 완료 · {plan.DisplayName} 다시 선택");
     }
 
+    private static bool HasFacilityTravelConfirmationVisual(Bitmap frame)
+    {
+        // The optional "nearby facility unavailable -> move to ..." dialog appears
+        // around the middle of the screen, not only in the old bottom confirmation ROI.
+        // Detect a broad saturated-green confirmation control in the center/lower modal
+        // area. This detector is used as authoritative only immediately after a
+        // facility-move click; elsewhere travel wording is still required.
+        var roi = Rectangle.Intersect(
+            FacilityTravelConfirmVisual,
+            new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width < 300 || roi.Height < 250)
+            return false;
+
+        int sampled = 0;
+        int green = 0;
+        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
+        for (int y = roi.Top; y < roi.Bottom; y += 3)
+        for (int x = roi.Left; x < roi.Right; x += 3)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            bool confirmGreen =
+                p.G >= 95 &&
+                p.G >= p.R + 40 &&
+                p.G >= p.B + 15;
+            if (!confirmGreen)
+                continue;
+
+            green++;
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        if (sampled == 0 || green * 1000 < sampled * 12)
+            return false;
+
+        return maxX - minX >= 110 && maxY - minY >= 22;
+    }
+
     private static bool HasBottomConfirmationModal(Bitmap frame)
     {
         // Screenshot evidence: the modal's confirm control is a broad saturated-green
@@ -957,9 +999,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (!AlteringFacilityLayout.IsSafeMoveGeometry())
             throw new InvalidOperationException("설비로 이동 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
-        // Primary state signal is the fixed teal move-button body, not its text.
-        // V3.1.8 proved that OCR can miss the visible label and must never turn
-        // "OCR 없음" into "already on-site".
         int moveFrames = 0;
         bool shouldClickMove = remoteConfirmed;
 
@@ -973,7 +1012,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                     Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
 
-                bool moveVisible = await HasFacilityMoveButtonPositiveEvidenceAsync(frame, ct);
+                bool moveVisible =
+                    await HasFacilityMoveButtonPositiveEvidenceAsync(frame, ct);
                 if (moveVisible)
                 {
                     moveFrames++;
@@ -993,11 +1033,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
             if (!shouldClickMove)
             {
-                // V3.1.44 live log (18:16): materials were already sufficient and
-                // this old fast path treated only two missing move-button frames as
-                // "already onsite", then selected the recipe while still remote.
-                // Never authorize recipe input here. Feed the candidate into the
-                // same long onsite proof used after real travel.
                 Log?.Invoke(
                     $"[자동 가공] {plan.ScreenTitle} · 최초 진입 이동버튼 미검출 · " +
                     "2프레임 현장 확정 금지 · 클릭 없이 7프레임/3초+후행 재확인으로 전환");
@@ -1010,15 +1045,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 Fail(confirmed, "원격 상태 복구 전 가공 시설 화면을 확인하지 못했습니다.");
 
             Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} · 상세창 원격 상태로 설비 이동 확정 · " +
-                "작은 설비로 이동 문구 OCR 생략");
+                $"[자동 가공] {plan.ScreenTitle} · 상세창 원격 상태로 설비 이동 확정");
         }
 
-        bool moveClickReactionProven = false;
+        bool moveClickSent = false;
         if (shouldClickMove)
         {
             _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
-            moveClickReactionProven = await ClickFacilityMoveWithRetryAsync(plan, ct);
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
+                $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
+                "입력 1회 고정 · 재클릭 금지");
+            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+            moveClickSent = true;
         }
 
         bool sawDeparture = false;
@@ -1026,11 +1065,68 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         int loadingCliRejects = 0;
         int onsiteStableFrames = 0;
         DateTime? onsiteCandidateSince = null;
+        int travelConfirmationSpaces = 0;
 
         for (int attempt = 0; attempt < 120; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            await Task.Delay(500, ct);
+            await Task.Delay(attempt < 20 ? 200 : 500, ct);
+
+            // Capture first: the optional travel popup can appear while the facility
+            // header remains behind it. Do not wait for CLI/OCR cycles before handling it.
+            using var frame = Capture(ct);
+            bool facilityVisible =
+                await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+
+            bool travelPopupVisual =
+                moveClickSent &&
+                !sawDeparture &&
+                HasFacilityTravelConfirmationVisual(frame);
+
+            if (AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
+                    travelPopupVisual,
+                    travelConfirmationSpaces,
+                    sawDeparture))
+            {
+                bool wordingMatched = await IsFacilityTravelDialogAsync(frame, ct);
+
+                _ui.TapFresh(0x39, ct); // Space = confirm optional facility travel
+                travelConfirmationSpaces++;
+                onsiteStableFrames = 0;
+                onsiteCandidateSince = null;
+
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 이동 확인창 감지 · " +
+                    $"화면중앙 초록 확인 구조 + 이동문구OCR={(wordingMatched ? "확인" : "미검출(이동클릭 직후 전용 판정)")} · " +
+                    $"Space {travelConfirmationSpaces}/{AlteringFacilityTravelConfirmPolicy.MaxTravelConfirmationSpaces}");
+
+                await Task.Delay(450, ct);
+
+                using var afterSpace = Capture(ct);
+                bool popupStillVisible =
+                    HasFacilityTravelConfirmationVisual(afterSpace);
+
+                if (!popupStillVisible)
+                {
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 이동 확인창 닫힘 확인 · 자동이동/전환 대기");
+                    continue;
+                }
+
+                if (travelConfirmationSpaces >=
+                    AlteringFacilityTravelConfirmPolicy.MaxTravelConfirmationSpaces)
+                {
+                    Fail(
+                        afterSpace,
+                        "설비 이동 확인창이 Space 2회 입력 후에도 그대로 남아 있어 " +
+                        "설비 이동 재클릭 없이 정지합니다.");
+                }
+
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 이동 확인창 유지 · " +
+                    "같은 팝업에 Space 1회만 재시도 예정");
+                continue;
+            }
 
             GatheringActivity? activity = null;
             var activityResponse = await _cli.GetActivityAsync(ct);
@@ -1038,7 +1134,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             {
                 activity = GatheringQueries.ParseActivity(activityResponse);
                 if (!activity.IsSafeField)
-                    throw new InvalidOperationException("설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+                    throw new InvalidOperationException(
+                        "설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
 
                 if (activity.IsAutoTraveling)
                 {
@@ -1051,24 +1148,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 loadingCliRejects++;
                 sawDeparture = true;
                 if (loadingCliRejects == 1 || loadingCliRejects % 5 == 0)
-                    Log?.Invoke($"[자동 가공] 지역 이동 로딩 중 CLI 일시 거부 · 재시도 {loadingCliRejects}회");
+                    Log?.Invoke(
+                        $"[자동 가공] 지역 이동 로딩 중 CLI 일시 거부 · 재시도 {loadingCliRejects}회");
             }
             else
             {
                 _ = GatheringQueries.ParseActivity(activityResponse);
             }
 
-            using var frame = Capture(ct);
-            bool facilityVisible = await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
-            bool moveVisible = facilityVisible && HasFacilityMoveButtonVisual(frame);
-
             if (!facilityVisible)
                 sawDeparture = true;
 
-            // V3.1.42 live log (16:43) showed that two transient frames without
-            // the move button can occur before the remote state fully settles.
-            // Require a known non-travel CLI state, a longer stable visual window,
-            // and one delayed fresh recheck before authorizing facility input.
+            bool moveVisible =
+                facilityVisible &&
+                await HasFacilityMoveButtonPositiveEvidenceAsync(frame, ct);
+
             if (AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
                     facilityVisible,
                     moveVisible,
@@ -1092,12 +1186,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         finalActivity = GatheringQueries.ParseActivity(finalActivityResponse);
 
                     using var finalFrame = Capture(ct);
+                    bool finalPopupVisible =
+                        moveClickSent &&
+                        HasFacilityTravelConfirmationVisual(finalFrame);
                     bool finalFacilityVisible =
                         await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null;
                     bool finalMoveVisible =
                         finalFacilityVisible &&
                         await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
                     bool finalOnsite =
+                        !finalPopupVisible &&
                         finalActivity is not null &&
                         GatheringSafetyPolicy.IsSafeField(finalActivity) &&
                         AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
@@ -1110,14 +1208,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         Log?.Invoke(
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
                             $"가공창 유지 + 설비로 이동 버튼 없음 {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
-                            $"+ 1.2초 후행 재확인 · CLI AutoTraveling=false · " +
-                            $"이동입력반응={(moveClickReactionProven ? "확인" : "동일화면 직접전환")}");
+                            "+ 1.2초 후행 재확인 · CLI AutoTraveling=false · 이동확인창 없음");
                         return;
                     }
 
                     Log?.Invoke(
                         $"[자동 가공] {plan.ScreenTitle} · 설비 도착 후보 후행 재확인 실패 · " +
                         $"가공창={finalFacilityVisible} · 이동버튼={finalMoveVisible} · " +
+                        $"이동확인창={finalPopupVisible} · " +
                         $"CLI AutoTraveling={(finalActivity?.IsAutoTraveling.ToString() ?? "조회불가")} · 계속 대기");
                     onsiteStableFrames = 0;
                     onsiteCandidateSince = null;
@@ -1131,12 +1229,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
             if (attempt > 0 && attempt % 10 == 0)
                 Log?.Invoke(
-                    $"[자동 가공] 설비 이동 대기 · {attempt / 2}초 · 이동감지={sawTravel} · " +
+                    $"[자동 가공] 설비 이동 대기 · 이동감지={sawTravel} · " +
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
-                    $"이동버튼화면={moveVisible} · CLI로딩거부={loadingCliRejects}");
+                    $"이동버튼화면={moveVisible} · 이동확인Space={travelConfirmationSpaces} · " +
+                    $"CLI로딩거부={loadingCliRejects}");
         }
 
-        throw new InvalidOperationException("설비로 이동 후 현장 가공창을 제한 시간 안에 확인하지 못해 정지합니다.");
+        throw new InvalidOperationException(
+            "설비로 이동 입력 후 확인창/자동이동/현장 전환을 제한 시간 안에 확인하지 못해 " +
+            "추가 설비 이동 클릭 없이 정지합니다.");
     }
 
     // Free navigation only, for opening an ingredient's obtain-method route.
@@ -1206,9 +1307,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
     private async Task<bool> IsFacilityTravelDialogAsync(Bitmap frame, CancellationToken ct)
     {
-        // The travel-confirm dialog and the real completion result both have a large
-        // green button. Distinguish them by the travel wording inside the dialog.
-        return await FindAsync(frame, FacilityTravelDialog, "설비로 이동", ct) is not null ||
+        if (!HasFacilityTravelConfirmationVisual(frame))
+            return false;
+
+        // Outside the immediate move-click transition, keep wording as the
+        // discriminator so completion/result dialogs cannot be mistaken for travel.
+        return await FindAsync(frame, FacilityTravelDialog, "근처", ct) is not null ||
+               await FindAsync(frame, FacilityTravelDialog, "이동합니다", ct) is not null ||
+               await FindAsync(frame, FacilityTravelDialog, "설비로 이동", ct) is not null ||
                await FindAsync(frame, FacilityTravelDialog, "이동", ct) is not null;
     }
 
@@ -1226,171 +1332,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             AlteringFacilityLayout.MoveButtonVisualArea,
             "설비로 이동",
             ct) is not null;
-    }
-
-    private async Task<bool> ClickFacilityMoveWithRetryAsync(
-        AlteringPlan plan,
-        CancellationToken ct)
-    {
-        for (int clickAttempt = 1;
-             clickAttempt <= AlteringFacilityTravelConfirmPolicy.MaxMoveClickAttempts;
-             clickAttempt++)
-        {
-            // V3.1.45 live log (18:33): the facility screen was confirmed and the
-            // fixed coordinate was clicked only ~0.4s later. Give the screen time
-            // to become input-ready, then re-prove the button on a fresh frame.
-            await Task.Delay(
-                AlteringFacilityTravelConfirmPolicy.InitialMoveClickSettleDelay,
-                ct);
-
-            using (var ready = Capture(ct))
-            {
-                bool facilityVisible =
-                    await FindFacilityHeaderAsync(ready, plan.ScreenTitle, ct) is not null;
-                if (!facilityVisible)
-                {
-                    Log?.Invoke(
-                        $"[자동 가공] {plan.ScreenTitle} · 설비 이동 클릭 전 화면 이탈 확인 · 이동 시작으로 인정");
-                    return true;
-                }
-
-                if (!await HasFacilityMoveButtonPositiveEvidenceAsync(ready, ct))
-                {
-                    Log?.Invoke(
-                        $"[자동 가공] {plan.ScreenTitle} · 설비 이동 클릭 전 0.9초 안정대기 후 버튼 미검출 · " +
-                        "입력 생략하고 현장 장기 검증으로 전환");
-                    return false;
-                }
-            }
-
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} · 설비 이동 클릭 준비 완료 · " +
-                $"0.9초 안정대기 + 새 화면 버튼 재확인 · 입력 {clickAttempt}/2");
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
-                $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
-                $"입력 {clickAttempt}/2");
-            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
-
-            bool travelConfirmSent = await ConfirmFacilityTravelDialogIfPresentAsync(
-                plan, ct);
-            if (travelConfirmSent)
-            {
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 처리 완료 · Space 1회 · 게임 자동이동 확인");
-                return true;
-            }
-
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 없음 · Space 생략 · 입력 반응 재확인");
-
-            await Task.Delay(
-                AlteringFacilityTravelConfirmPolicy.MoveReactionProbeDelay,
-                ct);
-
-            var activityResponse = await _cli!.GetActivityAsync(ct);
-            if (activityResponse.Success)
-            {
-                var activity = GatheringQueries.ParseActivity(activityResponse);
-                if (!activity.IsSafeField)
-                    throw new InvalidOperationException(
-                        "설비 이동 입력 확인 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
-
-                if (activity.IsAutoTraveling)
-                {
-                    Log?.Invoke(
-                        $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 반응 확인 · CLI AutoTraveling=true");
-                    return true;
-                }
-            }
-            else if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
-            {
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 반응 확인 · 지역 이동 로딩 CLI 일시 거부");
-                return true;
-            }
-            else
-            {
-                _ = GatheringQueries.ParseActivity(activityResponse);
-            }
-
-            using var reacted = Capture(ct);
-            bool reactedFacilityVisible =
-                await FindFacilityHeaderAsync(reacted, plan.ScreenTitle, ct) is not null;
-            if (!reactedFacilityVisible)
-            {
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 반응 확인 · 시설 화면 이탈/로딩");
-                return true;
-            }
-
-            bool moveStillVisible =
-                await HasFacilityMoveButtonPositiveEvidenceAsync(reacted, ct);
-            if (!moveStillVisible)
-            {
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 후 버튼 소실 · " +
-                    "동일화면 직접전환 후보 · 장기 현장 검증으로 전환");
-                return false;
-            }
-
-            if (clickAttempt <
-                AlteringFacilityTravelConfirmPolicy.MaxMoveClickAttempts)
-            {
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 입력 무반응 · " +
-                    "버튼이 그대로 보여 0.9초 안정대기 후 1회 재클릭");
-                continue;
-            }
-
-            Fail(
-                reacted,
-                "설비로 이동 버튼을 0.9초 안정대기 후 2회 클릭했지만 " +
-                "확인창/자동이동/화면이탈 없이 버튼이 그대로 남아 있어 품목을 선택하지 않고 정지합니다.");
-        }
-
-        return false;
-    }
-
-    private async Task<bool> ConfirmFacilityTravelDialogIfPresentAsync(
-        AlteringPlan plan,
-        CancellationToken ct)
-    {
-        bool confirmationSent = false;
-
-        // Nearby facilities can transition immediately with no confirmation dialog.
-        // When no nearby facility exists, the game may show an optional travel
-        // confirmation. Watch briefly and press Space only for that proven dialog.
-        for (int attempt = 0; attempt < 8; attempt++)
-        {
-            ct.ThrowIfCancellationRequested();
-            await Task.Delay(attempt == 0 ? 180 : 140, ct);
-
-            using var frame = Capture(ct);
-            bool greenConfirm = HasBottomConfirmationModal(frame);
-            bool travelDialog = greenConfirm &&
-                await IsFacilityTravelDialogAsync(frame, ct);
-
-            if (AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
-                    greenConfirm,
-                    travelDialog,
-                    confirmationSent))
-            {
-                _ui.TapFresh(0x39, ct); // Space = confirm travel
-                confirmationSent = true;
-                Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 감지 · Space 1회 확인");
-                await Task.Delay(250, ct);
-                return true;
-            }
-
-            // If the facility header disappeared, direct travel/loading already began,
-            // so no confirmation Space is needed and we must not inject one later.
-            if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
-                return false;
-        }
-
-        return false;
     }
 
     private async Task<bool> WaitForReceiptFacilityReturnAsync(
@@ -1538,7 +1479,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             bool facilityVisible = await FindFacilityHeaderAsync(
                 verify, plan.ScreenTitle, ct) is not null;
             bool greenConfirm = HasBottomConfirmationModal(verify);
-            bool travelDialog = greenConfirm &&
+            bool travelDialog =
                 await IsFacilityTravelDialogAsync(verify, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
@@ -1564,7 +1505,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 bool retryFacilityVisible = await FindFacilityHeaderAsync(
                     retryFrame, plan.ScreenTitle, ct) is not null;
                 bool retryGreenConfirm = HasBottomConfirmationModal(retryFrame);
-                bool retryTravelDialog = retryGreenConfirm &&
+                bool retryTravelDialog =
                     await IsFacilityTravelDialogAsync(retryFrame, ct);
                 bool? retryAutoTraveling = await TryAutoTravelingAsync(ct);
 
@@ -1609,7 +1550,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             bool facilityVisible = await FindFacilityHeaderAsync(
                 closedCheck, plan.ScreenTitle, ct) is not null;
             bool greenConfirm = HasBottomConfirmationModal(closedCheck);
-            bool travelDialog = greenConfirm &&
+            bool travelDialog =
                 await IsFacilityTravelDialogAsync(closedCheck, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
@@ -1675,7 +1616,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     return true;
                 }
 
-                bool travelDialogAfterReceipt = greenConfirm &&
+                bool travelDialogAfterReceipt =
                     await IsFacilityTravelDialogAsync(frame, ct);
                 bool? autoTravelAfterReceipt = await TryAutoTravelingAsync(ct);
 
@@ -1719,7 +1660,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     "CLI로 수령은 확인했고 완료창 닫기 입력도 처리했지만 가공 시설 화면 복귀를 확인하지 못했습니다.");
             }
 
-            bool travelDialogVisible = greenConfirm && await IsFacilityTravelDialogAsync(frame, ct);
+            bool travelDialogVisible = await IsFacilityTravelDialogAsync(frame, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
             bool canConfirm = AlteringReceiptPolicy.CanConfirmCompletion(

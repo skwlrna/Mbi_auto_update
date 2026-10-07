@@ -42,10 +42,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.46"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.47"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.46</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.47</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -314,24 +314,28 @@ jobs:
               $travel -notmatch 'FinalOnsiteRecheckDelay' -or
               $travel -notmatch '설비 도착 후보 후행 재확인 실패' -or
               $travel -notmatch 'CLI AutoTraveling=false') { throw 'stable delayed facility arrival verification missing' }
-          if ($travel -notmatch 'ClickFacilityMoveWithRetryAsync') { throw 'guarded facility move click flow missing' }
-          if ($screen -notmatch 'HasFacilityMoveButtonPositiveEvidenceAsync' -or
-              $screen -notmatch '0\.9초 안정대기 \+ 새 화면 버튼 재확인' -or
-              $screen -notmatch '설비 이동 입력 무반응' -or
-              $screen -notmatch '확인창/자동이동/화면이탈 없이 버튼이 그대로 남아') { throw 'facility move settle/reaction/retry safety flow missing' }
+          if ($screen -match 'ClickFacilityMoveWithRetryAsync' -or
+              $travelConfirmPolicy -match 'MaxMoveClickAttempts|InitialMoveClickSettleDelay|MoveReactionProbeDelay') { throw 'misdiagnosed facility move re-click/timing logic returned' }
+          if ($travel -notmatch 'ShouldConfirmAfterMoveClick' -or
+              $travel -notmatch '입력 1회 고정 · 재클릭 금지' -or
+              $travel -notmatch '이동 확인창 감지' -or
+              $travel -notmatch '이동 확인창 닫힘 확인' -or
+              $travel -notmatch '추가 설비 이동 클릭 없이 정지') { throw 'one-shot move plus continuous travel-popup handling missing' }
+          if ($screen -notmatch 'FacilityTravelDialog = new\(80, 260, 640, 700\)' -or
+              $screen -notmatch 'FacilityTravelConfirmVisual = new\(120, 340, 560, 620\)' -or
+              $screen -notmatch 'HasFacilityTravelConfirmationVisual') { throw 'center-screen travel popup detector missing' }
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
           $travelConfirmPolicy = Get-Content source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs -Raw
-          if ($screen -notmatch 'ConfirmFacilityTravelDialogIfPresentAsync' -or
-              $screen -notmatch '설비 이동 확인창 감지 · Space 1회 확인' -or
-              $screen -notmatch '설비 이동 확인창 없음 · Space 생략') { throw 'optional facility travel confirmation flow missing' }
+          if ($screen -match 'ConfirmFacilityTravelDialogIfPresentAsync' -or
+              $screen -notmatch '이동 확인창 감지' -or
+              $screen -notmatch '이동 확인창 닫힘 확인') { throw 'continuous center travel-popup flow missing' }
           if ($travelConfirmPolicy -notmatch 'greenConfirmationVisible' -or
               $travelConfirmPolicy -notmatch 'travelDialogVisible' -or
               $travelConfirmPolicy -notmatch '!confirmationAlreadySent') { throw 'facility travel confirmation safety policy missing' }
-          if ($travelConfirmPolicy -notmatch 'InitialMoveClickSettleDelay = TimeSpan\.FromMilliseconds\(900\)' -or
-              $travelConfirmPolicy -notmatch 'MaxMoveClickAttempts = 2' -or
-              $travelConfirmPolicy -notmatch 'MoveReactionProbeDelay = TimeSpan\.FromMilliseconds\(700\)') { throw 'facility move click timing policy missing' }
+          if ($travelConfirmPolicy -notmatch 'MaxTravelConfirmationSpaces = 2' -or
+              $travelConfirmPolicy -notmatch 'ShouldConfirmAfterMoveClick') { throw 'bounded center travel-popup confirmation policy missing' }
           if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'completion-result visual detector missing' }
           $receiptPolicy = Get-Content source/FishingAutomation/AlteringReceiptPolicy.cs -Raw
           if ($receiptPolicy -notmatch '!travelDialogVisible' -or $receiptPolicy -notmatch '!autoTraveling') { throw 'receipt Space travel veto policy missing' }
@@ -933,9 +937,9 @@ jobs:
              $multiGather -notmatch 'await automation\.RunAsync\(plan, ct\)'){throw 'multi-gather must delegate execution to verified single-gather automation'}
           if($multiGather -match 'TapFresh|ClickFresh|DragFresh|0x39'){throw 'multi-gather coordinator must not own direct input or Space'}
 
-          if($alterScreen -notmatch 'ConfirmFacilityTravelDialogIfPresentAsync' -or
-             $alterScreen -notmatch '설비 이동 확인창 감지 · Space 1회 확인' -or
-             $alterScreen -notmatch '설비 이동 확인창 없음 · Space 생략'){throw 'optional facility travel confirmation handling missing'}
+          if($alterScreen -match 'ConfirmFacilityTravelDialogIfPresentAsync' -or
+             $alterScreen -notmatch '이동 확인창 감지' -or
+             $alterScreen -notmatch '이동 확인창 닫힘 확인'){throw 'continuous center travel-popup handling missing'}
 
           foreach($source in @($craftScreen,$gatherScreen,$bulkScreen,$alterScreen,$resolver,$multiGather)){
             if($source -match 'execute_gathering|execute_altering|execute_crafting'){throw 'paid production CLI action leaked into V3 production execution'}

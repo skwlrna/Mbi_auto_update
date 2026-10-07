@@ -136,16 +136,19 @@ Match-Required $facilityTravel 'if \(shouldClickMove\)' 'facility move click occ
 Match-Required $facilityTravel 'HasStableOnsiteEvidence' 'non-click initial path reaches the same long onsite proof'
 Match-Required $alterTests '18:16 sufficient-material regression' '18:16 sufficient-material fast-path failure remains an executable regression case'
 
-# 4e) 18:33 real-world regression: newly opened facility UI may not accept an immediate fixed-coordinate click.
-Match-Required $travelPolicy 'InitialMoveClickSettleDelay = TimeSpan\.FromMilliseconds\(900\)' 'facility move waits 0.9s before fixed-coordinate input'
-Match-Required $travelPolicy 'MaxMoveClickAttempts = 2' 'facility move retry is bounded to exactly one retry'
-Match-Required $travelPolicy 'MoveReactionProbeDelay = TimeSpan\.FromMilliseconds\(700\)' 'facility move probes actual reaction after input'
-Match-Required $facilityTravel 'ClickFacilityMoveWithRetryAsync' 'facility travel delegates fixed-coordinate input to guarded retry flow'
-Match-Required $alter 'HasFacilityMoveButtonPositiveEvidenceAsync' 'exact move-label OCR is retained as a positive-only remote veto'
-Match-Required $alter '0\.9초 안정대기 \+ 새 화면 버튼 재확인' 'fresh pre-click move-button proof remains required'
-Match-Required $alter '설비 이동 입력 무반응' 'unchanged remote button triggers the one bounded retry'
-Match-Required $alter '확인창/자동이동/화면이탈 없이 버튼이 그대로 남아' 'two unconsumed clicks stop before recipe input'
-Match-Required $alterTests '18:33 click-timing regression' '18:33 early-click failure remains executable regression coverage'
+# 4e) 19:21 root cause: the move click succeeds, but the optional center-screen travel dialog must be confirmed.
+Match-Forbidden $alter 'ClickFacilityMoveWithRetryAsync' 'facility move is never re-clicked after a successful one-shot input'
+Match-Forbidden $travelPolicy 'MaxMoveClickAttempts|InitialMoveClickSettleDelay|MoveReactionProbeDelay' 'misdiagnosed click-retry timing logic stays removed'
+Match-Required $alter 'FacilityTravelDialog = new\(80, 260, 640, 700\)' 'travel wording OCR covers the center-screen popup'
+Match-Required $alter 'FacilityTravelConfirmVisual = new\(120, 340, 560, 620\)' 'travel confirmation visual covers the center/lower modal area'
+Match-Required $alter 'HasFacilityTravelConfirmationVisual' 'travel flow has a dedicated center-popup visual detector'
+Match-Required $travelPolicy 'MaxTravelConfirmationSpaces = 2' 'same proven travel popup has at most one Space retry'
+Match-Required $facilityTravel 'ShouldConfirmAfterMoveClick' 'whole travel wait loop continuously watches the optional travel popup'
+Match-Required $facilityTravel '입력 1회 고정 · 재클릭 금지' 'facility move click is one-shot'
+Match-Required $facilityTravel '이동 확인창 감지' 'center travel popup is confirmed with Space'
+Match-Required $facilityTravel '이동 확인창 닫힘 확인' 'travel popup close is verified before continuing'
+Match-Required $facilityTravel '추가 설비 이동 클릭 없이 정지' 'failed transition never re-clicks the facility move control'
+Match-Required $alterTests '19:21 regression' '19:21 missed center-popup root cause remains executable regression coverage'
 
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'

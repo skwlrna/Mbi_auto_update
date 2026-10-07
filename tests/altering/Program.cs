@@ -152,26 +152,31 @@ Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
         retryAlreadyUsed: true),
     "fixed recipe retry is strictly one-shot");
 
-Check(AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
-        greenConfirmationVisible: true,
-        travelDialogVisible: true,
-        confirmationAlreadySent: false),
-    "facility travel dialog receives one Space confirmation when it actually appears");
-Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
-        greenConfirmationVisible: false,
-        travelDialogVisible: false,
-        confirmationAlreadySent: false),
-    "direct facility travel without a confirmation dialog never receives Space");
-Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
-        greenConfirmationVisible: true,
-        travelDialogVisible: false,
-        confirmationAlreadySent: false),
-    "generic green modal is never enough to authorize facility travel Space");
-Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
-        greenConfirmationVisible: true,
-        travelDialogVisible: true,
-        confirmationAlreadySent: true),
-    "facility travel confirmation is strictly one-shot");
+Check(AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
+        travelPopupVisual: true,
+        confirmationSpaceCount: 0,
+        departureAlreadySeen: false),
+    "19:21 regression: a center-screen travel confirmation appearing after the move click receives Space");
+Check(AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
+        travelPopupVisual: true,
+        confirmationSpaceCount: 1,
+        departureAlreadySeen: false),
+    "same proven travel popup may receive exactly one bounded Space retry if it remains visible");
+Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
+        travelPopupVisual: false,
+        confirmationSpaceCount: 0,
+        departureAlreadySeen: false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
+        travelPopupVisual: true,
+        confirmationSpaceCount: 2,
+        departureAlreadySeen: false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
+        travelPopupVisual: true,
+        confirmationSpaceCount: 0,
+        departureAlreadySeen: true),
+    "travel Space is blocked without the popup, after two attempts, or once departure is already proven");
+Check(AlteringFacilityTravelConfirmPolicy.MaxTravelConfirmationSpaces == 2,
+    "travel confirmation Space retry is strictly bounded");
 Check(AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
         facilityVisible: true,
         moveButtonVisible: false,
@@ -196,21 +201,13 @@ Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
       !AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
         TimeSpan.FromMilliseconds(2999)),
-    "16:43 arrival regression: two-frame/short move-button disappearance cannot authorize facility input");
+    "facility arrival cannot be authorized by a short move-button disappearance");
 Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
         TimeSpan.FromSeconds(3)),
     "facility arrival requires the full stable frame and duration threshold");
 Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
     "facility arrival keeps a delayed final recheck after the stable window");
-Check(AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames > 2 &&
-      AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableDuration >= TimeSpan.FromSeconds(3),
-    "18:16 sufficient-material regression: initial missing move-button frames can never prove onsite by themselves");
-Check(AlteringFacilityTravelConfirmPolicy.InitialMoveClickSettleDelay >= TimeSpan.FromMilliseconds(800),
-    "18:33 click-timing regression: facility move waits for the newly opened screen to become input-ready");
-Check(AlteringFacilityTravelConfirmPolicy.MaxMoveClickAttempts == 2 &&
-      AlteringFacilityTravelConfirmPolicy.MoveReactionProbeDelay >= TimeSpan.FromMilliseconds(500),
-    "18:33 click-timing regression: an unconsumed facility move click gets exactly one bounded retry after reaction probing");
 
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");
