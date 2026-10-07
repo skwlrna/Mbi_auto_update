@@ -50,10 +50,28 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
             return false;
 
-        // Never authorize a receive Space from the remote facility screen.
-        // Do not OCR the small "설비로 이동" label: its fixed teal button body is
-        // the state signal. OCR failure must never be interpreted as on-site.
-        if (HasFacilityMoveButtonVisual(frame))
+        // Receipt authorization is state-aware. Before a stable on-site proof, the
+        // broad teal move-button detector remains a hard veto. After the receipt
+        // travel path has completed its full on-site proof, a visual-only teal false
+        // positive cannot block "모두 받기"; an exact "설비로 이동" label still
+        // blocks Space.
+        bool visualMoveButton = HasFacilityMoveButtonVisual(frame);
+        bool exactMoveLabelVisible = false;
+        if (visualMoveButton)
+        {
+            exactMoveLabelVisible = await FindAsync(
+                frame,
+                AlteringFacilityLayout.MoveButtonVisualArea,
+                "설비로 이동",
+                ct) is not null;
+        }
+
+        bool trustedOnsiteFacility =
+            string.Equals(_confirmedOnsiteFacility, plan.FacilityName, StringComparison.Ordinal);
+        if (AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+                trustedOnsiteFacility,
+                visualMoveButton,
+                exactMoveLabelVisible))
             return false;
 
         if (_cli is null)
@@ -1037,7 +1055,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private async Task TravelToFacilityAsync(
         AlteringPlan plan,
         CancellationToken ct,
-        bool forceMoveClick = false)
+        bool forceMoveClick = false,
+        bool receiptMode = false)
     {
         if (_cli is null)
             throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
@@ -1215,9 +1234,31 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (!facilityVisible)
                 sawDeparture = true;
 
-            bool moveVisible =
-                facilityVisible &&
-                await HasFacilityMoveButtonPositiveEvidenceAsync(frame, ct);
+            bool moveVisible = false;
+            if (facilityVisible)
+            {
+                if (receiptMode && moveClickSent)
+                {
+                    bool visualMoveButton = HasFacilityMoveButtonVisual(frame);
+                    bool exactMoveLabelVisible = false;
+                    if (visualMoveButton)
+                    {
+                        exactMoveLabelVisible = await FindAsync(
+                            frame,
+                            AlteringFacilityLayout.MoveButtonVisualArea,
+                            "설비로 이동",
+                            ct) is not null;
+                    }
+
+                    moveVisible = AlteringReceiptPolicy.IsRemoteMoveButtonAfterReceiptMove(
+                        visualMoveButton,
+                        exactMoveLabelVisible);
+                }
+                else
+                {
+                    moveVisible = await HasFacilityMoveButtonPositiveEvidenceAsync(frame, ct);
+                }
+            }
 
             if (AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
                     facilityVisible,
@@ -1247,9 +1288,32 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         HasFacilityTravelConfirmationVisual(finalFrame);
                     bool finalFacilityVisible =
                         await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null;
-                    bool finalMoveVisible =
-                        finalFacilityVisible &&
-                        await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
+                    bool finalMoveVisible = false;
+                    if (finalFacilityVisible)
+                    {
+                        if (receiptMode && moveClickSent)
+                        {
+                            bool visualMoveButton = HasFacilityMoveButtonVisual(finalFrame);
+                            bool exactMoveLabelVisible = false;
+                            if (visualMoveButton)
+                            {
+                                exactMoveLabelVisible = await FindAsync(
+                                    finalFrame,
+                                    AlteringFacilityLayout.MoveButtonVisualArea,
+                                    "설비로 이동",
+                                    ct) is not null;
+                            }
+
+                            finalMoveVisible = AlteringReceiptPolicy.IsRemoteMoveButtonAfterReceiptMove(
+                                visualMoveButton,
+                                exactMoveLabelVisible);
+                        }
+                        else
+                        {
+                            finalMoveVisible =
+                                await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
+                        }
+                    }
                     bool finalOnsite =
                         !finalPopupVisible &&
                         finalActivity is not null &&
@@ -1287,8 +1351,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 Log?.Invoke(
                     $"[자동 가공] 설비 이동 대기 · 이동감지={sawTravel} · " +
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
-                    $"이동버튼화면={moveVisible} · 이동확인Space={travelConfirmationSpaces} · " +
-                    $"CLI로딩거부={loadingCliRejects}");
+                    $"이동버튼확정={moveVisible} · 수령상태분리={receiptMode && moveClickSent} · " +
+                    $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
         }
 
         throw new InvalidOperationException(
@@ -1777,12 +1841,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         // If this is the remote facility screen, travel first and wait until the
         // facility title is visible with "설비로 이동" gone for two frames.
         Log?.Invoke($"[자동 가공] 완료품 수령 전 현장 가공대 확인 · {plan.ScreenTitle}");
-        await TravelToFacilityAsync(plan, ct);
+        await TravelToFacilityAsync(plan, ct, receiptMode: true);
         await EnterFacilityAsync(plan, ct);
         _confirmedOnsiteFacility = plan.FacilityName;
 
-        // Require two consecutive on-site receive confirmations. HasCollectPromptAsync
-        // itself vetoes any frame where "설비로 이동" is visible.
+        // Require two consecutive on-site receive confirmations. Before travel proof,
+        // a visual move button vetoes receipt; after the stable receipt on-site proof,
+        // only an exact "설비로 이동" label may override the blue receive evidence.
         if (!await WaitForCollectPromptAsync(plan, attempts: 24, delayMs: 250, ct))
         {
             using var failed = Capture(ct);
@@ -1808,7 +1873,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
         Log?.Invoke(
-            $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 설비로 이동 없음 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
+            $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 수령 현장 확정 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
             $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -1829,7 +1894,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         // any receive Space, so this path should normally be unused. If called, it still
         // waits for proven on-site state before authorizing input.
         await EnterFacilityAsync(plan, ct);
-        await TravelToFacilityAsync(plan, ct);
+        await TravelToFacilityAsync(plan, ct, receiptMode: true);
         await EnterFacilityAsync(plan, ct);
         if (!await WaitForCollectPromptAsync(plan, attempts: 90, delayMs: 500, ct))
         {

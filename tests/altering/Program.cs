@@ -209,6 +209,29 @@ Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
 Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
     "facility arrival keeps a delayed final recheck after the stable window");
 
+Check(!AlteringReceiptPolicy.IsRemoteMoveButtonAfterReceiptMove(
+        visualMoveButton: true,
+        exactMoveLabelVisible: false),
+    "04:05 receipt regression: post-move teal-only false positive is not remote proof");
+Check(AlteringReceiptPolicy.IsRemoteMoveButtonAfterReceiptMove(
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "post-move receipt state still treats visual plus exact move label as remote");
+Check(!AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: false),
+    "trusted receipt onsite state ignores teal-only move false positive");
+Check(AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true) &&
+      AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        trustedOnsiteFacility: false,
+        visualMoveButton: true,
+        exactMoveLabelVisible: false),
+    "exact move label always blocks receipt and untrusted visual move evidence stays conservative");
+
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(1, 0),
