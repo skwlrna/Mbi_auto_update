@@ -2,7 +2,7 @@ using FishingAutomation;
 
 namespace DungeonVisionBot;
 
-internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("가공");
@@ -853,28 +853,78 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return (paid is not null, paid is not null ? "가공하러 가기 OCR" : "없음");
     }
 
-    public async Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
+    public Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
+        => QueueAsync(
+            plan,
+            AlteringFacilityEntryDirective.Automatic,
+            reserveFiveWings,
+            ct);
+
+    public async Task QueueAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Action reserveFiveWings,
+        CancellationToken ct)
     {
         plan.Validate();
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
-        bool reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
-        if (reusedOnsite)
+        bool reusedOnsite = false;
+        if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
         {
-            _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 현장 상태 재사용");
+            using var frame = Capture(ct);
+            bool facilityVisible =
+                await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool completionModal = HasBottomConfirmationModal(frame);
+            if (!facilityVisible || completionModal)
+                Fail(
+                    frame,
+                    "중간관리자가 같은 시설 현장 재사용을 지시했지만 시설창 복귀 상태를 확인하지 못했습니다. " +
+                    "하위 가공 모듈이 임의로 설비 이동을 다시 판단하지 않습니다.");
+
+            _confirmedOnsiteFacility = plan.FacilityName;
+            reusedOnsite = true;
+            _stage.Move(
+                ProductionStage.OpenHub,
+                $"{plan.ScreenTitle} 중간관리자 현장 재사용");
+            Log?.Invoke(
+                $"[자동 가공] 중간관리자 지시 · {plan.ScreenTitle} 현장확정 재사용 · " +
+                "설비 이동 버튼 색상/형태 재판정 없음 · 바로 품목 선택");
         }
-        else
+        else if (directive == AlteringFacilityEntryDirective.FreshMoveRequired)
         {
             _confirmedOnsiteFacility = null;
             await EnterFacilityAsync(plan, ct);
             Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} 진입 · 새 시설 첫 등록 · " +
+                $"[자동 가공] 중간관리자 지시 · {plan.ScreenTitle} 새 시설 진입 · " +
                 "품목 선택보다 설비 이동 1회 우선");
             await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility = plan.FacilityName;
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
+            Log?.Invoke(
+                $"[자동 가공] 중간관리자 지시 이행 · {plan.ScreenTitle} 설비 도착 · " +
+                $"이제 {plan.DisplayName} 선택");
+        }
+        else
+        {
+            reusedOnsite = await TryReuseOnsiteFacilityAsync(plan, ct);
+            if (reusedOnsite)
+            {
+                _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 현장 상태 재사용");
+            }
+            else
+            {
+                _confirmedOnsiteFacility = null;
+                await EnterFacilityAsync(plan, ct);
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} 진입 · 새 시설 첫 등록 · " +
+                    "품목 선택보다 설비 이동 1회 우선");
+                await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
+                await EnterFacilityAsync(plan, ct);
+                _confirmedOnsiteFacility = plan.FacilityName;
+                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
+            }
         }
 
         bool remoteRecoveryUsed = false;
