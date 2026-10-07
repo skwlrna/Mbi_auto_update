@@ -363,6 +363,81 @@ Check(!releasedLane.IntermediateLease &&
       releasedLane.IntermediateRegisteredWorks == 1,
     "intermediate facility ownership releases only after the lane is empty");
 
+var nestedLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+nestedLane.AcquireIntermediate(lanePlan.FacilityName, Array.Empty<AlteringWork>(), "parent#1");
+Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 1,
+    "parent intermediate obtains sole facility lease");
+nestedLane.NoteRegistration(lanePlan, FacilityLaneOwner.Intermediate, 1);
+var nestedCompleted = new[]
+{
+    new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "Completed", true, 0)
+};
+nestedLane.Observe(lanePlan.FacilityName, nestedCompleted, allowShrink: false);
+try
+{
+    nestedLane.AcquireIntermediate(lanePlan.FacilityName, nestedCompleted, "child#1");
+    throw new Exception("nested intermediate acquired a nonempty facility");
+}
+catch (InvalidOperationException)
+{
+    Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 1,
+        "child intermediate cannot borrow a facility before parent's batch is received");
+}
+nestedLane.Observe(lanePlan.FacilityName, Array.Empty<AlteringWork>(), allowShrink: true);
+nestedLane.AcquireIntermediate(lanePlan.FacilityName, Array.Empty<AlteringWork>(), "child#1");
+Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 2,
+    "same-facility nested intermediate borrows the empty lane without dropping parent lease");
+try
+{
+    nestedLane.ReleaseIntermediate(lanePlan.FacilityName, Array.Empty<AlteringWork>(), "parent#1");
+    throw new Exception("parent lease released before child");
+}
+catch (InvalidOperationException)
+{
+    Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 2,
+        "intermediate leases must release in child-first order");
+}
+try
+{
+    nestedLane.AcquireIntermediate(lanePlan.FacilityName, Array.Empty<AlteringWork>(), "parent#1");
+    throw new Exception("duplicate active parent lease");
+}
+catch (InvalidOperationException)
+{
+    Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 2,
+        "duplicate/re-entrant owner keys never increase intermediate lease depth");
+}
+nestedLane.NoteRegistration(lanePlan, FacilityLaneOwner.Intermediate, 1);
+nestedLane.Observe(lanePlan.FacilityName, nestedCompleted, allowShrink: false);
+try
+{
+    nestedLane.ReleaseIntermediate(lanePlan.FacilityName, nestedCompleted, "child#1");
+    throw new Exception("child lease released before collecting its work");
+}
+catch (InvalidOperationException)
+{
+    Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 2,
+        "nested child lease retains ownership while child work is live");
+}
+nestedLane.Observe(lanePlan.FacilityName, Array.Empty<AlteringWork>(), allowShrink: true);
+nestedLane.ReleaseIntermediate(lanePlan.FacilityName, Array.Empty<AlteringWork>(), "child#1");
+Check(nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 1,
+    "child release restores parent's intermediate lease");
+try
+{
+    nestedLane.AssertAccess(lanePlan.FacilityName, FacilityLaneOwner.Main);
+    throw new Exception("main input accepted while parent lease remained");
+}
+catch (InvalidOperationException)
+{
+    Check(true, "main registration stays blocked while the parent intermediate owns the lane");
+}
+nestedLane.ReleaseIntermediate(lanePlan.FacilityName, Array.Empty<AlteringWork>(), "parent#1");
+Check(!nestedLane.Snapshot(lanePlan.FacilityName).IntermediateLease &&
+      nestedLane.Snapshot(lanePlan.FacilityName).IntermediateDepth == 0 &&
+      nestedLane.Snapshot(lanePlan.FacilityName).IntermediateRegisteredWorks == 2,
+    "last parent release returns the lane to main without losing nested work ownership counts");
+
 string sessionPath = Path.Combine(Path.GetTempPath(), "mabi-altering-" + Guid.NewGuid().ToString("N") + ".json");
 var sessionStore = new AlteringSessionStore(sessionPath);
 var testIdentity = new CliIdentityContext("char-1", "테스트", "account-1", "서버A");
@@ -758,6 +833,105 @@ Check(scheduledOwnership.InitialObservedWorks == 1 &&
       scheduledOwnership.IntermediateRegisteredWorks == 1 &&
       !scheduledOwnership.IntermediateLease,
     "dependency scheduler owns the empty facility lane only for its intermediate batch and releases it after receipt");
+var recoveredSessionWorld = new RecursiveProductionWorld();
+recoveredSessionWorld.AddExternalWork(
+    "철괴", "금속 가공 시설", "Completed", isCompleted: true, remainingSeconds: 0);
+string satisfiedSessionDir = Path.Combine(
+    Path.GetTempPath(), "mabi-satisfied-dependency-" + Guid.NewGuid().ToString("N"));
+var satisfiedIronPlan = new AlteringPlan("금속 가공 시설", "철괴(철 광석)", 3, 3, false);
+var staleDependencyStore = new AlteringSessionStore(
+    AlteringSessionStore.MultiPlanPath(
+        Path.Combine(satisfiedSessionDir, "dependencies"), satisfiedIronPlan));
+staleDependencyStore.Save(
+    AlteringSessionState.Create(satisfiedIronPlan, testIdentity, 0, 0) with
+    {
+        QueuedWorks = 1,
+        Stage = "중단된 중간재료 배치"
+    });
+var recoveredLane = new FacilityLaneState(
+    await recoveredSessionWorld.WorksAsync(default));
+var recoveredScheduler = new MultiAlteringDependencyScheduler(
+    recoveredSessionWorld,
+    recoveredSessionWorld,
+    testIdentity,
+    satisfiedSessionDir,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: recoveredLane);
+var recoveredResolver = new RecursiveAlteringSupplyResolver(
+    recoveredSessionWorld,
+    recoveredSessionWorld,
+    recoveredSessionWorld,
+    recoveredSessionWorld,
+    verificationAttempts: 4);
+await recoveredScheduler.RunAsync(
+    satisfiedIronPlan,
+    0,
+    3,
+    recoveredResolver,
+    default);
+Check(!File.Exists(staleDependencyStore.Path) &&
+      recoveredWorldQueueIsUnchanged() &&
+      recoveredSessionWorld.Count("철괴") == 3 &&
+      recoveredLane.Snapshot("금속 가공 시설").IntermediateDepth == 0,
+    "satisfied dependency deletes stale resume state after an existing completed batch is received");
+
+bool recoveredWorldQueueIsUnchanged() => recoveredSessionWorld.Queued.Count == 0;
+
+// Repeating the same intermediate request must start from a clean checkpoint,
+// not inherit the obsolete queued-work count from the prior satisfied request.
+recoveredSessionWorld.SetCount("철 광석", 10);
+await recoveredScheduler.RunAsync(
+    satisfiedIronPlan,
+    3,
+    3,
+    recoveredResolver,
+    default);
+Check(recoveredSessionWorld.Count("철괴") == 6 &&
+      recoveredSessionWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)" }) &&
+      !File.Exists(staleDependencyStore.Path),
+    "later request for the same intermediate starts fresh after completed-work checkpoint cleanup");
+if (Directory.Exists(satisfiedSessionDir))
+    Directory.Delete(satisfiedSessionDir, recursive: true);
+
+var nestedProductionWorld = new RecursiveProductionWorld
+{
+    NestedSameFacilityChain = true
+};
+nestedProductionWorld.SetCount("철괴", 3); // Enough for one 합금괴, not both.
+nestedProductionWorld.SetCount("철 광석", 0);
+string nestedSessionDir = Path.Combine(
+    Path.GetTempPath(), "mabi-nested-dependency-" + Guid.NewGuid().ToString("N"));
+var nestedProductionLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var nestedProductionScheduler = new MultiAlteringDependencyScheduler(
+    nestedProductionWorld, nestedProductionWorld, testIdentity, nestedSessionDir,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: nestedProductionLane);
+var nestedProductionResolver = new RecursiveAlteringSupplyResolver(
+    nestedProductionWorld,
+    nestedProductionWorld,
+    nestedProductionWorld,
+    nestedProductionWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    dependencyScheduler: nestedProductionScheduler);
+var nestedFinalPlan = new AlteringPlan("금속 가공 시설", "합성괴", 1, 1, false);
+var nestedFinalAutomation = new AlteringAutomation(
+    nestedProductionWorld,
+    nestedProductionWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4,
+    nestedProductionResolver);
+await nestedFinalAutomation.RunAsync(nestedFinalPlan, default);
+Check(nestedProductionWorld.Queued.SequenceEqual(new[]
+    { "합금괴", "철괴(철 광석)", "합금괴", "합성괴" }) &&
+      nestedProductionWorld.Count("합성괴") == 1 &&
+      nestedProductionLane.Snapshot("금속 가공 시설").IntermediateRegisteredWorks == 3 &&
+      nestedProductionLane.Snapshot("금속 가공 시설").IntermediateDepth == 0,
+    "three-stage same-facility recursive dependency restores parent lease after child batch");
+if (Directory.Exists(nestedSessionDir))
+    Directory.Delete(nestedSessionDir, recursive: true);
+
 if (Directory.Exists(dependencySessionDir))
     Directory.Delete(dependencySessionDir, recursive: true);
 
@@ -1063,6 +1237,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal readonly List<string> Queued = new();
     internal readonly List<string> Gathered = new();
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls;
+    internal bool NestedSameFacilityChain;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -1101,7 +1276,15 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                 new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 }),
             MakeRecipe("철괴(광석)", 3, "금속 가공 시설",
                 new Dictionary<string,long>(StringComparer.Ordinal) { ["돌 광석"] = 10 })
-        });
+        }.Concat(NestedSameFacilityChain
+            ? new[]
+            {
+                MakeRecipe("합금괴", 1, "금속 가공 시설",
+                    new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3 }),
+                MakeRecipe("합성괴", 1, "금속 가공 시설",
+                    new Dictionary<string,long>(StringComparer.Ordinal) { ["합금괴"] = 2 })
+            }
+            : Array.Empty<AlteringRecipe>()).ToArray());
     }
 
     private AlteringRecipe MakeRecipe(string display, int produced, string facility, IReadOnlyDictionary<string,long> ingredients)
@@ -1137,6 +1320,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         {
             "강철괴" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3, ["석탄"] = 4 },
             "철괴(철 광석)" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 },
+            "합금괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3 },
+            "합성괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["합금괴"] = 2 },
             _ => throw new InvalidOperationException("unexpected recipe")
         };
         foreach (var ingredient in ingredients)
@@ -1158,6 +1343,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                 "강철괴" => 3,
                 "철괴" => 3,
                 "철괴(철 광석)" => 3,
+                "합금괴" when NestedSameFacilityChain => 1,
+                "합성괴" when NestedSameFacilityChain => 1,
                 _ => plan.ProducedPerWork
             };
             string output = System.Text.RegularExpressions.Regex
