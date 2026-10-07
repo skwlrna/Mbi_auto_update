@@ -77,7 +77,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                 _data,
                 _screen,
                 _delay,
-                _verificationAttempts);
+                _verificationAttempts,
+                facilityState: _laneState);
             collector.Log += text => Log?.Invoke(text);
 
             if (!await collector.CollectReadyBatchAsync(requestedPlan, ct))
@@ -192,7 +193,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                 _laneState?.Observe(
                     receiptPlan.FacilityName,
                     remainingWorks,
-                    allowShrink: true));
+                    allowShrink: true),
+            facilityState: _laneState);
         automation.Log += text => Log?.Invoke(text);
 
         var coordinator = new MultiAlteringCoordinator(
