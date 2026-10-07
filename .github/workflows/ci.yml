@@ -602,6 +602,7 @@ jobs:
           if($laneOwnership -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'facility ownership ledger must never own direct input' }
           if($laneOwnership -notmatch 'IntermediateOwners' -or $laneOwnership -notmatch 'IntermediateDepth') { throw 'nested facility lease stack missing' }
           if($dependencyScheduler -notmatch 'completedSession = store.Load' -or $dependencyScheduler -notmatch 'completedSession.MatchesIdentity') { throw 'satisfied dependency session cleanup missing' }
+          if($alteringPlan -notmatch '_onConfirmedReceipt' -or $multiAlterMain -notmatch 'onConfirmedReceipt:' -or $dependencyScheduler -notmatch 'onConfirmedReceipt:') { throw 'confirmed altering receipt must reconcile facility ownership before nested material work' }
           if($multiAlter -notmatch 'FacilityLaneState' -or
              $multiAlter -notmatch 'AssertAccess' -or
              $multiAlter -notmatch 'allowShrink: false' -or
