@@ -72,6 +72,14 @@ Check(!GatheringNavigationPolicy.IsStableFirstRow(
         new System.Drawing.Rectangle(176,620,465,66),
         new System.Drawing.Rectangle(310,620,300,66)),
     "first gathering row rejects a large horizontal/layout change");
+Check(GatheringNavigationPolicy.IsSameLifeSkillRow(
+        new System.Drawing.Rectangle(265,590,115,20),
+        new System.Drawing.Rectangle(238,612,155,20)),
+    "15:47 life-skill row regression: exact OCR boxes may stop overlapping while remaining on the same row");
+Check(!GatheringNavigationPolicy.IsSameLifeSkillRow(
+        new System.Drawing.Rectangle(265,590,115,20),
+        new System.Drawing.Rectangle(238,660,155,20)),
+    "life-skill row final check rejects a different vertical row");
 Check(LifeSkillProfilePolicy.IsConfirmed(true, false, 0, 0),
     "profile opens from stable stat OCR without visual fallback");
 Check(LifeSkillProfilePolicy.IsConfirmed(false, true, 0.24, 0.02),

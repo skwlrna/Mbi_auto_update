@@ -37,6 +37,7 @@ $lane = Read-Source 'source/FishingAutomation/FacilityLaneState.cs'
 $gathering = Read-Source 'source/FishingAutomation/GatheringAutomation.cs'
 $bulk = Read-Source 'source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs'
 $stopPolicy = Read-Source 'source/FishingAutomation/LifeSkillStopPolicy.cs'
+$navPolicy = Read-Source 'source/FishingAutomation/GatheringNavigationPolicy.cs'
 $alter = Read-Source 'source/FishingAutomation/dungeon/AlteringScreen.cs'
 $receiptPolicy = Read-Source 'source/FishingAutomation/AlteringReceiptPolicy.cs'
 $gatherTests = Read-Source 'tests/gathering/Program.cs'
@@ -80,6 +81,17 @@ Match-Required $confirmStop '다음 재료로 넘어가지 않습니다' 'unconf
 Match-Required $gatherTests '13:14 regression' '13:14 live failure remains an executable regression case'
 Match-Required $gatherTests 'visible Stop UI must not authorize the next material' 'visible Stop handoff rejection remains tested'
 Match-Required $gatherTests 'next material starts when CLI Stop lingers' 'stale CLI-only Stop handoff remains tested'
+
+# 3b) 15:47 real-world regression: exact life-skill label OCR can jitter without changing rows.
+Match-Required $navPolicy 'IsSameLifeSkillRow' 'life-skill final click has a dedicated same-row geometry policy'
+Match-Required $navPolicy 'Math\.Abs\(expectedCenterY - freshCenterY\) <= 24' 'life-skill same-row policy uses bounded vertical tolerance'
+$lifeSkillStart = Method-Block $bulk 'private async Task StartLifeSkillHundredAsync' '\r?\n    private async Task<DetectionResult\?> FindStableLifeSkillRowAsync' 'life-skill start flow'
+Match-Required $lifeSkillStart 'for \(int pass = 1; pass <= 3; pass\+\+\)' 'life-skill final OCR confirmation has a bounded three-frame retry'
+Match-Required $lifeSkillStart 'GatheringNavigationPolicy\.IsSameLifeSkillRow' 'life-skill final click uses row-Y identity instead of rectangle overlap'
+Match-Required $lifeSkillStart 'HasRowIconVisual' 'life-skill final click still requires the left row icon'
+Match-Required $lifeSkillStart 'exact OCR \+ 같은 행 Y±24 \+ 왼쪽 아이콘' 'life-skill final click logs all three safety signals'
+Match-Forbidden $lifeSkillStart 'Bounds\.IntersectsWith\(row\.Value\.Bounds\)' 'life-skill final click no longer requires OCR rectangles to overlap'
+Match-Required $gatherTests '15:47 life-skill row regression' '15:47 OCR-box jitter remains an executable regression case'
 
 # 4) 14:23 real-world regression: completion may return to field, but recovery is navigation-only.
 $receiptReturn = Method-Block $alter 'private async Task<bool> WaitForReceiptFacilityReturnAsync' '\r?\n    private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync' 'receipt field-return recovery'

@@ -26,4 +26,17 @@ internal static class GatheringNavigationPolicy
                Math.Abs(firstCenterX - secondCenterX) <= 18 &&
                Math.Abs(firstCenterY - secondCenterY) <= 14;
     }
+
+    internal static bool IsSameLifeSkillRow(Rectangle expected, Rectangle fresh)
+    {
+        if (expected.Width <= 0 || expected.Height <= 0 || fresh.Width <= 0 || fresh.Height <= 0)
+            return false;
+
+        // A fresh OCR box can shift or resize enough to stop overlapping even when
+        // the exact same label remains on the same list row. The neighboring rows
+        // are much farther apart, so use bounded vertical row identity here.
+        int expectedCenterY = expected.Top + expected.Height / 2;
+        int freshCenterY = fresh.Top + fresh.Height / 2;
+        return Math.Abs(expectedCenterY - freshCenterY) <= 24;
+    }
 }
