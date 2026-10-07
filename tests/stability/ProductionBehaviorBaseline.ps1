@@ -129,12 +129,16 @@ Match-Required $alter 'moveAnchorVisible: moveAnchor' 'move-button policy receiv
 Match-Required $alterTests '17:21 regression' '17:21 currency/X veto failure remains an executable regression case'
 Match-Required $alterTests 'isolated anchor color cannot masquerade' 'remote move detection still requires broad shape plus anchor'
 
-# 4d) 18:16 sufficient-material regression: initial facility entry cannot use the old 2-frame onsite shortcut.
-Match-Forbidden $facilityTravel '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창' 'initial two-frame onsite shortcut is permanently removed'
-Match-Required $facilityTravel '2프레임 현장 확정 금지' 'initial missing move-button observations enter long onsite verification'
-Match-Required $facilityTravel 'if \(shouldClickMove\)' 'facility move click occurs only after two positive move-button frames or explicit remote detail proof'
-Match-Required $facilityTravel 'HasStableOnsiteEvidence' 'non-click initial path reaches the same long onsite proof'
-Match-Required $alterTests '18:16 sufficient-material regression' '18:16 sufficient-material fast-path failure remains an executable regression case'
+# 4d) 20:19 live regression: a fresh facility entry must move before any recipe selection.
+$queueFlow = Method-Block $alter 'public async Task QueueAsync' '\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync' 'queue facility-first order'
+Match-Required $queueFlow 'TryReuseOnsiteFacilityAsync' 'only proven same-facility reuse may skip a fresh move'
+Match-Required $queueFlow 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)' 'fresh facility entry forces one move before recipe selection'
+Match-Required $queueFlow '새 시설 첫 등록' 'fresh facility move-first order is explicit in diagnostics'
+Match-Required $queueFlow 'await SelectRecipeAsync\(plan, ct\)' 'recipe selection remains after facility travel'
+Match-Required $facilityTravel '설비 이동 1회 필수 경로' 'forced first-entry travel ignores move-detector false negatives for ordering'
+Match-Required $facilityTravel '버튼 검출 결과로 품목 선택 순서를 바꾸지 않음' 'move detector cannot authorize recipe-before-move'
+Match-Required $facilityTravel '품목 선택 전 실행' 'one-shot move input is explicitly before recipe selection'
+Match-Forbidden $facilityTravel '최초 진입 이동버튼 미검출' 'fresh entry can no longer downgrade into onsite proof before moving'
 
 # 4e) 19:21 root cause: the move click succeeds, but the optional center-screen travel dialog must be confirmed.
 Match-Forbidden $alter 'ClickFacilityMoveWithRetryAsync' 'facility move is never re-clicked after a successful one-shot input'

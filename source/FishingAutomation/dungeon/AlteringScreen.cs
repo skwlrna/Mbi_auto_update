@@ -807,8 +807,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         {
             _confirmedOnsiteFacility = null;
             await EnterFacilityAsync(plan, ct);
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 진입 · 품목 선택 전 설비로 이동");
-            await TravelToFacilityAsync(plan, ct);
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} 진입 · 새 시설 첫 등록 · " +
+                "품목 선택보다 설비 이동 1회 우선");
+            await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility = plan.FacilityName;
             Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
@@ -915,7 +917,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         await EnterFacilityAsync(plan, ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 원격 상세 복구 · 무료 설비 이동 1회 실행");
 
-        await TravelToFacilityAsync(plan, ct, remoteConfirmed: true);
+        await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
         await EnterFacilityAsync(plan, ct);
 
         _confirmedOnsiteFacility = plan.FacilityName;
@@ -992,7 +994,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
     private async Task TravelToFacilityAsync(
         AlteringPlan plan,
         CancellationToken ct,
-        bool remoteConfirmed = false)
+        bool forceMoveClick = false)
     {
         if (_cli is null)
             throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
@@ -1000,10 +1002,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             throw new InvalidOperationException("설비로 이동 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
         int moveFrames = 0;
-        bool shouldClickMove = remoteConfirmed;
+        bool shouldClickMove = forceMoveClick;
 
-        if (!remoteConfirmed)
+        if (forceMoveClick)
         {
+            // V3.1.47 live log 20:19: the newly opened wood facility was remote,
+            // but a false-negative move-button detector allowed "onsite" proof and
+            // selected 상급 목재 before 설비로 이동. On a fresh facility entry
+            // QueueAsync now owns the order: facility -> move once -> recipe.
+            using var confirmed = Capture(ct);
+            if (await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
+                Fail(confirmed, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
+
+            bool moveVisible =
+                await HasFacilityMoveButtonPositiveEvidenceAsync(confirmed, ct);
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 설비 이동 1회 필수 경로 · " +
+                $"버튼검출={(moveVisible ? "확인" : "미검출")} · " +
+                "버튼 검출 결과로 품목 선택 순서를 바꾸지 않음");
+        }
+        else
+        {
+            // Non-forced callers (mainly receipt/location verification) may already
+            // be onsite. Only those paths are allowed to use visual evidence to
+            // decide whether a move click is necessary.
             for (int attempt = 0; attempt < 8; attempt++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -1034,18 +1056,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (!shouldClickMove)
             {
                 Log?.Invoke(
-                    $"[자동 가공] {plan.ScreenTitle} · 최초 진입 이동버튼 미검출 · " +
-                    "2프레임 현장 확정 금지 · 클릭 없이 7프레임/3초+후행 재확인으로 전환");
+                    $"[자동 가공] {plan.ScreenTitle} · 현장 가능 경로 · 이동버튼 미검출 · " +
+                    "7프레임/3초+후행 재확인으로 현장 여부 검증");
             }
-        }
-        else
-        {
-            using var confirmed = Capture(ct);
-            if (await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
-                Fail(confirmed, "원격 상태 복구 전 가공 시설 화면을 확인하지 못했습니다.");
-
-            Log?.Invoke(
-                $"[자동 가공] {plan.ScreenTitle} · 상세창 원격 상태로 설비 이동 확정");
         }
 
         bool moveClickSent = false;
@@ -1055,7 +1068,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             Log?.Invoke(
                 $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
                 $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
-                "입력 1회 고정 · 재클릭 금지");
+                "입력 1회 고정 · 재클릭 금지 · 품목 선택 전 실행");
             _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
             moveClickSent = true;
         }
