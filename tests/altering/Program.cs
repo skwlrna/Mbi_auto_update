@@ -172,6 +172,37 @@ Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirm(
         travelDialogVisible: true,
         confirmationAlreadySent: true),
     "facility travel confirmation is strictly one-shot");
+Check(AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+        facilityVisible: true,
+        moveButtonVisible: false,
+        autoTraveling: false),
+    "facility arrival candidate requires visible facility, no move button and proven non-travel CLI");
+Check(!AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+        facilityVisible: true,
+        moveButtonVisible: false,
+        autoTraveling: null) &&
+      !AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+        facilityVisible: true,
+        moveButtonVisible: true,
+        autoTraveling: false) &&
+      !AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+        facilityVisible: true,
+        moveButtonVisible: false,
+        autoTraveling: true),
+    "unknown CLI, visible move button or active travel never proves facility arrival");
+Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
+        AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames - 1,
+        TimeSpan.FromSeconds(4)) &&
+      !AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
+        AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
+        TimeSpan.FromMilliseconds(2999)),
+    "16:43 arrival regression: two-frame/short move-button disappearance cannot authorize facility input");
+Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
+        AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
+        TimeSpan.FromSeconds(3)),
+    "facility arrival requires the full stable frame and duration threshold");
+Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
+    "facility arrival keeps a delayed final recheck after the stable window");
 
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");

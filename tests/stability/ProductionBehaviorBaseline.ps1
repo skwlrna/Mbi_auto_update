@@ -40,6 +40,7 @@ $stopPolicy = Read-Source 'source/FishingAutomation/LifeSkillStopPolicy.cs'
 $navPolicy = Read-Source 'source/FishingAutomation/GatheringNavigationPolicy.cs'
 $alter = Read-Source 'source/FishingAutomation/dungeon/AlteringScreen.cs'
 $receiptPolicy = Read-Source 'source/FishingAutomation/AlteringReceiptPolicy.cs'
+$travelPolicy = Read-Source 'source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs'
 $gatherTests = Read-Source 'tests/gathering/Program.cs'
 $alterTests = Read-Source 'tests/altering/Program.cs'
 
@@ -108,6 +109,18 @@ Match-Required $receiptPolicy 'IsCliReceiptConfirmed\(start, end\)' 'post-reopen
 Match-Required $alterTests '14:23 receipt regression' '14:23 live failure remains an executable regression case'
 Match-Required $alterTests 'unknown CLI state blocks field re-entry' 'unknown CLI state cannot authorize field recovery'
 Match-Required $alterTests 'reopened facility cannot falsely confirm unchanged' 'unchanged queue cannot falsely confirm receipt'
+
+# 4b) 16:43 real-world regression: transient move-button disappearance cannot prove arrival.
+$facilityTravel = Method-Block $alter 'private async Task TravelToFacilityAsync' '\r?\n    // Free navigation only' 'facility travel arrival'
+Match-Required $travelPolicy 'RequiredOnsiteStableFrames = 7' 'facility arrival requires seven stable observations'
+Match-Required $travelPolicy 'RequiredOnsiteStableDuration = TimeSpan\.FromSeconds\(3\)' 'facility arrival requires a three-second stable window'
+Match-Required $travelPolicy 'FinalOnsiteRecheckDelay = TimeSpan\.FromMilliseconds\(1200\)' 'facility arrival has a delayed fresh final recheck'
+Match-Required $travelPolicy 'autoTraveling == false' 'unknown/stale CLI cannot prove facility arrival'
+Match-Required $facilityTravel 'HasStableOnsiteEvidence' 'travel flow uses the long stable-arrival policy'
+Match-Required $facilityTravel 'FinalOnsiteRecheckDelay' 'travel flow performs the delayed final recheck'
+Match-Required $facilityTravel '설비 도착 후보 후행 재확인 실패' 'failed late arrival verification returns to waiting'
+Match-Required $facilityTravel 'CLI AutoTraveling=false' 'successful arrival records proven non-travel CLI'
+Match-Required $alterTests '16:43 arrival regression' '16:43 transient move-button disappearance remains an executable regression case'
 
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'

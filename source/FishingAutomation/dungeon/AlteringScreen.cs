@@ -1013,6 +1013,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         bool sawTravel = false;
         int loadingCliRejects = 0;
         int onsiteStableFrames = 0;
+        DateTime? onsiteCandidateSince = null;
 
         for (int attempt = 0; attempt < 120; attempt++)
         {
@@ -1052,26 +1053,66 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             if (!facilityVisible)
                 sawDeparture = true;
 
-            // Restore the V3.1.8 arrival rule. Some facilities transition directly
-            // to the on-site state without exposing auto-travel/loading/departure.
-            // In that valid path the facility window stays visible and only the
-            // "설비로 이동" button disappears. Two stable frames are sufficient.
-            if (facilityVisible &&
-                !moveVisible &&
-                activity?.IsAutoTraveling != true)
+            // V3.1.42 live log (16:43) showed that two transient frames without
+            // the move button can occur before the remote state fully settles.
+            // Require a known non-travel CLI state, a longer stable visual window,
+            // and one delayed fresh recheck before authorizing facility input.
+            if (AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+                    facilityVisible,
+                    moveVisible,
+                    activity?.IsAutoTraveling))
             {
+                onsiteCandidateSince ??= DateTime.UtcNow;
                 onsiteStableFrames++;
-                if (onsiteStableFrames >= 2)
+                TimeSpan stableFor = DateTime.UtcNow - onsiteCandidateSince.Value;
+
+                if (AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
+                        onsiteStableFrames,
+                        stableFor))
                 {
+                    await Task.Delay(
+                        AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay,
+                        ct);
+
+                    GatheringActivity? finalActivity = null;
+                    var finalActivityResponse = await _cli.GetActivityAsync(ct);
+                    if (finalActivityResponse.Success)
+                        finalActivity = GatheringQueries.ParseActivity(finalActivityResponse);
+
+                    using var finalFrame = Capture(ct);
+                    bool finalFacilityVisible =
+                        await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null;
+                    bool finalMoveVisible =
+                        finalFacilityVisible && HasFacilityMoveButtonVisual(finalFrame);
+                    bool finalOnsite =
+                        finalActivity is not null &&
+                        GatheringSafetyPolicy.IsSafeField(finalActivity) &&
+                        AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+                            finalFacilityVisible,
+                            finalMoveVisible,
+                            finalActivity.IsAutoTraveling);
+
+                    if (finalOnsite)
+                    {
+                        Log?.Invoke(
+                            $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
+                            $"가공창 유지 + 설비로 이동 버튼 없음 {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
+                            "+ 1.2초 후행 재확인 · CLI AutoTraveling=false");
+                        return;
+                    }
+
                     Log?.Invoke(
-                        $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
-                        "가공창 유지 + 설비로 이동 버튼 없음 2프레임 · 직접 전환 허용");
-                    return;
+                        $"[자동 가공] {plan.ScreenTitle} · 설비 도착 후보 후행 재확인 실패 · " +
+                        $"가공창={finalFacilityVisible} · 이동버튼={finalMoveVisible} · " +
+                        $"CLI AutoTraveling={(finalActivity?.IsAutoTraveling.ToString() ?? "조회불가")} · 계속 대기");
+                    onsiteStableFrames = 0;
+                    onsiteCandidateSince = null;
                 }
             }
             else
             {
                 onsiteStableFrames = 0;
+                onsiteCandidateSince = null;
             }
 
             if (attempt > 0 && attempt % 10 == 0)

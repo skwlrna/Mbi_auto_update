@@ -42,10 +42,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.42"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.43"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.42</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.43</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -309,7 +309,10 @@ jobs:
               $travel -notmatch '!moveVisible' -or
               $travel -notmatch 'onsiteStableFrames') { throw 'direct on-site arrival visual gate missing' }
           if ($travel -match 'if \(sawDeparture &&\s*facilityVisible') { throw 'departure evidence must not gate direct facility arrival' }
-          if ($travel -notmatch '가공창 유지 \+ 설비로 이동 버튼 없음 2프레임 · 직접 전환 허용') { throw 'direct facility arrival trace missing' }
+          if ($travel -notmatch 'HasStableOnsiteEvidence' -or
+              $travel -notmatch 'FinalOnsiteRecheckDelay' -or
+              $travel -notmatch '설비 도착 후보 후행 재확인 실패' -or
+              $travel -notmatch 'CLI AutoTraveling=false') { throw 'stable delayed facility arrival verification missing' }
           if ($screen -notmatch 'IsTransientLoadingRejection\(activityResponse\)') { throw 'map-loading cli_rejected retry missing' }
           if ($screen -notmatch '지역 이동 로딩 중 CLI 일시 거부') { throw 'map-loading retry diagnostic missing' }
           if ($screen -match 'attempt >= 6') { throw 'time-only facility arrival fallback returned' }
