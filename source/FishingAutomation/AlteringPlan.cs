@@ -95,6 +95,22 @@ internal interface IAlteringScreen : IDisposable
     Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct);
 }
 
+internal enum AlteringFacilityEntryDirective
+{
+    Automatic,
+    FreshMoveRequired,
+    ReuseCoordinatorConfirmedOnsite
+}
+
+internal interface IAlteringCoordinatorQueueScreen
+{
+    Task QueueAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Action reserveFiveWings,
+        CancellationToken ct);
+}
+
 internal interface IDirectCliAlteringScreen
 {
     Task CompleteAsync(string displayName, CancellationToken ct);
@@ -138,6 +154,7 @@ internal sealed class AlteringAutomation
     private readonly IAlteringInternalConsumptionObserver? _internalConsumptionObserver;
     private readonly Action<AlteringPlan, IReadOnlyList<AlteringWork>>? _onConfirmedReceipt;
     private readonly AlteringSessionStore? _sessionStore;
+    private readonly FacilityLaneState? _facilityState;
     private AlteringSessionState? _session;
     private long? _estimatedWorkSeconds;
     private static readonly TimeSpan StallThreshold = TimeSpan.FromSeconds(60);
@@ -155,7 +172,8 @@ internal sealed class AlteringAutomation
         AlteringSessionStore? sessionStore = null,
         AlteringSessionState? session = null,
         IAlteringInternalConsumptionObserver? internalConsumptionObserver = null,
-        Action<AlteringPlan, IReadOnlyList<AlteringWork>>? onConfirmedReceipt = null)
+        Action<AlteringPlan, IReadOnlyList<AlteringWork>>? onConfirmedReceipt = null,
+        FacilityLaneState? facilityState = null)
     {
         if ((sessionStore is null) != (session is null))
             throw new ArgumentException("이어하기 저장소와 세션 상태는 함께 제공해야 합니다.");
@@ -168,6 +186,7 @@ internal sealed class AlteringAutomation
         _internalConsumptionObserver = internalConsumptionObserver;
         _onConfirmedReceipt = onConfirmedReceipt;
         _sessionStore = sessionStore;
+        _facilityState = facilityState;
         _session = session;
     }
 
@@ -367,6 +386,9 @@ internal sealed class AlteringAutomation
                 SaveStage("완료품 수령");
             if (await CollectIfReadyAsync(plan, works, ct))
             {
+                _facilityState?.ConfirmOnsite(
+                    plan.FacilityName,
+                    "완료품 수령 후 같은 시설창 복귀 확인");
                 works = await _data.WorksAsync(ct);
                 // A nested dependency can start before RunBatchAsync returns.
                 // Reconcile the proven receipt immediately, rather than leaving
@@ -396,6 +418,8 @@ internal sealed class AlteringAutomation
 
                 if (_screen is IAlteringRecoveryScreen recovery)
                 {
+                    _facilityState?.InvalidateOnsite(
+                        $"정체 복구 진입 {stallRecoveries}/{MaxStallRecoveries}");
                     await recovery.RecoverStallAsync(plan, stallRecoveries, reason, ct);
                     lastProgressAt = DateTime.UtcNow;
                 }
@@ -473,6 +497,8 @@ internal sealed class AlteringAutomation
                             Log?.Invoke(
                                 $"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
 
+                            _facilityState?.InvalidateOnsite(
+                                $"재료 해결 진입 · {plan.DisplayName}");
                             await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
 
                             recipes = await _data.RecipesAsync(ct);
@@ -509,7 +535,7 @@ internal sealed class AlteringAutomation
                             .CaptureBeforeRegistrationAsync(plan, ct);
 
                     bool reserved = false;
-                    await _screen.QueueAsync(plan, () =>
+                    Action reserveCallback = () =>
                     {
                         ct.ThrowIfCancellationRequested();
                         if (reserved || !plan.AllowPaidButton ||
@@ -518,7 +544,28 @@ internal sealed class AlteringAutomation
                                 "정령의 날개 사용 시도가 0개 사용 원칙에 의해 차단되었습니다.");
                         reserved = true;
                         ReservedWings += 5;
-                    }, ct);
+                    };
+
+                    if (_facilityState is not null)
+                    {
+                        if (_screen is not IAlteringCoordinatorQueueScreen coordinatorScreen)
+                            throw new InvalidOperationException(
+                                "다중가공 중간관리자 시설 지시를 현재 가공 화면이 지원하지 않습니다.");
+
+                        AlteringFacilityEntryDirective directive =
+                            _facilityState.QueueDirectiveFor(plan.FacilityName);
+                        Log?.Invoke(
+                            $"[자동 가공] 중간관리자 시설 지시 · {plan.ScreenTitle} · {directive}");
+                        await coordinatorScreen.QueueAsync(
+                            plan,
+                            directive,
+                            reserveCallback,
+                            ct);
+                    }
+                    else
+                    {
+                        await _screen.QueueAsync(plan, reserveCallback, ct);
+                    }
 
                     await VerifyRegistrationAsync(async token =>
                     {
@@ -533,6 +580,10 @@ internal sealed class AlteringAutomation
                     if (_internalConsumptionObserver is not null && consumptionBefore is not null)
                         await _internalConsumptionObserver.CommitAfterRegistrationAsync(
                             plan, consumptionBefore, ct);
+
+                    _facilityState?.ConfirmOnsite(
+                        plan.FacilityName,
+                        "작업 등록 CLI 증가 확인");
 
                     QueuedWorks++;
                     ConfirmedRegistrationsThisRun++;
