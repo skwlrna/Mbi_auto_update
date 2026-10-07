@@ -58,6 +58,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             return;
 
         requestedPlan.Validate();
+        string dependencyDir = Path.Combine(_sessionDirectory, "dependencies");
+        var store = new AlteringSessionStore(
+            AlteringSessionStore.MultiPlanPath(dependencyDir, requestedPlan));
 
         Log?.Invoke(
             $"[중간재료 스케줄] 요청 · {requestedPlan.DisplayName} 추가 {requiredAdditionalQuantity:N0}개 · " +
@@ -105,6 +108,22 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         long remainingLong = Math.Max(0, requiredAdditionalQuantity - alreadyGained);
         if (remainingLong == 0)
         {
+            // The whole request was satisfied by receiving the existing facility
+            // batch. No new dependency is needed; a checkpoint left by a prior
+            // cancellation must not be resumed by a later request for this recipe.
+            // Only clean up the same character's matching recipe checkpoint.
+            var completedSession = store.Load();
+            if (completedSession is not null &&
+                completedSession.MatchesIdentity(_identity) &&
+                completedSession.FacilityName == requestedPlan.FacilityName &&
+                completedSession.DisplayName == requestedPlan.DisplayName)
+            {
+                store.Delete();
+                Log?.Invoke(
+                    $"[중간재료 스케줄] 기존 완료 배치로 충족 · 오래된 중간재료 이어하기 기록 삭제 · " +
+                    requestedPlan.DisplayName);
+            }
+
             Log?.Invoke(
                 $"[중간재료 스케줄] 기존 완료 배치 수령으로 부족량 해소 · " +
                 $"{requestedPlan.OutputName} +{alreadyGained:N0}개 · 추가 등록 없음");
@@ -125,14 +144,13 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             throw new InvalidOperationException(
                 $"{plan.FacilityName} 중간재료 배치 시작 직전에 다른 작업이 생겨 시설 소유권을 확보하지 못했습니다.");
 
+        string ownerKey = $"{plan.DisplayName}#{plan.RecipeOrdinal}";
         _laneState?.AcquireIntermediate(
             plan.FacilityName,
-            emptyFacilityCheck);
+            emptyFacilityCheck,
+            ownerKey);
 
-        string dependencyDir = Path.Combine(_sessionDirectory, "dependencies");
         Directory.CreateDirectory(dependencyDir);
-        var store = new AlteringSessionStore(
-            AlteringSessionStore.MultiPlanPath(dependencyDir, plan));
 
         var saved = store.Load();
         AlteringSessionState session;
@@ -204,7 +222,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             .ToArray();
         _laneState?.ReleaseIntermediate(
             plan.FacilityName,
-            finalFacilityWorks);
+            finalFacilityWorks,
+            ownerKey);
 
         long outputAfter = await _data.ItemCountAsync(plan.OutputName, ct);
         long totalGain = outputAfter - requestBaselineQuantity;
