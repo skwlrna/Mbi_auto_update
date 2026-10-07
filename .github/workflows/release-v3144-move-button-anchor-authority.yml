@@ -482,8 +482,9 @@ jobs:
              $travelConfirmPolicy -notmatch 'RequiredOnsiteStableDuration = TimeSpan\.FromSeconds\(3\)' -or
              $travelConfirmPolicy -notmatch 'FinalOnsiteRecheckDelay = TimeSpan\.FromMilliseconds\(1200\)' -or
              $travelConfirmPolicy -notmatch 'autoTraveling == false'){throw 'V3.1.44 facility arrival stability policy missing'}
-          if($tests -notmatch '17:21 regression' -or
-             $tests -notmatch 'isolated anchor color cannot masquerade'){throw 'V3.1.44 17:21 move-button regression coverage missing'}
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          if($alterTests -notmatch '17:21 regression' -or
+             $alterTests -notmatch 'isolated anchor color cannot masquerade'){throw 'V3.1.44 17:21 move-button regression coverage missing'}
           if($alter -notmatch 'ConfirmFacilityTravelDialogIfPresentAsync' -or
              $alter -notmatch '설비 이동 확인창 감지 · Space 1회 확인' -or
              $alter -notmatch '설비 이동 확인창 없음 · Space 생략'){throw 'optional facility travel confirmation flow missing'}
