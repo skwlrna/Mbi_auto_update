@@ -187,7 +187,12 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             _verificationAttempts,
             resolver,
             store,
-            session);
+            session,
+            onConfirmedReceipt: (receiptPlan, remainingWorks) =>
+                _laneState?.Observe(
+                    receiptPlan.FacilityName,
+                    remainingWorks,
+                    allowShrink: true));
         automation.Log += text => Log?.Invoke(text);
 
         var coordinator = new MultiAlteringCoordinator(
