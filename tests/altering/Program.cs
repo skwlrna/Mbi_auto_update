@@ -397,6 +397,22 @@ laneOwnership.Observe(
 Check(laneOwnership.Snapshot(lanePlan.FacilityName).MainRegisteredWorks == 1,
     "facility ownership records only confirmed main registrations");
 
+Check(laneOwnership.QueueDirectiveFor(lanePlan.FacilityName) ==
+      AlteringFacilityEntryDirective.FreshMoveRequired,
+    "facility manager requires one fresh move before any onsite proof");
+laneOwnership.ConfirmOnsite(
+    lanePlan.FacilityName,
+    "test receipt return");
+Check(laneOwnership.QueueDirectiveFor(lanePlan.FacilityName) ==
+      AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+      laneOwnership.QueueDirectiveFor("목재 가공 시설") ==
+      AlteringFacilityEntryDirective.FreshMoveRequired,
+    "facility manager alone decides same-facility reuse versus a different-facility move");
+laneOwnership.InvalidateOnsite("test field departure");
+Check(laneOwnership.QueueDirectiveFor(lanePlan.FacilityName) ==
+      AlteringFacilityEntryDirective.FreshMoveRequired,
+    "facility manager invalidation returns the next registration to the fresh-move route");
+
 var foreignGrowthOwnership = new FacilityLaneState(Array.Empty<AlteringWork>());
 try
 {
@@ -1243,18 +1259,44 @@ catch (InvalidOperationException)
     Check(true, "multi-altering rejects duplicate recipe entries instead of producing twice accidentally");
 }
 
+
+var managedPlan = plan with { TargetQuantity = 30 };
+var managedWorld = new FakeWorld(managedPlan);
+var managedFacilityState = new FacilityLaneState(Array.Empty<AlteringWork>());
+var managedAutomation = new AlteringAutomation(
+    managedWorld,
+    managedWorld,
+    (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    },
+    8,
+    facilityState: managedFacilityState);
+await managedAutomation.RunAsync(managedPlan, default);
+Check(managedWorld.Directives.Count > 1 &&
+      managedWorld.Directives[0] == AlteringFacilityEntryDirective.FreshMoveRequired &&
+      managedWorld.Directives.Skip(1).All(x =>
+          x == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite),
+    "multi facility manager gives one fresh-entry move then owns all same-facility continuation decisions");
+Check(managedWorld.DirectiveAfterCollection ==
+      AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+    "07:01 regression: after completed-work receipt the next same-facility registration reuses coordinator-confirmed onsite state");
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
 catch(Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
 
-internal sealed class FakeWorld : IAlteringData, IAlteringScreen
+internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen
 {
     private readonly AlteringPlan _plan;
     private readonly List<AlteringWork> _works = new();
     private int _polls;
-    internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls;
+    internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls, CollectionCount;
     internal long Owned;
+    internal readonly List<AlteringFacilityEntryDirective> Directives = new();
+    internal AlteringFacilityEntryDirective? DirectiveAfterCollection;
     internal bool QueuedWhileExisting;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
     internal string MissingReason = "not_enough_ingredient";
@@ -1293,6 +1335,17 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
         MaxQueue = Math.Max(MaxQueue, _works.Count);
         return Task.CompletedTask;
     }
+    public Task QueueAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Action reserveFiveWings,
+        CancellationToken ct)
+    {
+        Directives.Add(directive);
+        if (CollectionCount > 0)
+            DirectiveAfterCollection = directive;
+        return QueueAsync(plan, reserveFiveWings, ct);
+    }
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -1310,6 +1363,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen
     }
     private void ApplyCollection(AlteringPlan plan)
     {
+        CollectionCount++;
         ExistingRemaining = Math.Max(0, ExistingRemaining - _works.Count(x => x.IsCompleted));
         if (CreditRewards) Owned += _works.Count(x => x.IsCompleted) * (plan.ProducedPerWork + Bonus);
         _works.RemoveAll(x => x.IsCompleted);
