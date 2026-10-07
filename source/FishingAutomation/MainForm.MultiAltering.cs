@@ -245,7 +245,8 @@ public sealed partial class MainForm
                         laneState.Observe(
                             receiptPlan.FacilityName,
                             remainingWorks,
-                            allowShrink: true));
+                            allowShrink: true),
+                    facilityState: laneState);
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);

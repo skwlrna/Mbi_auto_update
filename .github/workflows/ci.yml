@@ -42,10 +42,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.51"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.52"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.51</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.52</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -265,7 +265,12 @@ jobs:
           $travelIndex = $queue.IndexOf('await TravelToFacilityAsync')
           $selectIndex = $queue.IndexOf('await SelectRecipeAsync')
           if ($travelIndex -lt 0 -or $selectIndex -lt 0 -or $travelIndex -gt $selectIndex) { throw 'facility travel must happen before recipe selection' }
-          if ([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 1) { throw 'queue registration must allow at most one facility travel' }
+          $coordinatorReuse = [regex]::Match(
+              $queue,
+              'if \(directive == AlteringFacilityEntryDirective\.ReuseCoordinatorConfirmedOnsite\)[\s\S]*?(?=\r?\n        else if \(directive == AlteringFacilityEntryDirective\.FreshMoveRequired\))').Value
+          if ([string]::IsNullOrWhiteSpace($coordinatorReuse) -or
+              $coordinatorReuse -match 'TravelToFacilityAsync|TryReuseOnsiteFacilityAsync|HasFacilityMoveButtonVisual') { throw 'coordinator-confirmed onsite reuse must not re-decide or re-run facility travel' }
+          if ([regex]::Matches($queue, 'await TravelToFacilityAsync').Count -ne 2) { throw 'queue must keep one fresh-directive move path plus one legacy automatic fallback path' }
           if ($queue -notmatch 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)') { throw 'fresh facility registration must force one move before recipe selection' }
           if ($queue -notmatch '새 시설 첫 등록' -or
               $queue -notmatch '품목 선택보다 설비 이동 1회 우선') { throw 'fresh facility move-first trace missing' }
@@ -490,7 +495,9 @@ jobs:
           if ($recovery -notmatch 'TapFresh\(0x01, ct\)' -or $recovery -match 'TapFresh\(0x39, ct\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
 
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
-          if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose guarded stall recovery' }
+          if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or
+              $zeroWing -notmatch 'IAlteringCoordinatorQueueScreen' -or
+              $zeroWing -notmatch 'IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose coordinator queue and guarded stall recovery' }
           if ($zeroWing -notmatch 'GuardAsync\("\[자동 가공\] 정체 화면 재판정"') { throw 'stall recovery is not wrapped in currency verification' }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
@@ -628,6 +635,18 @@ jobs:
              $laneOwnership -notmatch '외부 수령 또는 취소 가능성' -or
              $laneOwnership -notmatch '자동화가 등록하지 않은 작업 증가') { throw 'facility lane ownership ledger safety rules missing' }
           if($laneOwnership -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'facility ownership ledger must never own direct input' }
+          if($laneOwnership -notmatch 'QueueDirectiveFor' -or
+             $laneOwnership -notmatch 'ConfirmOnsite' -or
+             $laneOwnership -notmatch 'InvalidateOnsite' -or
+             $laneOwnership -notmatch 'ReuseCoordinatorConfirmedOnsite') { throw 'multi-altering facility location authority is not centralized in the manager' }
+          if($alteringPlan -notmatch '_facilityState\.QueueDirectiveFor' -or
+             $alteringPlan -notmatch '완료품 수령 후 같은 시설창 복귀 확인' -or
+             $multiAlterMain -notmatch 'facilityState: laneState' -or
+             $dependencyScheduler -notmatch 'facilityState: _laneState') { throw 'multi-altering workers are not wired to the shared facility manager' }
+          if($alterScreen -notmatch 'IAlteringCoordinatorQueueScreen' -or
+             $alterScreen -notmatch 'ReuseCoordinatorConfirmedOnsite' -or
+             $alterScreen -notmatch '설비 이동 버튼 색상/형태 재판정 없음' -or
+             $zeroWing -notmatch 'IAlteringCoordinatorQueueScreen') { throw 'lower altering screen is not a coordinator-command executor' }
           if($laneOwnership -notmatch 'IntermediateOwners' -or $laneOwnership -notmatch 'IntermediateDepth') { throw 'nested facility lease stack missing' }
           if($dependencyScheduler -notmatch 'completedSession = store.Load' -or $dependencyScheduler -notmatch 'completedSession.MatchesIdentity') { throw 'satisfied dependency session cleanup missing' }
           if($alteringPlan -notmatch '_onConfirmedReceipt' -or $multiAlterMain -notmatch 'onConfirmedReceipt:' -or $dependencyScheduler -notmatch 'onConfirmedReceipt:') { throw 'confirmed altering receipt must reconcile facility ownership before nested material work' }

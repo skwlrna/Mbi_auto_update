@@ -19,7 +19,7 @@ internal static class SpiritWingSafety
     }
 }
 
-internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly IAlteringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -39,6 +39,27 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringRecover
             if (plan.AllowPaidButton)
                 throw new InvalidOperationException("정령의 날개 사용 허용 가공은 실행하지 않습니다.");
             await _inner.QueueAsync(plan, reserveFiveWings, ct).ConfigureAwait(false);
+            return true;
+        }, ct);
+
+    public Task QueueAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Action reserveFiveWings,
+        CancellationToken ct)
+        => GuardAsync("[자동 가공] 중간관리자 지시 가공", async () =>
+        {
+            if (plan.AllowPaidButton)
+                throw new InvalidOperationException("정령의 날개 사용 허용 가공은 실행하지 않습니다.");
+            if (_inner is not IAlteringCoordinatorQueueScreen coordinatorScreen)
+                throw new InvalidOperationException(
+                    "현재 가공 화면은 다중가공 중간관리자 시설 지시를 지원하지 않습니다.");
+
+            await coordinatorScreen.QueueAsync(
+                plan,
+                directive,
+                reserveFiveWings,
+                ct).ConfigureAwait(false);
             return true;
         }, ct);
 
