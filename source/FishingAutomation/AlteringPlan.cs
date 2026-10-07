@@ -136,6 +136,7 @@ internal sealed class AlteringAutomation
     private readonly int _verificationAttempts;
     private readonly IAlteringSupplyResolver? _supplyResolver;
     private readonly IAlteringInternalConsumptionObserver? _internalConsumptionObserver;
+    private readonly Action<AlteringPlan, IReadOnlyList<AlteringWork>>? _onConfirmedReceipt;
     private readonly AlteringSessionStore? _sessionStore;
     private AlteringSessionState? _session;
     private long? _estimatedWorkSeconds;
@@ -153,7 +154,8 @@ internal sealed class AlteringAutomation
         IAlteringSupplyResolver? supplyResolver = null,
         AlteringSessionStore? sessionStore = null,
         AlteringSessionState? session = null,
-        IAlteringInternalConsumptionObserver? internalConsumptionObserver = null)
+        IAlteringInternalConsumptionObserver? internalConsumptionObserver = null,
+        Action<AlteringPlan, IReadOnlyList<AlteringWork>>? onConfirmedReceipt = null)
     {
         if ((sessionStore is null) != (session is null))
             throw new ArgumentException("이어하기 저장소와 세션 상태는 함께 제공해야 합니다.");
@@ -164,6 +166,7 @@ internal sealed class AlteringAutomation
         _verificationAttempts = verificationAttempts;
         _supplyResolver = supplyResolver;
         _internalConsumptionObserver = internalConsumptionObserver;
+        _onConfirmedReceipt = onConfirmedReceipt;
         _sessionStore = sessionStore;
         _session = session;
     }
@@ -365,6 +368,11 @@ internal sealed class AlteringAutomation
             if (await CollectIfReadyAsync(plan, works, ct))
             {
                 works = await _data.WorksAsync(ct);
+                // A nested dependency can start before RunBatchAsync returns.
+                // Reconcile the proven receipt immediately, rather than leaving
+                // the parent lane's shrinking queue for a child to misclassify
+                // as an external/manual cancellation.
+                _onConfirmedReceipt?.Invoke(plan, works);
                 SaveStage("가공 진행");
             }
 

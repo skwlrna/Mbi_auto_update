@@ -37,10 +37,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.37"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.38"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.37</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.38</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -600,6 +600,9 @@ jobs:
              $laneOwnership -notmatch '외부 수령 또는 취소 가능성' -or
              $laneOwnership -notmatch '자동화가 등록하지 않은 작업 증가') { throw 'facility lane ownership ledger safety rules missing' }
           if($laneOwnership -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'facility ownership ledger must never own direct input' }
+          if($laneOwnership -notmatch 'IntermediateOwners' -or $laneOwnership -notmatch 'IntermediateDepth') { throw 'nested facility lease stack missing' }
+          if($dependencyScheduler -notmatch 'completedSession = store.Load' -or $dependencyScheduler -notmatch 'completedSession.MatchesIdentity') { throw 'satisfied dependency session cleanup missing' }
+          if($alteringPlan -notmatch '_onConfirmedReceipt' -or $multiAlterMain -notmatch 'onConfirmedReceipt:' -or $dependencyScheduler -notmatch 'onConfirmedReceipt:') { throw 'confirmed altering receipt must reconcile facility ownership before nested material work' }
           if($multiAlter -notmatch 'FacilityLaneState' -or
              $multiAlter -notmatch 'AssertAccess' -or
              $multiAlter -notmatch 'allowShrink: false' -or

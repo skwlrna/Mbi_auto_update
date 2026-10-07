@@ -240,7 +240,12 @@ public sealed partial class MainForm
                     supplyResolver: resolver,
                     sessionStore: store,
                     session: session,
-                    internalConsumptionObserver: consumptionLedger);
+                    internalConsumptionObserver: consumptionLedger,
+                    onConfirmedReceipt: (receiptPlan, remainingWorks) =>
+                        laneState.Observe(
+                            receiptPlan.FacilityName,
+                            remainingWorks,
+                            allowShrink: true));
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);
