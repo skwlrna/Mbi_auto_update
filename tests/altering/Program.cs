@@ -205,7 +205,7 @@ Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
 Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
         TimeSpan.FromSeconds(3)),
-    "facility arrival requires the full stable frame and duration threshold");
+    "18:16 sufficient-material regression: facility arrival requires the full stable frame and duration threshold");
 Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
     "facility arrival keeps a delayed final recheck after the stable window");
 
