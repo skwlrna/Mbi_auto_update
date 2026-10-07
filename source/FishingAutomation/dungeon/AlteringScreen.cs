@@ -180,14 +180,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
     private static bool HasFacilityMoveButtonVisual(Bitmap frame)
     {
-        // Detect the broad remote "설비로 이동" pill first. The close-X detector
-        // separately validates real diagonal X geometry so remote currency digits
-        // cannot mask a genuine move button.
+        // Prove the remote "설비로 이동" pill with TWO left-side signals:
+        // (1) the broad teal shape and (2) teal fill around the fixed click anchor.
+        // The top-right X is advisory only because the 17:21 live failure showed
+        // currency digits can mimic it and incorrectly erase a genuine move button.
+        var bounds = new Rectangle(Point.Empty, frame.Size);
         var roi = Rectangle.Intersect(
             AlteringFacilityLayout.MoveButtonVisualArea,
-            new Rectangle(Point.Empty, frame.Size));
-        if (roi.Width < 120 || roi.Height < 45)
+            bounds);
+        var anchor = Rectangle.Intersect(
+            AlteringFacilityLayout.MoveButtonAnchorArea,
+            bounds);
+        if (roi.Width < 120 || roi.Height < 45 ||
+            anchor.Width < 80 || anchor.Height < 24)
             return false;
+
+        static bool IsMoveTeal(Color p)
+            => p.B >= 35 && p.G >= 30 && p.R <= 65 &&
+               p.B >= p.R + 18 && p.G >= p.R + 10;
 
         int sampled = 0;
         int teal = 0;
@@ -198,13 +208,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         {
             Color p = frame.GetPixel(x, y);
             sampled++;
-
-            // Remote "설비로 이동" is a broad blue/teal pill.  The on-site
-            // "모두 받기" control and slot rings are gray and fail the channel
-            // separation below even when brightness varies.
-            bool button = p.B >= 35 && p.G >= 30 && p.R <= 65 &&
-                p.B >= p.R + 18 && p.G >= p.R + 10;
-            if (!button)
+            if (!IsMoveTeal(p))
                 continue;
 
             teal++;
@@ -223,13 +227,26 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         if (!moveShape)
             return false;
 
-        // The user-confirmed on-site screen has a top-right X. It is authoritative:
-        // the left-side "모두 받기" control can overlap this move-button ROI and must
-        // never win merely because it is a strong blue/teal shape.
+        int anchorSampled = 0;
+        int anchorTeal = 0;
+        for (int y = anchor.Top; y < anchor.Bottom; y += 2)
+        for (int x = anchor.Left; x < anchor.Right; x += 2)
+        {
+            anchorSampled++;
+            if (IsMoveTeal(frame.GetPixel(x, y)))
+                anchorTeal++;
+        }
+
+        // The real fixed button fills a large portion of the anchor area.
+        // Sparse blue fragments from other on-site controls cannot satisfy this.
+        bool moveAnchor = anchorSampled > 0 &&
+            anchorTeal * 100 >= anchorSampled * 18;
+
         bool onsiteCloseVisible = HasOnsiteCloseButtonVisual(frame);
         return AlteringFacilityLayout.ShouldAcceptMoveButton(
             onsiteCloseVisible,
-            moveShapeVisible: true);
+            moveShapeVisible: moveShape,
+            moveAnchorVisible: moveAnchor);
     }
 
     private async Task<bool> WaitForCollectPromptAsync(
@@ -493,7 +510,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 await Task.Delay(100, ct);
         }
 
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 연속 등록 · 현장 상태 유지 확인 · 우측 상단 X 우선 판정 · 설비 이동 오탐 차단");
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 연속 등록 · 현장 상태 유지 확인 · 고정 이동버튼 전체형태+중심앵커 부재 2회 확인");
         return true;
     }
 

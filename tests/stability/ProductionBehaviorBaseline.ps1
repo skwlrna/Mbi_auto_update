@@ -122,6 +122,13 @@ Match-Required $facilityTravel '설비 도착 후보 후행 재확인 실패' 'f
 Match-Required $facilityTravel 'CLI AutoTraveling=false' 'successful arrival records proven non-travel CLI'
 Match-Required $alterTests '16:43 arrival regression' '16:43 transient move-button disappearance remains an executable regression case'
 
+# 4c) 17:21 real-world regression: top-right currency/X ambiguity cannot hide a real move button.
+Match-Required $alter 'MoveButtonAnchorArea' 'move-button detector uses the fixed left-side anchor area'
+Match-Required $alter 'anchorTeal \* 100 >= anchorSampled \* 18' 'move-button anchor requires substantial teal fill'
+Match-Required $alter 'moveAnchorVisible: moveAnchor' 'move-button policy receives independent fixed-anchor proof'
+Match-Required $alterTests '17:21 regression' '17:21 currency/X veto failure remains an executable regression case'
+Match-Required $alterTests 'isolated anchor color cannot masquerade' 'remote move detection still requires broad shape plus anchor'
+
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'
 Match-Required $fieldExit '일반 필드 2프레임 확인' 'processing UI exit still requires stable field confirmation'

@@ -42,10 +42,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.43"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.44"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.43</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.44</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -241,16 +241,15 @@ jobs:
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
-             $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)'){throw 'fixed facility move geometry missing'}
+             $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)' -or
+             $facilityLayout -notmatch 'MoveButtonAnchorArea = new\(35, 218, 100, 34\)'){throw 'fixed facility move shape/anchor geometry missing'}
           if($facilityLayout -notmatch 'OnsiteCloseVisualArea = new\(744, 42, 44, 44\)' -or
-             $facilityLayout -notmatch 'ShouldAcceptMoveButton'){throw 'on-site close-X move veto policy missing'}
-          if($screen -match 'strongMoveShape'){throw 'unsafe strong move-button override returned'}
+             $facilityLayout -notmatch 'moveShapeVisible && moveAnchorVisible'){throw 'fixed-anchor move authority policy missing'}
           if($screen -notmatch 'HasOnsiteCloseButtonVisual' -or
-             $screen -notmatch 'centerBright >= 4' -or
-             $screen -notmatch 'diagonal >= 18' -or
-             $screen -notmatch 'q1 >= 3 && q2 >= 3 && q3 >= 3 && q4 >= 3' -or
-             $screen -notmatch 'ShouldAcceptMoveButton'){throw 'on-site close-X/currency-digit discriminator missing'}
-          if($screen -notmatch '우측 상단 X 우선 판정 · 설비 이동 오탐 차단'){throw 'on-site close-X reuse diagnostic missing'}
+             $screen -notmatch 'anchorTeal \* 100 >= anchorSampled \* 18' -or
+             $screen -notmatch 'moveAnchorVisible: moveAnchor' -or
+             $screen -notmatch 'ShouldAcceptMoveButton'){throw 'broad-shape plus fixed-anchor move detector missing'}
+          if($screen -notmatch '고정 이동버튼 전체형태\+중심앵커 부재 2회 확인'){throw 'on-site reuse fixed-anchor diagnostic missing'}
           if($screen -notmatch 'HasFacilityMoveButtonVisual' -or
              $screen -notmatch '품목 선택 전 설비로 이동' -or
              $screen -notmatch '설비 도착 · 이제'){throw 'facility-first processing route missing'}

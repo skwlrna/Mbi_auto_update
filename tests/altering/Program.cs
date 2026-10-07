@@ -257,12 +257,28 @@ Check(!AlteringRecipeLayout.IsFixedFacility("약품 가공 시설") &&
 Check(AlteringFacilityLayout.IsSafeMoveGeometry() &&
       AlteringFacilityLayout.MoveButtonPoint == new System.Drawing.Point(85, 235) &&
       AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65) &&
+      AlteringFacilityLayout.MoveButtonAnchorArea == new System.Drawing.Rectangle(35, 218, 100, 34) &&
       AlteringFacilityLayout.OnsiteCloseVisualArea == new System.Drawing.Rectangle(744, 42, 44, 44),
-    "facility move uses user-confirmed remote button and on-site close-X geometry");
-Check(!AlteringFacilityLayout.ShouldAcceptMoveButton(true, true),
-    "on-site close X vetoes a strong blue receive-control false move match");
-Check(AlteringFacilityLayout.ShouldAcceptMoveButton(false, true),
-    "real remote move shape remains accepted when the on-site close X is absent");
+    "facility move uses fixed broad shape + center-anchor geometry");
+Check(AlteringFacilityLayout.ShouldAcceptMoveButton(
+        onsiteCloseVisible: true,
+        moveShapeVisible: true,
+        moveAnchorVisible: true),
+    "17:21 regression: ambiguous top-right X/currency match cannot veto a proven fixed move button");
+Check(AlteringFacilityLayout.ShouldAcceptMoveButton(
+        onsiteCloseVisible: false,
+        moveShapeVisible: true,
+        moveAnchorVisible: true),
+    "real remote move shape plus fixed anchor is accepted");
+Check(!AlteringFacilityLayout.ShouldAcceptMoveButton(
+        onsiteCloseVisible: true,
+        moveShapeVisible: true,
+        moveAnchorVisible: false) &&
+      !AlteringFacilityLayout.ShouldAcceptMoveButton(
+        onsiteCloseVisible: false,
+        moveShapeVisible: false,
+        moveAnchorVisible: true),
+    "on-site fragments or isolated anchor color cannot masquerade as the remote move button");
 
 Check(AlteringFacilityResolver.Resolve(new AlteringRecipe("새록 버섯 진액", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&
       AlteringFacilityResolver.Resolve(new AlteringRecipe("튼튼 버섯 가루", true, 5, null, Array.Empty<AlteringIngredient>())) == "약품 가공 시설" &&

@@ -9,16 +9,22 @@ internal static class AlteringFacilityLayout
     // independent of OCR so missing text recognition cannot be mistaken for on-site.
     internal static readonly Rectangle MoveButtonVisualArea = new(15, 205, 155, 65);
     internal static readonly Point MoveButtonPoint = new(85, 235);
+    internal static readonly Rectangle MoveButtonAnchorArea = new(35, 218, 100, 34);
 
-    // User-confirmed on-site facility screen. The white X at the top-right is
-    // present on-site and absent on the remote/back-arrow screen. It is the
-    // highest-priority visual veto against false remote detection.
+    // The top-right X remains an advisory on-site signal, but V3.1.43 live
+    // evidence showed remote currency digits can still mimic it. A real remote
+    // move button must therefore be proved independently at its fixed left-side
+    // anchor and cannot be canceled by the ambiguous X detector.
     internal static readonly Rectangle OnsiteCloseVisualArea = new(744, 42, 44, 44);
 
-    // The on-site top-right X is authoritative. A blue/teal fragment from the
-    // on-site receive control must never override it and trigger another travel.
-    internal static bool ShouldAcceptMoveButton(bool onsiteCloseVisible, bool moveShapeVisible)
-        => moveShapeVisible && !onsiteCloseVisible;
+    internal static bool ShouldAcceptMoveButton(
+        bool onsiteCloseVisible,
+        bool moveShapeVisible,
+        bool moveAnchorVisible)
+    {
+        _ = onsiteCloseVisible; // advisory only; never veto proven fixed-anchor remote UI
+        return moveShapeVisible && moveAnchorVisible;
+    }
 
     internal static bool IsSafeMoveGeometry()
         => MoveButtonVisualArea.Contains(MoveButtonPoint) &&
@@ -26,6 +32,11 @@ internal static class AlteringFacilityLayout
            MoveButtonVisualArea.Top >= 0 &&
            MoveButtonVisualArea.Right <= 800 &&
            MoveButtonVisualArea.Bottom <= 1000 &&
+           MoveButtonAnchorArea.Contains(MoveButtonPoint) &&
+           MoveButtonAnchorArea.Left >= MoveButtonVisualArea.Left &&
+           MoveButtonAnchorArea.Top >= MoveButtonVisualArea.Top &&
+           MoveButtonAnchorArea.Right <= MoveButtonVisualArea.Right &&
+           MoveButtonAnchorArea.Bottom <= MoveButtonVisualArea.Bottom &&
            OnsiteCloseVisualArea.Left >= 0 &&
            OnsiteCloseVisualArea.Top >= 0 &&
            OnsiteCloseVisualArea.Right <= 800 &&
