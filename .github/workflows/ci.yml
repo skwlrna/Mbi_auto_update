@@ -600,6 +600,8 @@ jobs:
              $laneOwnership -notmatch '외부 수령 또는 취소 가능성' -or
              $laneOwnership -notmatch '자동화가 등록하지 않은 작업 증가') { throw 'facility lane ownership ledger safety rules missing' }
           if($laneOwnership -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'facility ownership ledger must never own direct input' }
+          if($laneOwnership -notmatch 'IntermediateOwners' -or $laneOwnership -notmatch 'IntermediateDepth') { throw 'nested facility lease stack missing' }
+          if($dependencyScheduler -notmatch 'completedSession = store.Load' -or $dependencyScheduler -notmatch 'completedSession.MatchesIdentity') { throw 'satisfied dependency session cleanup missing' }
           if($multiAlter -notmatch 'FacilityLaneState' -or
              $multiAlter -notmatch 'AssertAccess' -or
              $multiAlter -notmatch 'allowShrink: false' -or
