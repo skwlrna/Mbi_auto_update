@@ -203,6 +203,9 @@ Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
     "facility arrival requires the full stable frame and duration threshold");
 Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
     "facility arrival keeps a delayed final recheck after the stable window");
+Check(AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames > 2 &&
+      AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableDuration >= TimeSpan.FromSeconds(3),
+    "18:16 sufficient-material regression: initial missing move-button frames can never prove onsite by themselves");
 
 Check(AlteringReceiptPolicy.IsCliReceiptConfirmed(7, 6),
     "same-item queue decrease confirms an altering receipt");

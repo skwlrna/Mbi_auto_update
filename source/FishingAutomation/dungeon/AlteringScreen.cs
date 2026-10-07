@@ -961,7 +961,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         // V3.1.8 proved that OCR can miss the visible label and must never turn
         // "OCR 없음" into "already on-site".
         int moveFrames = 0;
-        int onsiteFrames = 0;
+        bool shouldClickMove = remoteConfirmed;
 
         if (!remoteConfirmed)
         {
@@ -974,32 +974,33 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     Fail(frame, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
 
                 bool moveVisible = HasFacilityMoveButtonVisual(frame);
-                if (!moveVisible)
+                if (moveVisible)
                 {
-                    onsiteFrames++;
-                    moveFrames = 0;
-                    if (onsiteFrames >= 2)
+                    moveFrames++;
+                    if (moveFrames >= 2)
                     {
-                        Log?.Invoke(
-                            $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창");
-                        return;
+                        shouldClickMove = true;
+                        break;
                     }
                 }
                 else
                 {
-                    moveFrames++;
-                    onsiteFrames = 0;
-                    if (moveFrames >= 2)
-                        break;
+                    moveFrames = 0;
                 }
 
                 await Task.Delay(180, ct);
             }
 
-            if (moveFrames < 2)
+            if (!shouldClickMove)
             {
-                using var failed = Capture(ct);
-                Fail(failed, "설비 이동 버튼 화면 상태를 안정적으로 확인하지 못했습니다.");
+                // V3.1.44 live log (18:16): materials were already sufficient and
+                // this old fast path treated only two missing move-button frames as
+                // "already onsite", then selected the recipe while still remote.
+                // Never authorize recipe input here. Feed the candidate into the
+                // same long onsite proof used after real travel.
+                Log?.Invoke(
+                    $"[자동 가공] {plan.ScreenTitle} · 최초 진입 이동버튼 미검출 · " +
+                    "2프레임 현장 확정 금지 · 클릭 없이 7프레임/3초+후행 재확인으로 전환");
             }
         }
         else
@@ -1013,18 +1014,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 "작은 설비로 이동 문구 OCR 생략");
         }
 
-        _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
-        Log?.Invoke(
-            $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
-            $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · OCR 없음");
-        _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+        if (shouldClickMove)
+        {
+            _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
+                $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · OCR 없음");
+            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
 
-        bool travelConfirmSent = await ConfirmFacilityTravelDialogIfPresentAsync(
-            plan, ct);
-        Log?.Invoke(
-            travelConfirmSent
-                ? $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 처리 완료 · Space 1회 · 게임 자동이동 대기"
-                : $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 없음 · Space 생략 · 게임 자동이동 대기");
+            bool travelConfirmSent = await ConfirmFacilityTravelDialogIfPresentAsync(
+                plan, ct);
+            Log?.Invoke(
+                travelConfirmSent
+                    ? $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 처리 완료 · Space 1회 · 게임 자동이동 대기"
+                    : $"[자동 가공] {plan.ScreenTitle} · 설비 이동 확인창 없음 · Space 생략 · 게임 자동이동 대기");
+        }
 
         bool sawDeparture = false;
         bool sawTravel = false;

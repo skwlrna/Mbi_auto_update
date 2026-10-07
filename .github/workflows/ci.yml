@@ -42,10 +42,10 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.44"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.45"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.44</Version>') { throw 'project version mismatch' }
+          if ($p -notmatch '<Version>3\.1\.45</Version>') { throw 'project version mismatch' }
 
       - name: Updater rollback regression tests
         shell: pwsh
@@ -302,11 +302,13 @@ jobs:
             if($planText -notmatch [regex]::Escape($facility)){throw "facility missing from common altering path: $facility"}
           }
           if($queue -notmatch 'V3\.1\.8 execution model for every processing facility'){throw 'V3.1.8 all-processing execution marker missing'}
-          if ($screen -notmatch '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창') { throw 'already-on-site visual facility state missing' }
+          if ($screen -match '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창') { throw 'unsafe initial two-frame onsite shortcut returned' }
           $travel = [regex]::Match($screen, 'private async Task TravelToFacilityAsync[\s\S]*?(?=\r?\n    // Free navigation only)').Value
           if ($travel -notmatch 'facilityVisible' -or
               $travel -notmatch '!moveVisible' -or
-              $travel -notmatch 'onsiteStableFrames') { throw 'direct on-site arrival visual gate missing' }
+              $travel -notmatch 'onsiteStableFrames' -or
+              $travel -notmatch '2프레임 현장 확정 금지' -or
+              $travel -notmatch 'if \(shouldClickMove\)') { throw 'unified initial facility arrival gate missing' }
           if ($travel -match 'if \(sawDeparture &&\s*facilityVisible') { throw 'departure evidence must not gate direct facility arrival' }
           if ($travel -notmatch 'HasStableOnsiteEvidence' -or
               $travel -notmatch 'FinalOnsiteRecheckDelay' -or

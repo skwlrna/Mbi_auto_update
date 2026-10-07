@@ -129,6 +129,13 @@ Match-Required $alter 'moveAnchorVisible: moveAnchor' 'move-button policy receiv
 Match-Required $alterTests '17:21 regression' '17:21 currency/X veto failure remains an executable regression case'
 Match-Required $alterTests 'isolated anchor color cannot masquerade' 'remote move detection still requires broad shape plus anchor'
 
+# 4d) 18:16 sufficient-material regression: initial facility entry cannot use the old 2-frame onsite shortcut.
+Match-Forbidden $facilityTravel '설비로 이동 버튼 화면 없음 2프레임 · 이미 현장 가공창' 'initial two-frame onsite shortcut is permanently removed'
+Match-Required $facilityTravel '2프레임 현장 확정 금지' 'initial missing move-button observations enter long onsite verification'
+Match-Required $facilityTravel 'if \(shouldClickMove\)' 'facility move click occurs only after two positive move-button frames or explicit remote detail proof'
+Match-Required $facilityTravel 'HasStableOnsiteEvidence' 'non-click initial path reaches the same long onsite proof'
+Match-Required $alterTests '18:16 sufficient-material regression' '18:16 sufficient-material fast-path failure remains an executable regression case'
+
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'
 Match-Required $fieldExit '일반 필드 2프레임 확인' 'processing UI exit still requires stable field confirmation'
