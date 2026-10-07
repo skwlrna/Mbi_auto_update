@@ -577,8 +577,9 @@ jobs:
           $receiptPolicy = Get-Content source/FishingAutomation/AlteringReceiptPolicy.cs -Raw
           if ($receiptPolicy -notmatch '!travelDialogVisible' -or $receiptPolicy -notmatch '!autoTraveling') { throw 'altering receipt travel veto policy missing' }
           if ($alterScreen -notmatch '완료품 수령 전 현장 가공대 확인' -or
-              $alterScreen -notmatch 'await TravelToFacilityAsync\(plan, ct\)' -or
-              $alterScreen -notmatch '설비로 이동 없음.*파란 수령 버튼.*Space') { throw 'altering receipt must prove on-site bench before Space' }
+              $alterScreen -notmatch 'await TravelToFacilityAsync\(plan, ct, receiptMode: true\)' -or
+              $alterScreen -notmatch '수령 현장 확정.*파란 수령 버튼.*Space 1회' -or
+              $alterScreen -notmatch 'ShouldBlockReceiptForMoveButton') { throw 'altering receipt must prove receipt-specific on-site state before Space' }
           if ($alterScreen -notmatch 'IsFacilityTravelDialogAsync' -or
               $alterScreen -notmatch 'AutoTraveling=true · 추가 Space 차단') { throw 'altering completion travel popup/autotravel Space veto missing' }
           if ($gatherData -notmatch 'IsTransientLoadingRejection' -or $gatherData -notmatch '20회 연속 거절') { throw 'gathering transient CLI retry missing' }
