@@ -1387,7 +1387,7 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 }
 
 
-internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
+internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
 {
     private static readonly GatheringActivity Idle =
         new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
@@ -1493,6 +1493,14 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         Queued.Add(plan.DisplayName);
         _works.Add(new(plan.OutputName, plan.FacilityName, "Completed", true, 0));
     }
+
+    public Task QueueAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Action reserveFiveWings,
+        CancellationToken ct)
+        => QueueAsync(plan, reserveFiveWings, ct);
+
 
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
