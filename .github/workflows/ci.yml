@@ -251,7 +251,7 @@ jobs:
              $screen -notmatch 'ShouldAcceptMoveButton'){throw 'broad-shape plus fixed-anchor move detector missing'}
           if($screen -notmatch '고정 이동버튼 전체형태\+중심앵커 부재 2회 확인'){throw 'on-site reuse fixed-anchor diagnostic missing'}
           if($screen -notmatch 'HasFacilityMoveButtonVisual' -or
-             $screen -notmatch '품목 선택 전 설비로 이동' -or
+             $screen -notmatch '품목 선택보다 설비 이동 1회 우선' -or
              $screen -notmatch '설비 도착 · 이제'){throw 'facility-first processing route missing'}
           if($screen -match 'FindAsync\([^\r\n]*FacilityMoveButton[^\r\n]*"설비로 이동"'){throw 'small facility move label OCR returned to processing flow'}
           if($screen -notmatch 'teal \* 100 < sampled \* 5' -or
