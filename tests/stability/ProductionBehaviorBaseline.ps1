@@ -33,6 +33,8 @@ function Method-Block([string]$text, [string]$startPattern, [string]$nextPattern
 
 $multiGather = Read-Source 'source/FishingAutomation/MultiGatheringCoordinator.cs'
 $multiAlter = Read-Source 'source/FishingAutomation/MultiAlteringCoordinator.cs'
+$multiAlterDependency = Read-Source 'source/FishingAutomation/MultiAlteringDependencyScheduler.cs'
+$alterPlan = Read-Source 'source/FishingAutomation/AlteringPlan.cs'
 $lane = Read-Source 'source/FishingAutomation/FacilityLaneState.cs'
 $gathering = Read-Source 'source/FishingAutomation/GatheringAutomation.cs'
 $bulk = Read-Source 'source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs'
@@ -53,6 +55,15 @@ Match-Required $multiAlter 'runBatch\(plan, 1, ct\)' 'same-facility work remains
 Match-Required $multiAlter '같은 시설 여러 품목은 라운드로빈 혼합' 'round-robin mixed-facility behavior remains explicit'
 Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slot completion never causes a facility move'
 Match-Forbidden $multiAlter 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime|0x39' 'multi-altering coordinator owns no direct UI input'
+
+# 1b) V3.1.49 speed-up changes polling only; input order/coordinates stay owned by existing guards.
+Match-Required $alterPlan 'VerifyRegistrationAsync' 'registration uses dedicated fast-then-safe verification'
+Match-Required $alterPlan 'TimeSpan\.FromMilliseconds\(250\)' 'registration fast poll is 250ms'
+Match-Required $alterPlan 'TimeSpan\.FromSeconds\(1\)' 'registration verification falls back to the proven 1s poll'
+Match-Required $alter 'WaitForScreenStateAsync' 'processing navigation uses bounded screen-state polling'
+Match-Required $alter 'WaitForProcessingNavigationReadyAsync' 'K/menu navigation can advance as soon as the expected screen appears'
+Match-Required $multiAlter 'Math\.Clamp\(waitSeconds, 1, 30\)' 'multi-altering batch completion minimum poll is 1s'
+Match-Required $multiAlterDependency 'Math\.Clamp\(waitSeconds, 1, 30\)' 'dependency batch completion minimum poll is 1s'
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
