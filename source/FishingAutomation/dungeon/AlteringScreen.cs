@@ -389,6 +389,51 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         return true;
     }
 
+    private async Task<bool> WaitForScreenStateAsync(
+        Func<Bitmap, Task<bool>> match,
+        int timeoutMs,
+        CancellationToken ct)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+            if (await match(frame))
+                return true;
+
+            if (DateTime.UtcNow >= deadline)
+                return false;
+
+            await Task.Delay(100, ct);
+        }
+    }
+
+    private Task<bool> WaitForFacilityHeaderAsync(
+        string title,
+        int timeoutMs,
+        CancellationToken ct)
+        => WaitForScreenStateAsync(
+            async frame => await FindFacilityHeaderAsync(frame, title, ct) is not null,
+            timeoutMs,
+            ct);
+
+    private Task<bool> WaitForProcessingNavigationReadyAsync(
+        AlteringPlan plan,
+        int timeoutMs,
+        CancellationToken ct)
+        => WaitForScreenStateAsync(
+            async frame =>
+            {
+                if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
+                    return true;
+                if (await FindFacilityHeaderAsync(frame, "가공", ct) is not null)
+                    return true;
+                return await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null;
+            },
+            timeoutMs,
+            ct);
+
     private async Task EnterFacilityAsync(AlteringPlan plan, CancellationToken ct)
     {
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
@@ -409,7 +454,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 {
                     Log?.Invoke("[자동 가공] 현재 화면=품목 상세 · 닫고 시설 화면을 다시 확인합니다.");
                     _ui.TapFresh(0x01, ct);
-                    await Task.Delay(700, ct);
+                    await WaitForFacilityHeaderAsync(plan.ScreenTitle, 700, ct);
                     continue;
                 }
 
@@ -428,7 +473,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다 · Esc");
                     _ui.TapFresh(0x01, ct);
-                    await Task.Delay(900, ct);
+                    await WaitForFacilityHeaderAsync("가공", 900, ct);
                     continue;
                 }
 
@@ -442,16 +487,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         continue;
                     }
 
-                    await Task.Delay(1200, ct);
-                    using var verify = Capture(ct);
-                    if (await FindFacilityHeaderAsync(verify, plan.ScreenTitle, ct) is not null)
+                    if (await WaitForFacilityHeaderAsync(plan.ScreenTitle, 1200, ct))
                     {
-                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle}");
+                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 화면 확인 즉시 진행");
                         return;
                     }
 
                     Log?.Invoke($"[자동 가공] 시설 전환 확인 대기 {attempt}/{maxAttempts} · 현재 화면을 다시 판정합니다.");
-                    await Task.Delay(900, ct);
+                    await WaitForProcessingNavigationReadyAsync(plan, 900, ct);
                     continue;
                 }
 
@@ -461,7 +504,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                 _ui.TapFresh(0x25, ct);
             }
 
-            await Task.Delay(1000, ct);
+            await WaitForProcessingNavigationReadyAsync(plan, 1000, ct);
             using (var menu = Capture(ct))
             {
                 if (await FindFacilityHeaderAsync(menu, plan.ScreenTitle, ct) is not null)
@@ -478,7 +521,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         await Task.Delay(1200, ct);
                         continue;
                     }
-                    await Task.Delay(900, ct);
+                    await WaitForFacilityHeaderAsync("가공", 900, ct);
                 }
             }
         }

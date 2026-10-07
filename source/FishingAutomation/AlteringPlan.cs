@@ -520,7 +520,7 @@ internal sealed class AlteringAutomation
                         ReservedWings += 5;
                     }, ct);
 
-                    await VerifyAsync(async token =>
+                    await VerifyRegistrationAsync(async token =>
                     {
                         int count = Matching(await _data.WorksAsync(token), plan).Count();
                         if (count > previous + 1)
@@ -528,7 +528,7 @@ internal sealed class AlteringAutomation
                                 "동시에 다른 가공 작업이 등록되어 수량을 확정할 수 없습니다.");
                         return count == previous + 1;
                     }, "작업 등록을 확인하지 못했습니다. 재화 중복 사용을 막기 위해 재클릭하지 않고 정지합니다.",
-                    ct, TimeSpan.FromSeconds(1));
+                    ct);
 
                     if (_internalConsumptionObserver is not null && consumptionBefore is not null)
                         await _internalConsumptionObserver.CommitAfterRegistrationAsync(
@@ -777,6 +777,29 @@ internal sealed class AlteringAutomation
             "2차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 클릭 없이 정지합니다.", ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 2차 모두 받기");
         return true;
+    }
+
+    private async Task VerifyRegistrationAsync(
+        Func<CancellationToken, Task<bool>> condition,
+        string failure,
+        CancellationToken ct)
+    {
+        // Normal registrations usually appear in CLI almost immediately. Probe quickly
+        // for the first two seconds, then fall back to the proven 1s polling path so
+        // slow/loading environments keep the previous safety margin.
+        const int fastAttempts = 8;
+        for (int i = 0; i < fastAttempts; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await condition(ct)) return;
+            await _delay(TimeSpan.FromMilliseconds(250), ct);
+        }
+
+        await VerifyAsync(
+            condition,
+            failure,
+            ct,
+            TimeSpan.FromSeconds(1));
     }
 
     private async Task VerifyAsync(

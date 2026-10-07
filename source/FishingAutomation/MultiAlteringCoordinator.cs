@@ -234,10 +234,10 @@ internal sealed class MultiAlteringCoordinator
             int runningSlots = active.Count(x => !x.IsCompleted);
             Log?.Invoke(
                 $"[다중가공] 병렬 대기 · 진행/대기 {runningSlots}건 · 완료 누적 {completedSlots}건 · " +
-                $"다음 확인 약 {Math.Clamp(waitSeconds, 2, 30)}초 · 배치 전체 완료 전 이동 없음");
+                $"다음 확인 약 {Math.Clamp(waitSeconds, 1, 30)}초 · 배치 전체 완료 전 이동 없음");
 
             await delay(
-                TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 2, 30)),
+                TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 1, 30)),
                 ct);
         }
 

@@ -16,7 +16,7 @@ internal sealed record ReleaseUpdateInfo(
 
 internal static class UpdateManager
 {
-    public const string CurrentVersion = "V3.1.48";
+    public const string CurrentVersion = "V3.1.49";
     public const string RepositoryOwner = "skwlrna";
     public const string RepositoryName = "Mbi_auto_update";
 

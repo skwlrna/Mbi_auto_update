@@ -276,7 +276,7 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                 $"배치 전체 완료 전 이동 없음");
 
             await _delay(
-                TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 2, 30)),
+                TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 1, 30)),
                 ct);
         }
     }
