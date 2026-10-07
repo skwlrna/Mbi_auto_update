@@ -72,6 +72,15 @@ Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 10
 Match-Required $alter '현장 수령 화면 재확인 완료' 'receipt Space is emitted only after the post-delay recheck'
 Match-Required $alter 'Space 1회' 'receipt input remains a single Space after stabilization'
 
+# 1d) V3.1.51 receipt state is separated from the legacy teal move-button detector.
+Match-Required $alter 'receiptMode = false' 'facility travel exposes an explicit receipt-only state mode'
+Match-Required $alter 'receiptMode: true' 'receipt callers opt into receipt-only travel state handling'
+Match-Required $alter 'IsRemoteMoveButtonAfterReceiptMove' 'post-move receipt travel uses strict remote evidence'
+Match-Required $alter 'ShouldBlockReceiptForMoveButton' 'receive Space uses trusted onsite state instead of teal-only veto'
+Match-Required $receiptPolicy 'visualMoveButton && exactMoveLabelVisible' 'post-move teal shape alone cannot prove remote during receipt'
+Match-Required $receiptPolicy 'visualMoveButton && !trustedOnsiteFacility' 'legacy visual veto remains conservative before onsite proof'
+Match-Required $alterTests '04:05 receipt regression' '04:05 teal false-positive receipt failure remains executable coverage'
+
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
     Match-Required $lane ([regex]::Escape($required)) "facility ownership keeps $required"
