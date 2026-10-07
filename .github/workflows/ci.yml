@@ -257,7 +257,8 @@ jobs:
           if($screen -notmatch 'teal \* 100 < sampled \* 5' -or
              $screen -notmatch 'width >= 90 && height >= 18'){throw 'facility move teal-shape detector missing'}
           if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
-             $screen -notmatch '작은 설비로 이동 문구 OCR 생략'){throw 'fixed move click/OCR-skip trace missing'}
+             $screen -notmatch 'HasFacilityMoveButtonPositiveEvidenceAsync' -or
+             $screen -notmatch '입력 1회 고정 · 재클릭 금지'){throw 'fixed one-shot move click/positive-evidence trace missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync)').Value
           $remoteRecovery = [regex]::Match($screen, 'private async Task RecoverRemoteDetailToOnsiteAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
