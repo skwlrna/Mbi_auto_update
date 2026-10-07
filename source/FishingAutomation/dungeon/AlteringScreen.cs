@@ -1200,9 +1200,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
 
     private async Task<bool> WaitForReceiptFacilityReturnAsync(
         AlteringPlan plan,
+        int? receiptWorkCountBefore,
         CancellationToken ct)
     {
         int facilityFrames = 0;
+        int fieldFrames = 0;
         for (int wait = 0; wait < 60; wait++)
         {
             ct.ThrowIfCancellationRequested();
@@ -1211,6 +1213,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             using var returned = Capture(ct);
             if (await FindFacilityHeaderAsync(returned, plan.ScreenTitle, ct) is not null)
             {
+                fieldFrames = 0;
                 facilityFrames++;
                 if (facilityFrames >= 2)
                 {
@@ -1219,11 +1222,106 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                     Log?.Invoke($"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 확인");
                     return true;
                 }
+                continue;
             }
-            else
+
+            facilityFrames = 0;
+
+            // V3.1.39 live log (14:23): after closing the result the game
+            // returned to the FIELD, not to the metal-working facility.
+            // Only read-only CLI + stable visual state may authorize ONE
+            // navigation recovery. No second receive/confirmation Space here.
+            if (receiptWorkCountBefore is not > 0 || wait < 5)
+                continue;
+
+            bool confirmationVisible = HasBottomConfirmationModal(returned);
+            bool otherUi = await FindFacilityHeaderAsync(returned, "가공", ct) is not null ||
+                           await FindAsync(returned, new(100, 690, 580, 200), "필요한 재료", ct) is not null;
+            if (!otherUi)
             {
-                facilityFrames = 0;
+                foreach (string other in AlteringPlan.Facilities.Select(x => x.Replace(" 시설", "")))
+                {
+                    if (other == plan.ScreenTitle) continue;
+                    if (await FindFacilityHeaderAsync(returned, other, ct) is not null)
+                    {
+                        otherUi = true;
+                        break;
+                    }
+                }
             }
+
+            // Unknown/loading CLI must not turn into a field re-entry command.
+            GatheringActivity? activity = null;
+            if (_cli is not null)
+            {
+                var activityResponse = await _cli.GetActivityAsync(ct);
+                if (activityResponse.Success)
+                    activity = GatheringQueries.ParseActivity(activityResponse);
+            }
+
+            bool safeField = activity is not null &&
+                             GatheringSafetyPolicy.IsSafeField(activity) &&
+                             !activity.IsGathering && !activity.IsFishing;
+            bool mayRecover = AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+                fieldOnly: !otherUi,
+                confirmationVisible: confirmationVisible,
+                autoTraveling: activity?.IsAutoTraveling,
+                safeField: safeField,
+                receiptWorkCountBefore: receiptWorkCountBefore);
+
+            fieldFrames = mayRecover ? fieldFrames + 1 : 0;
+            if (fieldFrames < 3)
+                continue;
+
+            _confirmedOnsiteFacility = null;
+            Log?.Invoke($"[자동 가공] 수령 완료창 닫기 후 일반 필드 3회 확인 · " +
+                        $"{plan.ScreenTitle} 가공 메뉴 1회 재진입 시도 · 재수령 Space 금지");
+            await EnterFacilityAsync(plan, ct);
+
+            int reopenedFrames = 0;
+            for (int confirm = 0; confirm < 3; confirm++)
+            {
+                using var reopened = Capture(ct);
+                if (await FindFacilityHeaderAsync(reopened, plan.ScreenTitle, ct) is not null)
+                    reopenedFrames++;
+                else
+                    reopenedFrames = 0;
+                if (reopenedFrames >= 2)
+                    break;
+                await Task.Delay(250, ct);
+            }
+            if (reopenedFrames < 2)
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName} 완료창 닫기 후 가공 메뉴 재진입 상태를 2회 확인하지 못했습니다. 추가 입력 없이 정지합니다.");
+
+            // Returning to a facility proves ONLY navigation. A result popup
+            // disappearing does not prove an item was received. Fail closed if
+            // same-recipe queue has not actually decreased.
+            int? receiptWorkCountAfter = null;
+            for (int retry = 0; retry < 4; retry++)
+            {
+                receiptWorkCountAfter = await TryMatchingWorkCountAsync(plan, ct);
+                if (AlteringReceiptPolicy.IsProvenReceiptAfterReopen(
+                        receiptWorkCountBefore, receiptWorkCountAfter))
+                    break;
+                await Task.Delay(350, ct);
+            }
+
+            if (!AlteringReceiptPolicy.IsProvenReceiptAfterReopen(
+                    receiptWorkCountBefore, receiptWorkCountAfter))
+            {
+                Log?.Invoke($"[자동 가공] 일반 필드 복구 후 수령 미확정 · {plan.DisplayName} · " +
+                            $"동일 품목 작업 {receiptWorkCountBefore}->{(receiptWorkCountAfter?.ToString() ?? "조회불가")} · 재수령 입력 없음");
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName} 완료 화면에서 필드로 복귀했지만 동일 품목 작업 감소를 확인하지 못했습니다. " +
+                    "중복 수령 방지를 위해 추가 입력 없이 정지합니다.");
+            }
+
+            _stage.Move(ProductionStage.VerifyInventory,
+                $"{plan.DisplayName} 필드 복구 후 수령 확인");
+            Log?.Invoke($"[자동 가공] 수령 후 필드 복귀 자동 복구 성공 · {plan.ScreenTitle} " +
+                        $"시설창 2회 확인 · 작업 {receiptWorkCountBefore}->{receiptWorkCountAfter} · 추가 Space 0회");
+            return true;
         }
 
         return false;
@@ -1233,7 +1331,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
         AlteringPlan plan,
         CancellationToken ct,
         string reason,
-        bool cliReceiptConfirmed = false)
+        bool cliReceiptConfirmed = false,
+        int? receiptWorkCountBefore = null)
     {
         Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
         _ui.TapFresh(0x39, ct);
@@ -1338,7 +1437,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
             }
         }
 
-        return await WaitForReceiptFacilityReturnAsync(plan, ct);
+        return await WaitForReceiptFacilityReturnAsync(plan, receiptWorkCountBefore, ct);
     }
 
     private async Task<bool> ConfirmCompletionResultAsync(
@@ -1415,7 +1514,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         plan,
                         ct,
                         $"첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}",
-                        cliReceiptConfirmed: true))
+                        cliReceiptConfirmed: true,
+                        receiptWorkCountBefore: receiptBefore))
                     return true;
 
                 using var cliFailed = Capture(ct);
@@ -1456,7 +1556,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringRecoveryScreen,
                         plan,
                         ct,
                         "가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · " +
-                        $"첫 수령 전 동일 품목 작업수={(workCountBefore?.ToString() ?? "확인불가")}"))
+                        $"첫 수령 전 동일 품목 작업수={(workCountBefore?.ToString() ?? "확인불가")}",
+                        receiptWorkCountBefore: workCountBefore))
                     return true;
 
                 using var failed = Capture(ct);

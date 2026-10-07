@@ -40,4 +40,23 @@ internal static class AlteringReceiptPolicy
         => greenConfirmVisible &&
            !facilityVisible &&
            !travelDialogVisible;
+
+    // A missed facility-return screen may be a normal FIELD, but reopening
+    // requires multiple clean visual observations and a trustworthy idle CLI.
+    internal static bool CanRecoverFieldAfterCompletion(
+        bool fieldOnly,
+        bool confirmationVisible,
+        bool? autoTraveling,
+        bool safeField,
+        int? receiptWorkCountBefore)
+        => fieldOnly &&
+           !confirmationVisible &&
+           autoTraveling == false &&
+           safeField &&
+           receiptWorkCountBefore is > 0;
+
+    // Re-entering a facility is NOT proof of a receipt: queue must decrease.
+    internal static bool IsProvenReceiptAfterReopen(int? before, int? after)
+        => before is int start && after is int end &&
+           IsCliReceiptConfirmed(start, end);
 }

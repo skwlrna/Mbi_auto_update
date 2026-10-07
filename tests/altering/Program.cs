@@ -16,6 +16,41 @@ Check(!AlteringDetailPolicy.IsConfirmed(false, true, false, false),
     "materials alone do not confirm a recipe detail screen");
 Check(!AlteringDetailPolicy.IsConfirmed(false, false, true, false),
     "action alone does not confirm a recipe detail screen");
+Check(AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: true, confirmationVisible: false, autoTraveling: false,
+        safeField: true, receiptWorkCountBefore: 4),
+    "14:23 receipt regression: verified field after completion permits one safe facility re-entry");
+Check(!AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: true, confirmationVisible: true, autoTraveling: false,
+        safeField: true, receiptWorkCountBefore: 4),
+    "completion or travel popup blocks field re-entry");
+Check(!AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: true, confirmationVisible: false, autoTraveling: true,
+        safeField: true, receiptWorkCountBefore: 4),
+    "real auto-travel blocks field re-entry");
+Check(!AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: true, confirmationVisible: false, autoTraveling: null,
+        safeField: true, receiptWorkCountBefore: 4),
+    "unknown CLI state blocks field re-entry");
+Check(!AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: false, confirmationVisible: false, autoTraveling: false,
+        safeField: true, receiptWorkCountBefore: 4),
+    "other altering screens block field re-entry");
+Check(!AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: true, confirmationVisible: false, autoTraveling: false,
+        safeField: false, receiptWorkCountBefore: 4),
+    "unsafe field blocks facility re-entry");
+Check(!AlteringReceiptPolicy.CanRecoverFieldAfterCompletion(
+        fieldOnly: true, confirmationVisible: false, autoTraveling: false,
+        safeField: true, receiptWorkCountBefore: null),
+    "unknown receipt baseline forbids facility recovery");
+Check(AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 0) &&
+      AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 3),
+    "confirmed same-recipe queue drop allows continuation after reopening");
+Check(!AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 4) &&
+      !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 5) &&
+      !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, null),
+    "reopened facility cannot falsely confirm unchanged/increased/unknown receipt");
 Check(AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, false),
     "real altering completion result can authorize confirmation");
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, true, false),
