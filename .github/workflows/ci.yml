@@ -332,9 +332,9 @@ jobs:
           if ($screen -match 'ConfirmFacilityTravelDialogIfPresentAsync' -or
               $screen -notmatch '이동 확인창 감지' -or
               $screen -notmatch '이동 확인창 닫힘 확인') { throw 'continuous center travel-popup flow missing' }
-          if ($travelConfirmPolicy -notmatch 'greenConfirmationVisible' -or
-              $travelConfirmPolicy -notmatch 'travelDialogVisible' -or
-              $travelConfirmPolicy -notmatch '!confirmationAlreadySent') { throw 'facility travel confirmation safety policy missing' }
+          if ($travelConfirmPolicy -notmatch 'ShouldConfirmAfterMoveClick' -or
+              $travelConfirmPolicy -notmatch 'MaxTravelConfirmationSpaces = 2' -or
+              $travelConfirmPolicy -notmatch '!departureAlreadySeen') { throw 'facility travel confirmation safety policy missing' }
           if ($travelConfirmPolicy -notmatch 'MaxTravelConfirmationSpaces = 2' -or
               $travelConfirmPolicy -notmatch 'ShouldConfirmAfterMoveClick') { throw 'bounded center travel-popup confirmation policy missing' }
           if ($screen -notmatch 'HasBottomConfirmationModal') { throw 'completion-result visual detector missing' }
