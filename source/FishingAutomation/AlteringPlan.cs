@@ -546,8 +546,14 @@ internal sealed class AlteringAutomation
                             Log?.Invoke(
                                 $"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
 
-                            _facilityState?.InvalidateOnsite(
-                                $"재료 해결 진입 · {plan.DisplayName}");
+                            // M1: Checking or producing missing materials does not,
+                            // by itself, mean that the character left this facility.
+                            // The shared manager keeps onsite authority until the
+                            // H5 field-exit notification or a genuinely different
+                            // facility's verified queue/receipt changes its state.
+                            Log?.Invoke(
+                                $"[자동 가공] 재료 해결 진입 · {plan.DisplayName} · " +
+                                "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
                             await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
 
                             recipes = await _data.RecipesAsync(ct);
