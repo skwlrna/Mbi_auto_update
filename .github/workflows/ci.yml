@@ -318,7 +318,9 @@ jobs:
               $queue -notmatch 'throw new AlteringCoordinatorFacilityMismatchException' -or
               $queue -notmatch '가공 클릭/설비 이동 0회' -or
               $alteringPlan -notmatch 'class AlteringCoordinatorFacilityMismatchException' -or
-              $alteringPlan -notmatch 'catch \(AlteringCoordinatorFacilityMismatchException conflict\)' -or
+              $alteringPlan -notmatch 'catch \(Exception conflict\) when' -or
+              $alteringPlan -notmatch 'AlteringCoordinatorFacilityMismatchException\.IsForFacility' -or
+              $alteringPlan -notmatch 'aggregate\.Flatten\(\)\.InnerExceptions' -or
               $alteringPlan -notmatch '상세 OCR/현장확정 충돌' -or
               $alteringPlan -notmatch '_facilityState.InvalidateOnsite') {throw 'H3 child remote OCR may override facility manager without explicit conflict reporting'}
           if ($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'duplicate post-select detail/OCR pass returned' }
