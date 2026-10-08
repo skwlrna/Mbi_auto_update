@@ -173,20 +173,14 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             throw new InvalidOperationException(
                 "새 F9 작업 폴더에 이전 기록이 존재합니다 · 신규 등록 차단 · 기록 보존");
 
-        // The manager is the ONLY owner of the selected facilities. Anything
-        // left in those lanes (including completed-but-uncollected jobs) must
-        // first be handled outside this new run, never silently collected.
-        var works = await data.WorksAsync(ct);
-        if (works.Any(w => plans.Any(p => p.FacilityName == w.FacilityName)))
-            throw new InvalidOperationException(
-                "새 다중가공: 선택 시설에 이전 대기/완료 작업이 있습니다 · " +
-                "자동 수령/취소/재등록 없이 정지 · 다른 시설의 작업은 허용");
-
-        // OpenAsync creates a new authoritative N02/F05 ledger and checks the
-        // selected facilities AGAIN after inventory baselines are sampled.
-        // allowSingleCharacter permits a realm-only CLI; it does not remove
-        // any consumption/receipt/duplicate-registration safeguards.
-        await OpenAsync(plans, identity, data, ct, allowSingleCharacter: true);
+        // Every explicit F9 is a new order. Existing game jobs are NOT prior
+        // progress on this order. The new ledger snapshots those jobs as
+        // InitialExistingWorks and subtracts their eventual output from the
+        // freshly entered target. The coordinator still owns whole-facility
+        // collection and never performs partial receive-all.
+        // Old F05/N02 files are never opened, migrated or overwritten.
+        await OpenAsync(plans, identity, data, ct,
+            allowSingleCharacter: true, allowPreexistingSelectedFacilityWorks: true);
         if (IsResuming)
             throw new InvalidOperationException(
                 "F9 새 작업이 기존 배치를 복원하려 했습니다 · 안전 정지");
@@ -211,7 +205,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     }
 
     internal async Task OpenAsync(IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
-        IAlteringData data, CancellationToken ct, bool allowSingleCharacter = false)
+        IAlteringData data, CancellationToken ct, bool allowSingleCharacter = false,
+        bool allowPreexistingSelectedFacilityWorks = false)
     {
         ct.ThrowIfCancellationRequested();
         foreach (var plan in plans) plan.Validate();
@@ -327,7 +322,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         var works = await data.WorksAsync(ct);
         // The 1-character unbound-identity mode owns only the SELECTED
         // facilities. Unrelated facilities are not touched or collected.
-        if (allowSingleCharacter && works.Any(w =>
+        if (allowSingleCharacter && !allowPreexistingSelectedFacilityWorks && works.Any(w =>
                 plans.Any(p => p.FacilityName == w.FacilityName)))
             throw new InvalidOperationException(
                 "1캐릭터 신규 가공: 선택한 시설에 기존 대기 작업이 있습니다 · " +
@@ -364,10 +359,26 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with { BatchId = batchId });
             }
         }
-        // A work queued while the baselines were being fetched invalidates
-        // a fresh one-character batch, even if it belongs to another recipe
-        // within the same selected facility.
-        if (allowSingleCharacter && (await data.WorksAsync(ct)).Any(w =>
+        // Never credit old jobs towards the new target. Also ensure that
+        // another actor did not add/remove jobs while we read inventory
+        // baselines: a changed queue cannot be safely attributed to this F9.
+        if (allowPreexistingSelectedFacilityWorks)
+        {
+            var latest = await data.WorksAsync(ct);
+            foreach (string facility in plans.Select(p => p.FacilityName).Distinct())
+            {
+                static string QueueShape(IEnumerable<AlteringWork> list) =>
+                    string.Join("|", list.GroupBy(w => w.DisplayName, StringComparer.Ordinal)
+                        .OrderBy(g => g.Key, StringComparer.Ordinal)
+                        .Select(g => g.Key + ":" + g.Count()));
+                if (QueueShape(works.Where(w => w.FacilityName == facility)) !=
+                    QueueShape(latest.Where(w => w.FacilityName == facility)))
+                    throw new InvalidOperationException(
+                        "F9 신규 작업 기준 수량 확인 중 기존 대기열이 변했습니다 · " +
+                        "과거 작업을 새 수량으로 오인하지 않도록 등록 없이 정지");
+            }
+        }
+        else if (allowSingleCharacter && (await data.WorksAsync(ct)).Any(w =>
                 plans.Any(p => p.FacilityName == w.FacilityName)))
             throw new InvalidOperationException(
                 "1캐릭터 신규 가공 준비 도중 선택 시설 대기열이 변했습니다 · " +
