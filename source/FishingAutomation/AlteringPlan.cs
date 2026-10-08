@@ -102,6 +102,20 @@ internal enum AlteringFacilityEntryDirective
     ReuseCoordinatorConfirmedOnsite
 }
 
+// A lower screen can report contradictory two-frame detail evidence, but only
+// the facility manager may invalidate its location authority. Never re-travel
+// from a managed queue callback based on OCR alone.
+internal sealed class AlteringCoordinatorFacilityMismatchException : InvalidOperationException
+{
+    internal string FacilityName { get; }
+
+    internal AlteringCoordinatorFacilityMismatchException(
+        string facilityName,
+        string message,
+        Exception? inner = null) : base(message, inner)
+        => FacilityName = facilityName;
+}
+
 // The coordinator's completed facility-entry directive remains authoritative
 // throughout recipe selection. A move-button visual may appear even onsite.
 // Automatic (single-altering) keeps the legacy visual veto unchanged.
@@ -579,11 +593,28 @@ internal sealed class AlteringAutomation
                             _facilityState.QueueDirectiveFor(plan.FacilityName);
                         Log?.Invoke(
                             $"[자동 가공] 중간관리자 시설 지시 · {plan.ScreenTitle} · {directive}");
-                        await coordinatorScreen.QueueAsync(
-                            plan,
-                            directive,
-                            reserveCallback,
-                            ct);
+                        try
+                        {
+                            await coordinatorScreen.QueueAsync(
+                                plan,
+                                directive,
+                                reserveCallback,
+                                ct);
+                        }
+                        catch (AlteringCoordinatorFacilityMismatchException conflict)
+                            when (string.Equals(
+                                conflict.FacilityName,
+                                plan.FacilityName,
+                                StringComparison.Ordinal))
+                        {
+                            _facilityState.InvalidateOnsite(
+                                $"상세 OCR/현장확정 충돌 · {plan.DisplayName} · " +
+                                $"기존 지시={directive} · 하위 임의 재이동 금지");
+                            Log?.Invoke(
+                                $"[자동 가공] 중간관리자 현장 판단 충돌 수신 · " +
+                                $"{plan.ScreenTitle} · {conflict.Message} · 추가 입력 없이 정지");
+                            throw;
+                        }
                     }
                     else
                     {
