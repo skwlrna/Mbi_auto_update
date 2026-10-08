@@ -51,6 +51,29 @@ Check(!AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 4) &&
       !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 5) &&
       !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, null),
     "reopened facility cannot falsely confirm unchanged/increased/unknown receipt");
+Check(AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: false),
+    "M5: two clean facility frames with known idle CLI may prove post-receipt return");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: true,
+        travelDialogVisible: false, autoTraveling: false),
+    "M5: facility title behind completion modal must not prove onsite");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: true, autoTraveling: false),
+    "M5: travel dialog blocks onsite confirmation");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: true) &&
+      !AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: null),
+    "M5: active or unknown CLI movement prevents false onsite reuse");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: false, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: false),
+    "M5: missing facility title cannot be treated as completed return");
 Check(AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, false),
     "real altering completion result can authorize confirmation");
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, true, false),
