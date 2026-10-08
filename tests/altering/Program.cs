@@ -1329,12 +1329,70 @@ Check(managedWorld.DirectiveAfterCollection ==
       AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
     "07:01 regression: after completed-work receipt the next same-facility registration reuses coordinator-confirmed onsite state");
 
+Check(managedWorld.ReceiptDirectives.Count > 0 &&
+      managedWorld.ReceiptDirectives.All(x =>
+          x == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite),
+    "H2: completed same-facility works are collected under the manager's Reuse directive");
+
+var freshReceiptWorld = new FakeWorld(lanePlan);
+freshReceiptWorld.AddCompleted(1);
+var freshReceiptLane = new FacilityLaneState(
+    Array.Empty<AlteringWork>());
+var freshReceiptAutomation = new AlteringAutomation(
+    freshReceiptWorld, freshReceiptWorld, (_, _) => Task.CompletedTask,
+    8, facilityState: freshReceiptLane);
+Check(await freshReceiptAutomation.CollectReadyBatchAsync(lanePlan, default) &&
+      freshReceiptWorld.ReceiptDirectives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.FreshMoveRequired }),
+    "H2: receiving existing complete work at startup requires manager Fresh directive");
+
+var failedReceiptWorld = new FakeWorld(lanePlan) { TwoStageCollect = true };
+failedReceiptWorld.AddCompleted(1);
+var failedReceiptLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+failedReceiptLane.ConfirmOnsite(lanePlan.FacilityName, "test same-site receipt");
+var failedReceiptAutomation = new AlteringAutomation(
+    failedReceiptWorld, failedReceiptWorld, (_, _) => Task.CompletedTask,
+    8, facilityState: failedReceiptLane);
+bool blockedUnsafeFallback = false;
+try
+{
+    await failedReceiptAutomation.CollectReadyBatchAsync(lanePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    blockedUnsafeFallback = ex.Message.Contains("자체 재이동/2차 수령 금지");
+}
+Check(blockedUnsafeFallback &&
+      failedReceiptWorld.SecondStageCalls == 0 &&
+      failedReceiptWorld.ReceiptDirectives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }),
+    "H2: manager receipt failure cannot fall through to autonomous travel or second Space");
+
+Check(!AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "H2: coordinator-confirmed onsite receipt ignores always-visible move label");
+Check(!AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "H2: manager-directed fresh arrival ignores persistent label after proven travel");
+Check(AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective.Automatic,
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "H2: legacy single-altering exact move label still vetoes receipt");
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
 catch(Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
 
-internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen
+internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen
 {
     private readonly AlteringPlan _plan;
     private readonly List<AlteringWork> _works = new();
@@ -1342,6 +1400,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls, CollectionCount;
     internal long Owned;
     internal readonly List<AlteringFacilityEntryDirective> Directives = new();
+    internal readonly List<AlteringFacilityEntryDirective> ReceiptDirectives = new();
     internal AlteringFacilityEntryDirective? DirectiveAfterCollection;
     internal bool QueuedWhileExisting;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
@@ -1399,6 +1458,14 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         ApplyCollection(plan);
         return Task.FromResult(true);
     }
+    public Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct)
+    {
+        ReceiptDirectives.Add(directive);
+        return CollectAsync(plan, ct);
+    }
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -1433,7 +1500,7 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 }
 
 
-internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
+internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
 {
     private static readonly GatheringActivity Idle =
         new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
@@ -1573,6 +1640,12 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         return Task.FromResult(true);
     }
+
+    public Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct)
+        => CollectAsync(plan, ct);
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
         => Task.FromResult(false);
