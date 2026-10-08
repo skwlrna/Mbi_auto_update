@@ -798,6 +798,30 @@ jobs:
              $multiAlterMain -notmatch 'laneState: laneState' -or
              $multiAlterMain -notmatch 'ConfirmedRegistrationsThisRun' -or
              $multiAlterMain -notmatch 'FacilityLaneOwner\.Main') { throw 'main multi-altering ownership wiring missing' }
+          # M3: existing CLI works and resumed sessions are not physical onsite
+          # evidence. A cold-start F9 manager must remain Unknown until this run
+          # proves a registration or receipt under the proper facility authority.
+          $startupLane = Get-Content source/FishingAutomation/FacilityLaneState.cs -Raw
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          if ($startupLane -notmatch 'enum FacilityLocationProof' -or
+              $startupLane -notmatch 'ColdStartUnknown' -or
+              $startupLane -notmatch 'ConfirmedThisRun' -or
+              $startupLane -notmatch 'RuntimeUncertain' -or
+              $startupLane -notmatch 'class FacilityStartupLocationPolicy' -or
+              $startupLane -notmatch 'proof == FacilityLocationProof.ConfirmedThisRun' -or
+              $startupLane -notmatch '_locationProof = FacilityLocationProof.ConfirmedThisRun' -or
+              $startupLane -notmatch '_locationProof = FacilityLocationProof.RuntimeUncertain' -or
+              $startupLane -notmatch '초기 위치 미확정\(원격 확정 아님\)' -or
+              $multiAlterMain -notmatch '이전 실행의 현장확정은 복원하지 않음' -or
+              $alterTests -notmatch 'M3: F9 resume with existing works cannot inherit a prior-run onsite proof' -or
+              $alterTests -notmatch 'M3: cold-start diagnostics are emitted once per facility' -or
+              $alterTests -notmatch 'M3: observing the same CLI seven-slot ledger is not physical location evidence' -or
+              $alterTests -notmatch 'M3: current-run onsite verification permits same-facility reuse' -or
+              $alterTests -notmatch 'M3: post-start location uncertainty is distinct from cold-start unknown' -or
+              $alterTests -notmatch 'M3: even a stale same-name location cannot authorize reuse') {
+              throw 'M3 cold-start Unknown must stay separate from physically confirmed onsite or remote'
+          }
+
           if($dependencyScheduler -notmatch 'AcquireIntermediate' -or
              $dependencyScheduler -notmatch 'ReleaseIntermediate' -or
              $dependencyScheduler -notmatch 'FacilityLaneOwner\.Intermediate' -or
