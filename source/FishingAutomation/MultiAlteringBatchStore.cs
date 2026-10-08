@@ -151,6 +151,47 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         IAlteringData data, CancellationToken ct)
         => OpenAsync(plans, identity, data, ct, allowSingleCharacter: true);
 
+    // Explicit fresh F9 mode. Historical batches (including unresolved F05
+    // transactions) live in OTHER run folders and are never deserialized,
+    // replayed, reset or deleted by this entry point. The manager owns the
+    // whole new job roster; do not resume anything from a past F10 run.
+    internal async Task OpenFreshAsync(
+        IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
+        IAlteringData data, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        foreach (var plan in plans) plan.Validate();
+        if (plans.Count == 0 || plans.Select(Key).Distinct().Count() != plans.Count)
+            throw new InvalidDataException("신규 다중가공 계획이 비었거나 중복되었습니다.");
+
+        // An explicit, newly allocated directory may contain only the lease.
+        // Existing/corrupt manifests must never turn into a fresh operation.
+        if (File.Exists(_path) ||
+            Directory.EnumerateFileSystemEntries(_directory)
+                .Any(p => !string.Equals(System.IO.Path.GetFileName(p),
+                    "batch.lock", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "새 F9 작업 폴더에 이전 기록이 존재합니다 · 신규 등록 차단 · 기록 보존");
+
+        // The manager is the ONLY owner of the selected facilities. Anything
+        // left in those lanes (including completed-but-uncollected jobs) must
+        // first be handled outside this new run, never silently collected.
+        var works = await data.WorksAsync(ct);
+        if (works.Any(w => plans.Any(p => p.FacilityName == w.FacilityName)))
+            throw new InvalidOperationException(
+                "새 다중가공: 선택 시설에 이전 대기/완료 작업이 있습니다 · " +
+                "자동 수령/취소/재등록 없이 정지 · 다른 시설의 작업은 허용");
+
+        // OpenAsync creates a new authoritative N02/F05 ledger and checks the
+        // selected facilities AGAIN after inventory baselines are sampled.
+        // allowSingleCharacter permits a realm-only CLI; it does not remove
+        // any consumption/receipt/duplicate-registration safeguards.
+        await OpenAsync(plans, identity, data, ct, allowSingleCharacter: true);
+        if (IsResuming)
+            throw new InvalidOperationException(
+                "F9 새 작업이 기존 배치를 복원하려 했습니다 · 안전 정지");
+    }
+
     internal static void EnsureNoActiveVerifiedBatch(string directory)
     {
         MultiAlteringBatch? saved;
