@@ -629,6 +629,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 고정좌표 선택 · {plan.DisplayName} · " +
             $"순번 {plan.RecipeOrdinal}/{plan.RecipeCount} · ({center.X},{center.Y}) · 카드명 OCR 없음");
+        await RequireManagedIdleAsync(plan, directive, "고정 품목 카드 선택 직전", ct);
         _ui.ClickFresh(center, ct);
         await Task.Delay(350, ct);
 
@@ -680,6 +681,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Log?.Invoke(
                     $"[자동 가공] {plan.DisplayName} 고정좌표 1차 클릭 미반영 확인 · " +
                     $"시설 목록 유지 + 중앙 지시/기존 안전판정 유지 · 동일 좌표 재클릭 1/1");
+                await RequireManagedIdleAsync(plan, directive, "고정 품목 재클릭 직전", ct);
                 _ui.ClickFresh(center, ct);
                 await Task.Delay(450, ct);
 
@@ -722,6 +724,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(beforeSearch,
                 "약품 가공 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. 검색 입력을 차단합니다.");
 
+        await RequireManagedIdleAsync(plan, directive, "약품 검색 열기 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 돋보기 · 고정좌표 " +
@@ -737,14 +740,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(searchDialog,
                 $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
 
+        await RequireManagedIdleAsync(plan, directive, "약품 검색어 입력 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
         _ui.PasteFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
+        await RequireManagedIdleAsync(plan, directive, "약품 검색 Enter 직전", ct);
         _ui.TapFresh(0x1C, ct); // Enter
         Log?.Invoke($"[자동 가공] 약품 검색어 입력 확정 · Enter · {plan.DisplayName}");
         await Task.Delay(220, ct);
 
         using var beforeApply = Capture(ct);
+        await RequireManagedIdleAsync(plan, directive, "약품 검색 적용 Space 직전", ct);
         _ui.TapFresh(0x39, ct); // Space = 적용
         Log?.Invoke("[자동 가공] 약품 검색 적용 · Space");
         await Task.Delay(700, ct);
@@ -774,6 +780,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(resultFrame,
                 $"약품 검색 결과가 중복 제법 순번 {plan.RecipeOrdinal}이라 첫 결과 고정좌표를 사용하지 않습니다.");
 
+        await RequireManagedIdleAsync(plan, directive, "약품 검색 결과 선택 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 첫 결과 선택 · 고정좌표 " +
@@ -794,6 +801,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringFacilityEntryDirective directive,
         CancellationToken ct)
     {
+        await RequireManagedIdleAsync(plan, directive, "품목 선택 경로 진입", ct);
         _stage.Move(ProductionStage.Search, plan.DisplayName);
         if (await TrySelectFixedRecipeAsync(plan, directive, ct))
             return;
@@ -821,6 +829,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "연속 등록 중 원격 가공 화면이 감지되어 고정 품목 좌표 입력을 차단했습니다.");
             }
 
+            await RequireManagedIdleAsync(plan, directive, "캐시 품목 선택 직전", ct);
             _ui.ClickFresh(_cachedRecipeCenter, ct);
             await Task.Delay(250, ct);
 
@@ -865,6 +874,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 _cachedRecipeCenter = selected.Center;
                 _hasCachedRecipeCenter = true;
 
+                await RequireManagedIdleAsync(plan, directive, "OCR 품목 선택 직전", ct);
                 _ui.ClickFresh(selected.Center, ct);
                 await Task.Delay(350, ct);
                 using var popup = Capture(ct);
@@ -902,6 +912,43 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             reserveFiveWings,
             ct);
 
+
+    // F03: manager authorization is a decision about facility ownership, not
+    // permission to input while character activity is moving or unavailable.
+    // Return a typed mismatch so the owner invalidates its onsite evidence.
+    private async Task RequireManagedIdleAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        string phase,
+        CancellationToken ct)
+    {
+        if (directive == AlteringFacilityEntryDirective.Automatic)
+            return;
+
+        ct.ThrowIfCancellationRequested();
+        GatheringActivity? activity = null;
+        if (_cli is not null)
+        {
+            var response = await _cli.GetActivityAsync(ct);
+            if (response.Success)
+                activity = GatheringQueries.ParseActivity(response);
+        }
+
+        if (activity is not null &&
+            GatheringSafetyPolicy.IsSafeField(activity) &&
+            !activity.IsAutoTraveling &&
+            !activity.IsGathering &&
+            !activity.IsFishing &&
+            !activity.IsInCombat)
+            return;
+
+        string reason = $"관리 가공 입력 차단 · {phase} · " +
+            $"CLI activity={(activity is null ? "불명확" : activity.IsAutoTraveling ? "이동 중" : "안전한 대기 아님")}";
+        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {reason} · 중앙 현장확정 무효화 요청");
+        throw new AlteringCoordinatorFacilityMismatchException(
+            plan.FacilityName, reason, new InvalidOperationException(reason));
+    }
+
     public async Task QueueAsync(
         AlteringPlan plan,
         AlteringFacilityEntryDirective directive,
@@ -911,6 +958,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         plan.Validate();
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
+
+        await RequireManagedIdleAsync(plan, directive, "시설 진입/재사용 전", ct);
 
         // Explicit manager directive supersedes any lower Automatic cache.
         if (directive != AlteringFacilityEntryDirective.Automatic)
@@ -947,7 +996,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 지시 · {plan.ScreenTitle} 새 시설 진입 · " +
                 "품목 선택보다 설비 이동 1회 우선");
-            await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
+            await TravelToFacilityAsync(plan, ct, forceMoveClick: true, directive: directive);
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility =
                 AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
@@ -986,6 +1035,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         {
             // Keep the coordinator's authority through the entire recipe-selection
             // chain (fixed card, retry, medicine, cached center).
+            await RequireManagedIdleAsync(plan, directive, "품목 선택 전", ct);
             await SelectRecipeAsync(plan, directive, ct);
             Point visualActionCenter = Point.Empty;
             bool restartAfterRemoteRecovery = false;
@@ -1077,6 +1127,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 작업 등록");
                 Log?.Invoke(
                     "[자동 가공] 설비 도착 후 현장 가공 버튼 화면 확인 · 가공하러 가기 2프레임 아님 · 정령의 날개 버튼 입력 없음");
+                await RequireManagedIdleAsync(plan, directive, "무료 가공 등록 버튼 직전", ct);
                 _ui.ClickFresh(visualActionCenter, ct);
             }
 
@@ -1175,7 +1226,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringPlan plan,
         CancellationToken ct,
         bool forceMoveClick = false,
-        bool receiptMode = false)
+        bool receiptMode = false,
+        AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
     {
         if (_cli is null)
             throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
@@ -1250,6 +1302,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
                 $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
                 "입력 1회 고정 · 재클릭 금지 · 품목 선택 전 실행");
+            await RequireManagedIdleAsync(plan, directive, "설비 이동 클릭 직전", ct);
             _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
             moveClickSent = true;
         }
@@ -1719,12 +1772,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 beforeClose, plan.ScreenTitle, ct) is not null;
             bool greenConfirm = HasBottomConfirmationModal(beforeClose);
             bool travelDialog = await IsFacilityTravelDialogAsync(beforeClose, ct);
-            bool canClose = cliReceiptConfirmed
-                ? AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
-                    greenConfirm, facilityVisible, travelDialog)
-                : AlteringReceiptPolicy.CanConfirmCompletion(
-                    greenConfirm, facilityVisible, travelDialog,
-                    await TryAutoTravelingAsync(ct) == true);
+            bool? autoTraveling = await TryAutoTravelingAsync(ct);
+            bool canClose = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                    managedReceipt, autoTraveling) &&
+                (cliReceiptConfirmed
+                    ? AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+                        greenConfirm, facilityVisible, travelDialog)
+                    : AlteringReceiptPolicy.CanConfirmCompletion(
+                        greenConfirm, facilityVisible, travelDialog,
+                        autoTraveling == true));
             if (!canClose)
                 Fail(beforeClose,
                     "수령 완료창 Space 직전 재검증 실패 · 완료창/이동창/시설창 상태 불확실 · 추가 입력 없이 정지합니다.");
@@ -1743,16 +1799,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 await IsFacilityTravelDialogAsync(verify, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
-            bool canRetryClose = cliReceiptConfirmed
-                ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
-                    greenConfirm,
-                    facilityVisible,
-                    travelDialog)
-                : AlteringReceiptPolicy.CanRetryCompletionClose(
+            bool canRetryClose = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                    managedReceipt, autoTraveling) &&
+                (cliReceiptConfirmed
+                    ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+                        greenConfirm, facilityVisible, travelDialog)
+                    : AlteringReceiptPolicy.CanRetryCompletionClose(
                     greenConfirm,
                     facilityVisible,
                     travelDialog,
-                    autoTraveling == true);
+                    autoTraveling == true));
 
             if (canRetryClose)
             {
@@ -1769,16 +1825,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     await IsFacilityTravelDialogAsync(retryFrame, ct);
                 bool? retryAutoTraveling = await TryAutoTravelingAsync(ct);
 
-                bool canRetryAgain = cliReceiptConfirmed
-                    ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
-                        retryGreenConfirm,
-                        retryFacilityVisible,
-                        retryTravelDialog)
-                    : AlteringReceiptPolicy.CanRetryCompletionClose(
+                bool canRetryAgain = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                        managedReceipt, retryAutoTraveling) &&
+                    (cliReceiptConfirmed
+                        ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+                            retryGreenConfirm, retryFacilityVisible, retryTravelDialog)
+                        : AlteringReceiptPolicy.CanRetryCompletionClose(
                         retryGreenConfirm,
                         retryFacilityVisible,
                         retryTravelDialog,
-                        retryAutoTraveling == true);
+                        retryAutoTraveling == true));
 
                 if (canRetryAgain)
                 {
@@ -1814,16 +1870,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 await IsFacilityTravelDialogAsync(closedCheck, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
 
-            bool completionStillVisible = cliReceiptConfirmed
-                ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
-                    greenConfirm,
-                    facilityVisible,
-                    travelDialog)
-                : AlteringReceiptPolicy.CanRetryCompletionClose(
+            bool completionStillVisible = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                    managedReceipt, autoTraveling) &&
+                (cliReceiptConfirmed
+                    ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
+                        greenConfirm, facilityVisible, travelDialog)
+                    : AlteringReceiptPolicy.CanRetryCompletionClose(
                     greenConfirm,
                     facilityVisible,
                     travelDialog,
-                    autoTraveling == true);
+                    autoTraveling == true));
 
             if (completionStillVisible)
             {
@@ -1889,7 +1945,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (!AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
                         greenConfirm,
                         facilityVisible,
-                        travelDialogAfterReceipt))
+                        travelDialogAfterReceipt) ||
+                    !AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                        managedReceipt, autoTravelAfterReceipt))
                 {
                     cliReceiptStableFrames = 0;
                     if (travelDialogAfterReceipt)
@@ -1934,7 +1992,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 greenConfirm,
                 facilityVisible,
                 travelDialogVisible,
-                autoTraveling == true);
+                autoTraveling == true) &&
+                AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                    managedReceipt, autoTraveling);
 
             if (canConfirm)
             {
@@ -1946,7 +2006,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // Space. If travel started between the two visual frames, input stays
                 // blocked.
                 bool? freshTravel = await TryAutoTravelingAsync(ct);
-                if (freshTravel == true)
+                if (!AlteringReceiptPolicy.CanSendCompletionCloseSpace(
+                        managedReceipt, freshTravel) || freshTravel == true)
                 {
                     stableFrames = 0;
                     Log?.Invoke("[자동 가공] 완료창 후보 감지 중 AutoTraveling=true · 추가 Space 차단");
@@ -2020,7 +2081,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             _confirmedOnsiteFacility = null;
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} 새 시설 이동 1회 선행");
-            await TravelToFacilityAsync(plan, ct, forceMoveClick: true, receiptMode: true);
+            await TravelToFacilityAsync(plan, ct, forceMoveClick: true, receiptMode: true, directive: directive);
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility =
                 AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(

@@ -151,6 +151,11 @@ try
           Has(queue, "MustReportToCoordinator") &&
           Has(queue, "RecoverRemoteDetailToOnsiteAsync"),
         "real queue retains manager entry and typed remote-detail conflict path");
+    Check(Has(queue, "RequireManagedIdleAsync") &&
+          Has(fixedRecipe, "RequireManagedIdleAsync") &&
+          Has(medicine, "RequireManagedIdleAsync") &&
+          Has(selection, "RequireManagedIdleAsync"),
+        "managed registration paths require a fresh CLI-safe activity guard before input");
     Check(queue.ToList().FindIndex(s => s.EndsWith(".MustReportToCoordinator")) <
           queue.ToList().FindIndex(s => s.EndsWith(".RecoverRemoteDetailToOnsiteAsync")),
         "real queue checks manager conflict BEFORE Automatic-only remote-detail recovery");
@@ -175,6 +180,9 @@ try
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
         "real completion requires modal approval and guarded close");
     var close = ScreenCalls("CloseCompletionResultAndWaitForFacilityAsync", 6);
+    Check(Has(completion, "CanSendCompletionCloseSpace") &&
+          Has(close, "CanSendCompletionCloseSpace"),
+        "compiled completion and close paths use managed tri-state CLI guard");
     Check(Has(close, "CanConfirmCliReceiptCompletion") &&
           Has(close, "CanRetryCliReceiptCompletionClose") &&
           Has(close, "WaitForReceiptFacilityReturnAsync"),
@@ -211,6 +219,12 @@ try
           CallBoolean(receiptPolicy, "CanConfirmReceiptFacilityReturn",
             true, false, false, false),
         "real result-return policy rejects popup, travel and unknown CLI");
+    Check(CallBoolean(receiptPolicy, "CanSendCompletionCloseSpace", true, false) &&
+          !CallBoolean(receiptPolicy, "CanSendCompletionCloseSpace", true, true) &&
+          !CallBoolean(receiptPolicy, "CanSendCompletionCloseSpace", true, null) &&
+          CallBoolean(receiptPolicy, "CanSendCompletionCloseSpace", false, null) &&
+          CallBoolean(receiptPolicy, "CanSendCompletionCloseSpace", false, true),
+        "manager blocks unknown/traveling completion Space; single policy is unchanged");
     Check(CallCache("AfterVerifiedFacilityEntry", automatic, "금속 가공 시설") ==
           "금속 가공 시설" &&
           CallCache("AfterVerifiedFacilityEntry", fresh, "금속 가공 시설") == null &&
