@@ -15,7 +15,7 @@ public sealed partial class MainForm
         bool completed = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
-        bool limitedFreshTest = false;
+        bool singleCharacterMode = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
         _multiAlteringCts = new CancellationTokenSource();
@@ -61,19 +61,15 @@ public sealed partial class MainForm
             var gatheringData = new GatheringCliData(_cli);
             var identity = await CliIdentityGuard.CaptureForMultiAlteringAsync(
                 _cli, token, allowLimitedFreshTest: true);
-            limitedFreshTest = !identity.Baseline.HasDurableMultiIdentity;
+            singleCharacterMode = !identity.Baseline.HasDurableMultiIdentity;
             _log.Write("[다중가공] 캐릭터 문맥 저장 · " + identity.Description);
-            if (limitedFreshTest)
-            {
-                // The user operates ONE fixed character. The CLI exposes
-                // RealmName only, so use the existing isolated durable ledger
-                // rather than repeatedly treating the same character as new.
-                _alteringPage.CharacterStatus = "1캐릭터 모드";
-                _log.Write("[다중가공] 1캐릭터 모드 · 서버 정보만 확인 · " +
-                    "기존 제한적 배치 장부에서 동일 계획 F10 이어하기 허용 · " +
-                    "다른 캐릭터로 전환 시 이 장부 재사용 금지");
-            }
-            else _alteringPage.CharacterStatus = "확인됨";
+            _alteringPage.CharacterStatus = singleCharacterMode
+                ? "1캐릭터 · 신규 작업" : "신규 작업";
+            _log.Write("[다중가공] F9 신규 실행 · 중간관리자가 선택 목록/시설별 대기열/7칸 " +
+                "혼합 배치를 전부 지휘 · F10/재시작 시 과거 배치 자동 이어하기 없음");
+            if (singleCharacterMode)
+                _log.Write("[다중가공] 단일 캐릭터 전용 · CLI 서버명만 검증 · " +
+                    "다른 캐릭터로 전환하지 않음");
 
             var recipes = await rawAlteringData.RecipesAsync(token);
             var currentWorks = await rawAlteringData.WorksAsync(token);
@@ -81,31 +77,20 @@ public sealed partial class MainForm
             string mainSessionDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "MabiAuto", "multi-altering");
-            string sessionDir = limitedFreshTest
-                ? Path.Combine(mainSessionDir, "limited-fresh-test")
-                : mainSessionDir;
-            if (limitedFreshTest)
-            {
-                // Share the regular batch lock across both modes: no other
-                // process may register work under a verified batch concurrently.
-                verifiedBatchLease = await Task.Run(
-                    () => new MultiAlteringBatchStore(mainSessionDir), token);
-                await Task.Run(() =>
-                    MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(mainSessionDir), token);
-            }
-            if (!limitedFreshTest)
-            {
-                // If CLI begins exposing a strong ID again, do NOT open a new
-                // regular ledger while an older realm-only run is still active.
-                // The only authorized continuation remains the isolated roster.
-                await Task.Run(() =>
-                    MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(
-                        Path.Combine(mainSessionDir, "limited-fresh-test")), token);
-            }
+            // Root file lease excludes legacy and other running versions.
+            verifiedBatchLease = await Task.Run(
+                () => new MultiAlteringBatchStore(mainSessionDir), token);
+
+            // Create a new unique N02/F05 ledger for EVERY explicit F9.
+            // Do not open or mutate any old limited-fresh-test or main
+            // batch.json, including previously unresolved F05 checkpoints.
+            string sessionDir = Path.Combine(mainSessionDir, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
             batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
-            await Task.Run(() => batchStore.OpenAsync(
-                plans, identity.Baseline, rawAlteringData, token,
-                allowSingleCharacter: limitedFreshTest), token);
+            await Task.Run(() => batchStore.OpenFreshAsync(
+                plans, identity.Baseline, rawAlteringData, token), token);
+            _log.Write("[다중가공] 독립 신규 장부 생성 · " + sessionDir +
+                " · 과거 F05 미확정 기록 변경 없음");
             _log.Write($"[다중가공] 배치 식별 · {batchStore.BatchId} · 완료 기록 {batchStore.CompletedPlans(plans).Count}/{plans.Count}");
             if (batchStore.IsTerminal)
             {
@@ -228,7 +213,7 @@ public sealed partial class MainForm
                 var session = store.Load() ?? throw new InvalidDataException("배치 품목 기록 소실 · 안전 정지");
                 bool itemCompleted = session.MultiState == MultiAlteringItemState.Completed;
                 hasResumableSessionForPreflight |= batchStore.IsResuming;
-                _log.Write($"[다중가공] 배치 이어하기 · {plan.DisplayName} · 등록 {session.QueuedWorks}/{session.RequiredWorks} · 상태={session.MultiState}");
+                _log.Write($"[다중가공] 중간관리자 신규 작업 · {plan.DisplayName} · 등록 {session.QueuedWorks}/{session.RequiredWorks} · 상태={session.MultiState}");
 
                 if (!itemCompleted && selectedRecipe.MissingIngredients.Count > 0)
                 {
@@ -317,7 +302,7 @@ public sealed partial class MainForm
 
             _productionCurrentQuantity = progress.Values.Sum();
             _productionProgressSummary =
-                $"다중가공 시작 상태 복원 · {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
+                $"중간관리자 신규 배치 시작 · {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
                 $"시설별 혼합 7칸 배치";
             UpdateStats();
             RefreshProductionDashboard();
@@ -403,10 +388,8 @@ public sealed partial class MainForm
         }
         catch (OperationCanceledException)
         {
-            _log.Write("[다중가공] 정지 · 신규 등록/이동 중단 · " +
-                (limitedFreshTest
-                    ? "1캐릭터 배치 장부 보존 · 동일 계획 검증 후 F10 이어하기 가능"
-                    : "시설별 배치 이어하기 기록 유지"));
+            _log.Write("[다중가공] F10 정지 · 등록/이동 중단 · " +
+                "이번 실행 기록 보존(자동 이어하기 없음) · 다음 F9는 새 작업");
             SetStatus("다중가공 정지", Color.DarkOrange);
         }
         catch (Exception ex)
