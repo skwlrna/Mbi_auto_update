@@ -420,6 +420,8 @@ Match-Required $fixedAlter '_verifiedFixedRecipes' 'first successful exact fixed
 Match-Required $fixedAlter '_repeatOcrFreeRecipe' 'known fixed recipe repeat avoids OCR'
 Match-Required $fixedAlter 'HasFixedFacilityHeaderVisual' 'facility title and subtitle use fixed pixel anchors'
 Match-Required $fixedAlter '_postTravelProvenFacilityTitle' 'after proven first arrival re-entry cannot fail on a second OCR pass'
+Match-Required $fixedAlter 'Point titleCenter = new' 'facility title fixed-card click geometry is used'
+Match-Forbidden $fixedAlter 'ClickLabelAsync\(plan.ScreenTitle, AlteringFacilityLayout.TitleArea' 'facility title must not be clicked from OCR results'
 Match-Required $fixedOcr 'new Rectangle\(12, 24, 250, 80\)' 'first title OCR covers leftmost title glyph'
 Match-Required (Read-Source 'tests/altering-screen-integration/Program.cs') 'verified repeat detail uses fixed free-button shape without OCR' 'real screen OCR-free repeated path is tested'
 Match-Required $fixedAlter 'RequireManagedIdleAsync\(' 'managed CLI activity safety checks remain in place'
