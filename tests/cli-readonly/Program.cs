@@ -149,6 +149,24 @@ try
 }
 catch (InvalidOperationException ex) when (ex.Message.Contains("바뀌었습니다")) { checks++; }
 
+int interruptedIdentityReads = 0;
+var interruptedCli = new MabinogiMobileCli(log, true, (_, _) =>
+{
+    string snapshot = ++interruptedIdentityReads switch
+    {
+        1 => """{"CharacterId":"char-1","CharacterName":"테스트"}""",
+        2 => """{"CharacterName":"테스트"}""",
+        _ => """{"CharacterId":"char-2","CharacterName":"테스트"}"""
+    };
+    return Task.FromResult(new CliProcessOutput(0, snapshot, ""));
+});
+try
+{
+    _ = await CliIdentityGuard.CaptureForMultiAlteringAsync(interruptedCli, default);
+    throw new Exception("identity swap across weak frame accepted");
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("바뀌었습니다")) { checks++; }
+
 var currenciesBefore = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
     "[{\"DisplayName\":\"정령의 날개\",\"Amount\":100},{\"DisplayName\":\"골드\",\"Amount\":5000}]", "")));
 var currenciesAfter = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
