@@ -225,9 +225,14 @@ static class Program
                 var path = AlteringSessionStore.MultiPlanPath(temp.Path, plan);
                 new AlteringSessionStore(path).Save(AlteringSessionState.Create(plan, Identity, 0, 0));
             }
-            Check(MultiAlteringBatchStore.ReadPendingPlans(temp.Path)
-                .OrderBy(MultiAlteringBatchStore.Key).SequenceEqual(Plans.OrderBy(MultiAlteringBatchStore.Key)),
-                "Verified legacy zero-work roster not visible in UI");
+            // v1 has no authoritative full roster: even all surviving zero
+            // checkpoints cannot prove that a completed peer was not deleted.
+            // Only an explicitly selected multi-plan may use strict OpenAsync.
+            await Reject(() => {
+                _ = MultiAlteringBatchStore.ReadPendingPlans(temp.Path);
+                return Task.CompletedTask;
+            }, "자동 목록 복원");
+            Check(!File.Exists(temp.Manifest), "Legacy UI read unexpectedly started a batch");
             using (var batch = new MultiAlteringBatchStore(temp.Path))
             {
                 await Open(batch, world);
