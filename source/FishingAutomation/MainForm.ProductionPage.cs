@@ -805,6 +805,13 @@ public sealed partial class MainForm
             catch (Exception ex)
             {
                 _owner._log.Write("[자동 가공] 이어하기 기록 확인 실패: " + ex.Message);
+                if (ex.Message.Contains("구형 다중가공 기록 발견", StringComparison.Ordinal))
+                {
+                    _owner._productionProgressSummary =
+                        "구형 다중가공 세션 검토 필요 · 자동 목록 복원/단일가공 우회 차단 · " +
+                        "남은 품목을 수동 선택한 뒤 안전 이관 확인";
+                    _owner.SetStatus("구형 다중가공 기록 검토 필요", Color.DarkOrange);
+                }
             }
         }
 
