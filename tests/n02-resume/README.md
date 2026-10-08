@@ -55,23 +55,41 @@ Completed performs cleanup/plan clearing with no game input. A crash before whol
 completion still restores the individual Completed entries. New identical item
 plans after Closed receive a new batch ID and fresh baselines.
 
-A receipt interrupted before or after input, during quantity verification or
-completion persistence leaves RecoveryRequired and stops without registration.
-Uncertain state is deliberately not automatically repaired. F10 callbacks do no
-filesystem work, and existing N03 cancellation propagation/guards remain intact.
+Managed visual receipts now commit RecoveryRequired at the final irreversible
+receive-Space boundary, **after** on-site movement, two-frame blue prompt/OCR
+checks, and the 400ms stabilization/recheck. A failed *pre-input* screen check
+cannot poison a resumable session because no receipt was yet attempted.
+The zero-wing wrapper passes this same boundary through its pre/post currency
+verification; an unknown screen without the boundary contract retains the
+conservative early marker instead of assuming no input.
+
+Once the receive boundary is entered, an interrupted input, failed quantity
+verification or failed persistence leaves RecoveryRequired and stops without
+registration. A native send that may have occurred is never automatically
+retried. F10 callbacks do no filesystem work and N03 input protection remains.
 An IO operation already blocked in the OS cannot be forcibly terminated, but its
 worker does not block hotkey delivery and cancellation blocks subsequent inputs.
 
 ## Old records and conflicts
 
-Legacy v1 `plan-*.json` and numeric multi files are loaded/validated and retained.
-Their missing batch roster cannot prove whether an absent peer was completed and
-then deleted, so automatic migration to a fresh full plan would be unsafe. They
-stop with RecoveryRequired instead of deleting/resetting records. Existing single
-processing v1 restoration remains unchanged. An orphan initial temp manifest also
-stops. Damaged/inaccessible manifests never mean a fresh batch. Plan, identity,
-yield, target or batch mismatch preserves the original and reports the conflict.
-There is no automatic new-batch action for an unresolved old batch.
+Legacy v1 records are never reset/deleted. A **narrow automatic upgrade**
+is permitted only when *every selected plan* has an exact stable-key
+`plan-<hash>.json` checkpoint, all registered/pending/existing works and
+internal credits are zero, its output count still equals its original baseline,
+its complete character/account/realm identity and plan match exactly, and there
+are no selected-facility live works, orphan temp files or dependency sessions.
+The saved roster is restored read-only in the UI before validation. After
+successful verification all zero-work sessions are incorporated in one durable
+manifest. Original v1 files remain untouched until the batch finishes; cleanup
+moves them into `legacy-archive/<batch-id>/`, rather than deleting them.
+
+Any nonzero, numeric index, missing/deleted completed peer, changed inventory,
+unknown identity, corrupt file or uncertain legacy record remains RecoveryRequired
+with no autonomous input. The single-start route also blocks incomplete legacy
+records instead of treating the absent `batch.json` as a fresh selection.
+Existing single-processing v1 restoration remains unchanged. Native/OS failure,
+inaccessible manifest or orphan temp fails closed. There is no unsafe reset button
+for an unresolved older batch.
 
 ## Deterministic verification
 
@@ -82,7 +100,7 @@ dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
 dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
 ```
 
-The N02 executable reports 39 named cases. It uses unique temporary directories,
+The N02 executable reports 44 named cases (39 original + five targeted boundary/migration cases). It uses unique temporary directories,
 actual file persistence and fresh store/automation/coordinator objects. It never
 opens a game window or loads the Interception driver.
 
@@ -90,13 +108,13 @@ opens a game window or loads the Interception driver.
 | --- | --- |
 | A | Wood 100 complete, steel 4/10 works, rice 3/10; cancellation, dispose/reopen, restore partial counters and total progress, zero extra wood registrations. |
 | B | Restart immediately after durable item completion; completed automation returns without an inventory query. |
-| C | Interrupted before receipt input, after input, after receipt verification/read, during write and replacement; no false success or automatic registration. |
+| C | Interrupted after the receive-input journal, after input, after receipt verification/read, during write and replacement; no false success or automatic registration. A separate read-only OCR/preflight failure before the irreversible input boundary resumes safely without new registrations. |
 | D | Wood decreases from 100 to 40 after completion; restart continues remaining plans with zero wood registrations and no invented consumption credit. |
 | E | Write/replace/read faults, damaged/null/invalid-version files; original protected and same-run fail closed. |
 | F | All three items complete, terminal record committed, dependency cleanup, plan-clear acknowledgement and fresh batch identity. |
 | G | Reordered plans restore by facility/name/recipe identity. |
 | H | Same name/different ordinal, target, yield, facility, name and each identity field conflict. |
-| I | Actual historical v1 JSON without new fields, both stable and numeric filenames; readable but incomplete completion evidence stops. Orphan temp also stops. |
+| I | Original unsupported v1 stable/numeric records still fail closed. New positive upgrade requires every plan's exact zero-work stable file, same output baselines, identity and empty facility queue; preserves/archives originals. Changed counts/live works/missing completed peer continue to stop. Orphan temp stops. |
 | J | Whole completion committed; termination after only one dependency file is deleted; restart does cleanup with zero registration. |
 | K | New equal wood 100 batch after acknowledged completion: different batch ID, ten normal new registrations. |
 | L | A/B/A/B/A/B/A seven-slot mix, a completed slot while others run, no partial receipt, two whole-lane receipts, one Fresh queue directive then Reuse; completed A is never registered again. |
@@ -106,12 +124,12 @@ opens a game window or loads the Interception driver.
 
 - **Confirmed:** baseline loss of item evidence, actual negative reproduction,
   no code changes to input/N03, F05 ledger, fixed screen coordinates or policies.
-- **Passed locally:** N02 39, altering 238, crafting 75, gathering 64, portable N03
+- **Passed locally:** N02 44, altering 238, crafting 75, gathering 64, portable N03
   55 (Windows adds three STA tests for 58). Windows-target production cross-build
   via .NET 8 MSBuild succeeds with zero errors. The host's dotnet CLI sometimes
   fails retrieving Process.StartTime; direct MSBuild/Roslyn execution was used as
   appropriate and is not claimed as execution on Windows.
-- **Windows CI:** full existing workflow plus N02 39 and N03 58; final run links
+- **Windows CI:** full existing workflow plus N02 44 and N03 58; final run links
   and results are recorded in the PR and final response.
 - **Conditional:** atomic replacement/Flush(true) relies on a functioning local
   filesystem. Physical disk/OS corruption, manual record removal, or a native IO
