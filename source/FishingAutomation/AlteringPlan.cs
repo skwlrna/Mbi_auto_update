@@ -483,7 +483,7 @@ internal sealed class AlteringAutomation
 
             if (works.Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted))
                 SaveStage("완료품 수령");
-            if (await CollectIfReadyAsync(plan, works, ct))
+            if (await CollectIfReadyAsync(plan, works, ct, deferPartialManaged: true))
             {
                 _facilityState?.ConfirmOnsite(
                     plan.FacilityName,
@@ -950,7 +950,8 @@ internal sealed class AlteringAutomation
             x.FacilityName == plan.FacilityName);
 
     private async Task<bool> CollectIfReadyAsync(
-        AlteringPlan plan, IReadOnlyList<AlteringWork> works, CancellationToken ct)
+        AlteringPlan plan, IReadOnlyList<AlteringWork> works, CancellationToken ct,
+        bool deferPartialManaged = false)
     {
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
@@ -960,10 +961,22 @@ internal sealed class AlteringAutomation
         // receipt while another slot is still in progress.
         if (_facilityState is not null &&
             !AlteringReceiptPolicy.CanCollectManagedFacility(works, plan.FacilityName))
+        {
+            // A normal RunBatch may see a completion AFTER the coordinator's
+            // observation but BEFORE registration. Defer it rather than
+            // throwing; explicit CollectReadyBatch still rejects partials.
+            if (deferPartialManaged &&
+                AlteringReceiptPolicy.IsPartialManagedFacility(works, plan.FacilityName))
+            {
+                Log?.Invoke($"[다중가공] {plan.FacilityName} 부분 완료 {count}/{totalBefore} · " +
+                            "모두 받기 보류 · 등록 권한은 중간관리자만 결정");
+                return false;
+            }
             throw new InvalidOperationException(
                 $"{plan.FacilityName} 다중가공 묶음 수령 차단 · " +
                 $"시설 전체 {totalBefore}건 중 완료 {count}건 · " +
                 "일부만 완료된 7칸 배치는 모두 받기/Space 입력 없이 대기해야 합니다.");
+        }
 
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 시설 전체 {totalBefore}건 · " +
