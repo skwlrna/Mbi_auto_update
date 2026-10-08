@@ -1012,6 +1012,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                     if (remoteTwoFrames)
                     {
+                        if (AlteringRemoteProcessGuard.MustReportToCoordinator(
+                                directive, remoteTwoFrames))
+                        {
+                            const string reason =
+                                "가공하러 가기 OCR 2프레임 감지 · 중간관리자 시설 현장확정과 충돌";
+                            Log?.Invoke(
+                                $"[자동 가공] {plan.ScreenTitle} · {reason} · " +
+                                "가공 클릭/설비 이동 0회 · 중간관리자에게 상태 충돌 반환");
+                            throw new AlteringCoordinatorFacilityMismatchException(
+                                plan.FacilityName,
+                                reason,
+                                _ui.Failure(confirm,
+                                    reason + " · 하위 모듈 추가 입력 없이 정지합니다."));
+                        }
+
+                        // Only Automatic (single altering) may use the legacy
+                        // one-shot recovery. A managed queue never reaches it.
                         if (!AlteringRemoteProcessGuard.CanRecover(true, remoteRecoveryUsed))
                             Fail(confirm,
                                 "무료 설비 이동 복구 후에도 가공하러 가기 상태가 2프레임 연속 확인되어 현장 가공 입력 없이 정지합니다.");
