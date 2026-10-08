@@ -1074,6 +1074,46 @@ Check(recoveredSessionWorld.QueueDirectives.SequenceEqual(
           new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }),
     "H4: first intermediate registration after boundary receipt reuses manager-confirmed facility without second move");
 
+var residualWorld = new RecursiveProductionWorld
+{
+    InjectResidualAfterReceipt = true
+};
+residualWorld.AddExternalWork(
+    "철괴", "금속 가공 시설", "Completed", isCompleted: true, remainingSeconds: 0);
+residualWorld.AddExternalWork(
+    "철괴", "금속 가공 시설", "Completed", isCompleted: true, remainingSeconds: 0);
+var residualLane = new FacilityLaneState(await residualWorld.WorksAsync(default));
+var residualScheduler = new MultiAlteringDependencyScheduler(
+    residualWorld,
+    residualWorld,
+    testIdentity,
+    Path.Combine(Path.GetTempPath(),
+        "mabi-h4-residual-" + Guid.NewGuid().ToString("N")),
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: residualLane);
+var residualResolver = new RecursiveAlteringSupplyResolver(
+    residualWorld, residualWorld, residualWorld, residualWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+bool residualRejected = false;
+try
+{
+    await residualScheduler.RunAsync(
+        satisfiedIronPlan, 0, 9, residualResolver, default);
+}
+catch (InvalidOperationException ex)
+{
+    residualRejected = ex.Message.Contains("작업이 남아 있어 중간재료가 시설을 소유하지 않습니다");
+}
+Check(residualRejected &&
+      residualLane.QueueDirectiveFor("금속 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      residualLane.Snapshot("금속 가공 시설").LiveWorks == 1 &&
+      residualWorld.QueueDirectives.Count == 0,
+    "H4: residual facility work after boundary receipt prevents onsite confirmation and intermediate registration");
+
+
 if (Directory.Exists(satisfiedSessionDir))
     Directory.Delete(satisfiedSessionDir, recursive: true);
 
@@ -1615,7 +1655,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal readonly List<AlteringFacilityEntryDirective> QueueDirectives = new();
     internal readonly List<string> Gathered = new();
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls;
-    internal bool NestedSameFacilityChain;
+    internal bool NestedSameFacilityChain, InjectResidualAfterReceipt;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -1742,6 +1782,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             _items[output] = Count(output) + produced;
         }
         _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
+        if (InjectResidualAfterReceipt)
+            _works.Add(new(
+                "외부 대기 작업", plan.FacilityName, "InProgress", false, 30));
         return Task.FromResult(true);
     }
 
