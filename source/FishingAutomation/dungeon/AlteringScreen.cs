@@ -1548,6 +1548,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private async Task<bool> WaitForReceiptFacilityReturnAsync(
         AlteringPlan plan,
         int? receiptWorkCountBefore,
+        bool managedReceipt,
         CancellationToken ct)
     {
         int facilityFrames = 0;
@@ -1560,13 +1561,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             using var returned = Capture(ct);
             if (await FindFacilityHeaderAsync(returned, plan.ScreenTitle, ct) is not null)
             {
+                bool completionModal = HasBottomConfirmationModal(returned);
+                bool travelDialog = await IsFacilityTravelDialogAsync(returned, ct);
+                bool? autoTraveling = await TryAutoTravelingAsync(ct);
+                bool cleanReturn = AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+                    facilityHeaderVisible: true,
+                    completionModalVisible: completionModal,
+                    travelDialogVisible: travelDialog,
+                    autoTraveling: autoTraveling);
                 fieldFrames = 0;
-                facilityFrames++;
+                facilityFrames = cleanReturn ? facilityFrames + 1 : 0;
                 if (facilityFrames >= 2)
                 {
                     _confirmedOnsiteFacility = plan.FacilityName;
                     _stage.Move(ProductionStage.VerifyInventory, $"{plan.DisplayName} 수령 후 시설 복귀");
-                    Log?.Invoke($"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 확인");
+                    Log?.Invoke(
+                        $"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 2프레임 · " +
+                        "완료/이동 팝업 없음 · CLI 비이동 확정");
                     return true;
                 }
                 continue;
@@ -1621,6 +1632,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 continue;
 
             _confirmedOnsiteFacility = null;
+            if (managedReceipt)
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName} 수령 후 일반 필드 복귀가 3회 확인됐습니다. " +
+                    "필드에서 K로 연 가공창은 물리적 현장 증거가 아니므로 중간관리자 재사용을 금지합니다. " +
+                    "임의 메뉴 재진입/설비 이동/Space 없이 정지합니다.");
+
             Log?.Invoke($"[자동 가공] 수령 완료창 닫기 후 일반 필드 3회 확인 · " +
                         $"{plan.ScreenTitle} 가공 메뉴 1회 재진입 시도 · 재수령 Space 금지");
             await EnterFacilityAsync(plan, ct);
@@ -1679,8 +1696,28 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         CancellationToken ct,
         string reason,
         bool cliReceiptConfirmed = false,
-        int? receiptWorkCountBefore = null)
+        int? receiptWorkCountBefore = null,
+        bool managedReceipt = false)
     {
+        // Revalidate the exact result modal immediately before any closing
+        // Space. A prior two-frame observation can go stale during CLI reads.
+        using (var beforeClose = Capture(ct))
+        {
+            bool facilityVisible = await FindFacilityHeaderAsync(
+                beforeClose, plan.ScreenTitle, ct) is not null;
+            bool greenConfirm = HasBottomConfirmationModal(beforeClose);
+            bool travelDialog = await IsFacilityTravelDialogAsync(beforeClose, ct);
+            bool canClose = cliReceiptConfirmed
+                ? AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
+                    greenConfirm, facilityVisible, travelDialog)
+                : AlteringReceiptPolicy.CanConfirmCompletion(
+                    greenConfirm, facilityVisible, travelDialog,
+                    await TryAutoTravelingAsync(ct) == true);
+            if (!canClose)
+                Fail(beforeClose,
+                    "수령 완료창 Space 직전 재검증 실패 · 완료창/이동창/시설창 상태 불확실 · 추가 입력 없이 정지합니다.");
+        }
+
         Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -1784,14 +1821,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             }
         }
 
-        return await WaitForReceiptFacilityReturnAsync(plan, receiptWorkCountBefore, ct);
+        return await WaitForReceiptFacilityReturnAsync(
+            plan, receiptWorkCountBefore, managedReceipt, ct);
     }
 
     private async Task<bool> ConfirmCompletionResultAsync(
         AlteringPlan plan,
         CancellationToken ct,
         int? receiptWorkCountBefore = null,
-        int resultAttempts = 24)
+        int resultAttempts = 24,
+        bool managedReceipt = false)
     {
         // Successful receipt replaces the facility UI with the full-screen
         // "가공 완료" result. Detect the large green bottom confirmation shape,
@@ -1820,11 +1859,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 if (facilityVisible)
                 {
-                    _confirmedOnsiteFacility = plan.FacilityName;
-                    Log?.Invoke(
-                        $"[자동 가공] 첫 수령 Space 후 CLI 시설 전체 작업 감소로 수령 확정 · " +
-                        $"{receiptBefore}->{receiptNow} · 시설창 복귀 확인");
-                    return true;
+                    // CLI proves the receipt, but not the character's physical
+                    // return. Never trust just one frame of facility header.
+                    if (await WaitForReceiptFacilityReturnAsync(
+                            plan, receiptBefore, managedReceipt, ct))
+                        return true;
+
+                    using var ambiguous = Capture(ct);
+                    Fail(ambiguous,
+                        "CLI 수령 확정 후 시설창 복귀 2프레임/완료창 없음/CLI 비이동을 확인하지 못했습니다.");
                 }
 
                 bool travelDialogAfterReceipt =
@@ -1862,7 +1905,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         ct,
                         $"첫 수령 Space 후 CLI 시설 전체 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}",
                         cliReceiptConfirmed: true,
-                        receiptWorkCountBefore: receiptBefore))
+                        receiptWorkCountBefore: receiptBefore,
+                        managedReceipt: managedReceipt))
                     return true;
 
                 using var cliFailed = Capture(ct);
@@ -1904,7 +1948,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         ct,
                         "가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · " +
                         $"첫 수령 전 시설 전체 작업수={(workCountBefore?.ToString() ?? "확인불가")}",
-                        receiptWorkCountBefore: workCountBefore))
+                        receiptWorkCountBefore: workCountBefore,
+                        managedReceipt: managedReceipt))
                     return true;
 
                 using var failed = Capture(ct);
@@ -2003,7 +2048,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         await Task.Delay(450, ct);
 
         if (!await ConfirmCompletionResultAsync(
-                plan, ct, receiptWorkCountBefore: receiptWorkCountBefore, resultAttempts: 24))
+                plan, ct, receiptWorkCountBefore: receiptWorkCountBefore, resultAttempts: 24,
+                managedReceipt: directive != AlteringFacilityEntryDirective.Automatic))
         {
             using var failed = Capture(ct);
             Fail(failed, "현장 수령 Space 후 가공 완료 결과창을 안전하게 확인하지 못했습니다.");
