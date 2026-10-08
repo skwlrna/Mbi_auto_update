@@ -324,27 +324,32 @@ static class Program
             Check(File.ReadAllText(Path.Combine(firstPath, "batch.json")) == firstJson,
                 "previous run manifest changed");
         });
-        await Test("K/fresh F9 starts at zero with an old completed job and orders full target", async () =>
+        await Test("K/fresh F9 receives old completed works before taking the new baseline", async () =>
         {
             using var temp = new Temp(); var world = new World(new[] { Wood });
-            world.AddCompleted(Wood, 1); // old game queue from a previous run
+            world.AddCompleted(Wood, 1);
+            await MultiAlteringFreshStartCleanup.ClearAsync(
+                new[] { Wood }, world, world, world.Delay, null, default);
+            Check(world.Receipts == 1 && world.Works.Count == 0 &&
+                world.Counts[Wood.OutputName] == Wood.ProducedPerWork,
+                "old completed job was not collected before baseline");
             string path = Path.Combine(temp.Path, "fresh-runs", "f9-new");
             using var fresh = new MultiAlteringBatchStore(path);
             await fresh.OpenFreshAsync(new[] { Wood },
                 new CliIdentityContext(null, null, null, "server"), world, default);
             Check(!fresh.IsResuming && fresh.Session(Wood).QueuedWorks == 0 &&
-                fresh.Session(Wood).InitialExistingWorks == 1 &&
+                fresh.Session(Wood).InitialExistingWorks == 0 &&
                 fresh.CompletedPlans(new[] { Wood }).Count == 0,
-                "prior job was counted as newly entered F9 target");
-            Check(world.Receipts == 0 && world.Registered.Count == 0,
-                "fresh F9 preflight must not issue receipt or registration input");
+                "old game queue was included in the new F9 order");
+            Check(world.Registered.Count == 0,
+                "fresh F9 preflight registered a work");
             await new Harness(fresh, new[] { Wood }, world).Run();
             Check(world.Registered.Count == Wood.RequiredWorks &&
                 world.Counts[Wood.OutputName] == (Wood.RequiredWorks + 1) * Wood.ProducedPerWork &&
                 fresh.CompletedPlans(new[] { Wood }).Count == 1,
-                "old completed job contaminated the 100-new-unit target");
+                "fresh target did not order every requested unit from zero");
         });
-        await Test("K/previous F9 one registered then restart orders a NEW full target", async () =>
+        await Test("K/previous F9 one registered then restart clears queue and orders full NEW target", async () =>
         {
             using var temp = new Temp(); var world = new World(new[] { Wood });
             var realm = new CliIdentityContext(null, null, null, "server");
@@ -359,21 +364,65 @@ static class Program
                     "setup did not queue one previous-run job");
                 oldJson = File.ReadAllText(Path.Combine(oldPath, "batch.json"));
             }
+            await MultiAlteringFreshStartCleanup.ClearAsync(
+                new[] { Wood }, world, world, world.Delay, null, default);
+            Check(world.Receipts == 1 && world.Works.Count == 0,
+                "restart did not clear old game works");
             string freshPath = Path.Combine(temp.Path, "fresh-runs", "f9-restart");
             using (var restarted = new MultiAlteringBatchStore(freshPath))
             {
                 await restarted.OpenFreshAsync(new[] { Wood }, realm, world, default);
                 Check(!restarted.IsResuming && restarted.Session(Wood).QueuedWorks == 0 &&
-                    restarted.Session(Wood).InitialExistingWorks == 1,
-                    "restart carried the old 1/100 progress into fresh target");
+                    restarted.Session(Wood).InitialExistingWorks == 0,
+                    "restart carried old progress or old queue into fresh target");
                 await new Harness(restarted, new[] { Wood }, world).Run();
                 Check(world.Registered.Count == Wood.RequiredWorks + 1 &&
                     world.Counts[Wood.OutputName] == (Wood.RequiredWorks + 1) * Wood.ProducedPerWork &&
                     restarted.CompletedPlans(new[] { Wood }).Count == 1,
-                    "restart must add ten fresh registrations on top of one old registration");
+                    "restart did not register full NEW target after clearing the old queue");
             }
             Check(File.ReadAllText(Path.Combine(oldPath, "batch.json")) == oldJson,
-                "new F9 altered the previous batch's historical evidence");
+                "new F9 accidentally opened the previous batch manifest");
+        });
+        await Test("K/fresh F9 never starts with old selected facility works still present", async () =>
+        {
+            using var temp = new Temp(); var world = new World(new[] { Wood });
+            world.AddCompleted(Wood, 1);
+            using var fresh = new MultiAlteringBatchStore(
+                Path.Combine(temp.Path, "fresh-runs", "f9-restart"));
+            await Reject(() => fresh.OpenFreshAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default),
+                "이전 작업을 정리해야");
+            Check(!File.Exists(Path.Combine(temp.Path, "fresh-runs", "f9-restart", "batch.json")),
+                "old work incorrectly created a fresh batch");
+        });
+        await Test("K/new F9 cleanup waits for full facility then receives once", async () =>
+        {
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            world.AddCompleted(Wood, 1);
+            world.Works.Add(new AlteringWork(
+                Wood.OutputName, Wood.FacilityName, "InProgress", false, 5));
+            int waited = 0;
+            await MultiAlteringFreshStartCleanup.ClearAsync(
+                new[] { Wood }, world, world,
+                (duration, ct) => { waited++; return world.Delay(duration, ct); },
+                null, default);
+            Check(waited >= 1 && world.Receipts == 1 && world.PartialReceipts == 0 &&
+                world.Works.Count == 0 && world.Registered.Count == 0,
+                "old partial facility was collected or registered prematurely");
+        });
+        await Test("K/F10 during old queue cleanup performs no receipt or registration", async () =>
+        {
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            world.Works.Add(new AlteringWork(
+                Wood.OutputName, Wood.FacilityName, "InProgress", false, 50));
+            using var stop = new CancellationTokenSource();
+            stop.Cancel();
+            await Reject(() => MultiAlteringFreshStartCleanup.ClearAsync(
+                new[] { Wood }, world, world, world.Delay, null, stop.Token),
+                "OperationCanceledException");
+            Check(world.Receipts == 0 && world.Registered.Count == 0,
+                "cancelled F9 cleanup changed the game");
         });
         await Test("K/fresh F9 permits only unrelated facility work", async () =>
         {
