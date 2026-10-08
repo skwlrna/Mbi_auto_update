@@ -927,10 +927,11 @@ jobs:
           if($resolver -notmatch 'MultiAlteringMaterialPreflightPolicy' -or
              $resolver -notmatch 'PreGatherKnownShortagesAsync' -or
              $resolver -notmatch '전체 품목 통합 채집 준비' -or
-             $multiAlterMain -notmatch 'MultiAlteringMaterialPreflightPolicy\.CanRun' -or
-             $multiAlterMain -notmatch 'hasResumableSessionForPreflight' -or
-             $multiAlterMain -notmatch 'hasSelectedFacilityWorksForPreflight' -or
-             $multiAlterMain -notmatch 'PreGatherKnownShortagesAsync') { throw 'safe whole-plan known-shortage preflight wiring missing' }
+             $multiAlterMain -notmatch 'MultiAlteringFreshStartCleanup\.ClearAsync' -or
+             $multiAlterMain -notmatch 'PreGatherKnownShortagesAsync' -or
+             $multiAlterMain -match 'hasResumableSessionForPreflight|hasSelectedFacilityWorksForPreflight') {
+              throw 'safe clean-F9 whole-plan known-shortage preflight wiring missing'
+          }
           if($resolver -notmatch '철괴\(철 광석\)' -or
              $resolver -notmatch '철괴\(광석\) 제외') { throw 'recursive iron ingot must prefer iron-ore recipe and exclude legacy ore route' }
           if($multiGather -notmatch 'new GatheringAutomation' -or
