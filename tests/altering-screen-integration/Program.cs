@@ -176,13 +176,13 @@ try
           Has(collect, "AfterVerifiedFacilityEntry"),
         "real receipt uses manager travel, stabilized blue recheck and completion proof");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
-    Check(Has(completion, "CanSendCompletionCloseSpace") &&
-          Has(close, "CanSendCompletionCloseSpace"),
-        "compiled completion and close paths use managed tri-state CLI guard");
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
         "real completion requires modal approval and guarded close");
     var close = ScreenCalls("CloseCompletionResultAndWaitForFacilityAsync", 6);
+    Check(Has(completion, "CanSendCompletionCloseSpace") &&
+          Has(close, "CanSendCompletionCloseSpace"),
+        "compiled completion and close paths use managed tri-state CLI guard");
     Check(Has(close, "CanConfirmCliReceiptCompletion") &&
           Has(close, "CanRetryCliReceiptCompletionClose") &&
           Has(close, "WaitForReceiptFacilityReturnAsync"),
