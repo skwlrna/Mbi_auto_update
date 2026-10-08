@@ -268,6 +268,100 @@ static class Program
                 "weak test overwrote normal or legacy roster");
             Check(world.Registered.Count == 0, "fresh test registered before scheduler");
         });
+        await Test("K/fresh F9 ignores but preserves old unresolved F05 journal", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            var realm = new CliIdentityContext(null, null, null, "server");
+            string oldPath = Path.Combine(temp.Path, "limited-fresh-test");
+            string oldManifest = Path.Combine(oldPath, "batch.json");
+            using (var abandoned = new MultiAlteringBatchStore(oldPath))
+            {
+                await abandoned.OpenAsync(Plans, realm, world, default, allowSingleCharacter: true);
+                abandoned.PrepareConsumption(Steel, Guid.NewGuid().ToString("N"),
+                    new Dictionary<string, long> { [Wood.OutputName] = 0 }, default);
+            }
+            string original = File.ReadAllText(oldManifest);
+            await Reject(async () =>
+            {
+                using var past = new MultiAlteringBatchStore(oldPath);
+                await past.OpenAsync(Plans, realm, world, default, allowSingleCharacter: true);
+            }, "미확정 소비 거래");
+            string freshPath = Path.Combine(temp.Path, "fresh-runs", "f9-first");
+            using (var fresh = new MultiAlteringBatchStore(freshPath))
+            {
+                await fresh.OpenFreshAsync(Plans, realm, world, default);
+                Check(!fresh.IsResuming && fresh.Session(Wood).QueuedWorks == 0 &&
+                    fresh.Session(Steel).QueuedWorks == 0,
+                    "supervisor fresh F9 restored abandoned work");
+                await new Harness(fresh, Plans, world).Run();
+                Check(fresh.CompletedPlans(Plans).Count == 3,
+                    "fresh supervisor did not order every selected item");
+            }
+            Check(File.ReadAllText(oldManifest) == original &&
+                File.Exists(Path.Combine(freshPath, "batch.json")),
+                "new F9 overwrote prior F05 history");
+        });
+        await Test("K/F10 history remains but next explicit F9 creates a new batch", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            var realm = new CliIdentityContext(null, null, null, "server");
+            string firstPath = Path.Combine(temp.Path, "fresh-runs", "f9-first");
+            string firstJson;
+            using (var prior = new MultiAlteringBatchStore(firstPath))
+            {
+                await prior.OpenFreshAsync(new[] { Wood }, realm, world, default);
+                firstJson = File.ReadAllText(Path.Combine(firstPath, "batch.json"));
+            }
+            string secondPath = Path.Combine(temp.Path, "fresh-runs", "f9-second");
+            using (var fresh = new MultiAlteringBatchStore(secondPath))
+            {
+                await fresh.OpenFreshAsync(new[] { Steel }, realm, world, default);
+                Check(!fresh.IsResuming && fresh.CompletedPlans(new[] { Steel }).Count == 0,
+                    "new F9 reused prior F10 roster");
+                Check(fresh.BatchId != JsonSerializer.Deserialize<MultiAlteringBatch>(firstJson)!.BatchId,
+                    "F9 runs shared batch identity");
+            }
+            Check(File.ReadAllText(Path.Combine(firstPath, "batch.json")) == firstJson,
+                "previous run manifest changed");
+        });
+        await Test("K/fresh F9 rejects selected facility completed or active works", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            world.AddCompleted(Wood, 1);
+            string path = Path.Combine(temp.Path, "fresh-runs", "f9-new");
+            using var fresh = new MultiAlteringBatchStore(path);
+            await Reject(() => fresh.OpenFreshAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default),
+                "선택 시설에 이전 대기/완료 작업");
+            Check(!File.Exists(Path.Combine(path, "batch.json")) &&
+                world.Registered.Count == 0 && world.Works.Count == 1,
+                "fresh supervisor received or silently replaced unrelated completed work");
+        });
+        await Test("K/fresh F9 permits only unrelated facility work", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            world.Works.Add(new AlteringWork("외부 품목", "외부 가공 시설", "InProgress", false, 10));
+            using var fresh = new MultiAlteringBatchStore(
+                Path.Combine(temp.Path, "fresh-runs", "f9-new"));
+            await fresh.OpenFreshAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default);
+            Check(world.Works.Count == 1 && world.Registered.Count == 0,
+                "unrelated facility work was consumed or registered");
+        });
+        await Test("K/new F9 fails closed if target run folder contains any history", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            string path = Path.Combine(temp.Path, "fresh-runs", "f9-new");
+            using var fresh = new MultiAlteringBatchStore(path);
+            string unknownPath = Path.Combine(path, "unresolved.tmp");
+            File.WriteAllText(unknownPath, "old data");
+            await Reject(() => fresh.OpenFreshAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default),
+                "이전 기록이 존재");
+            Check(File.ReadAllText(unknownPath) == "old data" &&
+                !File.Exists(Path.Combine(path, "batch.json")),
+                "unsafe fresh folder was overwritten");
+        });
         await Test("J/one-character isolated batch F10 restarts without redoing finished items", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
