@@ -398,6 +398,39 @@ static class Program
                 fresh.Session(Wood).QueuedWorks == 6,
                 "fresh F9 failed to register in free slots without changing the old job");
         });
+        await Test("K/fresh F9 coordinator fills initial vacancies around old running or completed work", async () =>
+        {
+            foreach (bool oldCompleted in new[] { false, true })
+            {
+                var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+                world.Works.Add(new AlteringWork(Wood.OutputName, Wood.FacilityName,
+                    oldCompleted ? "Completed" : "InProgress", oldCompleted, oldCompleted ? 0 : 60));
+                var lane = new FacilityLaneState(world.Works.ToArray());
+                using var stopped = new CancellationTokenSource();
+                int added = 0;
+                var supervisor = new MultiAlteringCoordinator(lane, fillInitialVacancies: true);
+                await Reject(() => supervisor.RunAsync(
+                    new[] { Wood },
+                    (p, budget, token) =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        Check(budget == 1, "manager did not allocate one free slot");
+                        world.Works.Add(new AlteringWork(
+                            Wood.OutputName, Wood.FacilityName, "InProgress", false, 30));
+                        lane.NoteRegistration(p, FacilityLaneOwner.Main, 1);
+                        if (++added == 6) stopped.Cancel();
+                        return Task.FromResult(false);
+                    },
+                    world.WorksAsync,
+                    world.Delay,
+                    stopped.Token), "OperationCanceledException");
+                Check(added == 6 && world.Works.Count == 7 &&
+                    world.Works[0].IsCompleted == oldCompleted &&
+                    world.Works[0].RemainingSeconds == (oldCompleted ? 0 : 60) &&
+                    world.Receipts == 0 && world.PartialReceipts == 0,
+                    "coordinator skipped free slots or modified old work");
+            }
+        });
         await Test("K/fresh F9 permits only unrelated facility work", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
