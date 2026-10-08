@@ -147,8 +147,10 @@ try
         "real medicine search guards directive, modal and detail before accepting selection");
     Check(!Has(medicine, "TravelToFacilityAsync"),
         "real medicine search cannot autonomously issue facility movement");
-    Check(Has(medicine, "IsNearMedicineFirstResult"),
-        "managed medicine selection checks an exact result at the expected row");
+    Check(!Has(medicine, "IsNearMedicineFirstResult") &&
+          Has(medicine, "MeasureVisualChangeRatio") &&
+          Has(medicine, "FindAlteringLabelsAsync"),
+        "medicine follows food crafting: OCR only helps confirm a changed fixed search result screen");
 
     var queue = ScreenCalls("QueueAsync", 4);
     Check(Has(queue, "SelectRecipeAsync") && Has(queue, "TravelToFacilityAsync") &&
