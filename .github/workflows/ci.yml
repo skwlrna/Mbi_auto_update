@@ -300,7 +300,11 @@ jobs:
           if ($queue -notmatch '새 시설 첫 등록' -or
               $queue -notmatch '품목 선택보다 설비 이동 1회 우선') { throw 'fresh facility move-first trace missing' }
           if ($queue -notmatch '설비 도착 · 이제 .* 선택') { throw 'post-arrival recipe selection trace missing' }
-          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 2) { throw 'queue must keep the base detail check plus one remote-candidate confirmation detail check' }
+          # F07: preserve BOTH original detail checks, plus the independent
+          # exact-identity gate inside the managed pre-registration callback.
+          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 3 -or
+              $queue -notmatch 'VerifyTwoFreshObservationsAsync' -or
+              $queue -notmatch 'FindRecipeAsync\(fresh, plan, token\)') { throw 'queue must keep two remote/detail safety checks and the new managed exact identity gate' }
           $remoteGuard = Get-Content source/FishingAutomation/AlteringRemoteProcessGuard.cs -Raw
           if ($remoteGuard -notmatch '!firstRemote \|\| !secondRemote' -or
               $queue -notmatch '작업 등록 직전 원격 상태 후보 1/2' -or
