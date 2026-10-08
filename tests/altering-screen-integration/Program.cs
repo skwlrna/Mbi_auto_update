@@ -163,6 +163,19 @@ try
     Check(Has(queue, "VerifyTwoFreshObservationsAsync") &&
           Has(queue, "RequireManagedIdleAsync"),
         "managed real QueueAsync wires independent title verification before UI input");
+    var n01Calls = queue.ToList();
+    int n01FreshTarget = n01Calls.FindLastIndex(x =>
+        x.EndsWith(".IsStableFreshFreeActionTarget", StringComparison.Ordinal));
+    int n01FinalClick = n01Calls.FindLastIndex(x =>
+        x.EndsWith(".ClickFresh", StringComparison.Ordinal));
+    Check(n01FreshTarget >= 0 && n01FinalClick > n01FreshTarget &&
+          Has(queue, "TryFindFreeProcessButtonVisual") &&
+          Has(queue, "FindRecipeAsync") &&
+          Has(queue, "DetectRemoteProcessStateAsync"),
+        "N01 compiled QueueAsync reacquires final button from fresh frame after recipe/remote checks");
+    var f07Title = ScreenCalls("FindRecipeAsync", 3);
+    Check(Has(f07Title, "FindAsync"),
+        "F07 real recipe title check remains on managed final action path");
     Check(queue.ToList().FindIndex(s => s.EndsWith(".MustReportToCoordinator")) <
           queue.ToList().FindIndex(s => s.EndsWith(".RecoverRemoteDetailToOnsiteAsync")),
         "real queue checks manager conflict BEFORE Automatic-only remote-detail recovery");
@@ -345,6 +358,26 @@ try
         Check(canceledBeforeAction && observations == 1,
             "F08 F10-style cancel between fresh observations stops before input");
     }
+    // This MUST invoke the production compiled policy methods. Qualifier
+    // collisions are real (iron recipes share the display output "철괴").
+    bool UniqueOutput(string selected, string output, string[] names) =>
+        (bool)(Method(identityPolicy, "MayUseBaseOutputTitle", 3).Invoke(
+            null, new object[] { selected, output, names }) ?? false);
+    Check(!UniqueOutput("철괴(광석)", "철괴",
+              new[] { "철괴(광석)", "철괴(철 광석)" }) &&
+          UniqueOutput("밀가루(곡물)", "밀가루",
+              new[] { "밀가루(곡물)", "목재", "강철괴" }) &&
+          !UniqueOutput("철괴", "철괴", new[] { "철괴" }),
+        "F07 qualified output-only title never proves which duplicate CLI recipe was clicked");
+    bool StableFree(Point earlier, Point latest) =>
+        (bool)(Method(identityPolicy, "IsStableFreshFreeActionTarget", 3).Invoke(
+            null, new object[] { earlier, latest,
+                new Rectangle(180, 895, 470, 95) }) ?? false);
+    Check(StableFree(new Point(420, 944), new Point(444, 950)) &&
+          !StableFree(new Point(420, 944), new Point(490, 950)) &&
+          !StableFree(new Point(420, 944), new Point(440, 980)) &&
+          !StableFree(new Point(420, 944), new Point(440, 770)),
+        "N01 stale, displaced or off-button target cannot authorize last-frame ClickFresh");
     Check(CallBoolean(identityPolicy, "IsNearMedicineFirstResult", 210, 410, 219, 412) &&
           !CallBoolean(identityPolicy, "IsNearMedicineFirstResult", 210, 580, 219, 412),
         "F07 medicine result must be near exact first-result row");
