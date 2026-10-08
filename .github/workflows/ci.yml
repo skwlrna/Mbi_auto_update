@@ -422,10 +422,11 @@ jobs:
           if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
           if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
           if ($screen -notmatch 'resultAttempts: 24') { throw 'on-site receipt completion-result wait missing' }
-          if ($collectFlow -notmatch 'receiptWorkCountBefore = await TryMatchingWorkCountAsync\(plan, ct\)' -or
-              $screen -notmatch 'TryMatchingWorkCountAsync' -or
+          if ($collectFlow -notmatch 'receiptWorkCountBefore = await TryFacilityWorkCountAsync\(plan, ct\)' -or
+              $screen -notmatch 'TryFacilityWorkCountAsync' -or
+              $screen -match 'TryMatchingWorkCountAsync' -or
               $screen -notmatch 'IsCliReceiptConfirmed' -or
-              $screen -notmatch '첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정') { throw 'pre-receipt same-item CLI confirmation path missing' }
+              $screen -notmatch '첫 수령 Space 후 CLI 시설 전체 작업 감소로 수령 확정') { throw 'M4 pre-receipt facility-wide CLI confirmation path missing' }
           if ($screen -notmatch 'WaitForReceiptFacilityReturnAsync' -or
               $screen -notmatch 'CloseCompletionResultAndWaitForFacilityAsync' -or
               $screen -notmatch '완료창 닫기 Space 1차 입력' -or
@@ -433,6 +434,31 @@ jobs:
               $screen -notmatch '완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음' -or
               $screen -notmatch 'Space 2회 입력 후에도 그대로 남아 있어 추가 입력 없이 정지' -or
               $screen -match '결과창 인식 생략 · 다음 가공 진입에서 화면 재검증') { throw 'receipt result verified close/retry-and-return gate missing' }
+          # M4: mixed seven-slot receive-all is a FACILITY-wide action.
+          # Reject partially complete managed queues before any UI input and
+          # require zero jobs after the one receive. Single mode retains its
+          # historical lower-risk count-decrease check.
+          $alteringAll = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          $m4Collect = [regex]::Match(
+              $alteringAll,
+              'private async Task<bool> CollectIfReadyAsync[\s\S]*?(?=\r?\n    private async Task VerifyRegistrationAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($m4Collect) -or
+              $receiptPolicy -notmatch 'CanCollectManagedFacility' -or
+              $receiptPolicy -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
+              $receiptPolicy -notmatch 'IsManagedFacilityReceiptConfirmed' -or
+              $receiptPolicy -notmatch 'before > 0 && after == 0' -or
+              $m4Collect -notmatch 'CanCollectManagedFacility\(works, plan.FacilityName\)' -or
+              $m4Collect -notmatch '일부만 완료된 7칸 배치' -or
+              $m4Collect -notmatch 'IsManagedFacilityReceiptConfirmed' -or
+              $m4Collect -notmatch '시설 전체 대기열 0건' -or
+              $m4Collect -notmatch 'if \(_facilityState is not null\)' -or
+              $screen -match 'TryMatchingWorkCountAsync' -or
+              $alterTests -notmatch 'M4: manager verifies blue receive-all removed both selected and other recipe' -or
+              $alterTests -notmatch 'M4: partial mixed facility batch is rejected before moving' -or
+              $alterTests -notmatch 'M4: selected item disappearing while another completed recipe remains fails closed') {
+              throw 'M4 mixed facility receipt must use all-facility evidence before and after a single receive'
+          }
           if ($receiptPolicy -notmatch 'IsCliReceiptConfirmed' -or
               $receiptPolicy -notmatch 'after < before' -or
               $receiptPolicy -notmatch 'CanRetryCompletionClose' -or
