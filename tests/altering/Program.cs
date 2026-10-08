@@ -1160,10 +1160,15 @@ if (Directory.Exists(dependencySessionDir))
 
 var multiWorld = new RecursiveProductionWorld();
 multiWorld.SetCount("석탄", 0);
+var multiLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+multiLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: previous intermediate confirmed metal facility");
+multiWorld.ManagerObservedDuringGather = multiLane;
 var multiResolver = new RecursiveAlteringSupplyResolver(
     multiWorld, multiWorld, multiWorld, multiWorld,
     delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-    verificationAttempts: 4);
+    verificationAttempts: 4,
+    laneState: multiLane);
 var multiAuto = new AlteringAutomation(
     multiWorld, multiWorld,
     (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
@@ -1176,14 +1181,24 @@ Check(multiWorld.Count("강철괴") == 3 &&
     "multi-gather batches iron ore and coal in one field transition before recursive processing");
 Check(multiWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)", "강철괴" }),
     "multi-gather preserves recursive caller return: intermediate iron then final steel");
+Check(multiLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      multiWorld.LaneDirectivesAtGatherStart.Count == 2 &&
+      multiWorld.LaneDirectivesAtGatherStart.All(d =>
+          d == AlteringFacilityEntryDirective.FreshMoveRequired),
+    "H5: after an intermediate onsite confirmation, a subsequent grouped field exit clears manager onsite before gathering input");
 
 var wholePlanWorld = new RecursiveProductionWorld();
 wholePlanWorld.SetCount("석탄", 0);
 wholePlanWorld.SetCount("철 광석", 0);
+var preflightLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+preflightLane.ConfirmOnsite(steelPlan.FacilityName, "H5 test: previously confirmed facility");
+wholePlanWorld.ManagerObservedDuringGather = preflightLane;
 var wholePlanResolver = new RecursiveAlteringSupplyResolver(
     wholePlanWorld, wholePlanWorld, wholePlanWorld, wholePlanWorld,
     delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-    verificationAttempts: 4);
+    verificationAttempts: 4,
+    laneState: preflightLane);
 var wholeSteelRecipe = (await wholePlanWorld.RecipesAsync(default))
     .Single(x => x.DisplayName == "강철괴");
 var alloyPlan = new AlteringPlan("금속 가공 시설", "합금괴", 3, 3, false);
@@ -1212,6 +1227,12 @@ Check(wholePlanWorld.FieldExitCalls == 1 &&
       wholePlanWorld.Count("철 광석") >= 20 &&
       wholePlanWorld.Count("석탄") >= 6,
     "whole-plan material preflight merges shared proven raw shortages into one field gathering session");
+Check(preflightLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      wholePlanWorld.LaneDirectivesAtGatherStart.Count == 2 &&
+      wholePlanWorld.LaneDirectivesAtGatherStart.All(d =>
+          d == AlteringFacilityEntryDirective.FreshMoveRequired),
+    "H5: whole-plan preflight announces confirmed field exit to the shared manager before raw gathering");
 
 var skipWorld = new RecursiveProductionWorld();
 skipWorld.SetCount("철 광석", 20);
@@ -1654,8 +1675,11 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal readonly List<string> Queued = new();
     internal readonly List<AlteringFacilityEntryDirective> QueueDirectives = new();
     internal readonly List<string> Gathered = new();
-    internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls;
-    internal bool NestedSameFacilityChain, InjectResidualAfterReceipt;
+    internal readonly List<AlteringFacilityEntryDirective> LaneDirectivesAtGatherStart = new();
+    internal FacilityLaneState? ManagerObservedDuringGather;
+    internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
+    internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
+        HideGatheringCatalogOnFirstQuery, FailFieldExit;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -1800,6 +1824,10 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        CatalogCalls++;
+        if (HideGatheringCatalogOnFirstQuery && CatalogCalls == 1)
+            return Task.FromResult<IReadOnlyList<GatherableItem>>(
+                Array.Empty<GatherableItem>());
         return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]
         {
             new GatherableItem("철 광석", true),
@@ -1825,6 +1853,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (ManagerObservedDuringGather is not null)
+            LaneDirectivesAtGatherStart.Add(
+                ManagerObservedDuringGather.QueueDirectiveFor("금속 가공 시설"));
         GatherStarts++;
         Gathered.Add(plan.DisplayName);
         _gathering = plan.DisplayName;
@@ -1842,6 +1873,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     {
         ct.ThrowIfCancellationRequested();
         FieldExitCalls++;
+        if (FailFieldExit)
+            throw new InvalidOperationException("H5 simulated navigation failure");
         return Task.CompletedTask;
     }
 
