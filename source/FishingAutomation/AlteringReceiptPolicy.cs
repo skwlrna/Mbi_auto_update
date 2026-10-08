@@ -73,6 +73,11 @@ internal static class AlteringReceiptPolicy
            !travelDialogVisible &&
            autoTraveling == false;
 
+    // F04: unlike Automatic single processing, manager-controlled receipt must
+    // positively observe the character not traveling before EVERY close Space.
+    internal static bool CanSendCompletionCloseSpace(bool managedReceipt, bool? autoTraveling)
+        => !managedReceipt || autoTraveling == false;
+
     internal static bool CanConfirmCompletion(
         bool greenConfirmVisible,
         bool facilityVisible,
