@@ -684,6 +684,24 @@ jobs:
              $dependencyScheduler -notmatch 'CollectReadyBatchAsync' -or
              $dependencyScheduler -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $dependencyScheduler -notmatch '배치 전체 완료 전 이동 없음') { throw 'intermediate processing must share whole-facility seven-slot scheduling' }
+          # H4: a dependency-boundary receipt may authorize same-facility
+          # reuse only after the existing batch is received, the shared lane has
+          # observed the CLI shrink, and the facility queue is proven empty.
+          $boundaryReceipt = [regex]::Match(
+              $dependencyScheduler,
+              'if \(boundaryWorks\.Length > 0\)[\s\S]*?(?=\r?\n        long current =)').Value
+          $boundaryObserve = $boundaryReceipt.IndexOf('_laneState?.Observe(')
+          $boundaryEmpty = $boundaryReceipt.IndexOf('if (afterFacilityCollection.Length > 0)')
+          $boundaryConfirm = $boundaryReceipt.IndexOf('_laneState?.ConfirmOnsite(')
+          if ([string]::IsNullOrWhiteSpace($boundaryReceipt) -or
+              $boundaryReceipt -notmatch 'collector\.CollectReadyBatchAsync\(requestedPlan, ct\)' -or
+              $boundaryObserve -lt 0 -or
+              $boundaryEmpty -le $boundaryObserve -or
+              $boundaryConfirm -le $boundaryEmpty -or
+              $boundaryReceipt -notmatch 'allowShrink: true' -or
+              $boundaryReceipt -notmatch '중간재료 전환 경계 · 완료 배치 수령 및 시설 작업 0건 확인' -or
+              $alterTests -notmatch 'H4: dependency boundary receipt confirms only the proven same-facility onsite state' -or
+              $alterTests -notmatch 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility') { throw 'H4 dependency boundary did not preserve coordinator onsite authority after verified receipt' }
           if($dependencyScheduler -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'dependency scheduler must not own direct input' }
           if($laneOwnership -notmatch 'FacilityLaneOwner' -or
              $laneOwnership -notmatch 'InitialObservedWorks' -or
