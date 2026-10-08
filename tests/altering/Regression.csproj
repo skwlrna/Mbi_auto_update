@@ -7,6 +7,7 @@
     <Compile Include="../../source/FishingAutomation/AlteringRecipeLayout.cs" Link="AlteringRecipeLayout.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringQueries.cs" Link="AlteringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringDetailPolicy.cs" Link="AlteringDetailPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringRecipeIdentityPolicy.cs" Link="AlteringRecipeIdentityPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringReceiptPolicy.cs" Link="AlteringReceiptPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringRemoteProcessGuard.cs" Link="AlteringRemoteProcessGuard.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringFixedRecipeRetryPolicy.cs" Link="AlteringFixedRecipeRetryPolicy.cs" />
