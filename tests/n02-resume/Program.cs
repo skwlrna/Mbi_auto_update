@@ -262,6 +262,18 @@ static class Program
                     "Changed legacy history silently authorized new registration");
             }
         });
+        await Test("I/zero-work legacy mismatched character cannot migrate", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            foreach (var plan in Plans)
+                new AlteringSessionStore(AlteringSessionStore.MultiPlanPath(temp.Path, plan))
+                    .Save(AlteringSessionState.Create(plan, Identity, 0, 0));
+            using var batch = new MultiAlteringBatchStore(temp.Path);
+            await Reject(() => Open(batch, world, identity: Identity with { CharacterId = "other" }),
+                "RecoveryRequired");
+            Check(!File.Exists(temp.Manifest) && world.Registered.Count == 0,
+                "Cross-character legacy history was treated as a fresh batch");
+        });
         await Test("I/incomplete legacy roster never reprocesses deleted completed peer", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
@@ -270,6 +282,12 @@ static class Program
                     .Save(AlteringSessionState.Create(plan, Identity, 0, 0));
             using var batch = new MultiAlteringBatchStore(temp.Path);
             await Reject(() => Open(batch, world), "RecoveryRequired");
+            // The single-altering entry must not mistake absent batch.json for
+            // permission to bypass an incomplete prior multi-plan roster.
+            await Reject(() => {
+                _ = MultiAlteringBatchStore.ReadPendingPlans(temp.Path);
+                return Task.CompletedTask;
+            }, "RecoveryRequired");
             Check(!File.Exists(temp.Manifest) && world.Registered.Count == 0,
                 "Incomplete legacy roster reset missing completed wood");
         });
