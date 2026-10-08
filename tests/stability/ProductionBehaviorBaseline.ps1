@@ -149,6 +149,19 @@ Match-Required $alterTests 'H5: hidden raw shortage discovered after intermediat
 Match-Required $alterTests 'H5: uncertain or failed field exit invalidates stale onsite' 'H5 failed navigation never reuses stale onsite'
 Match-Required $alterTests 'H5: resolver preflight without actual field departure' 'H5 no-departure preserves onsite'
 
+# M1: only proven movement may invalidate onsite; material resolution itself
+# is still read-only planning until H5 or intermediate queue reports movement.
+$m1Resolve = [regex]::Match(
+    $alterPlan,
+    'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, remainingWorks, ct\);').Value
+Require (-not [string]::IsNullOrWhiteSpace($m1Resolve)) 'M1 material resolver call stays in registration flow'
+Match-Forbidden $m1Resolve '_facilityState\?\.InvalidateOnsite' 'M1 cannot revoke onsite merely because materials are missing'
+Match-Required $m1Resolve '실제 필드/타 시설 이탈 전 현장확정 유지' 'M1 defers location changes to confirmed travel'
+Match-Required $alterTests 'M1: material inspection and same-facility resolution without travel retain manager onsite' 'M1 same-site resolution preserves reuse directive'
+Match-Required $alterTests 'M1: material inspection cannot invent onsite proof' 'M1 initial unknown requires a first facility move'
+Match-Required $alterTests 'M1: material-only failure stops without queueing or revoking proven onsite' 'M1 failed inspection cannot falsely revoke onsite'
+
+
 
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
