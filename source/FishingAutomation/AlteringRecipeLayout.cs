@@ -4,13 +4,15 @@ namespace FishingAutomation;
 
 internal static class AlteringRecipeLayout
 {
-    internal static readonly Point ProcessingSearchIconPoint = new(39, 117);
-    internal static readonly Rectangle ProcessingSearchDialogArea = new(140, 760, 520, 235);
-    internal static readonly Point ProcessingSearchInputPoint = new(400, 862);
-    internal static readonly Rectangle ProcessingSearchResultArea = new(35, 350, 730, 550);
-    internal static readonly Point ProcessingSearchFirstResultPoint = new(219, 412);
-    internal const double ProcessingSearchOpenChangeRatio = 0.08;
-    internal const double ProcessingSearchResultChangeRatio = 0.06;
+    // 약품 가공은 음식 제작 검색 UI를 그대로 사용한다.
+    // 이 좌표와 화면 변화 기준은 음식 제작의 정의를 공유하여 어긋나지 않게 한다.
+    internal static readonly Point ProcessingSearchIconPoint = CraftingHubLayout.ProductSearchIconPoint;
+    internal static readonly Rectangle ProcessingSearchDialogArea = CraftingHubLayout.ProductSearchDialogArea;
+    internal static readonly Point ProcessingSearchInputPoint = CraftingHubLayout.ProductSearchInputPoint;
+    internal static readonly Rectangle ProcessingSearchResultArea = CraftingHubLayout.ProductSearchResultArea;
+    internal static readonly Point ProcessingSearchFirstResultPoint = CraftingHubLayout.ProductFirstResultPoint;
+    internal const double ProcessingSearchOpenChangeRatio = CraftingHubLayout.SearchDialogOpenChangeRatio;
+    internal const double ProcessingSearchResultChangeRatio = CraftingHubLayout.SearchResultChangeRatio;
 
     private static readonly HashSet<string> FixedFacilities = new(StringComparer.Ordinal)
     {
