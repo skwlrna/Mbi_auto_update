@@ -687,6 +687,7 @@ jobs:
           # H4: a dependency-boundary receipt may authorize same-facility
           # reuse only after the existing batch is received, the shared lane has
           # observed the CLI shrink, and the facility queue is proven empty.
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
           $boundaryReceipt = [regex]::Match(
               $dependencyScheduler,
               'if \(boundaryWorks\.Length > 0\)[\s\S]*?(?=\r?\n        long current =)').Value
