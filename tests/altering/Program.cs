@@ -760,20 +760,20 @@ Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.Reser
     "missing materials are resolved inside the same zero-wing altering session");
 
 var noDeparturePlan = plan with { TargetQuantity = 3 };
-var noDepartureWorld = new FakeWorld(noDeparturePlan) { Available = false };
-var noDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
-noDepartureLane.ConfirmOnsite(noDeparturePlan.FacilityName,
+var m1NoDepartureWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var m1NoDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m1NoDepartureLane.ConfirmOnsite(noDeparturePlan.FacilityName,
     "M1 test: verified onsite before material-only resolution");
-var noDepartureResolver = new FakeResolver(noDepartureWorld);
+var m1NoDepartureResolver = new FakeResolver(m1NoDepartureWorld);
 var noDepartureAuto = new AlteringAutomation(
-    noDepartureWorld, noDepartureWorld, (_, _) => Task.CompletedTask,
-    4, noDepartureResolver, facilityState: noDepartureLane);
+    m1NoDepartureWorld, m1NoDepartureWorld, (_, _) => Task.CompletedTask,
+    4, m1NoDepartureResolver, facilityState: m1NoDepartureLane);
 await noDepartureAuto.RunAsync(noDeparturePlan, default);
-Check(noDepartureResolver.Calls == 1 &&
-      noDepartureWorld.Directives.SequenceEqual(
+Check(m1NoDepartureResolver.Calls == 1 &&
+      m1NoDepartureWorld.Directives.SequenceEqual(
           new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }) &&
-      noDepartureLane.IsOnsiteConfirmed(noDeparturePlan.FacilityName) &&
-      noDepartureWorld.QueueCalls == 1,
+      m1NoDepartureLane.IsOnsiteConfirmed(noDeparturePlan.FacilityName) &&
+      m1NoDepartureWorld.QueueCalls == 1,
     "M1: material inspection and same-facility resolution without travel retain manager onsite through next registration");
 
 var noInitialOnsiteWorld = new FakeWorld(noDeparturePlan) { Available = false };
