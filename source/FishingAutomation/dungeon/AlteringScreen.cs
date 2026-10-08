@@ -1842,6 +1842,34 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return false;
     }
 
+    // Managed receipt: distinguish the actual "가공 완료" result from
+    // unrelated green confirmations. The title is a positive OCR signal;
+    // absence is uncertainty, never permission to press Space.
+    private async Task RequireManagedCompletionCloseAsync(
+        AlteringPlan plan, CancellationToken ct)
+    {
+        await RequireManagedIdleAsync(
+            plan, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+            "완료 결과창 Space 직전 활동 검사", ct);
+        using var frame = Capture(ct);
+        bool green = HasBottomConfirmationModal(frame);
+        bool heading = green &&
+            await FindAsync(frame, Whole, "가공 완료", ct) is not null;
+        bool facility = await FindFacilityHeaderAsync(
+            frame, plan.ScreenTitle, ct) is not null;
+        bool travelDialog = await IsFacilityTravelDialogAsync(frame, ct);
+        bool? traveling = await TryAutoTravelingAsync(ct);
+        if (!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+                green, heading, facility, travelDialog, traveling))
+            Fail(frame,
+                "관리 수령 완료 결과창 고유 제목/초록 버튼/CLI 비이동 증거 부족 · 다른 초록 팝업 Space 차단");
+        // A second fresh activity gate after OCR prevents its await from
+        // extending the lifetime of the input authorization.
+        await RequireManagedIdleAsync(
+            plan, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+            "완료 결과창 최종 CLI 허가", ct);
+    }
+
     private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync(
         AlteringPlan plan,
         CancellationToken ct,
@@ -1872,6 +1900,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "수령 완료창 Space 직전 재검증 실패 · 완료창/이동창/시설창 상태 불확실 · 추가 입력 없이 정지합니다.");
         }
 
+        if (managedReceipt)
+            await RequireManagedCompletionCloseAsync(plan, ct);
         Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -1924,6 +1954,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 if (canRetryAgain)
                 {
+                    if (managedReceipt)
+                        await RequireManagedCompletionCloseAsync(plan, ct);
                     _ui.TapFresh(0x39, ct);
                     Log?.Invoke("[자동 가공] 완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음");
                     await Task.Delay(450, ct);
