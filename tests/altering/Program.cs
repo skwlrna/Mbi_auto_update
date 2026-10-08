@@ -1533,6 +1533,88 @@ Check(managedWorld.DirectiveAfterCollection ==
       AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
     "07:01 regression: after completed-work receipt the next same-facility registration reuses coordinator-confirmed onsite state");
 
+Check(AlteringStallRecoveryPolicy.CanRetainOnsite(
+        wasPreviouslyConfirmedOnsite: true,
+        AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel) &&
+      !AlteringStallRecoveryPolicy.CanRetainOnsite(
+        wasPreviouslyConfirmedOnsite: false,
+        AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel) &&
+      !AlteringStallRecoveryPolicy.CanRetainOnsite(
+        wasPreviouslyConfirmedOnsite: true,
+        AlteringStallRecoveryObservation.Unknown),
+    "M2: only a previously confirmed onsite plus proven UI-only recovery can retain central location authority");
+
+var m2Plan = managedPlan;
+var m2World = new FakeWorld(m2Plan);
+var m2Lane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m2Lane.ConfirmOnsite(m2Plan.FacilityName, "M2 test previously confirmed onsite");
+var m2Auto = new AlteringAutomation(
+    m2World, m2World, (_, _) => Task.CompletedTask, 4,
+    facilityState: m2Lane);
+await m2Auto.RecoverStallUnderManagerAsync(m2Plan, 1, "M2 verified same-site UI-only stall", default);
+Check(m2Lane.IsOnsiteConfirmed(m2Plan.FacilityName) &&
+      m2World.ManagedRecoveryCalls == 1 &&
+      m2World.LegacyRecoveryCalls == 0 &&
+      m2World.QueueCalls == 0,
+    "M2: coordinator re-confirms previously proven onsite after safe UI-only stall recovery without any recipe or move input");
+
+var m2UnknownWorld = new FakeWorld(m2Plan);
+var m2UnknownLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var m2UnknownAuto = new AlteringAutomation(
+    m2UnknownWorld, m2UnknownWorld, (_, _) => Task.CompletedTask, 4,
+    facilityState: m2UnknownLane);
+await m2UnknownAuto.RecoverStallUnderManagerAsync(
+    m2Plan, 1, "M2 unknown prior location", default);
+Check(m2UnknownLane.QueueDirectiveFor(m2Plan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m2UnknownWorld.ManagedRecoveryCalls == 1 &&
+      m2UnknownWorld.QueueCalls == 0,
+    "M2: UI recovery cannot create onsite authority when manager had no prior confirmed location");
+
+var m2AmbiguousWorld = new FakeWorld(m2Plan)
+{
+    RecoveryObservation = AlteringStallRecoveryObservation.Unknown
+};
+var m2AmbiguousLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m2AmbiguousLane.ConfirmOnsite(m2Plan.FacilityName, "M2 test onsite before uncertain recovery");
+await new AlteringAutomation(
+    m2AmbiguousWorld, m2AmbiguousWorld, (_, _) => Task.CompletedTask, 4,
+    facilityState: m2AmbiguousLane)
+    .RecoverStallUnderManagerAsync(m2Plan, 1, "M2 uncertain UI/CLI proof", default);
+Check(m2AmbiguousLane.QueueDirectiveFor(m2Plan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m2AmbiguousWorld.ManagedRecoveryCalls == 1,
+    "M2: popup, travel, missing header or unknown CLI cannot restore coordinator onsite");
+
+var m2FailureWorld = new FakeWorld(m2Plan) { FailManagedRecovery = true };
+var m2FailureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m2FailureLane.ConfirmOnsite(m2Plan.FacilityName, "M2 test onsite before failed recovery");
+bool m2Failed = false;
+try
+{
+    await new AlteringAutomation(
+        m2FailureWorld, m2FailureWorld, (_, _) => Task.CompletedTask, 4,
+        facilityState: m2FailureLane)
+        .RecoverStallUnderManagerAsync(m2Plan, 1, "M2 failed recovery", default);
+}
+catch (InvalidOperationException ex)
+{
+    m2Failed = ex.Message.Contains("M2 simulated recovery verification failure");
+}
+Check(m2Failed &&
+      m2FailureLane.QueueDirectiveFor(m2Plan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m2FailureWorld.QueueCalls == 0,
+    "M2: manager invalidates onsite before failed stall recovery and never issues automatic travel");
+
+var m2LegacyWorld = new FakeWorld(m2Plan);
+await new AlteringAutomation(m2LegacyWorld, m2LegacyWorld)
+    .RecoverStallUnderManagerAsync(m2Plan, 1, "M2 single-mode legacy", default);
+Check(m2LegacyWorld.LegacyRecoveryCalls == 1 &&
+      m2LegacyWorld.ManagedRecoveryCalls == 0,
+    "M2: single-altering keeps its bounded legacy recovery route unchanged");
+
+
 Check(managedWorld.ReceiptDirectives.Count > 0 &&
       managedWorld.ReceiptDirectives.All(x =>
           x == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite),
@@ -1674,12 +1756,16 @@ Console.WriteLine($"PASS {checks} altering workflow checks");
 }
 catch(Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
 
-internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen
+internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen
 {
     private readonly AlteringPlan _plan;
     private readonly List<AlteringWork> _works = new();
     private int _polls;
     internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls, CollectionCount;
+    internal int ManagedRecoveryCalls, LegacyRecoveryCalls;
+    internal AlteringStallRecoveryObservation RecoveryObservation =
+        AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel;
+    internal bool FailManagedRecovery;
     internal long Owned;
     internal readonly List<AlteringFacilityEntryDirective> Directives = new();
     internal readonly List<AlteringFacilityEntryDirective> ReceiptDirectives = new();
@@ -1773,6 +1859,22 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         ExistingRemaining = Math.Max(0, ExistingRemaining - _works.Count(x => x.IsCompleted));
         if (CreditRewards) Owned += _works.Count(x => x.IsCompleted) * (plan.ProducedPerWork + Bonus);
         _works.RemoveAll(x => x.IsCompleted);
+    }
+    public Task RecoverStallAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        LegacyRecoveryCalls++;
+        return Task.CompletedTask;
+    }
+    public Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ManagedRecoveryCalls++;
+        if (FailManagedRecovery)
+            throw new InvalidOperationException("M2 simulated recovery verification failure");
+        return Task.FromResult(RecoveryObservation);
     }
     internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
     internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
