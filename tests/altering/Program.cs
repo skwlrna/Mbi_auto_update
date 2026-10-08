@@ -759,6 +759,62 @@ await resolvedAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.ReservedWings == 0,
     "missing materials are resolved inside the same zero-wing altering session");
 
+var noDeparturePlan = plan with { TargetQuantity = 3 };
+var noDepartureWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var noDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+noDepartureLane.ConfirmOnsite(noDeparturePlan.FacilityName,
+    "M1 test: verified onsite before material-only resolution");
+var noDepartureResolver = new FakeResolver(noDepartureWorld);
+var noDepartureAuto = new AlteringAutomation(
+    noDepartureWorld, noDepartureWorld, (_, _) => Task.CompletedTask,
+    4, noDepartureResolver, facilityState: noDepartureLane);
+await noDepartureAuto.RunAsync(noDeparturePlan, default);
+Check(noDepartureResolver.Calls == 1 &&
+      noDepartureWorld.Directives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }) &&
+      noDepartureLane.IsOnsiteConfirmed(noDeparturePlan.FacilityName) &&
+      noDepartureWorld.QueueCalls == 1,
+    "M1: material inspection and same-facility resolution without travel retain manager onsite through next registration");
+
+var noInitialOnsiteWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var noInitialOnsiteLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var noInitialOnsiteResolver = new FakeResolver(noInitialOnsiteWorld);
+await new AlteringAutomation(
+    noInitialOnsiteWorld, noInitialOnsiteWorld, (_, _) => Task.CompletedTask,
+    4, noInitialOnsiteResolver, facilityState: noInitialOnsiteLane)
+    .RunAsync(noDeparturePlan, default);
+Check(noInitialOnsiteWorld.Directives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.FreshMoveRequired }) &&
+      noInitialOnsiteResolver.Calls == 1,
+    "M1: material inspection cannot invent onsite proof when the manager had no confirmed location");
+
+var noDepartureFailureWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var noDepartureFailureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+noDepartureFailureLane.ConfirmOnsite(noDeparturePlan.FacilityName,
+    "M1 test: already onsite before material-only validation failure");
+var noDepartureFailureResolver = new FakeResolver(noDepartureFailureWorld)
+{
+    FailBeforeLeaving = true
+};
+bool materialOnlyFailure = false;
+try
+{
+    await new AlteringAutomation(
+        noDepartureFailureWorld, noDepartureFailureWorld, (_, _) => Task.CompletedTask,
+        4, noDepartureFailureResolver, facilityState: noDepartureFailureLane)
+        .RunAsync(noDeparturePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    materialOnlyFailure = ex.Message.Contains("M1 simulated material validation failure");
+}
+Check(materialOnlyFailure &&
+      noDepartureFailureResolver.Calls == 1 &&
+      noDepartureFailureWorld.QueueCalls == 0 &&
+      noDepartureFailureLane.IsOnsiteConfirmed(noDeparturePlan.FacilityName),
+    "M1: material-only failure stops without queueing or revoking proven onsite when no departure occurred");
+
+
 var changedReasonWorld = new FakeWorld(plan with { TargetQuantity = 3 })
 {
     Available = false,
@@ -1727,10 +1783,13 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
 internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 {
     internal int Calls;
+    internal bool FailBeforeLeaving;
     public Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Calls++;
+        if (FailBeforeLeaving)
+            throw new InvalidOperationException("M1 simulated material validation failure");
         world.Available = true;
         return Task.CompletedTask;
     }
