@@ -2,6 +2,10 @@ name: Publish V3.1.53 Auto Update After Main CI
 
 # Installed clients ignore prereleases. Publish only the CI-approved main.
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v3153-auto-update.yml'
   workflow_run:
     workflows: ["Check V3 Production Engine"]
     types: [completed]
@@ -194,8 +198,10 @@ jobs:
           gh release create V3.1.53 artifacts/MabiAuto_V3.1.53_Windows_Lite.zip artifacts/MabiAuto_V3.1.53_Windows_Lite.zip.sha256 artifacts/MabiAuto_V3.1.53_Source.zip --draft --verify-tag --title 'Mabi Auto V3.1.53' --notes-file source/RELEASE_NOTES.md
           if($LASTEXITCODE-ne0){throw 'Draft release failed'}
           $expected=@('MabiAuto_V3.1.53_Windows_Lite.zip','MabiAuto_V3.1.53_Windows_Lite.zip.sha256','MabiAuto_V3.1.53_Source.zip')
-          $draft=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.1.53" | ConvertFrom-Json
-          if($LASTEXITCODE-ne0 -or -not $draft -or -not $draft.draft -or $draft.prerelease){throw 'Draft release invalid'}
+          $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Draft release lookup failed'}
+          $draft=@($releases | Where-Object { $_.tag_name -eq 'V3.1.53' }) | Select-Object -First 1
+          if(-not $draft -or -not $draft.draft -or $draft.prerelease){throw 'Draft release invalid'}
           foreach($n in $expected){if($n -notin $draft.assets.name){throw "Missing release asset: $n"}}
           gh release edit V3.1.53 --draft=false
           if($LASTEXITCODE-ne0){throw 'Release publication failed'}
@@ -203,3 +209,61 @@ jobs:
           if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){throw 'Public auto-update not verified'}
           foreach($n in $expected){if($n -notin $published.assets.name){throw "Published release missing asset: $n"}}
           Write-Host "Auto-update V3.1.53 publicly published from commit $sha"
+
+
+  # One-shot recovery for the verified CI build of 7e784637 after GitHub's
+  # /releases/tags endpoint returned 404 for the successfully-created DRAFT.
+  # This job never rebuilds or mutates the release payload: it only publishes
+  # the existing immutable tag after checking the exact uploaded assets.
+  finalize_existing_draft:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish only the already validated V3.1.53 draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='7e7846371b2eac17d810c9c54e37b05efc37b2b0'
+          $ci=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/37762562678" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or $ci.head_sha -ne $source -or $ci.conclusion -ne 'success' -or $ci.event -ne 'push'){
+            throw 'Original main CI proof is missing or failed'
+          }
+          $originalJob=gh api "repos/$env:GITHUB_REPOSITORY/actions/jobs/113263415450" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Original Windows release job lookup failed'}
+          foreach($step in @('Publish verified Windows binaries','Smoke test executable','Build updater-compatible Windows Lite, checksum, source','Retain test-release assets in Actions')){
+            $e=@($originalJob.steps | Where-Object { $_.name -eq $step }) | Select-Object -First 1
+            if(-not $e -or $e.conclusion -ne 'success'){throw "Pre-release binary/package verification missing: $step"}
+          }
+          $tag=(git ls-remote --tags origin refs/tags/V3.1.53 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($tag)){throw 'V3.1.53 tag missing'}
+          if((($tag -split "\s+")[0]).Trim() -ne $source){throw 'V3.1.53 tag does not point to approved binary SHA'}
+          $releaseList=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list unavailable'}
+          $r=@($releaseList | Where-Object { $_.tag_name -eq 'V3.1.53' }) | Select-Object -First 1
+          if(-not $r -or $r.prerelease){throw 'Expected exact V3.1.53 draft missing'}
+          $required=@{
+            'MabiAuto_V3.1.53_Windows_Lite.zip'=100000000
+            'MabiAuto_V3.1.53_Windows_Lite.zip.sha256'=64
+            'MabiAuto_V3.1.53_Source.zip'=100000
+          }
+          foreach($name in $required.Keys){
+            $a=@($r.assets | Where-Object { $_.name -eq $name }) | Select-Object -First 1
+            if(-not $a -or $a.size -lt $required[$name]){throw "Missing/invalid preverified asset: $name"}
+          }
+          if($r.draft){
+            gh release edit V3.1.53 --draft=false
+            if($LASTEXITCODE-ne0){throw 'Draft public conversion failed'}
+          }
+          $published=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.1.53" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){
+            throw 'V3.1.53 public release confirmation failed'
+          }
+          foreach($name in $required.Keys){
+            if($name -notin $published.assets.name){throw "Published asset vanished: $name"}
+          }
+          Write-Host "V3.1.53 PUBLIC auto-update verified. Binary SHA: $source. Three assets present."
