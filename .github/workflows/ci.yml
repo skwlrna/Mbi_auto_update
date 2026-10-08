@@ -621,7 +621,7 @@ jobs:
               'public async Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync[\s\S]*?(?=\r?\n    public async Task RecoverStallAsync)').Value
           if ([string]::IsNullOrWhiteSpace($managedRecovery) -or
               $managedRecovery -notmatch '_confirmedOnsiteFacility = null' -or
-              $managedRecovery -notmatch 'await EnterFacilityAsync\(plan, ct\)' -or
+              $managedRecovery -notmatch 'await EnterFacilityAsync\(plan, ct, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite\)' -or
               $managedRecovery -notmatch 'for \(int pass = 0; pass < 2; pass\+\+\)' -or
               $managedRecovery -notmatch 'HasBottomConfirmationModal' -or
               $managedRecovery -notmatch 'TryAutoTravelingAsync' -or
