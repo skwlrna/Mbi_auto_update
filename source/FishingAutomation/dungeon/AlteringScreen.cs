@@ -578,6 +578,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<bool> TrySelectFixedRecipeAsync(
         AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
         CancellationToken ct)
     {
         if (!AlteringRecipeLayout.IsFixedFacility(plan.FacilityName))
@@ -598,7 +599,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                 Fail(frame, $"{plan.ScreenTitle} 고정좌표 입력 전 시설 화면을 확인하지 못했습니다.");
 
-            if (HasFacilityMoveButtonVisual(frame))
+            if (directive != AlteringFacilityEntryDirective.Automatic &&
+                HasBottomConfirmationModal(frame))
+                Fail(frame, $"{plan.ScreenTitle} 품목 선택 전 확인창이 남아 있어 입력 없이 정지합니다.");
+
+            if (AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+                    directive, HasFacilityMoveButtonVisual(frame)))
                 Fail(frame,
                     $"{plan.ScreenTitle} 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. " +
                     "품목 고정좌표 입력 없이 정지합니다.");
@@ -632,7 +638,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             {
                 bool facilityVisible =
                     await FindFacilityHeaderAsync(retryGate, plan.ScreenTitle, ct) is not null;
-                bool moveVisible = facilityVisible && HasFacilityMoveButtonVisual(retryGate);
+                if (directive != AlteringFacilityEntryDirective.Automatic &&
+                    HasBottomConfirmationModal(retryGate))
+                    Fail(retryGate,
+                        $"{plan.ScreenTitle} 고정좌표 재시도 전 확인창이 남아 있어 추가 입력 없이 정지합니다.");
+
+                bool moveVisible = facilityVisible &&
+                    AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+                        directive, HasFacilityMoveButtonVisual(retryGate));
 
                 if (!AlteringFixedRecipeRetryPolicy.ShouldRetry(
                         detailVisible: false,
@@ -650,7 +663,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 Log?.Invoke(
                     $"[자동 가공] {plan.DisplayName} 고정좌표 1차 클릭 미반영 확인 · " +
-                    $"시설 목록 유지 + 원격 버튼 없음 · 동일 좌표 재클릭 1/1");
+                    $"시설 목록 유지 + 중앙 지시/기존 안전판정 유지 · 동일 좌표 재클릭 1/1");
                 _ui.ClickFresh(center, ct);
                 await Task.Delay(450, ct);
 
@@ -673,6 +686,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<bool> TrySelectMedicineRecipeBySearchAsync(
         AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
         CancellationToken ct)
     {
         if (!string.Equals(plan.FacilityName, "약품 가공 시설", StringComparison.Ordinal))
@@ -684,7 +698,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         using var beforeSearch = Capture(ct);
         if (await FindFacilityHeaderAsync(beforeSearch, plan.ScreenTitle, ct) is null)
             Fail(beforeSearch, "약품 검색 전 약품 가공 화면을 확인하지 못했습니다.");
-        if (HasFacilityMoveButtonVisual(beforeSearch))
+        if (directive != AlteringFacilityEntryDirective.Automatic &&
+            HasBottomConfirmationModal(beforeSearch))
+            Fail(beforeSearch, "약품 검색 전 확인창이 남아 있어 입력 없이 정지합니다.");
+        if (AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+                directive, HasFacilityMoveButtonVisual(beforeSearch)))
             Fail(beforeSearch,
                 "약품 가공 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. 검색 입력을 차단합니다.");
 
@@ -755,12 +773,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return true;
     }
 
-    private async Task SelectRecipeAsync(AlteringPlan plan, CancellationToken ct)
+    private async Task SelectRecipeAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct)
     {
         _stage.Move(ProductionStage.Search, plan.DisplayName);
-        if (await TrySelectFixedRecipeAsync(plan, ct))
+        if (await TrySelectFixedRecipeAsync(plan, directive, ct))
             return;
-        if (await TrySelectMedicineRecipeBySearchAsync(plan, ct))
+        if (await TrySelectMedicineRecipeBySearchAsync(plan, directive, ct))
             return;
 
         string cacheKey = RecipeCacheKey(plan);
@@ -775,7 +796,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
                     Fail(frame, "연속 등록 전 가공 시설 화면을 확인하지 못했습니다.");
 
-                if (HasFacilityMoveButtonVisual(frame))
+                if (directive != AlteringFacilityEntryDirective.Automatic &&
+                    HasBottomConfirmationModal(frame))
+                    Fail(frame, "연속 등록 중 확인창이 남아 있어 고정 품목 좌표 입력 없이 정지합니다.");
+
+                if (AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+                        directive, HasFacilityMoveButtonVisual(frame)))
                     Fail(frame, "연속 등록 중 원격 가공 화면이 감지되어 고정 품목 좌표 입력을 차단했습니다.");
             }
 
@@ -934,7 +960,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // V3.1.31 only adds one bounded recovery when the paid remote state persists.
         while (true)
         {
-            await SelectRecipeAsync(plan, ct);
+            // Keep the coordinator's authority through the entire recipe-selection
+            // chain (fixed card, retry, medicine, cached center).
+            await SelectRecipeAsync(plan, directive, ct);
             Point visualActionCenter = Point.Empty;
             bool restartAfterRemoteRecovery = false;
 
