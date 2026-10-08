@@ -26,6 +26,7 @@
     <Compile Include="../../source/FishingAutomation/MultiAlteringDependencyScheduler.cs" Link="MultiAlteringDependencyScheduler.cs" />
     <Compile Include="../../source/FishingAutomation/RecursiveAlteringSupplyResolver.cs" Link="RecursiveAlteringSupplyResolver.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringReceiptPolicy.cs" Link="AlteringReceiptPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringConsumptionLedger.cs" Link="MultiAlteringConsumptionLedger.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringQueries.cs" Link="AlteringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringSession.cs" Link="AlteringSession.cs" />
