@@ -301,7 +301,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             throw new InvalidDataException("F05 구형 소비 기록 구조 손상 · 안전 정지");
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var tx in b.AppliedConsumption.Concat(
-            b.PreparedConsumption is null ? [] : [b.PreparedConsumption]))
+            b.PreparedConsumption is null ? Array.Empty<MultiAlteringConsumptionTransaction>() :
+            new[] { b.PreparedConsumption }))
         {
             if (!Guid.TryParseExact(tx.TransactionId, "N", out _) ||
                 string.IsNullOrWhiteSpace(tx.ConsumerKey) || !ids.Add(tx.TransactionId) ||
