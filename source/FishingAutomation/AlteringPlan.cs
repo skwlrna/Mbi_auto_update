@@ -102,6 +102,18 @@ internal enum AlteringFacilityEntryDirective
     ReuseCoordinatorConfirmedOnsite
 }
 
+// The coordinator's completed facility-entry directive remains authoritative
+// throughout recipe selection. A move-button visual may appear even onsite.
+// Automatic (single-altering) keeps the legacy visual veto unchanged.
+internal static class AlteringFacilityEntryPolicy
+{
+    internal static bool ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective directive,
+        bool moveButtonVisible)
+        => directive == AlteringFacilityEntryDirective.Automatic &&
+           moveButtonVisible;
+}
+
 internal interface IAlteringCoordinatorQueueScreen
 {
     Task QueueAsync(
