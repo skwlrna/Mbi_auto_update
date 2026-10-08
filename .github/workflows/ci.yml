@@ -884,12 +884,26 @@ jobs:
              $dependencyScheduler -notmatch 'ConfirmedRegistrationsThisRun') { throw 'intermediate facility ownership wiring missing' }
           if($multiAlterMain -notmatch 'new MultiAlteringConsumptionLedger' -or
              $multiAlterMain -notmatch 'internalConsumptionObserver: consumptionLedger' -or
-             $multiAlterMain -notmatch 'CreditInternalConsumption' -or
+             $multiAlterMain -notmatch 'RefreshDurableConsumption' -or
+             $multiAlterMain -notmatch 'rawAlteringData\.ItemCountsAsync, batchStore' -or
              $multiAlterMain -notmatch 'UnregisterProducer') { throw 'multi-altering internal material consumption accounting wiring missing' }
           if($consumptionLedger -notmatch 'CaptureBeforeRegistrationAsync' -or
              $consumptionLedger -notmatch 'CommitAfterRegistrationAsync' -or
              $consumptionLedger -notmatch 'previous - current' -or
-             $consumptionLedger -notmatch 'RegisterProducer') { throw 'registration-window internal material consumption ledger missing' }
+             $consumptionLedger -notmatch 'RegisterProducer' -or
+             $consumptionLedger -notmatch '_durableBatch.PrepareConsumption' -or
+             $consumptionLedger -notmatch '_durableBatch.ApplyConsumption' -or
+             $alteringPlan -notmatch 'PendingConsumptionTransactionId' -or
+             $multiAlterMain -notmatch 'RefreshDurableConsumption') {
+               throw 'F05 durable capture/apply and producer refresh wiring missing'
+          }
+          $f05Store = Get-Content source/FishingAutomation/MultiAlteringBatchStore.cs -Raw
+          if ($f05Store -notmatch 'PreparedConsumption' -or
+              $f05Store -notmatch 'AppliedConsumption' -or
+              $f05Store -notmatch 'TransactionId' -or
+              $f05Store -notmatch 'Commit\(Batch with \{ Items = items, PreparedConsumption = null') {
+              throw 'F05 atomic transaction persistence missing'
+          }
           if($consumptionLedger -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'internal consumption ledger must never own direct input' }
           if($alteringPlan -notmatch 'CreditedInternalConsumptionQuantity' -or
              $alteringPlan -notmatch 'EffectiveOutputQuantity' -or
