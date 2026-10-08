@@ -968,6 +968,11 @@ internal sealed class AlteringAutomation
                 _facilityState.QueueDirectiveFor(plan.FacilityName);
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} · {directive}");
+            // The manager alone owns onsite authority. Receipt might close
+            // into FIELD, or the completion result might still cover the UI.
+            // Do not preserve a reusable bench proof across that uncertainty.
+            _facilityState.InvalidateOnsite(
+                $"수령 진입 · {plan.DisplayName} · 완료창 닫기 및 현장 복귀 검증 대기");
             firstCollected = await coordinated.CollectAsync(plan, directive, ct);
 
             // Coordinator-controlled receipt must never fall through to a second,
