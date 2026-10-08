@@ -67,21 +67,10 @@ internal sealed class InterceptionInput : IInputController, IInputTransport
 
     private static void SetClipboardText(string text, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        Exception? failure = null;
-        var thread = new Thread(() =>
-        {
-            try { ct.ThrowIfCancellationRequested(); System.Windows.Forms.Clipboard.SetText(text); }
-            catch (Exception ex) { failure = ex; }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        // Cancellation never waits on the STA clipboard worker. The worker can
-        // only prepare clipboard contents; it has no input transport reference.
-        while (!thread.Join(20)) ct.ThrowIfCancellationRequested();
-        ct.ThrowIfCancellationRequested();
-        if (failure is not null)
-            throw new InvalidOperationException("검색어를 클립보드에 준비하지 못했습니다.", failure);
+        // The STA worker is background and shared writes are serialized across
+        // cancelled/restarted runs. A late old write cannot overwrite a newer
+        // successful paste. Cancellation never waits for a blocked STA worker.
+        CancellableClipboardWriter.Set(text, ct, System.Windows.Forms.Clipboard.SetText);
     }
 
     private int FindWorkingMouseDevice(int preferred)
