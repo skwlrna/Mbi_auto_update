@@ -6,6 +6,32 @@ internal enum FacilityLaneOwner
     Intermediate
 }
 
+// M3: a saved work/session ledger is evidence of queue ownership, NOT of
+// the character's current physical location. Cold-start Unknown is also NOT
+// proof that the player is remote; the first entry simply needs a conservative
+// manager-authorized travel, unless this run establishes real onsite proof.
+internal enum FacilityLocationProof
+{
+    ColdStartUnknown,
+    ConfirmedThisRun,
+    RuntimeUncertain
+}
+
+internal static class FacilityStartupLocationPolicy
+{
+    internal static AlteringFacilityEntryDirective DecideEntry(
+        string requestedFacility,
+        string? confirmedFacility,
+        FacilityLocationProof proof)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestedFacility);
+        return proof == FacilityLocationProof.ConfirmedThisRun &&
+               string.Equals(confirmedFacility, requestedFacility, StringComparison.Ordinal)
+            ? AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite
+            : AlteringFacilityEntryDirective.FreshMoveRequired;
+    }
+}
+
 internal sealed record FacilityLaneSnapshot(
     string FacilityName,
     int InitialObservedWorks,
@@ -44,7 +70,11 @@ internal sealed class FacilityLaneState
     private readonly Dictionary<string, Lane> _lanes =
         new(StringComparer.Ordinal);
     private string? _confirmedOnsiteFacility;
+    private FacilityLocationProof _locationProof = FacilityLocationProof.ColdStartUnknown;
+    private readonly HashSet<string> _reportedColdStartFacilities =
+        new(StringComparer.Ordinal);
 
+    internal FacilityLocationProof LocationProof => _locationProof;
     internal event Action<string>? Log;
 
     internal FacilityLaneState(IReadOnlyList<AlteringWork> initialWorks)
@@ -100,9 +130,22 @@ internal sealed class FacilityLaneState
     internal AlteringFacilityEntryDirective QueueDirectiveFor(string facilityName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
-        return string.Equals(_confirmedOnsiteFacility, facilityName, StringComparison.Ordinal)
-            ? AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite
-            : AlteringFacilityEntryDirective.FreshMoveRequired;
+
+        AlteringFacilityEntryDirective directive =
+            FacilityStartupLocationPolicy.DecideEntry(
+                facilityName, _confirmedOnsiteFacility, _locationProof);
+
+        // Log each cold-start target once, not every round-robin batch turn.
+        // Do not infer physical remoteness from the always-visible move button,
+        // stored session JSON, or an existing/complete CLI facility work list.
+        if (_locationProof == FacilityLocationProof.ColdStartUnknown &&
+            _reportedColdStartFacilities.Add(facilityName))
+            Log?.Invoke(
+                $"[시설 소유권] 시작/이어하기 · {facilityName} · " +
+                "초기 위치 미확정(원격 확정 아님) · 기존 작업/저장 세션은 현장 증거가 아님 · " +
+                "중간관리자 최초 Fresh 이동 1회 우선 · 임의 Reuse 금지");
+
+        return directive;
     }
 
     internal void ConfirmOnsite(string facilityName, string reason)
@@ -115,6 +158,7 @@ internal sealed class FacilityLaneState
             facilityName,
             StringComparison.Ordinal);
         _confirmedOnsiteFacility = facilityName;
+        _locationProof = FacilityLocationProof.ConfirmedThisRun;
 
         Log?.Invoke(
             $"[시설 소유권] {facilityName.Replace(" 시설", "")} · 현장확정" +
@@ -125,21 +169,23 @@ internal sealed class FacilityLaneState
     internal void InvalidateOnsite(string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        if (_confirmedOnsiteFacility is null)
+        string? previous = _confirmedOnsiteFacility;
+        _confirmedOnsiteFacility = null;
+        _locationProof = FacilityLocationProof.RuntimeUncertain;
+        if (previous is null)
             return;
 
-        string previous = _confirmedOnsiteFacility;
-        _confirmedOnsiteFacility = null;
         Log?.Invoke(
             $"[시설 소유권] {previous.Replace(" 시설", "")} · 현장확정 해제 · " +
             $"중간관리자 근거={reason} · 다음 등록은 새 시설 이동 경로 사용");
     }
 
     internal bool IsOnsiteConfirmed(string facilityName)
-        => string.Equals(
-            _confirmedOnsiteFacility,
-            facilityName,
-            StringComparison.Ordinal);
+        => _locationProof == FacilityLocationProof.ConfirmedThisRun &&
+           string.Equals(
+               _confirmedOnsiteFacility,
+               facilityName,
+               StringComparison.Ordinal);
 
     internal void AssertAccess(string facilityName, FacilityLaneOwner owner)
     {
