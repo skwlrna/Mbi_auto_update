@@ -91,6 +91,44 @@ internal sealed class InputSendPermit : IDisposable
     public void Dispose() => _registration.Dispose();
 }
 
+// The clipboard uses an STA worker because automation callers need not be STA.
+// A cancelled worker cannot be forcibly stopped inside Clipboard.SetText, so
+// serialize actual writes across runs: an older write must finish before a newer
+// one begins. Workers waiting behind a write recheck cancellation and never
+// publish stale text. Background threads cannot hold the application open.
+internal static class CancellableClipboardWriter
+{
+    private static readonly object WriteGate = new();
+
+    internal static void Set(string text, CancellationToken ct, Action<string> write)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        ct.ThrowIfCancellationRequested();
+        Exception? failure = null;
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                using var held = InputLock.Enter(WriteGate, ct);
+                ct.ThrowIfCancellationRequested();
+                write(text);
+            }
+            catch (Exception ex) { failure = ex; }
+        })
+        {
+            IsBackground = true,
+            Name = "Automation clipboard STA"
+        };
+        worker.SetApartmentState(ApartmentState.STA);
+        worker.Start();
+        // Do not join an unresponsive native clipboard call when F10 cancels.
+        while (!worker.Join(20)) ct.ThrowIfCancellationRequested();
+        ct.ThrowIfCancellationRequested();
+        if (failure is not null)
+            throw new InvalidOperationException("검색어를 클립보드에 준비하지 못했습니다.", failure);
+    }
+}
+
 internal sealed class CancellableInputSequence(
     IInputTransport transport, IInputWindow window, IInputTiming timing, object gate)
 {
