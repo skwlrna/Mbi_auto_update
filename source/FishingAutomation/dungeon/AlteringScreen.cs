@@ -1389,6 +1389,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             {
                 bool wordingMatched = await IsFacilityTravelDialogAsync(frame, ct);
 
+                if (directive != AlteringFacilityEntryDirective.Automatic)
+                {
+                    // F03/F04: a generic green confirmation shape cannot
+                    // authorize managed Space. Require move-specific wording
+                    // and a CURRENT idle activity reading before any input.
+                    if (!wordingMatched)
+                        Fail(frame,
+                            "관리 시설 이동 확인창 문구 불명확 · 일반 초록창에 Space 입력 금지");
+                    await RequireManagedIdleAsync(
+                        plan, directive, "시설 이동 확인 팝업 Space 직전", ct);
+                    using var freshDialog = Capture(ct);
+                    if (!HasFacilityTravelConfirmationVisual(freshDialog) ||
+                        !await IsFacilityTravelDialogAsync(freshDialog, ct))
+                        Fail(freshDialog,
+                            "관리 시설 이동 확인창이 입력 직전 변경됨 · Space 차단");
+                    await RequireManagedIdleAsync(
+                        plan, directive, "시설 이동 팝업 최종 CLI 허가", ct);
+                }
                 _ui.TapFresh(0x39, ct); // Space = confirm optional facility travel
                 travelConfirmationSpaces++;
                 onsiteStableFrames = 0;
@@ -2220,6 +2238,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "F02 수령 입력 직전 시설 전체 완료 증거 소실(부분 완료/신규 대기/화면·CLI 변경) · " +
                     "모두 받기 Space 0회 · RecoveryRequired 유지 · 자동 재수령 금지");
         }
+        // F03: right before the irreversible receive input, the coordinator
+        // must still have an independently fresh, safe character activity.
+        await RequireManagedIdleAsync(
+            plan, directive, "모두 받기 최종 Space 직전 활동 검사", ct);
         ct.ThrowIfCancellationRequested();
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
