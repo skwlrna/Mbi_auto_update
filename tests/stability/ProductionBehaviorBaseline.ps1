@@ -114,6 +114,18 @@ Match-Required $receiptPolicy 'visualMoveButton && exactMoveLabelVisible' 'post-
 Match-Required $receiptPolicy 'visualMoveButton && !trustedOnsiteFacility' 'legacy visual veto remains conservative before onsite proof'
 Match-Required $alterTests '04:05 receipt regression' '04:05 teal false-positive receipt failure remains executable coverage'
 
+# L1: local screen cache is an Automatic(single-altering) observation,
+# never another multi-altering decision authority.
+Match-Required $alterPlan 'class AlteringScreenOnsiteCachePolicy' 'L1 local cache ownership policy'
+Match-Required $alterPlan 'directive == AlteringFacilityEntryDirective.Automatic \? facilityName : null' 'L1 managed entry cache remains empty'
+Match-Required $alterPlan 'managedReceipt \? null : facilityName' 'L1 managed receipt return cache remains empty'
+Match-Required $alter 'AlteringScreenOnsiteCachePolicy.MayTrustForReceipt' 'L1 receive cache read is gated by directive'
+Match-Required $alter 'AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry' 'L1 manager entry cannot grant local authority'
+Match-Required $alter 'AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn' 'L1 manager receipt cannot grant local authority'
+Match-Required $alterTests 'L1: managed receipt ignores lower screen cache' 'L1 cache cannot affect manager receipt'
+Match-Required $alterTests 'L1: successful managed reuse/fresh screen entries' 'L1 cache cannot affect manager entry'
+Match-Required $alterTests 'L1: managed receipt return reports success' 'L1 receipt return cache remains single only'
+
 # M5: a CLI receipt count drop is not physical bench evidence. The
 # coordinator must remain uncertain until a clean two-frame facility return.
 Match-Required $receiptPolicy 'CanConfirmReceiptFacilityReturn' 'M5 receipt return has centralized proof criteria'
