@@ -20,6 +20,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private string? _repeatOcrFreeFacilityTitle;
     private string? _postTravelProvenFacilityTitle;
     private bool _repeatOcrFreeRecipe;
+    private string? _selectedFixedRecipeKey;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
@@ -370,7 +371,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
-        if (_repeatOcrFreeRecipe)
+        // An already-selected exact fixed-grid card is identified by its
+        // original recipe ordinal + click coordinate. OCR is not an identity
+        // gate for that known location, even on the first registration.
+        if (_repeatOcrFreeRecipe ||
+            string.Equals(_selectedFixedRecipeKey, RecipeCacheKey(plan), StringComparison.Ordinal))
             return TryFindFreeProcessButtonVisual(frame, out _)
                 ? new DetectionResult(true, Popup, 1.0, plan.DisplayName)
                 : null;
@@ -409,7 +414,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // Once this exact fixed-position recipe has been successfully registered,
         // repeat observations use only the existing fixed free-button geometry.
         // No '필요한 재료', action label or recipe OCR calls are made.
-        if (_repeatOcrFreeRecipe)
+        if (_repeatOcrFreeRecipe || _selectedFixedRecipeKey is not null)
         {
             ct.ThrowIfCancellationRequested();
             return TryFindFreeProcessButtonVisual(frame, out _);
@@ -719,6 +724,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "품목 고정좌표 입력 없이 정지합니다.");
         }
 
+        _selectedFixedRecipeKey = RecipeCacheKey(plan);
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 고정좌표 선택 · {plan.DisplayName} · " +
             $"순번 {plan.RecipeOrdinal}/{plan.RecipeCount} · ({center.X},{center.Y}) · 카드명 OCR 없음");
@@ -1003,11 +1009,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // confirmed the recipe detail screen. The remote facility move-button ROI
         // belongs to the facility list screen and overlaps unrelated colours on the
         // detail popup, so it must never be used as a veto at this stage.
-        if (_repeatOcrFreeRecipe)
+        if (_repeatOcrFreeRecipe || _selectedFixedRecipeKey is not null)
         {
             ct.ThrowIfCancellationRequested();
             bool free = TryFindFreeProcessButtonVisual(frame, out _);
-            return (!free, free ? "반복 가공 무료 버튼 고정 위치 확인" : "고정 무료 버튼 없음");
+            return (!free, free ? "고정좌표 무료 가공 버튼 화면 확인" : "고정 무료 버튼 없음");
         }
         var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
         return (paid is not null, paid is not null ? "가공하러 가기 OCR" : "없음");
@@ -1072,6 +1078,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // Cache is enabled only after the FIRST successful manager-directed
         // registration of this facility / exact fixed recipe in this run.
         _postTravelProvenFacilityTitle = null;
+        _selectedFixedRecipeKey = null;
         _repeatOcrFreeFacilityTitle =
             directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
             _verifiedFacilityTitles.Contains(plan.ScreenTitle)
