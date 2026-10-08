@@ -140,6 +140,29 @@ internal static class AlteringFacilityEntryPolicy
            moveButtonVisible;
 }
 
+// L1: lower-screen onsite is a local Automatic(single-altering) observation,
+// not the facility manager's physical onsite authority. Manager-directed
+// entry/receipt must never populate or consume this private cache.
+internal static class AlteringScreenOnsiteCachePolicy
+{
+    internal static bool MayTrustForReceipt(
+        AlteringFacilityEntryDirective directive,
+        string? cachedFacility,
+        string requestedFacility)
+        => directive == AlteringFacilityEntryDirective.Automatic &&
+           string.Equals(cachedFacility, requestedFacility, StringComparison.Ordinal);
+
+    internal static string? AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective directive,
+        string facilityName)
+        => directive == AlteringFacilityEntryDirective.Automatic ? facilityName : null;
+
+    internal static string? AfterVerifiedReceiptReturn(
+        bool managedReceipt,
+        string facilityName)
+        => managedReceipt ? null : facilityName;
+}
+
 internal interface IAlteringCoordinatorQueueScreen
 {
     Task QueueAsync(
