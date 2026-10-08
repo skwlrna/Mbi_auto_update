@@ -838,6 +838,16 @@ internal sealed class AlteringAutomation
 
     internal void NoteStage(string stage) => SaveStage(stage);
 
+    // A durable F05 transaction already credited the producer in batch.json.
+    // The callback may ONLY reload the committed in-memory view: never add
+    // the same quantity a second time.
+    internal void RefreshDurableConsumption()
+    {
+        if (_session?.BatchId is null)
+            throw new InvalidOperationException("F05 영구 소비 보정은 다중가공 품목에만 사용합니다.");
+        RefreshBatchSession();
+    }
+
     internal void CreditInternalConsumption(long quantity, string consumerDisplayName)
     {
         RefreshBatchSession();
