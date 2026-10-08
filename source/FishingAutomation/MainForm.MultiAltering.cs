@@ -86,8 +86,27 @@ public sealed partial class MainForm
             // batch.json, including previously unresolved F05 checkpoints.
             string sessionDir = Path.Combine(mainSessionDir, "fresh-runs",
                 "f9-" + Guid.NewGuid().ToString("N"));
-            // Existing in-game works are cleaned up by the guarded live screen
-            // before ANY new-session baseline or registration is established.
+            batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
+            await Task.Run(() => batchStore.OpenFreshAsync(
+                plans, identity.Baseline, rawAlteringData, token), token);
+            // Observe occupied slots without changing old game works.
+            // The coordinator fills free slots under this F9's new goal.
+            currentWorks = await rawAlteringData.WorksAsync(token);
+            _log.Write("[다중가공] 이번 F9 새 목표 0부터 시작 · 기존 게임 작업은 그대로 · 빈 슬롯부터 등록");
+            _log.Write("[다중가공] 독립 신규 장부 생성 · " + sessionDir +
+                " · 과거 F05 미확정 기록 변경 없음");
+            _log.Write($"[다중가공] 배치 식별 · {batchStore.BatchId} · 완료 기록 {batchStore.CompletedPlans(plans).Count}/{plans.Count}");
+            if (batchStore.IsTerminal)
+            {
+                await Task.Run(batchStore.Cleanup, token);
+                _productionCurrentQuantity = _productionTargetQuantity;
+                foreach (var plan in plans) SeedAlteringStatus(plan, plan.TargetQuantity, 0);
+                _productionProgressSummary = "다중가공 저장된 전체 완료 확인 · 신규 등록 없음";
+                _log.Write("[다중가공] 전체 완료 확정 기록 복원 · 게임 입력 없이 정리만 완료");
+                SetStatus("다중가공 완료", Green);
+                completed = true;
+                return;
+            }
 
             var windows = WindowTools.EnumerateVisibleWindows();
             if (windows.Count != 1)
@@ -106,18 +125,6 @@ public sealed partial class MainForm
                 Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, gatheringData);
             using var screen = new ZeroWingAlteringScreen(visualAltering, _cli, identity);
             using var gatheringScreen = new ZeroWingGatheringScreen(visualGathering, _cli, identity);
-
-            // F9 always starts clean: finish receiving old selected-facility
-            // jobs before measuring inventory. Never track old jobs separately.
-            await MultiAlteringFreshStartCleanup.ClearAsync(
-                plans, rawAlteringData, screen, Task.Delay, _log.Write, token);
-            currentWorks = await rawAlteringData.WorksAsync(token);
-            batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
-            await Task.Run(() => batchStore.OpenFreshAsync(
-                plans, identity.Baseline, rawAlteringData, token), token);
-            _log.Write("[다중가공] 이전 작업 정리 완료 · 이번 F9는 등록 0부터 · 새 장부 " + sessionDir);
-            _log.Write($"[다중가공] 새 배치 식별 · {batchStore.BatchId} · 목표 {plans.Count}종");
-
 
             _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
 
@@ -191,6 +198,9 @@ public sealed partial class MainForm
             var automations = new Dictionary<(string Facility, string Display, int Ordinal), AlteringAutomation>();
             var progress = new Dictionary<(string Facility, string Display, int Ordinal), long>();
             var materialPreflight = new List<MultiAlteringSupplyPreflight>();
+            bool hasResumableSessionForPreflight = false;
+            bool hasSelectedFacilityWorksForPreflight = currentWorks.Any(work =>
+                plans.Any(plan => plan.FacilityName == work.FacilityName));
 
             for (int index = 0; index < plans.Count; index++)
             {
@@ -206,6 +216,7 @@ public sealed partial class MainForm
                 var store = batchStore.PlanStore(plan);
                 var session = store.Load() ?? throw new InvalidDataException("배치 품목 기록 소실 · 안전 정지");
                 bool itemCompleted = session.MultiState == MultiAlteringItemState.Completed;
+                hasResumableSessionForPreflight |= batchStore.IsResuming;
                 _log.Write($"[다중가공] 중간관리자 신규 작업 · {plan.DisplayName} · 등록 {session.QueuedWorks}/{session.RequiredWorks} · 상태={session.MultiState}");
 
                 if (!itemCompleted && selectedRecipe.MissingIngredients.Count > 0)
@@ -244,7 +255,8 @@ public sealed partial class MainForm
                 long restoredConfirmed = itemCompleted ? plan.TargetQuantity : Math.Clamp(
                     currentOutputForStatus +
                         session.CreditedInternalConsumptionQuantity -
-                        session.BaselineQuantity,
+                        session.BaselineQuantity -
+                        session.InitialExistingMinimum,
                     0,
                     plan.TargetQuantity);
                 var matchingWorks = currentWorks.Where(x =>
@@ -301,17 +313,33 @@ public sealed partial class MainForm
 
             if (materialPreflight.Count > 0)
             {
-                _productionProgressSummary =
-                    $"다중가공 전체 품목 확정 부족분 통합 채집 · {materialPreflight.Count}종 점검";
-                UpdateStats();
-                RefreshProductionDashboard();
-                _log.Write(
-                    $"[다중가공] 전체 품목 통합 재료 계획 시작 · " +
-                    $"CLI가 현재 부족으로 확정한 {materialPreflight.Count}종만 선행 계산 · " +
-                    "현재 충분해서 숨겨진 재료는 실행 중 재검증");
-                await Task.Run(() => resolver.PreGatherKnownShortagesAsync(materialPreflight, token), token);
-                _log.Write(
-                    "[다중가공] 전체 품목 통합 재료 계획 완료 · 실제 등록 직전 재료 검증은 기존 로직 유지");
+                bool canRunMaterialPreflight = MultiAlteringMaterialPreflightPolicy.CanRun(
+                    hasResumableSessionForPreflight,
+                    hasSelectedFacilityWorksForPreflight);
+
+                if (canRunMaterialPreflight)
+                {
+                    _productionProgressSummary =
+                        $"다중가공 전체 품목 확정 부족분 통합 채집 · {materialPreflight.Count}종 점검";
+                    UpdateStats();
+                    RefreshProductionDashboard();
+                    _log.Write(
+                        $"[다중가공] 전체 품목 통합 재료 계획 시작 · " +
+                        $"CLI가 현재 부족으로 확정한 {materialPreflight.Count}종만 선행 계산 · " +
+                        "현재 충분해서 숨겨진 재료는 실행 중 재검증");
+                    await Task.Run(() => resolver.PreGatherKnownShortagesAsync(materialPreflight, token), token);
+                    _log.Write(
+                        "[다중가공] 전체 품목 통합 재료 계획 완료 · 실제 등록 직전 재료 검증은 기존 로직 유지");
+                }
+                else
+                {
+                    string reason = hasResumableSessionForPreflight
+                        ? "이어하기 세션 존재"
+                        : "선택 시설에 기존 작업 존재";
+                    _log.Write(
+                        $"[다중가공] 전체 품목 통합 선행채집 생략 · {reason} · " +
+                        "기존 재귀 재료 해결로 실제 부족분만 처리");
+                }
             }
 
             var coordinator = new MultiAlteringCoordinator(
@@ -365,7 +393,7 @@ public sealed partial class MainForm
         catch (OperationCanceledException)
         {
             _log.Write("[다중가공] F10 정지 · 등록/이동 중단 · " +
-                "다음 F9는 이전 게임 작업을 정리한 뒤 0부터 새로 시작");
+                "이번 실행 기록 보존(자동 이어하기 없음) · 다음 F9는 새 작업");
             SetStatus("다중가공 정지", Color.DarkOrange);
         }
         catch (Exception ex)
