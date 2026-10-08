@@ -24,6 +24,19 @@ internal static class AlteringReceiptPolicy
         => exactMoveLabelVisible ||
            (visualMoveButton && !trustedOnsiteFacility);
 
+    // A manager-directed receipt has already chosen onsite reuse or completed
+    // a fresh travel. On those paths the always-visible move label is not
+    // evidence of physical distance. Facility/title, modal, activity, completed
+    // queue, blue-button and receipt-CLI checks remain separately mandatory.
+    internal static bool ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective directive,
+        bool trustedOnsiteFacility,
+        bool visualMoveButton,
+        bool exactMoveLabelVisible)
+        => directive == AlteringFacilityEntryDirective.Automatic &&
+           ShouldBlockReceiptForMoveButton(
+               trustedOnsiteFacility, visualMoveButton, exactMoveLabelVisible);
+
     internal static bool IsCliReceiptConfirmed(int before, int after)
         => before >= 0 && after >= 0 && after < before;
 
