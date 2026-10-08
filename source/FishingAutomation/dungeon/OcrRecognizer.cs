@@ -46,7 +46,9 @@ internal sealed class OcrRecognizer
     {
         // Facility views use a fixed large title at the top-left. Keep this ROI tight so
         // currency text and the help icon cannot make the exact line ambiguous.
-        var roi = new Rectangle(42, 24, 220, 72);
+        // Live V3.1.58 capture: the fixed title starts at x=20, not x=42.
+        // Include the entire left edge; OCR is for FIRST admission only.
+        var roi = new Rectangle(12, 24, 250, 80);
         var exact = await FindAlteringLabelsAsync(frame, roi, title, ct);
         if (exact.Count == 1) return exact[0];
 
