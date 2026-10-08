@@ -345,7 +345,8 @@ public sealed partial class MainForm
             var coordinator = new MultiAlteringCoordinator(
                 laneState,
                 FacilityLaneOwner.Main,
-                restoreCompleted: batchStore.CompletedPlans);
+                restoreCompleted: batchStore.CompletedPlans,
+                fillInitialVacancies: true);
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
