@@ -1333,6 +1333,48 @@ Check(managedWorld.ReceiptDirectives.Count > 0 &&
       managedWorld.ReceiptDirectives.All(x =>
           x == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite),
     "H2: completed same-facility works are collected under the manager's Reuse directive");
+Check(AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        remoteConfirmed: true) &&
+      AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        remoteConfirmed: true),
+    "H3: two-frame paid-detail OCR under either manager directive requires manager conflict reporting");
+Check(!AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        remoteConfirmed: false) &&
+      !AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.Automatic,
+        remoteConfirmed: true),
+    "H3: a single-frame OCR candidate is not authority to abort, and Automatic keeps legacy recovery");
+
+var conflictPlan = lanePlan;
+var conflictWorld = new FakeWorld(conflictPlan)
+{
+    TriggerCoordinatorDetailConflict = true
+};
+var conflictLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+conflictLane.ConfirmOnsite(conflictPlan.FacilityName, "H3 test established onsite");
+var conflictAutomation = new AlteringAutomation(
+    conflictWorld, conflictWorld, (_, _) => Task.CompletedTask,
+    8, facilityState: conflictLane);
+bool conflictReported = false;
+try
+{
+    await conflictAutomation.RunAsync(conflictPlan, default);
+}
+catch (AlteringCoordinatorFacilityMismatchException ex)
+{
+    conflictReported = ex.FacilityName == conflictPlan.FacilityName;
+}
+Check(conflictReported &&
+      conflictWorld.QueueCalls == 0 &&
+      conflictWorld.Directives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }) &&
+      conflictLane.QueueDirectiveFor(conflictPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H3: coordinator receives two-frame detail contradiction, invalidates onsite, and stops without additional queue input");
+
 
 var freshReceiptWorld = new FakeWorld(lanePlan);
 freshReceiptWorld.AddCompleted(1);
@@ -1403,7 +1445,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal readonly List<AlteringFacilityEntryDirective> ReceiptDirectives = new();
     internal AlteringFacilityEntryDirective? DirectiveAfterCollection;
     internal bool QueuedWhileExisting;
-    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
+    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict;
     internal string MissingReason = "not_enough_ingredient";
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
@@ -1449,6 +1491,10 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         Directives.Add(directive);
         if (CollectionCount > 0)
             DirectiveAfterCollection = directive;
+        if (TriggerCoordinatorDetailConflict)
+            throw new AlteringCoordinatorFacilityMismatchException(
+                plan.FacilityName,
+                "H3 test: conflicting two-frame remote detail OCR");
         return QueueAsync(plan, reserveFiveWings, ct);
     }
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
