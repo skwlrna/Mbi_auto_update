@@ -19,7 +19,7 @@ internal static class SpiritWingSafety
     }
 }
 
-internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly IAlteringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -91,6 +91,17 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordin
                 throw new InvalidOperationException("현재 가공 화면은 정체 복구를 지원하지 않습니다.");
             await recovery.RecoverStallAsync(plan, attempt, reason, ct).ConfigureAwait(false);
             return true;
+        }, ct);
+
+    public Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+        => GuardAsync("[자동 가공] 중간관리자 정체 복구 증거 확인", async () =>
+        {
+            if (_inner is not IAlteringCoordinatorStallRecoveryScreen coordinated)
+                throw new InvalidOperationException(
+                    "현재 가공 화면은 중간관리자 정체 복구 결과 보고를 지원하지 않습니다.");
+            return await coordinated.RecoverStallForCoordinatorAsync(
+                plan, attempt, reason, ct).ConfigureAwait(false);
         }, ct);
 
     public Task ExitToFieldAsync(CancellationToken ct)
