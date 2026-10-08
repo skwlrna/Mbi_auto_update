@@ -629,6 +629,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 고정좌표 선택 · {plan.DisplayName} · " +
             $"순번 {plan.RecipeOrdinal}/{plan.RecipeCount} · ({center.X},{center.Y}) · 카드명 OCR 없음");
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.ClickFresh(center, ct);
         await Task.Delay(350, ct);
 
@@ -680,6 +681,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Log?.Invoke(
                     $"[자동 가공] {plan.DisplayName} 고정좌표 1차 클릭 미반영 확인 · " +
                     $"시설 목록 유지 + 중앙 지시/기존 안전판정 유지 · 동일 좌표 재클릭 1/1");
+                await EnsureManagedIdleBeforeInputAsync(directive, ct);
                 _ui.ClickFresh(center, ct);
                 await Task.Delay(450, ct);
 
@@ -722,6 +724,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(beforeSearch,
                 "약품 가공 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. 검색 입력을 차단합니다.");
 
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 돋보기 · 고정좌표 " +
@@ -737,14 +740,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(searchDialog,
                 $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
 
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
         _ui.PasteFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.TapFresh(0x1C, ct); // Enter
         Log?.Invoke($"[자동 가공] 약품 검색어 입력 확정 · Enter · {plan.DisplayName}");
         await Task.Delay(220, ct);
 
         using var beforeApply = Capture(ct);
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.TapFresh(0x39, ct); // Space = 적용
         Log?.Invoke("[자동 가공] 약품 검색 적용 · Space");
         await Task.Delay(700, ct);
@@ -774,6 +780,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(resultFrame,
                 $"약품 검색 결과가 중복 제법 순번 {plan.RecipeOrdinal}이라 첫 결과 고정좌표를 사용하지 않습니다.");
 
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
         Log?.Invoke(
             $"[자동 가공] 약품 검색 첫 결과 선택 · 고정좌표 " +
@@ -821,6 +828,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "연속 등록 중 원격 가공 화면이 감지되어 고정 품목 좌표 입력을 차단했습니다.");
             }
 
+            await EnsureManagedIdleBeforeInputAsync(directive, ct);
             _ui.ClickFresh(_cachedRecipeCenter, ct);
             await Task.Delay(250, ct);
 
@@ -865,6 +873,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 _cachedRecipeCenter = selected.Center;
                 _hasCachedRecipeCenter = true;
 
+                await EnsureManagedIdleBeforeInputAsync(directive, ct);
                 _ui.ClickFresh(selected.Center, ct);
                 await Task.Delay(350, ct);
                 using var popup = Capture(ct);
@@ -2047,6 +2056,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (directive != AlteringFacilityEntryDirective.Automatic)
             _confirmedOnsiteFacility = null;
 
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         await EnterFacilityAsync(plan, ct);
 
         if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
@@ -2119,6 +2129,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Log?.Invoke(
             $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 수령 현장 확정 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
             $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+        await EnsureManagedIdleBeforeInputAsync(directive, ct);
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
