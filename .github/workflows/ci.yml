@@ -180,6 +180,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Inventory loot regressions failed' }
 
 
+      # L2 exercises compiled production AlteringScreen methods, not only FakeWorld.
+      - name: Real altering screen authority regressions (L2)
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'L2 real AlteringScreen regressions failed' }
+
       - name: Automatic altering regression tests
         shell: pwsh
         run: |
