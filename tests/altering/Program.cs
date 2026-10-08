@@ -1374,6 +1374,42 @@ Check(conflictReported &&
       conflictLane.QueueDirectiveFor(conflictPlan.FacilityName) ==
           AlteringFacilityEntryDirective.FreshMoveRequired,
     "H3: coordinator receives two-frame detail contradiction, invalidates onsite, and stops without additional queue input");
+var aggregateConflict = new AggregateException(
+    new AlteringCoordinatorFacilityMismatchException(
+        conflictPlan.FacilityName, "H3 remote-detail OCR conflict"),
+    new InvalidOperationException("H3 independent currency-verification failure"));
+Check(AlteringCoordinatorFacilityMismatchException.IsForFacility(
+        aggregateConflict, conflictPlan.FacilityName) &&
+      !AlteringCoordinatorFacilityMismatchException.IsForFacility(
+        aggregateConflict, "목재 가공 시설"),
+    "H3: typed OCR conflict survives aggregated wing-safety failure without matching another facility");
+
+var aggregateWorld = new FakeWorld(conflictPlan)
+{
+    TriggerCoordinatorDetailConflict = true,
+    AggregateCoordinatorDetailConflict = true
+};
+var aggregateLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+aggregateLane.ConfirmOnsite(conflictPlan.FacilityName, "H3 aggregate test onsite");
+bool preservedSafetyError = false;
+try
+{
+    var aggregateAutomation = new AlteringAutomation(
+        aggregateWorld, aggregateWorld, (_, _) => Task.CompletedTask,
+        8, facilityState: aggregateLane);
+    await aggregateAutomation.RunAsync(conflictPlan, default);
+}
+catch (AggregateException ex)
+{
+    preservedSafetyError = ex.InnerExceptions.Count == 2 &&
+        ex.InnerExceptions.Any(x => x is AlteringCoordinatorFacilityMismatchException) &&
+        ex.InnerExceptions.Any(x => x.Message.Contains("currency-verification"));
+}
+Check(preservedSafetyError && aggregateWorld.QueueCalls == 0 &&
+      aggregateLane.QueueDirectiveFor(conflictPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H3: wing-safety aggregate preserves both failures while manager invalidates location without queue input");
+
 
 
 var freshReceiptWorld = new FakeWorld(lanePlan);
@@ -1445,7 +1481,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal readonly List<AlteringFacilityEntryDirective> ReceiptDirectives = new();
     internal AlteringFacilityEntryDirective? DirectiveAfterCollection;
     internal bool QueuedWhileExisting;
-    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict;
+    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict;
     internal string MissingReason = "not_enough_ingredient";
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
@@ -1492,9 +1528,16 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         if (CollectionCount > 0)
             DirectiveAfterCollection = directive;
         if (TriggerCoordinatorDetailConflict)
-            throw new AlteringCoordinatorFacilityMismatchException(
+        {
+            var conflict = new AlteringCoordinatorFacilityMismatchException(
                 plan.FacilityName,
                 "H3 test: conflicting two-frame remote detail OCR");
+            if (AggregateCoordinatorDetailConflict)
+                throw new AggregateException(
+                    conflict,
+                    new InvalidOperationException("H3 independent currency-verification failure"));
+            throw conflict;
+        }
         return QueueAsync(plan, reserveFiveWings, ct);
     }
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
