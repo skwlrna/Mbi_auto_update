@@ -52,6 +52,27 @@ internal static class AlteringFacilityTravelConfirmPolicy
            moveClickSent &&
            transitionObserved;
 
+    // A very short move (e.g. player already in front of the wood bench)
+    // may finish before the first post-click capture. Require TWO separate
+    // visual anchors: a POSITIVELY observed remote move button before the
+    // click and the actual onsite close-X after the click, with the remote
+    // move control absent. Still require CLI idle, no modal, 7 stable frames,
+    // and an independent delayed final capture in the caller. Neither an
+    // OCR title miss nor a click alone can establish this path.
+    internal static bool HasVerifiedManagedInstantArrival(
+        bool moveClickSent,
+        bool preClickRemoteMoveButtonConfirmed,
+        bool facilityVisible,
+        bool onsiteCloseVisible,
+        bool remoteMoveButtonVisible,
+        bool? autoTraveling,
+        bool anyModalVisible)
+        => moveClickSent &&
+           preClickRemoteMoveButtonConfirmed &&
+           facilityVisible && onsiteCloseVisible &&
+           !remoteMoveButtonVisible && autoTraveling == false &&
+           !anyModalVisible;
+
     internal static bool HasStableOnsiteEvidence(
         int stableFrames,
         TimeSpan stableDuration)
