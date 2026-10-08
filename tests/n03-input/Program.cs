@@ -188,6 +188,76 @@ static class Program
             MouseBalanced(f.Fake, 1); Check(f.Fake.Moves == 21 && f.Fake.LastMove == new Point(520, 620), "Drag steps/coordinates changed");
             Check(f.Fake.Delays.SequenceEqual(new[] { 100, 90, 80 }.Concat(Enumerable.Repeat(40, 20)).Append(120)), "Drag delays changed");
         });
+#if PRODUCTION_ASSEMBLY
+        Test("clipboard/cancel-before-sta-worker-does-not-write", () =>
+        {
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            int writes = 0;
+            Cancelled(() => CancellableClipboardWriter.Set("stale", cancelled.Token, _ => writes++));
+            Check(writes == 0, "Cancelled clipboard worker wrote text");
+        });
+        Test("clipboard/cancel-during-sta-write-does-not-block-or-overwrite-newer", () =>
+        {
+            using var cancelled = new CancellationTokenSource();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var events = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var old = Task.Run(() => Cancelled(() => CancellableClipboardWriter.Set("old", cancelled.Token, _ =>
+            {
+                Check(Thread.CurrentThread.IsBackground, "Cancelled STA worker prevents process exit");
+                Check(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA, "Worker lost STA apartment");
+                events.Enqueue("old-start");
+                entered.Set();
+                Check(release.Wait(TimeSpan.FromSeconds(3)), "Old clipboard operation blocked");
+                events.Enqueue("old-end");
+            })));
+            Check(entered.Wait(TimeSpan.FromSeconds(3)), "Old STA worker did not enter");
+            try
+            {
+                cancelled.Cancel();
+                Complete(old); // Cancellation must return while the STA worker remains blocked.
+                var newer = Task.Run(() => CancellableClipboardWriter.Set("new", CancellationToken.None,
+                    value => events.Enqueue(value)));
+                Thread.Sleep(80);
+                Check(!newer.IsCompleted && !events.Contains("new"), "New clipboard write overtook cancelled old writer");
+                release.Set();
+                Complete(newer);
+                Check(events.SequenceEqual(new[] { "old-start", "old-end", "new" }),
+                    "Cancelled old writer overwrote a newer clipboard value");
+            }
+            finally { release.Set(); }
+        });
+        Test("clipboard/cancelled-queued-sta-worker-cannot-publish-after-restart", () =>
+        {
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var cancelled = new CancellationTokenSource();
+            var events = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var active = Task.Run(() => CancellableClipboardWriter.Set("active", CancellationToken.None, value =>
+            {
+                entered.Set();
+                Check(release.Wait(TimeSpan.FromSeconds(3)), "Active clipboard writer stalled");
+                events.Enqueue(value);
+            }));
+            Check(entered.Wait(TimeSpan.FromSeconds(3)), "Active clipboard writer missing");
+            try
+            {
+                var queued = Task.Run(() => Cancelled(() => CancellableClipboardWriter.Set("stale", cancelled.Token,
+                    value => events.Enqueue(value))));
+                Thread.Sleep(60);
+                cancelled.Cancel();
+                Complete(queued); // Must not wait for the earlier blocked writer.
+                release.Set();
+                Complete(active);
+                Complete(Task.Run(() => CancellableClipboardWriter.Set("new", CancellationToken.None,
+                    value => events.Enqueue(value))));
+                Check(events.SequenceEqual(new[] { "active", "new" }),
+                    "Cancelled queued STA worker wrote stale clipboard text");
+            }
+            finally { release.Set(); }
+        });
+#endif
         GuardTests();
         Console.WriteLine($"N03: {passed} tests passed; fake transport only; no real-game verification.");
     }
