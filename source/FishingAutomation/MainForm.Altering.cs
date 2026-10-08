@@ -12,12 +12,14 @@ public sealed partial class MainForm
     {
         if (requestedPlan is null && !batchChild)
         {
+            // F9 is ALWAYS a new supervisor-owned order, even for one recipe.
+            // Internal dependency requests (batchChild) keep their own path.
             var queued = _alteringPage.QueuedAlteringPlans;
-            if (queued.Count > 0)
-            {
-                await StartMultiAlteringAsync(queued);
-                return;
-            }
+            var orders = queued.Count > 0
+                ? queued
+                : new[] { SelectedAlteringPlan() };
+            await StartMultiAlteringAsync(orders);
+            return;
         }
 
         _starting = true;
