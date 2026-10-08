@@ -403,7 +403,7 @@ Match-Required $batchStore '새 F9 시작 전 선택 시설의 이전 작업을 
 Match-Required $batchStore 'allowSingleCharacter: true' 'fresh gate retains N02/F05 journaling without resume'
 Match-Required $startMulti 'MultiAlteringFreshStartCleanup.ClearAsync' 'F9 clears old live works before opening its fresh ledger'
 Match-Forbidden $startMulti 'session.InitialExistingMinimum|hasResumableSessionForPreflight' 'fresh F9 UI must not restore or subtract old queue progress'
-Match-Required (Read-Source 'source/FishingAutomation/MultiAlteringFreshStartCleanup.cs') 'works.Any(w => !w.IsCompleted)' 'old partial batches are never collected'
+Match-Required (Read-Source 'source/FishingAutomation/MultiAlteringFreshStartCleanup.cs') 'works\.Any\(w => !w\.IsCompleted\)' 'old partial batches are never collected'
 Match-Forbidden $productionPage 'ReadPendingPlans\(' 'new F9 UI never automatically selects a historical roster'
 Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 ignores but preserves old unresolved F05 journal' 'F05 old-record isolation is executable regression'
 Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/previous F9 one registered then restart clears queue and orders full NEW target' 'fresh 100 target excludes old 1 job after restart'
