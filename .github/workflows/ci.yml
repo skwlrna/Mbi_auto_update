@@ -408,7 +408,7 @@ jobs:
               $collectFlow -notmatch 'ReuseCoordinatorConfirmedOnsite' -or
               $collectFlow -notmatch 'FreshMoveRequired' -or
               $collectFlow -notmatch '설비 이동 0회' -or
-              $collectFlow -notmatch 'forceMoveClick: true, receiptMode: true' -or
+              $collectFlow -notmatch 'forceMoveClick: true,\s*receiptMode: true,\s*managedFreshMove: true' -or
               $collectFlow -notmatch 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct, directive\)' -or
               $promptFlow -notmatch 'TryAutoTravelingAsync' -or
               $promptFlow -notmatch 'HasBottomConfirmationModal' -or
