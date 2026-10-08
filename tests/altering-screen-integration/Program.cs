@@ -170,6 +170,12 @@ try
     var travel = ScreenCalls("TravelToFacilityAsync", 5);
     Check(Has(travel, "IsManagedFreshArrivalObservation"),
         "real managed Fresh travel checks independent transition evidence for arrival");
+    var enter = ScreenCalls("EnterFacilityAsync", 3);
+    Check(Has(enter, "RequireManagedIdleAsync"),
+        "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
+    Check(Has(travel, "RequireManagedIdleAsync") &&
+          Has(travel, "IsFacilityTravelDialogAsync"),
+        "F03/F04 optional travel popup uses positive wording plus managed idle before Space");
     var prompt = ScreenCalls("HasCollectPromptAsync", 4);
     Check(Has(prompt, "ShouldBlockReceiptForMoveButton") &&
           Has(prompt, "HasBottomConfirmationModal") &&
@@ -206,6 +212,8 @@ try
     Check(f02DurableBoundary >= 0 && f02DurableBoundary < f02FinalGate &&
           f02FinalGate < f02ReceiveSpace,
         "F02 compiled input ordering: durable boundary -> fresh all-work prompt -> receive Space");
+    Check(Has(collect, "RequireManagedIdleAsync"),
+        "F03 actual blue receive Space has fresh manager idle gate");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
@@ -218,6 +226,25 @@ try
           Has(close, "CanRetryCliReceiptCompletionClose") &&
           Has(close, "WaitForReceiptFacilityReturnAsync"),
         "real completion-close path rechecks modal and awaits facility return");
+    var completionClose = ScreenCalls("RequireManagedCompletionCloseAsync", 2);
+    Check(Has(close, "RequireManagedCompletionCloseAsync") &&
+          Has(completionClose, "CanCloseManagedCompletionResult") &&
+          Has(completionClose, "RequireManagedIdleAsync") &&
+          Has(completionClose, "FindAsync"),
+        "F03/F04 compiled close paths require positive result OCR and fresh activity");
+    Check(CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, false, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, true, true, false, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, true, false, true, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, true, false, false, true) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, true, false, false, null),
+        "F04 rejects unrelated green, facility, travel popup, moving or unknown CLI");
     var returning = ScreenCalls("WaitForReceiptFacilityReturnAsync", 4);
     Check(Has(returning, "CanConfirmReceiptFacilityReturn") &&
           Has(returning, "CanRecoverFieldAfterCompletion") &&

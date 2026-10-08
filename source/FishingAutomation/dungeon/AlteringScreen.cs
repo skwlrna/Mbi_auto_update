@@ -476,7 +476,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             timeoutMs,
             ct);
 
-    private async Task EnterFacilityAsync(AlteringPlan plan, CancellationToken ct)
+    private async Task EnterFacilityAsync(
+        AlteringPlan plan, CancellationToken ct,
+        AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
     {
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         const int maxAttempts = 3;
@@ -495,6 +497,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null)
                 {
                     Log?.Invoke("[자동 가공] 현재 화면=품목 상세 · 닫고 시설 화면을 다시 확인합니다.");
+                    await RequireManagedIdleAsync(plan, directive, "시설 상세/다른창 Esc 직전", ct);
                     _ui.TapFresh(0x01, ct);
                     await WaitForFacilityHeaderAsync(plan.ScreenTitle, 700, ct);
                     continue;
@@ -514,6 +517,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (otherFacility is not null)
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다 · Esc");
+                    await RequireManagedIdleAsync(plan, directive, "시설 상세/다른창 Esc 직전", ct);
                     _ui.TapFresh(0x01, ct);
                     await WaitForFacilityHeaderAsync("가공", 900, ct);
                     continue;
@@ -522,6 +526,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (await FindFacilityHeaderAsync(frame, "가공", ct) is not null)
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
+                    await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
                     if (!await ClickLabelAsync(plan.ScreenTitle, AlteringFacilityLayout.TitleArea(plan.ScreenTitle), "가공", ct, facilityTitle: true))
                     {
                         Log?.Invoke($"[자동 가공] 시설 제목 확인 실패 {attempt}/{maxAttempts} · 추가 입력 없이 재판정합니다.");
@@ -543,6 +548,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // Unknown after collection can be a transient reward/result screen or the
                 // ordinary field. Do one bounded K re-entry only; never spam keys blindly.
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
+                // Never press K over an unknown green/travel modal in a managed run.
+                if (directive != AlteringFacilityEntryDirective.Automatic &&
+                    (HasBottomConfirmationModal(frame) ||
+                     await IsFacilityTravelDialogAsync(frame, ct)))
+                    Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
+                await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
             }
 
@@ -557,6 +568,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 if (await FindFacilityHeaderAsync(menu, "가공", ct) is null)
                 {
+                    await RequireManagedIdleAsync(plan, directive, "가공 메뉴 진입 클릭 직전", ct);
                     if (!await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
                     {
                         Log?.Invoke($"[자동 가공] 가공 메뉴 확인 실패 {attempt}/{maxAttempts} · 추가 입력 없이 재판정합니다.");
@@ -1009,12 +1021,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         else if (directive == AlteringFacilityEntryDirective.FreshMoveRequired)
         {
             _confirmedOnsiteFacility = null;
-            await EnterFacilityAsync(plan, ct);
+            await EnterFacilityAsync(plan, ct, directive);
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 지시 · {plan.ScreenTitle} 새 시설 진입 · " +
                 "품목 선택보다 설비 이동 1회 우선");
             await TravelToFacilityAsync(plan, ct, forceMoveClick: true, directive: directive);
-            await EnterFacilityAsync(plan, ct);
+            await EnterFacilityAsync(plan, ct, directive);
             _confirmedOnsiteFacility =
                 AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
                     directive, plan.FacilityName);
@@ -1032,12 +1044,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             else
             {
                 _confirmedOnsiteFacility = null;
-                await EnterFacilityAsync(plan, ct);
+                await EnterFacilityAsync(plan, ct, directive);
                 Log?.Invoke(
                     $"[자동 가공] {plan.ScreenTitle} 진입 · 새 시설 첫 등록 · " +
                     "품목 선택보다 설비 이동 1회 우선");
                 await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
-                await EnterFacilityAsync(plan, ct);
+                await EnterFacilityAsync(plan, ct, directive);
                 _confirmedOnsiteFacility = plan.FacilityName;
                 Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 설비 도착 · 이제 {plan.DisplayName} 선택");
             }
@@ -1377,6 +1389,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             {
                 bool wordingMatched = await IsFacilityTravelDialogAsync(frame, ct);
 
+                if (directive != AlteringFacilityEntryDirective.Automatic)
+                {
+                    // F03/F04: a generic green confirmation shape cannot
+                    // authorize managed Space. Require move-specific wording
+                    // and a CURRENT idle activity reading before any input.
+                    if (!wordingMatched)
+                        Fail(frame,
+                            "관리 시설 이동 확인창 문구 불명확 · 일반 초록창에 Space 입력 금지");
+                    await RequireManagedIdleAsync(
+                        plan, directive, "시설 이동 확인 팝업 Space 직전", ct);
+                    using var freshDialog = Capture(ct);
+                    if (!HasFacilityTravelConfirmationVisual(freshDialog) ||
+                        !await IsFacilityTravelDialogAsync(freshDialog, ct))
+                        Fail(freshDialog,
+                            "관리 시설 이동 확인창이 입력 직전 변경됨 · Space 차단");
+                    await RequireManagedIdleAsync(
+                        plan, directive, "시설 이동 팝업 최종 CLI 허가", ct);
+                }
                 _ui.TapFresh(0x39, ct); // Space = confirm optional facility travel
                 travelConfirmationSpaces++;
                 onsiteStableFrames = 0;
@@ -1812,6 +1842,34 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return false;
     }
 
+    // Managed receipt: distinguish the actual "가공 완료" result from
+    // unrelated green confirmations. The title is a positive OCR signal;
+    // absence is uncertainty, never permission to press Space.
+    private async Task RequireManagedCompletionCloseAsync(
+        AlteringPlan plan, CancellationToken ct)
+    {
+        await RequireManagedIdleAsync(
+            plan, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+            "완료 결과창 Space 직전 활동 검사", ct);
+        using var frame = Capture(ct);
+        bool green = HasBottomConfirmationModal(frame);
+        bool heading = green &&
+            await FindAsync(frame, Whole, "가공 완료", ct) is not null;
+        bool facility = await FindFacilityHeaderAsync(
+            frame, plan.ScreenTitle, ct) is not null;
+        bool travelDialog = await IsFacilityTravelDialogAsync(frame, ct);
+        bool? traveling = await TryAutoTravelingAsync(ct);
+        if (!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+                green, heading, facility, travelDialog, traveling))
+            Fail(frame,
+                "관리 수령 완료 결과창 고유 제목/초록 버튼/CLI 비이동 증거 부족 · 다른 초록 팝업 Space 차단");
+        // A second fresh activity gate after OCR prevents its await from
+        // extending the lifetime of the input authorization.
+        await RequireManagedIdleAsync(
+            plan, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+            "완료 결과창 최종 CLI 허가", ct);
+    }
+
     private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync(
         AlteringPlan plan,
         CancellationToken ct,
@@ -1842,6 +1900,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "수령 완료창 Space 직전 재검증 실패 · 완료창/이동창/시설창 상태 불확실 · 추가 입력 없이 정지합니다.");
         }
 
+        if (managedReceipt)
+            await RequireManagedCompletionCloseAsync(plan, ct);
         Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -1894,6 +1954,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 if (canRetryAgain)
                 {
+                    if (managedReceipt)
+                        await RequireManagedCompletionCloseAsync(plan, ct);
                     _ui.TapFresh(0x39, ct);
                     Log?.Invoke("[자동 가공] 완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음");
                     await Task.Delay(450, ct);
@@ -2118,7 +2180,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (directive != AlteringFacilityEntryDirective.Automatic)
             _confirmedOnsiteFacility = null;
 
-        await EnterFacilityAsync(plan, ct);
+        await EnterFacilityAsync(plan, ct, directive);
 
         if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
         {
@@ -2146,7 +2208,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} 새 시설 이동 1회 선행");
             await TravelToFacilityAsync(plan, ct, forceMoveClick: true, receiptMode: true, directive: directive);
-            await EnterFacilityAsync(plan, ct);
+            await EnterFacilityAsync(plan, ct, directive);
             _confirmedOnsiteFacility =
                 AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
                     directive, plan.FacilityName);
@@ -2156,7 +2218,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // Single-altering retains its proven legacy travel decision.
             Log?.Invoke($"[자동 가공] 완료품 수령 전 현장 가공대 확인 · {plan.ScreenTitle}");
             await TravelToFacilityAsync(plan, ct, receiptMode: true);
-            await EnterFacilityAsync(plan, ct);
+            await EnterFacilityAsync(plan, ct, directive);
             _confirmedOnsiteFacility = plan.FacilityName;
         }
 
@@ -2208,6 +2270,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "F02 수령 입력 직전 시설 전체 완료 증거 소실(부분 완료/신규 대기/화면·CLI 변경) · " +
                     "모두 받기 Space 0회 · RecoveryRequired 유지 · 자동 재수령 금지");
         }
+        // F03: right before the irreversible receive input, the coordinator
+        // must still have an independently fresh, safe character activity.
+        await RequireManagedIdleAsync(
+            plan, directive, "모두 받기 최종 Space 직전 활동 검사", ct);
         ct.ThrowIfCancellationRequested();
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -2378,7 +2444,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         // K, facility menu selection, and Esc only affect the menu. The
         // entry helper never invokes TravelToFacilityAsync or move clicks.
-        await EnterFacilityAsync(plan, ct);
+        await EnterFacilityAsync(plan, ct, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite);
 
         // Two distinct, stable frames + no modal/detail + proven nontravelling
         // CLI. The persistent '설비로 이동' visual is deliberately ignored.
