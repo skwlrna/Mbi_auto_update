@@ -704,6 +704,7 @@ jobs:
           # M2 wait: per-facility progress evidence must survive each
           # one-slot batch return. A stagnant lane stops without extra input,
           # even while other facilities continue legitimately progressing.
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
           $watchCore = [regex]::Match(
               $multiAlter,
               'internal sealed class MultiAlteringWaitWatchdog[\s\S]*?(?=\r?\ninternal sealed class MultiAlteringCoordinator)').Value
