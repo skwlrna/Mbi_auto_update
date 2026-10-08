@@ -7,6 +7,7 @@
     <Compile Include="../../source/FishingAutomation/dungeon/FuzzyText.cs" Link="FuzzyText.cs" />
     <Compile Include="../../source/FishingAutomation/dungeon/Models.cs" Link="Models.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringRecipeIdentityPolicy.cs" Link="AlteringRecipeIdentityPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringReceiptPolicy.cs" Link="AlteringReceiptPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/FacilityLaneState.cs" Link="FacilityLaneState.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringConsumptionLedger.cs" Link="MultiAlteringConsumptionLedger.cs" />
