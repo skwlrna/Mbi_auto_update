@@ -197,6 +197,15 @@ try
         "real receipt keeps manager travel, blue recheck, completion proof and durable receive-input boundary");
     Check(Has(collect, "HasCollectPromptAsync"),
         "F02 compiled receipt checks fresh entire lane again after durable boundary before Space");
+    // The gate must be on the actual async production path in strict order.
+    // Merely calling the check somewhere else in the same method is insufficient.
+    var f02CompiledCalls = collect.ToList();
+    int f02DurableBoundary = f02CompiledCalls.FindLastIndex(x => x.EndsWith(".Invoke", StringComparison.Ordinal));
+    int f02FinalGate = f02CompiledCalls.FindLastIndex(x => x.EndsWith(".HasCollectPromptAsync", StringComparison.Ordinal));
+    int f02ReceiveSpace = f02CompiledCalls.FindIndex(x => x.EndsWith(".TapFresh", StringComparison.Ordinal));
+    Check(f02DurableBoundary >= 0 && f02DurableBoundary < f02FinalGate &&
+          f02FinalGate < f02ReceiveSpace,
+        "F02 compiled input ordering: durable boundary -> fresh all-work prompt -> receive Space");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
