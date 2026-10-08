@@ -37,6 +37,26 @@ internal static class AlteringReceiptPolicy
            ShouldBlockReceiptForMoveButton(
                trustedOnsiteFacility, visualMoveButton, exactMoveLabelVisible);
 
+    // The blue "모두 받기" belongs to the entire facility, not the
+    // selected recipe. Managed mixed-batch receipt requires all works in this
+    // facility to be completed before that single UI input, and requires zero
+    // works afterwards. Automatic/single-altering keeps its existing bounded
+    // decrease verification because unfinished neighboring work can coexist.
+    internal static bool CanCollectManagedFacility(
+        IReadOnlyList<AlteringWork> works,
+        string facilityName)
+    {
+        ArgumentNullException.ThrowIfNull(works);
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        var facilityWorks = works.Where(x =>
+            x.FacilityName == facilityName).ToArray();
+        return facilityWorks.Length > 0 &&
+               facilityWorks.All(x => x.IsCompleted);
+    }
+
+    internal static bool IsManagedFacilityReceiptConfirmed(int before, int after)
+        => before > 0 && after == 0;
+
     internal static bool IsCliReceiptConfirmed(int before, int after)
         => before >= 0 && after >= 0 && after < before;
 
