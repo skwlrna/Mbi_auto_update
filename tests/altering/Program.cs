@@ -288,6 +288,36 @@ Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
         confirmationSpaceCount: 0,
         departureAlreadySeen: true),
     "travel Space is blocked without the popup, after two attempts, or once departure is already proven");
+// Near-instant real movement (already standing by the machine) can finish
+// before the first sampled frame. Click alone or disappearing OCR is NEVER
+// enough; require a proven pre-click remote button plus a distinct close-X
+// after click, no remaining remote move button or modal, and idle CLI.
+Check(AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        moveClickSent: true, preClickRemoteMoveButtonConfirmed: true,
+        facilityVisible: true, onsiteCloseVisible: true,
+        remoteMoveButtonVisible: false, autoTraveling: false,
+        anyModalVisible: false),
+    "20:56 near-instant relocation has independent post-click onsite evidence");
+Check(!AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        moveClickSent: false, preClickRemoteMoveButtonConfirmed: true,
+        facilityVisible: true, onsiteCloseVisible: true,
+        remoteMoveButtonVisible: false, autoTraveling: false,
+        anyModalVisible: false) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, false, true, true, false, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, true, true, false, false, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, true, true, true, true, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, true, true, true, false, null, false) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, true, true, true, false, true, false) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, true, true, true, false, false, true) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+        true, true, false, true, false, false, false),
+    "F01 near-instant branch rejects click-only, absent X, remote UI, unknown/busy CLI or any modal");
 // F01 regression: two unrelated "loading" API rejections with a visible
 // facility title, or two OCR title misses with readable nontravel CLI, are
 // NOT movement evidence. Only positive auto-travel or consecutive correlated
