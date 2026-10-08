@@ -114,6 +114,18 @@ internal sealed class AlteringCoordinatorFacilityMismatchException : InvalidOper
         string message,
         Exception? inner = null) : base(message, inner)
         => FacilityName = facilityName;
+
+    // The zero-wing wrapper may aggregate this error with an independent
+    // currency-verification failure. Keep both failures intact while still
+    // letting the manager revoke stale location authority.
+    internal static bool IsForFacility(Exception error, string facilityName)
+        => error is AlteringCoordinatorFacilityMismatchException direct
+               && string.Equals(direct.FacilityName, facilityName, StringComparison.Ordinal)
+           || error is AggregateException aggregate
+               && aggregate.Flatten().InnerExceptions
+                   .OfType<AlteringCoordinatorFacilityMismatchException>()
+                   .Any(conflict => string.Equals(
+                       conflict.FacilityName, facilityName, StringComparison.Ordinal));
 }
 
 // The coordinator's completed facility-entry directive remains authoritative
@@ -601,11 +613,9 @@ internal sealed class AlteringAutomation
                                 reserveCallback,
                                 ct);
                         }
-                        catch (AlteringCoordinatorFacilityMismatchException conflict)
-                            when (string.Equals(
-                                conflict.FacilityName,
-                                plan.FacilityName,
-                                StringComparison.Ordinal))
+                        catch (Exception conflict) when (
+                            AlteringCoordinatorFacilityMismatchException.IsForFacility(
+                                conflict, plan.FacilityName))
                         {
                             _facilityState.InvalidateOnsite(
                                 $"상세 OCR/현장확정 충돌 · {plan.DisplayName} · " +
