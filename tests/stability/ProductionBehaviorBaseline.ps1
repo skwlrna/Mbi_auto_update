@@ -100,6 +100,18 @@ Match-Required $alter '설비 이동 0회' 'same-facility receipt cannot send a 
 Match-Required $receiptPolicy 'Alterin[g]?FacilityEntryDirective' 'receipt policy recognizes manager instruction'
 Match-Required $zeroWing 'IAlteringCoordinatorReceiptScreen' 'wing-safety wrapper preserves receipt directive'
 Match-Required $alterTests '07:01 regression' '07:01 repeated facility-move regression remains executable coverage'
+# H3: detailed paid-action OCR can be contradictory evidence, not travel permission.
+# The manager alone may invalidate its onsite state; Automatic still gets the old
+# single guarded remote-detail recovery.
+Match-Required $alterPlan 'class AlteringCoordinatorFacilityMismatchException' 'remote detail conflict carries a typed manager report'
+Match-Required $alterPlan 'catch \(AlteringCoordinatorFacilityMismatchException conflict\)' 'manager receives the child detail contradiction'
+Match-Required $alterPlan '_facilityState\.InvalidateOnsite' 'manager invalidates stale onsite authority on detail conflict'
+Match-Required (Read-Source 'source/FishingAutomation/AlteringRemoteProcessGuard.cs') 'MustReportToCoordinator' 'managed remote-detail OCR conflict has a dedicated policy'
+Match-Required $alter 'MustReportToCoordinator' 'managed queue branches before any remote travel recovery'
+Match-Required $alter 'throw new AlteringCoordinatorFacilityMismatchException' 'managed detail contradiction fails closed'
+Match-Required $alter '가공 클릭/설비 이동 0회' 'OCR conflict prevents free or paid input and extra travel'
+Match-Required $alterTests 'H3: coordinator receives two-frame detail contradiction' 'H3 manager state invalidation regression stays executable'
+
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
