@@ -14,6 +14,7 @@ try
     Type receiptPolicy = production.GetType("FishingAutomation.AlteringReceiptPolicy", true)!;
     Type cachePolicy = production.GetType("FishingAutomation.AlteringScreenOnsiteCachePolicy", true)!;
     Type remotePolicy = production.GetType("FishingAutomation.AlteringRemoteProcessGuard", true)!;
+    Type identityPolicy = production.GetType("FishingAutomation.AlteringRecipeIdentityPolicy", true)!;
     Type travelPolicy = production.GetType("FishingAutomation.AlteringFacilityTravelConfirmPolicy", true)!;
     const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic |
                              BindingFlags.Instance | BindingFlags.Static;
@@ -146,6 +147,8 @@ try
         "real medicine search guards directive, modal and detail before accepting selection");
     Check(!Has(medicine, "TravelToFacilityAsync"),
         "real medicine search cannot autonomously issue facility movement");
+    Check(Has(medicine, "IsNearMedicineFirstResult"),
+        "managed medicine selection checks an exact result at the expected row");
 
     var queue = ScreenCalls("QueueAsync", 4);
     Check(Has(queue, "SelectRecipeAsync") && Has(queue, "TravelToFacilityAsync") &&
@@ -157,6 +160,9 @@ try
           Has(medicine, "RequireManagedIdleAsync") &&
           Has(selection, "RequireManagedIdleAsync"),
         "managed registration paths require a fresh CLI-safe activity guard before input");
+    Check(Has(queue, "VerifyTwoFreshObservationsAsync") &&
+          Has(queue, "RequireManagedIdleAsync"),
+        "managed real QueueAsync wires independent title verification before UI input");
     Check(queue.ToList().FindIndex(s => s.EndsWith(".MustReportToCoordinator")) <
           queue.ToList().FindIndex(s => s.EndsWith(".RecoverRemoteDetailToOnsiteAsync")),
         "real queue checks manager conflict BEFORE Automatic-only remote-detail recovery");
@@ -241,6 +247,69 @@ try
           CallCache("AfterVerifiedFacilityEntry", reuse, "금속 가공 시설") == null &&
           CallCache("AfterVerifiedReceiptReturn", true, "금속 가공 시설") == null,
         "real screen cache policy cannot store manager-owned onsite proof");
+
+
+    // F08: invoke the ACTUAL compiled async identity policy, not a duplicate
+    // implementation or an IL-only token. Deterministic scripted observations
+    // model a correct/wrong/late detail across a real awaited boundary.
+    async Task<bool> VerifiedSequenceAsync(
+        Func<CancellationToken, Task<bool>> reader,
+        Func<TimeSpan, CancellationToken, Task> pause,
+        CancellationToken token = default)
+    {
+        var invoked = Method(identityPolicy, "VerifyTwoFreshObservationsAsync", 3)
+            .Invoke(null, new object[] { reader, pause, token });
+        return await (Task<bool>)(invoked ?? throw new InvalidOperationException(
+            "Real identity-policy task missing"));
+    }
+    int readCount = 0, waitCount = 0, authorizedInputs = 0;
+    bool accepted = await VerifiedSequenceAsync(
+        async token => { await Task.Yield(); token.ThrowIfCancellationRequested(); readCount++; return true; },
+        (duration, token) => { token.ThrowIfCancellationRequested(); waitCount++; return Task.CompletedTask; });
+    if (accepted) authorizedInputs++;
+    Check(accepted && readCount == 2 && waitCount == 1 && authorizedInputs == 1,
+        "F08 actual async gate grants action only after two correct fresh observations");
+    readCount = 0; waitCount = 0; authorizedInputs = 0;
+    accepted = await VerifiedSequenceAsync(
+        async token => { await Task.Yield(); token.ThrowIfCancellationRequested(); return ++readCount == 1; },
+        (duration, token) => { waitCount++; return Task.CompletedTask; });
+    if (accepted) authorizedInputs++;
+    Check(!accepted && readCount == 2 && waitCount == 1 && authorizedInputs == 0,
+        "F08 changed/wrong second detail rejects action after await");
+    readCount = 0; waitCount = 0;
+    accepted = await VerifiedSequenceAsync(
+        token => { readCount++; return Task.FromResult(false); },
+        (duration, token) => { waitCount++; return Task.CompletedTask; });
+    Check(!accepted && readCount == 1 && waitCount == 0,
+        "F08 missing first title prevents redundant capture and input");
+    using (var stop = new CancellationTokenSource())
+    {
+        int observations = 0;
+        bool canceledBeforeAction = false;
+        try
+        {
+            await VerifiedSequenceAsync(
+                token => { observations++; return Task.FromResult(true); },
+                (duration, token) => { stop.Cancel(); return Task.CompletedTask; },
+                stop.Token);
+        }
+        catch (OperationCanceledException) { canceledBeforeAction = true; }
+        Check(canceledBeforeAction && observations == 1,
+            "F08 F10-style cancel between fresh observations stops before input");
+    }
+    Check(CallBoolean(identityPolicy, "IsNearMedicineFirstResult", 210, 410, 219, 412) &&
+          !CallBoolean(identityPolicy, "IsNearMedicineFirstResult", 210, 580, 219, 412),
+        "F07 medicine result must be near exact first-result row");
+
+    // F09: compare the old 3.1.52 title-only return with the new safe
+    // guard. Unknown/true activity still blocks onsite ownership in both
+    // managed and Automatic modes. A live CLI-staleness reproduction is
+    // needed before relaxing that requirement.
+    Check(!CallBoolean(receiptPolicy, "CanConfirmReceiptFacilityReturn",
+            true, false, false, null) &&
+          !CallBoolean(receiptPolicy, "CanConfirmReceiptFacilityReturn",
+            true, false, false, true),
+        "F09 stale activity stays unresolved; do not silently grant single-mode onsite proof");
 
     // Exercise private pixel detectors from production's actual screen type.
     // Synthetic 800x1000 bitmaps are intentionally isolated: no game window,

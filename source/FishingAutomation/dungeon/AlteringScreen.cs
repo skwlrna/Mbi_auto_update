@@ -765,11 +765,20 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             AlteringRecipeLayout.ProcessingSearchResultArea,
             plan.DisplayName,
             ct,
-            cardCandidate: true);
+            cardCandidate: directive == AlteringFacilityEntryDirective.Automatic);
+
+        if (directive != AlteringFacilityEntryDirective.Automatic &&
+            (exact.Count != 1 ||
+             !AlteringRecipeIdentityPolicy.IsNearMedicineFirstResult(
+                 exact[0].Center.X, exact[0].Center.Y,
+                 AlteringRecipeLayout.ProcessingSearchFirstResultPoint.X,
+                 AlteringRecipeLayout.ProcessingSearchFirstResultPoint.Y)))
+            Fail(resultFrame,
+                "관리 약품 검색 결과의 정확 일치·첫 행 위치를 확인하지 못해 선택하지 않습니다.");
 
         Log?.Invoke(
             exact.Count > 0
-                ? $"[자동 가공] 약품 검색 결과 · exact OCR 후보 {exact.Count}개 · 화면 변화 {resultRatio:P1}"
+                ? $"[자동 가공] 약품 검색 결과 · OCR 후보 {exact.Count}개 · 화면 변화 {resultRatio:P1}"
                 : $"[자동 가공] 약품 검색 결과 · OCR 미검출 · 화면 변화 {resultRatio:P1}");
 
         if (exact.Count == 0 && resultRatio < AlteringRecipeLayout.ProcessingSearchResultChangeRatio)
@@ -1128,6 +1137,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Log?.Invoke(
                     "[자동 가공] 설비 도착 후 현장 가공 버튼 화면 확인 · 가공하러 가기 2프레임 아님 · 정령의 날개 버튼 입력 없음");
                 await RequireManagedIdleAsync(plan, directive, "무료 가공 등록 버튼 직전", ct);
+                if (directive != AlteringFacilityEntryDirective.Automatic)
+                {
+                    bool exactDetail = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsAsync(
+                        async token =>
+                        {
+                            using var fresh = Capture(token);
+                            return await IsRecipeDetailStructureAsync(fresh, token) &&
+                                   await FindRecipeAsync(fresh, plan, token) is not null;
+                        },
+                        Task.Delay,
+                        ct);
+                    if (!exactDetail)
+                    {
+                        const string reason = "관리 품목 상세 제목 2회 확인 실패 · 오등록 차단";
+                        throw new AlteringCoordinatorFacilityMismatchException(
+                            plan.FacilityName, reason, new InvalidOperationException(reason));
+                    }
+                    await RequireManagedIdleAsync(plan, directive, "품목명 확인 후 입력 직전", ct);
+                }
                 _ui.ClickFresh(visualActionCenter, ct);
             }
 
