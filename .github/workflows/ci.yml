@@ -252,7 +252,7 @@ jobs:
              $selectRecipe -notmatch 'TrySelectFixedRecipeAsync\(plan, directive, ct\)' -or
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync\(plan, directive, ct\)' -or
              $selectRecipe -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
-             $queue -notmatch 'SelectRecipeAsync\(plan, directive, ct\)') {throw 'H1 manager directive not preserved through fixed/medicine/cached/retry recipe paths'}
+             $screen -notmatch 'await SelectRecipeAsync\(plan, directive, ct\)') {throw 'H1 manager directive not preserved through fixed/medicine/cached/retry recipe paths'}
           if($fixedSelect -match 'if\s*\(HasFacilityMoveButtonVisual\(' -or
              $medicineSelect -match 'if\s*\(HasFacilityMoveButtonVisual\(' -or
              $selectRecipe -match 'if\s*\(HasFacilityMoveButtonVisual\('){throw 'H1 raw move-button veto bypassed manager directive'}
