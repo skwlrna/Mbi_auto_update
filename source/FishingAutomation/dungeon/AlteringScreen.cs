@@ -996,7 +996,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 지시 · {plan.ScreenTitle} 새 시설 진입 · " +
                 "품목 선택보다 설비 이동 1회 우선");
-            await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
+            await TravelToFacilityAsync(plan, ct, forceMoveClick: true, directive: directive);
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility =
                 AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
@@ -1226,7 +1226,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringPlan plan,
         CancellationToken ct,
         bool forceMoveClick = false,
-        bool receiptMode = false)
+        bool receiptMode = false,
+        AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
     {
         if (_cli is null)
             throw new InvalidOperationException("무료 설비 이동 상태 확인용 CLI가 연결되지 않았습니다.");
@@ -1301,6 +1302,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
                 $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
                 "입력 1회 고정 · 재클릭 금지 · 품목 선택 전 실행");
+            await RequireManagedIdleAsync(plan, directive, "설비 이동 클릭 직전", ct);
             _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
             moveClickSent = true;
         }
@@ -2079,7 +2081,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             _confirmedOnsiteFacility = null;
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} 새 시설 이동 1회 선행");
-            await TravelToFacilityAsync(plan, ct, forceMoveClick: true, receiptMode: true);
+            await TravelToFacilityAsync(plan, ct, forceMoveClick: true, receiptMode: true, directive: directive);
             await EnterFacilityAsync(plan, ct);
             _confirmedOnsiteFacility =
                 AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
