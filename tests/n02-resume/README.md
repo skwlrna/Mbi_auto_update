@@ -78,10 +78,16 @@ is permitted only when *every selected plan* has an exact stable-key
 internal credits are zero, its output count still equals its original baseline,
 its complete character/account/realm identity and plan match exactly, and there
 are no selected-facility live works, orphan temp files or dependency sessions.
-The saved roster is restored read-only in the UI before validation. After
-successful verification all zero-work sessions are incorporated in one durable
-manifest. Original v1 files remain untouched until the batch finishes; cleanup
-moves them into `legacy-archive/<batch-id>/`, rather than deleting them.
+The old v1 format has **no full-roster manifest**: even a complete set
+of surviving zero-work files cannot prove that a previously completed peer was
+not deleted. Therefore the UI **never auto-restores a v1 multi-plan roster**.
+It displays a recovery explanation and blocks silent single-mode fallback.
+The user must explicitly reselect the still-pending old multi-plan items; only
+then may OpenAsync verify the exact selected-item/stable-file set and the above
+zero-work/identity/inventory conditions. After successful verification the
+selected zero-work sessions become one durable manifest. Original v1 files
+remain untouched until completion and are then moved to
+`legacy-archive/<batch-id>/` rather than deleted.
 
 Any nonzero, numeric index, missing/deleted completed peer, changed inventory,
 unknown identity, corrupt file or uncertain legacy record remains RecoveryRequired
@@ -114,7 +120,7 @@ opens a game window or loads the Interception driver.
 | F | All three items complete, terminal record committed, dependency cleanup, plan-clear acknowledgement and fresh batch identity. |
 | G | Reordered plans restore by facility/name/recipe identity. |
 | H | Same name/different ordinal, target, yield, facility, name and each identity field conflict. |
-| I | Original unsupported v1 stable/numeric records still fail closed. New positive upgrade requires every plan's exact zero-work stable file, same output baselines, identity and empty facility queue; preserves/archives originals. Changed counts/live works/missing completed peer continue to stop. Orphan temp stops. |
+| I | Original unsupported v1 stable/numeric records still fail closed. New positive upgrade requires every plan's exact zero-work stable file, same output baselines, identity and empty facility queue; requires explicit user re-selection and never auto-reconstructs a possibly incomplete v1 roster; preserves/archives originals. Changed counts/live works/missing completed peer continue to stop. Orphan temp stops. |
 | J | Whole completion committed; termination after only one dependency file is deleted; restart does cleanup with zero registration. |
 | K | New equal wood 100 batch after acknowledged completion: different batch ID, ten normal new registrations. |
 | L | A/B/A/B/A/B/A seven-slot mix, a completed slot while others run, no partial receipt, two whole-lane receipts, one Fresh queue directive then Reuse; completed A is never registered again. |
