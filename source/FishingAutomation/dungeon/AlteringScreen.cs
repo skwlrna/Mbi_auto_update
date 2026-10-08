@@ -598,9 +598,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         continue;
                     }
 
-                    if (await WaitForFacilityHeaderAsync(plan.ScreenTitle, 1200, ct))
+                    // The chosen facility card was positively clicked in
+                    // the fixed hub. A fixed facility screen (title + level)
+                    // is sufficient; do not require another title OCR pass.
+                    if (await WaitForScreenStateAsync(async image =>
+                            HasFixedFacilityHeaderVisual(image) ||
+                            await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null,
+                            1200, ct))
                     {
-                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 화면 확인 즉시 진행");
+                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
                         return;
                     }
 
@@ -1421,7 +1427,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // selected 상급 목재 before 설비로 이동. On a fresh facility entry
             // QueueAsync now owns the order: facility -> move once -> recipe.
             using var confirmed = Capture(ct);
-            if (await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
+            // Fixed title/subtitle pixels are primary; first-entry OCR is
+            // secondary and never by itself blocks a valid fixed facility UI.
+            if (!HasFixedFacilityHeaderVisual(confirmed) &&
+                await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
                 Fail(confirmed, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
 
             bool moveVisible =
