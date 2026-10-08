@@ -19,7 +19,7 @@ internal static class SpiritWingSafety
     }
 }
 
-internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly IAlteringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -66,6 +66,18 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordin
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
         => GuardAsync("[자동 가공] 완료품 수령",
             () => _inner.CollectAsync(plan, ct), ct);
+
+    public Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct)
+        => GuardAsync("[자동 가공] 중간관리자 지시 완료품 수령", () =>
+        {
+            if (_inner is not IAlteringCoordinatorReceiptScreen coordinated)
+                throw new InvalidOperationException(
+                    "현재 가공 화면은 다중가공 중간관리자 수령 지시를 지원하지 않습니다.");
+            return coordinated.CollectAsync(plan, directive, ct);
+        }, ct);
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
         => GuardAsync("[자동 가공] 설비 이동 후 완료품 수령",
