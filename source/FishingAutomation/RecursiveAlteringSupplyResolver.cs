@@ -21,6 +21,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
     private readonly Func<TimeSpan, CancellationToken, Task>? _delay;
     private readonly int _verificationAttempts;
     private readonly IAlteringDependencyScheduler? _dependencyScheduler;
+    private readonly FacilityLaneState? _laneState;
     private readonly HashSet<string> _active = new(StringComparer.Ordinal);
 
     internal event Action<string>? Log;
@@ -33,7 +34,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         int maxDepth = 8,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         int verificationAttempts = 120,
-        IAlteringDependencyScheduler? dependencyScheduler = null)
+        IAlteringDependencyScheduler? dependencyScheduler = null,
+        FacilityLaneState? laneState = null)
     {
         _altering = altering;
         _gathering = gathering;
@@ -43,6 +45,33 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         _delay = delay;
         _verificationAttempts = Math.Clamp(verificationAttempts, 1, 120);
         _dependencyScheduler = dependencyScheduler;
+        _laneState = laneState;
+    }
+
+    // The resolver does not decide where to move. It only reports a confirmed
+    // transition back to the field to the shared facility manager. A failed
+    // transition leaves the true location unknown, so discard stale onsite
+    // authority before propagating the original error.
+    private async Task ExitToFieldAndNotifyManagerAsync(
+        IAlteringFieldExitScreen fieldExit,
+        string reason,
+        CancellationToken ct)
+    {
+        try
+        {
+            await fieldExit.ExitToFieldAsync(ct);
+        }
+        catch
+        {
+            _laneState?.InvalidateOnsite(
+                $"필드 이탈 진행 중 위치 미확정 · {reason}");
+            throw;
+        }
+
+        _laneState?.InvalidateOnsite(
+            $"실제 필드 복귀 확인 · {reason}");
+        Log?.Invoke(
+            $"[재료 해결] 필드 복귀 확인 · 중간관리자 현장확정 해제 · {reason}");
     }
 
     public async Task ResolveAsync(
@@ -71,7 +100,10 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             Log?.Invoke(
                 $"[재료 해결] 다중 채집 준비 · {parentPlan.DisplayName} · " +
                 string.Join(", ", multiGather.Select(x => $"{x.DisplayName} 목표 {x.TargetTotal}")));
-            await fieldExit.ExitToFieldAsync(ct);
+            await ExitToFieldAndNotifyManagerAsync(
+                fieldExit,
+                $"후속 다중 채집 · {parentPlan.DisplayName}",
+                ct);
             Log?.Invoke("[재료 해결] 다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
 
             var coordinator = new MultiGatheringCoordinator(
@@ -125,7 +157,10 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         Log?.Invoke(
             $"[재료 해결] 전체 품목 통합 채집 준비 · {eligible.Length}종 확정 부족분 · " +
             string.Join(", ", multiGather.Select(x => $"{x.DisplayName} 목표 {x.TargetTotal}")));
-        await fieldExit.ExitToFieldAsync(ct);
+        await ExitToFieldAndNotifyManagerAsync(
+            fieldExit,
+            "전체 품목 통합 선행채집",
+            ct);
         Log?.Invoke("[재료 해결] 전체 품목 통합 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
 
         var coordinator = new MultiGatheringCoordinator(
@@ -176,7 +211,10 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                         $"{itemName} 자동 채집 전에 가공 UI를 안전하게 종료할 수 없습니다.");
 
                 Log?.Invoke($"[재료 해결] {itemName} 단일 보충 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
-                await fieldExit.ExitToFieldAsync(ct);
+                await ExitToFieldAndNotifyManagerAsync(
+                    fieldExit,
+                    $"재귀 후속 단일 채집 · {itemName}",
+                    ct);
 
                 long currentBeforeFallback = await _gathering.ItemCountAsync(itemName, ct);
                 long fallbackTargetTotal = checked(currentBeforeFallback + quantity);

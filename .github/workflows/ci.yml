@@ -180,6 +180,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Inventory loot regressions failed' }
 
 
+      # L2 exercises compiled production AlteringScreen methods, not only FakeWorld.
+      - name: Real altering screen authority regressions (L2)
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'L2 real AlteringScreen regressions failed' }
+
       - name: Automatic altering regression tests
         shell: pwsh
         run: |
@@ -239,6 +246,24 @@ jobs:
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
+          # H1: explicit coordinator directives must survive through every
+          # recipe route, including the first-click retry; Automatic remains strict.
+          $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          if($alteringPlan -notmatch 'class AlteringFacilityEntryPolicy' -or
+             $alteringPlan -notmatch 'directive == AlteringFacilityEntryDirective.Automatic' -or
+             $alteringPlan -notmatch 'moveButtonVisible'){throw 'H1 centralized recipe move-visual policy missing'}
+          if($fixedSelect -notmatch 'AlteringFacilityEntryDirective directive' -or
+             $fixedSelect -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
+             $fixedSelect -notmatch 'directive, HasFacilityMoveButtonVisual\(retryGate\)' -or
+             $medicineSelect -notmatch 'AlteringFacilityEntryDirective directive' -or
+             $medicineSelect -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
+             $selectRecipe -notmatch 'TrySelectFixedRecipeAsync\(plan, directive, ct\)' -or
+             $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync\(plan, directive, ct\)' -or
+             $selectRecipe -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
+             $screen -notmatch 'await SelectRecipeAsync\(plan, directive, ct\)') {throw 'H1 manager directive not preserved through fixed/medicine/cached/retry recipe paths'}
+          if($fixedSelect -match 'if\s*\(HasFacilityMoveButtonVisual\(' -or
+             $medicineSelect -match 'if\s*\(HasFacilityMoveButtonVisual\(' -or
+             $selectRecipe -match 'if\s*\(HasFacilityMoveButtonVisual\('){throw 'H1 raw move-button veto bypassed manager directive'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)' -or
@@ -288,6 +313,23 @@ jobs:
               [string]::IsNullOrWhiteSpace($remoteRecovery) -or
               $remoteRecovery -notmatch 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)' -or
               [regex]::Matches($remoteRecovery, 'TravelToFacilityAsync').Count -ne 1) { throw 'bounded remote detail recovery missing' }
+          # H3: manager directives never permit child OCR to invoke forced
+          # free-facility movement. Unexpected two-frame evidence is returned to
+          # the manager as a typed conflict and clears the manager's onsite proof.
+          $reportIndex = $queue.IndexOf('AlteringRemoteProcessGuard.MustReportToCoordinator')
+          $forcedRecoveryIndex = $queue.IndexOf('await RecoverRemoteDetailToOnsiteAsync')
+          if ($remoteGuard -notmatch 'internal static bool MustReportToCoordinator' -or
+              $remoteGuard -notmatch 'directive != AlteringFacilityEntryDirective.Automatic' -or
+              $reportIndex -lt 0 -or
+              $forcedRecoveryIndex -le $reportIndex -or
+              $queue -notmatch 'throw new AlteringCoordinatorFacilityMismatchException' -or
+              $queue -notmatch '가공 클릭/설비 이동 0회' -or
+              $alteringPlan -notmatch 'class AlteringCoordinatorFacilityMismatchException' -or
+              $alteringPlan -notmatch 'catch \(Exception conflict\) when' -or
+              $alteringPlan -notmatch 'AlteringCoordinatorFacilityMismatchException\.IsForFacility' -or
+              $alteringPlan -notmatch 'aggregate\.Flatten\(\)\.InnerExceptions' -or
+              $alteringPlan -notmatch '상세 OCR/현장확정 충돌' -or
+              $alteringPlan -notmatch '_facilityState.InvalidateOnsite') {throw 'H3 child remote OCR may override facility manager without explicit conflict reporting'}
           if ($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'duplicate post-select detail/OCR pass returned' }
           if ($queue -match '품목 상세 기준 설비 이동 필요 확정' -or $queue -match '같은 품목을 다시 선택') { throw 'recipe-first backtrack flow returned' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
@@ -355,6 +397,26 @@ jobs:
           $promptFlow = [regex]::Match($screen, 'private async Task<bool> HasCollectPromptAsync[\s\S]*?(?=\r?\n    private static bool HasCollectButtonVisual)').Value
           if ($promptFlow -notmatch 'HasFacilityMoveButtonVisual' -or
               $promptFlow -notmatch 'ShouldBlockReceiptForMoveButton') { throw 'state-aware visual remote facility receive veto missing' }
+          # H2: facility movement during multi-altering receipt is decided by
+          # the same lane manager as work registration, never by the screen.
+          $receiptCoordinator = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $zeroWingReceipt = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
+          if ($receiptCoordinator -notmatch 'interface IAlteringCoordinatorReceiptScreen' -or
+              $receiptCoordinator -notmatch '_facilityState\.QueueDirectiveFor\(plan.FacilityName\)' -or
+              $receiptCoordinator -notmatch 'coordinated\.CollectAsync\(plan, directive, ct\)' -or
+              $receiptCoordinator -notmatch '자체 재이동/2차 수령 금지' -or
+              $collectFlow -notmatch 'ReuseCoordinatorConfirmedOnsite' -or
+              $collectFlow -notmatch 'FreshMoveRequired' -or
+              $collectFlow -notmatch '설비 이동 0회' -or
+              $collectFlow -notmatch 'forceMoveClick: true, receiptMode: true' -or
+              $collectFlow -notmatch 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct, directive\)' -or
+              $promptFlow -notmatch 'TryAutoTravelingAsync' -or
+              $promptFlow -notmatch 'HasBottomConfirmationModal' -or
+              $promptFlow -notmatch 'ShouldBlockReceiptForMoveButton' -or
+              $zeroWingReceipt -notmatch 'IAlteringCoordinatorReceiptScreen' -or
+              $receiptPolicy -notmatch 'directive == AlteringFacilityEntryDirective.Automatic') {
+              throw 'H2 manager receipt authority must persist through movement and final Space proof'
+          }
           if ($receiptPolicy -notmatch 'IsRemoteMoveButtonAfterReceiptMove' -or
               $receiptPolicy -notmatch 'visualMoveButton && exactMoveLabelVisible' -or
               $receiptPolicy -notmatch 'visualMoveButton && !trustedOnsiteFacility') { throw 'receipt post-move teal false-positive separation policy missing' }
@@ -367,10 +429,11 @@ jobs:
           if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
           if ($screen -notmatch 'ConfirmCompletionResultAsync') { throw 'completion result confirmation flow missing' }
           if ($screen -notmatch 'resultAttempts: 24') { throw 'on-site receipt completion-result wait missing' }
-          if ($collectFlow -notmatch 'receiptWorkCountBefore = await TryMatchingWorkCountAsync\(plan, ct\)' -or
-              $screen -notmatch 'TryMatchingWorkCountAsync' -or
+          if ($collectFlow -notmatch 'receiptWorkCountBefore = await TryFacilityWorkCountAsync\(plan, ct\)' -or
+              $screen -notmatch 'TryFacilityWorkCountAsync' -or
+              $screen -match 'TryMatchingWorkCountAsync' -or
               $screen -notmatch 'IsCliReceiptConfirmed' -or
-              $screen -notmatch '첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정') { throw 'pre-receipt same-item CLI confirmation path missing' }
+              $screen -notmatch '첫 수령 Space 후 CLI 시설 전체 작업 감소로 수령 확정') { throw 'M4 pre-receipt facility-wide CLI confirmation path missing' }
           if ($screen -notmatch 'WaitForReceiptFacilityReturnAsync' -or
               $screen -notmatch 'CloseCompletionResultAndWaitForFacilityAsync' -or
               $screen -notmatch '완료창 닫기 Space 1차 입력' -or
@@ -378,6 +441,31 @@ jobs:
               $screen -notmatch '완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음' -or
               $screen -notmatch 'Space 2회 입력 후에도 그대로 남아 있어 추가 입력 없이 정지' -or
               $screen -match '결과창 인식 생략 · 다음 가공 진입에서 화면 재검증') { throw 'receipt result verified close/retry-and-return gate missing' }
+          # M4: mixed seven-slot receive-all is a FACILITY-wide action.
+          # Reject partially complete managed queues before any UI input and
+          # require zero jobs after the one receive. Single mode retains its
+          # historical lower-risk count-decrease check.
+          $alteringAll = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          $m4Collect = [regex]::Match(
+              $alteringAll,
+              'private async Task<bool> CollectIfReadyAsync[\s\S]*?(?=\r?\n    private async Task VerifyRegistrationAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($m4Collect) -or
+              $receiptPolicy -notmatch 'CanCollectManagedFacility' -or
+              $receiptPolicy -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
+              $receiptPolicy -notmatch 'IsManagedFacilityReceiptConfirmed' -or
+              $receiptPolicy -notmatch 'before > 0 && after == 0' -or
+              $m4Collect -notmatch 'CanCollectManagedFacility\(works, plan.FacilityName\)' -or
+              $m4Collect -notmatch '일부만 완료된 7칸 배치' -or
+              $m4Collect -notmatch 'IsManagedFacilityReceiptConfirmed' -or
+              $m4Collect -notmatch '시설 전체 대기열 0건' -or
+              $m4Collect -notmatch 'if \(_facilityState is not null\)' -or
+              $screen -match 'TryMatchingWorkCountAsync' -or
+              $alterTests -notmatch 'M4: manager verifies blue receive-all removed both selected and other recipe' -or
+              $alterTests -notmatch 'M4: partial mixed facility batch is rejected before moving' -or
+              $alterTests -notmatch 'M4: selected item disappearing while another completed recipe remains fails closed') {
+              throw 'M4 mixed facility receipt must use all-facility evidence before and after a single receive'
+          }
           if ($receiptPolicy -notmatch 'IsCliReceiptConfirmed' -or
               $receiptPolicy -notmatch 'after < before' -or
               $receiptPolicy -notmatch 'CanRetryCompletionClose' -or
@@ -390,7 +478,8 @@ jobs:
               $closeHelper -notmatch 'AlteringReceiptPolicy\.CanRetryCliReceiptCompletionClose' -or
               $closeHelper -notmatch 'cliReceiptConfirmed' -or
               [regex]::Matches($closeHelper, '_ui\.TapFresh\(0x39, ct\)').Count -ne 2 -or
-              $closeHelper -notmatch 'WaitForReceiptFacilityReturnAsync\(plan, receiptWorkCountBefore, ct\)') { throw 'completion close helper must verify first Space, allow one safe retry, then wait for facility return' }
+              $closeHelper -notmatch 'WaitForReceiptFacilityReturnAsync\(\s*plan,\s*receiptWorkCountBefore,\s*managedReceipt,\s*ct\)' -or
+              $closeHelper -notmatch '수령 완료창 Space 직전 재검증 실패') { throw 'completion close helper must recheck modal before Space, allow one safe retry, and verify managed facility return' }
           $collectFlow = [regex]::Match($screen, 'public async Task<bool> CollectAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAfterTravelAsync)').Value
           if ($collectFlow -notmatch 'return true;') { throw 'on-site receive must return only after confirmed collection' }
           if ($screen -notmatch '가공 완료 결과창 확인 · 이동 팝업/자동이동 아님' -or
@@ -475,14 +564,17 @@ jobs:
           if ($altering -notmatch 'ct, TimeSpan\.FromSeconds\(1\)') { throw 'registration verification must poll every second' }
           if ($altering -notmatch '기존 .* 작업 .*건 유지 · 완료되는 즉시 수령하고 빈 슬롯에 새 목표 작업을 채웁니다') { throw 'legacy jobs must remain while freed slots are refilled' }
           if ($altering -match '기존 동일 품목 작업 수령 완료') { throw 'legacy jobs must not be fully drained before new target registration' }
-          if ($altering -notmatch 'bool firstCollected = await _screen\.CollectAsync') { throw 'first receive must report collection versus travel immediately' }
+          if ($altering -notmatch 'bool firstCollected;' -or
+              $altering -notmatch 'firstCollected = await coordinated\.CollectAsync\(plan, directive, ct\)' -or
+              $altering -notmatch 'firstCollected = await _screen\.CollectAsync\(plan, ct\)' -or
+              $altering -notmatch '자체 재이동/2차 수령 금지') { throw 'first receive must obey manager authority while Automatic keeps legacy behavior' }
           if ($altering -match 'for \(int i = 0; i < 4; i\+\+\)[\s\S]{0,500}TimeSpan\.FromSeconds\(2\)') { throw 'old eight-second first-receipt queue polling returned' }
           if ($altering -notmatch '1차 모두 받기 = 설비 이동 · 즉시 가공대 수령 화면 대기') { throw 'immediate travel branch diagnostic missing' }
           if ($altering -notmatch 'TimeSpan delay = pollDelay \?\? TimeSpan\.FromSeconds\(5\)') { throw 'non-registration verification default delay changed unexpectedly' }
           if ($altering -notmatch 'StallThreshold = TimeSpan\.FromSeconds\(60\)') { throw 'altering stall threshold must stay at 60 seconds' }
           if ($altering -notmatch 'MaxStallRecoveries = 3') { throw 'altering stall recovery bound missing' }
           if ($altering -notmatch 'ProgressSignature\(works, plan, QueuedWorks\)') { throw 'queue progress signature stall detector missing' }
-          if ($altering -notmatch '정체 감지' -or $altering -notmatch 'RecoverStallAsync') { throw 'altering stall recovery invocation missing' }
+          if ($altering -notmatch '정체 감지' -or $altering -notmatch 'RecoverStallUnderManagerAsync') { throw 'altering stall recovery must delegate to manager' }
           if ($altering -notmatch 'lastProgressAt = DateTime\.UtcNow') { throw 'stall recovery grace window reset missing' }
           if ($altering -notmatch '마지막 진단 화면을 저장한 상태로 정지합니다') { throw 'bounded stall final-stop diagnostic missing' }
 
@@ -499,6 +591,44 @@ jobs:
               $zeroWing -notmatch 'IAlteringCoordinatorQueueScreen' -or
               $zeroWing -notmatch 'IAlteringRecoveryScreen') { throw 'zero-wing wrapper does not expose coordinator queue and guarded stall recovery' }
           if ($zeroWing -notmatch 'GuardAsync\("\[자동 가공\] 정체 화면 재판정"') { throw 'stall recovery is not wrapped in currency verification' }
+          # M2: manager-directed recovery must report a non-travel UI
+          # observation; the manager alone can re-confirm prior onsite.
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          $managedRecovery = [regex]::Match(
+              $screen,
+              'public async Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync[\s\S]*?(?=\r?\n    public async Task RecoverStallAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($managedRecovery) -or
+              $managedRecovery -notmatch '_confirmedOnsiteFacility = null' -or
+              $managedRecovery -notmatch 'await EnterFacilityAsync\(plan, ct\)' -or
+              $managedRecovery -notmatch 'for \(int pass = 0; pass < 2; pass\+\+\)' -or
+              $managedRecovery -notmatch 'HasBottomConfirmationModal' -or
+              $managedRecovery -notmatch 'TryAutoTravelingAsync' -or
+              $managedRecovery -notmatch 'SameFacilityUiRestoredWithoutTravel' -or
+              $managedRecovery -match 'HasFacilityMoveButtonVisual\(' -or
+              $managedRecovery -match 'TravelToFacilityAsync\(' -or
+              $managedRecovery -match 'forceMoveClick' -or
+              $managedRecovery -match 'TapFresh\(0x39') {
+              throw 'M2 managed stall recovery must only observe proven nontravel UI without button-based location reclassification'
+          }
+          $managerRecovery = [regex]::Match(
+              $altering,
+              'internal async Task RecoverStallUnderManagerAsync[\s\S]*?(?=\r?\n    internal void NoteStage)').Value
+          if ([string]::IsNullOrWhiteSpace($managerRecovery) -or
+              $managerRecovery -notmatch 'wasOnsite = _facilityState.IsOnsiteConfirmed' -or
+              $managerRecovery -notmatch '_facilityState.InvalidateOnsite' -or
+              $managerRecovery -notmatch 'RecoverStallForCoordinatorAsync' -or
+              $managerRecovery -notmatch 'AlteringStallRecoveryPolicy.CanRetainOnsite' -or
+              $managerRecovery -notmatch '_facilityState.ConfirmOnsite' -or
+              $altering -notmatch 'IAlteringCoordinatorStallRecoveryScreen' -or
+              $zeroWing -notmatch 'IAlteringCoordinatorStallRecoveryScreen' -or
+              $zeroWing -notmatch '중간관리자 정체 복구 증거 확인' -or
+              $alterTests -notmatch 'M2: coordinator re-confirms previously proven onsite' -or
+              $alterTests -notmatch 'M2: UI recovery cannot create onsite authority' -or
+              $alterTests -notmatch 'M2: popup, travel, missing header or unknown CLI' -or
+              $alterTests -notmatch 'M2: manager invalidates onsite before failed stall recovery' -or
+              $alterTests -notmatch 'M2: single-altering keeps its bounded legacy recovery') {
+              throw 'M2 stall recovery outcome is not controlled by lane manager'
+          }
           $detailPolicy = Get-Content source/FishingAutomation/AlteringDetailPolicy.cs -Raw
           if ($detailPolicy -notmatch 'materialsVisible && \(freeActionVisible \|\| paidActionVisible\)') { throw 'detail fallback policy weakened' }
           $wingGuard = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
@@ -605,6 +735,30 @@ jobs:
              $multiAlter -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $multiAlter -notmatch '배치 전체 완료 전 이동 없음') { throw 'multi-altering must use whole-facility batch scheduling' }
           if($multiAlter -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'multi-altering coordinator must never own direct input' }
+          # M2 wait: per-facility progress evidence must survive each
+          # one-slot batch return. A stagnant lane stops without extra input,
+          # even while other facilities continue legitimately progressing.
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          $watchCore = [regex]::Match(
+              $multiAlter,
+              'internal sealed class MultiAlteringWaitWatchdog[\s\S]*?(?=\r?\ninternal sealed class MultiAlteringCoordinator)').Value
+          if ([string]::IsNullOrWhiteSpace($watchCore) -or
+              $watchCore -notmatch 'DateTimeOffset LastProgressAt' -or
+              $watchCore -notmatch 'lowestRunning < previous.LowestRunningSeconds' -or
+              $watchCore -notmatch 'Shape' -or
+              $watchCore -notmatch 'idle < _threshold' -or
+              $watchCore -notmatch '다중가공 시설별 정체 감지' -or
+              $watchCore -notmatch '임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지' -or
+              $multiAlter -notmatch 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' -or
+              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed\)' -or
+              $multiAlter -notmatch 'idleWatchdog.ConfirmManagerProgress\(facility\)' -or
+              $multiAlter -notmatch '_laneState\?\.InvalidateOnsite' -or
+              $alterTests -notmatch 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' -or
+              $alterTests -notmatch 'M2 wait: genuine countdown decreases refresh' -or
+              $alterTests -notmatch 'M2 wait: an increasing or noisy countdown cannot conceal' -or
+              $alterTests -notmatch 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane') {
+              throw 'M2 long batch-wait watchdog missing per-facility safety and regression coverage'
+          }
           if($multiAlter -notmatch '같은 시설 여러 품목은 라운드로빈 혼합' -or
              $multiAlter -notmatch 'runBatch\(plan, 1, ct\)') { throw 'same-facility round-robin slot mixing missing' }
           $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
@@ -626,6 +780,26 @@ jobs:
              $dependencyScheduler -notmatch 'CollectReadyBatchAsync' -or
              $dependencyScheduler -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $dependencyScheduler -notmatch '배치 전체 완료 전 이동 없음') { throw 'intermediate processing must share whole-facility seven-slot scheduling' }
+          # H4: a dependency-boundary receipt may authorize same-facility
+          # reuse only after the existing batch is received, the shared lane has
+          # observed the CLI shrink, and the facility queue is proven empty.
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          $boundaryReceipt = [regex]::Match(
+              $dependencyScheduler,
+              'if \(boundaryWorks\.Length > 0\)[\s\S]*?(?=\r?\n        long current =)').Value
+          $boundaryObserve = $boundaryReceipt.IndexOf('_laneState?.Observe(')
+          $boundaryEmpty = $boundaryReceipt.IndexOf('if (afterFacilityCollection.Length > 0)')
+          $boundaryConfirm = $boundaryReceipt.IndexOf('_laneState?.ConfirmOnsite(')
+          if ([string]::IsNullOrWhiteSpace($boundaryReceipt) -or
+              $boundaryReceipt -notmatch 'collector\.CollectReadyBatchAsync\(requestedPlan, ct\)' -or
+              $boundaryObserve -lt 0 -or
+              $boundaryEmpty -le $boundaryObserve -or
+              $boundaryConfirm -le $boundaryEmpty -or
+              $boundaryReceipt -notmatch 'allowShrink: true' -or
+              $boundaryReceipt -notmatch '중간재료 전환 경계 · 완료 배치 수령 및 시설 작업 0건 확인' -or
+              $alterTests -notmatch 'H4: dependency boundary receipt confirms only the proven same-facility onsite state' -or
+              $alterTests -notmatch 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility' -or
+              $alterTests -notmatch 'H4: residual facility work after boundary receipt prevents onsite confirmation') { throw 'H4 dependency boundary did not preserve coordinator onsite authority after verified receipt' }
           if($dependencyScheduler -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'dependency scheduler must not own direct input' }
           if($laneOwnership -notmatch 'FacilityLaneOwner' -or
              $laneOwnership -notmatch 'InitialObservedWorks' -or
@@ -658,6 +832,30 @@ jobs:
              $multiAlterMain -notmatch 'laneState: laneState' -or
              $multiAlterMain -notmatch 'ConfirmedRegistrationsThisRun' -or
              $multiAlterMain -notmatch 'FacilityLaneOwner\.Main') { throw 'main multi-altering ownership wiring missing' }
+          # M3: existing CLI works and resumed sessions are not physical onsite
+          # evidence. A cold-start F9 manager must remain Unknown until this run
+          # proves a registration or receipt under the proper facility authority.
+          $startupLane = Get-Content source/FishingAutomation/FacilityLaneState.cs -Raw
+          $alterTests = Get-Content tests/altering/Program.cs -Raw
+          if ($startupLane -notmatch 'enum FacilityLocationProof' -or
+              $startupLane -notmatch 'ColdStartUnknown' -or
+              $startupLane -notmatch 'ConfirmedThisRun' -or
+              $startupLane -notmatch 'RuntimeUncertain' -or
+              $startupLane -notmatch 'class FacilityStartupLocationPolicy' -or
+              $startupLane -notmatch 'proof == FacilityLocationProof.ConfirmedThisRun' -or
+              $startupLane -notmatch '_locationProof = FacilityLocationProof.ConfirmedThisRun' -or
+              $startupLane -notmatch '_locationProof = FacilityLocationProof.RuntimeUncertain' -or
+              $startupLane -notmatch '초기 위치 미확정\(원격 확정 아님\)' -or
+              $multiAlterMain -notmatch '이전 실행의 현장확정은 복원하지 않음' -or
+              $alterTests -notmatch 'M3: F9 resume with existing works cannot inherit a prior-run onsite proof' -or
+              $alterTests -notmatch 'M3: cold-start diagnostics are emitted once per facility' -or
+              $alterTests -notmatch 'M3: observing the same CLI seven-slot ledger is not physical location evidence' -or
+              $alterTests -notmatch 'M3: current-run onsite verification permits same-facility reuse' -or
+              $alterTests -notmatch 'M3: post-start location uncertainty is distinct from cold-start unknown' -or
+              $alterTests -notmatch 'M3: even a stale same-name location cannot authorize reuse') {
+              throw 'M3 cold-start Unknown must stay separate from physically confirmed onsite or remote'
+          }
+
           if($dependencyScheduler -notmatch 'AcquireIntermediate' -or
              $dependencyScheduler -notmatch 'ReleaseIntermediate' -or
              $dependencyScheduler -notmatch 'FacilityLaneOwner\.Intermediate' -or
@@ -955,10 +1153,45 @@ jobs:
 
           $resolverGather = [regex]::Match($resolver, 'var multiGather = await BuildMultiGatheringPlanAsync[\s\S]*?await coordinator\.RunAsync\(multiGather, ct\);').Value
           if([string]::IsNullOrWhiteSpace($resolverGather)){throw 'recursive multi-gather transition block missing'}
-          $exitIndex = $resolverGather.IndexOf('await fieldExit.ExitToFieldAsync(ct)')
+          $exitIndex = $resolverGather.IndexOf('await ExitToFieldAndNotifyManagerAsync(')
           $gatherIndex = $resolverGather.IndexOf('await coordinator.RunAsync(multiGather, ct)')
           if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'recursive multi-gather must exit altering UI before opening life skill'}
+          # M1: detecting missing materials is not evidence of travel.
+          # Keep the shared manager's onsite proof until H5 confirms an exit,
+          # another facility transition is proven, or stall/remote recovery fires.
+          $materialEntry = [regex]::Match(
+              $alteringPlan,
+              'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, remainingWorks, ct\);').Value
+          if ([string]::IsNullOrWhiteSpace($materialEntry) -or
+              $materialEntry -match '_facilityState\?\.InvalidateOnsite' -or
+              $materialEntry -notmatch '실제 필드/타 시설 이탈 전 현장확정 유지' -or
+              $alterTests -notmatch 'M1: material inspection and same-facility resolution without travel retain manager onsite' -or
+              $alterTests -notmatch 'M1: material inspection cannot invent onsite proof' -or
+              $alterTests -notmatch 'M1: material-only failure stops without queueing or revoking proven onsite') {
+              throw 'M1 material-only resolution must not revoke valid manager onsite before real departure'
+          }
           if($resolverGather -notmatch '다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'recursive multi-gather field-exit trace missing'}
+          # H5: all three supply branches share one confirmed field-exit
+          # notification to the lane manager; failed navigation is treated
+          # as an unknown location, not as permission to reuse onsite.
+          $managerExit = [regex]::Match(
+              $resolver,
+              'private async Task ExitToFieldAndNotifyManagerAsync[\s\S]*?(?=\r?\n    public async Task ResolveAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($managerExit) -or
+              $managerExit -notmatch 'await fieldExit.ExitToFieldAsync\(ct\)' -or
+              $managerExit -notmatch '_laneState\?\.InvalidateOnsite' -or
+              $managerExit -notmatch '실제 필드 복귀 확인' -or
+              $managerExit -notmatch '필드 이탈 진행 중 위치 미확정' -or
+              [regex]::Matches($resolver, 'await ExitToFieldAndNotifyManagerAsync\(').Count -ne 3 -or
+              $multiAlterMain -notmatch 'dependencyScheduler: dependencyScheduler,\s*laneState: laneState' -or
+              $resolver -notmatch 'FacilityLaneState\? laneState = null' -or
+              $alterTests -notmatch 'H5: after an intermediate onsite confirmation, a subsequent grouped field exit' -or
+              $alterTests -notmatch 'H5: whole-plan preflight announces confirmed field exit' -or
+              $alterTests -notmatch 'H5: hidden raw shortage discovered after intermediate processing' -or
+              $alterTests -notmatch 'H5: uncertain or failed field exit invalidates stale onsite' -or
+              $alterTests -notmatch 'H5: resolver preflight without actual field departure') {
+              throw 'H5 actual field exit must invalidate manager onsite before every subsequent gather'
+          }
           if($multiGather -notmatch 'new GatheringAutomation' -or
              $multiGather -notmatch 'await automation\.RunAsync\(plan, ct\)'){throw 'multi-gather must delegate execution to verified single-gather automation'}
           if($multiGather -match 'TapFresh|ClickFresh|DragFresh|0x39'){throw 'multi-gather coordinator must not own direct input or Space'}

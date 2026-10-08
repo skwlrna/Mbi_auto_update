@@ -51,6 +51,29 @@ Check(!AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 4) &&
       !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 5) &&
       !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, null),
     "reopened facility cannot falsely confirm unchanged/increased/unknown receipt");
+Check(AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: false),
+    "M5: two clean facility frames with known idle CLI may prove post-receipt return");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: true,
+        travelDialogVisible: false, autoTraveling: false),
+    "M5: facility title behind completion modal must not prove onsite");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: true, autoTraveling: false),
+    "M5: travel dialog blocks onsite confirmation");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: true) &&
+      !AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: true, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: null),
+    "M5: active or unknown CLI movement prevents false onsite reuse");
+Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
+        facilityHeaderVisible: false, completionModalVisible: false,
+        travelDialogVisible: false, autoTraveling: false),
+    "M5: missing facility title cannot be treated as completed return");
 Check(AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, false),
     "real altering completion result can authorize confirmation");
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, true, false),
@@ -120,6 +143,77 @@ Check(AlteringRemoteProcessGuard.ShouldBlock(
         firstOnsiteActionVisible: true,
         secondOnsiteActionVisible: false),
     "one missing onsite action frame preserves the two-frame remote safety veto");
+
+
+// L1: child screen cannot act as an independent manager-owned onsite cache.
+Check(AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.Automatic, "금속 가공 시설", "금속 가공 시설") &&
+      !AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.Automatic, "금속 가공 시설", "목재 가공 시설"),
+    "L1: Automatic-only receipt cache remains facility-scoped");
+Check(!AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        "금속 가공 시설", "금속 가공 시설") &&
+      !AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        "금속 가공 시설", "금속 가공 시설"),
+    "L1: managed receipt ignores lower screen cache even when facility names match");
+Check(AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective.Automatic, "금속 가공 시설") == "금속 가공 시설" &&
+      AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, "금속 가공 시설") is null &&
+      AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective.FreshMoveRequired, "금속 가공 시설") is null,
+    "L1: successful managed reuse/fresh screen entries cannot grant local onsite authority");
+Check(AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn(
+        managedReceipt: false, facilityName: "목재 가공 시설") == "목재 가공 시설" &&
+      AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn(
+        managedReceipt: true, facilityName: "목재 가공 시설") is null,
+    "L1: managed receipt return reports success but never repopulates Automatic cache");
+Check(AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.Automatic,
+        moveButtonVisible: true),
+    "single altering preserves the legacy move-button safety veto");
+Check(!AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.Automatic,
+        moveButtonVisible: false),
+    "single altering without a move-button visual keeps the normal recipe route");
+Check(!AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        moveButtonVisible: true),
+    "H1: coordinator-confirmed same-facility reuse ignores the always-visible move button during recipe selection");
+Check(!AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        moveButtonVisible: true),
+    "H1: a completed manager-directed fresh travel cannot be overturned by the move button during recipe selection");
+Check(AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: false),
+    "H1: a dropped first card click can retry once under confirmed reuse, even with the always-present move button");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: false,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: false),
+    "H1: coordinator reuse cannot override a missing facility header before retry");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: true,
+        facilityVisible: true,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: false),
+    "H1: delayed detail opening must prevent a duplicate click even with coordinator reuse");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: true),
+    "H1: coordinator reuse never weakens one-shot recipe retry limit");
 
 Check(AlteringFixedRecipeRetryPolicy.ShouldRetry(
         detailVisible: false,
@@ -382,6 +476,51 @@ var laneInitial = new[]
 {
     new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "InProgress", false, 10)
 };
+// M3: a fresh F9 session is location-unknown even with populated CLI works,
+// resume JSON, or a previously confirmed lane from a different run.
+var m3PriorRun = new FacilityLaneState(laneInitial);
+m3PriorRun.ConfirmOnsite(lanePlan.FacilityName,
+    "M3 prior run had independently verified the old facility");
+var m3ColdResume = new FacilityLaneState(laneInitial);
+var m3ColdLogs = new List<string>();
+m3ColdResume.Log += m3ColdLogs.Add;
+Check(m3PriorRun.IsOnsiteConfirmed(lanePlan.FacilityName) &&
+      m3ColdResume.LocationProof == FacilityLocationProof.ColdStartUnknown &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m3ColdLogs.Count(x => x.Contains("초기 위치 미확정(원격 확정 아님)")) == 1,
+    "M3: F9 resume with existing works cannot inherit a prior-run onsite proof or claim the player is remote");
+m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName);
+Check(m3ColdLogs.Count(x => x.Contains("초기 위치 미확정(원격 확정 아님)")) == 1,
+    "M3: cold-start diagnostics are emitted once per facility rather than every round-robin turn");
+m3ColdResume.Observe(lanePlan.FacilityName, laneInitial, allowShrink: false);
+Check(m3ColdResume.LocationProof == FacilityLocationProof.ColdStartUnknown &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: observing the same CLI seven-slot ledger is not physical location evidence");
+m3ColdResume.ConfirmOnsite(lanePlan.FacilityName,
+    "M3 current run verified physical arrival and CLI-confirmed registration");
+Check(m3ColdResume.LocationProof == FacilityLocationProof.ConfirmedThisRun &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+      m3ColdResume.QueueDirectiveFor("목재 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: current-run onsite verification permits same-facility reuse, never a different facility");
+m3ColdResume.InvalidateOnsite("M3 field exit or contradictory location evidence");
+Check(m3ColdResume.LocationProof == FacilityLocationProof.RuntimeUncertain &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: post-start location uncertainty is distinct from cold-start unknown and cannot reuse stale onsite");
+Check(FacilityStartupLocationPolicy.DecideEntry(
+          lanePlan.FacilityName, lanePlan.FacilityName,
+          FacilityLocationProof.ColdStartUnknown) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      FacilityStartupLocationPolicy.DecideEntry(
+          lanePlan.FacilityName, lanePlan.FacilityName,
+          FacilityLocationProof.RuntimeUncertain) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: even a stale same-name location cannot authorize reuse without current-run confirmation");
+
 var laneOwnership = new FacilityLaneState(laneInitial);
 Check(laneOwnership.Snapshot(lanePlan.FacilityName).InitialObservedWorks == 1,
     "facility ownership captures works that existed before automation start");
@@ -713,6 +852,62 @@ await resolvedAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.ReservedWings == 0,
     "missing materials are resolved inside the same zero-wing altering session");
 
+var noDeparturePlan = plan with { TargetQuantity = 3 };
+var m1NoDepartureWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var m1NoDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m1NoDepartureLane.ConfirmOnsite(noDeparturePlan.FacilityName,
+    "M1 test: verified onsite before material-only resolution");
+var m1NoDepartureResolver = new FakeResolver(m1NoDepartureWorld);
+var noDepartureAuto = new AlteringAutomation(
+    m1NoDepartureWorld, m1NoDepartureWorld, (_, _) => Task.CompletedTask,
+    4, m1NoDepartureResolver, facilityState: m1NoDepartureLane);
+await noDepartureAuto.RunAsync(noDeparturePlan, default);
+Check(m1NoDepartureResolver.Calls == 1 &&
+      m1NoDepartureWorld.Directives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }) &&
+      m1NoDepartureLane.IsOnsiteConfirmed(noDeparturePlan.FacilityName) &&
+      m1NoDepartureWorld.QueueCalls == 1,
+    "M1: material inspection and same-facility resolution without travel retain manager onsite through next registration");
+
+var noInitialOnsiteWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var noInitialOnsiteLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var noInitialOnsiteResolver = new FakeResolver(noInitialOnsiteWorld);
+await new AlteringAutomation(
+    noInitialOnsiteWorld, noInitialOnsiteWorld, (_, _) => Task.CompletedTask,
+    4, noInitialOnsiteResolver, facilityState: noInitialOnsiteLane)
+    .RunAsync(noDeparturePlan, default);
+Check(noInitialOnsiteWorld.Directives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.FreshMoveRequired }) &&
+      noInitialOnsiteResolver.Calls == 1,
+    "M1: material inspection cannot invent onsite proof when the manager had no confirmed location");
+
+var noDepartureFailureWorld = new FakeWorld(noDeparturePlan) { Available = false };
+var noDepartureFailureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+noDepartureFailureLane.ConfirmOnsite(noDeparturePlan.FacilityName,
+    "M1 test: already onsite before material-only validation failure");
+var noDepartureFailureResolver = new FakeResolver(noDepartureFailureWorld)
+{
+    FailBeforeLeaving = true
+};
+bool materialOnlyFailure = false;
+try
+{
+    await new AlteringAutomation(
+        noDepartureFailureWorld, noDepartureFailureWorld, (_, _) => Task.CompletedTask,
+        4, noDepartureFailureResolver, facilityState: noDepartureFailureLane)
+        .RunAsync(noDeparturePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    materialOnlyFailure = ex.Message.Contains("M1 simulated material validation failure");
+}
+Check(materialOnlyFailure &&
+      noDepartureFailureResolver.Calls == 1 &&
+      noDepartureFailureWorld.QueueCalls == 0 &&
+      noDepartureFailureLane.IsOnsiteConfirmed(noDeparturePlan.FacilityName),
+    "M1: material-only failure stops without queueing or revoking proven onsite when no departure occurred");
+
+
 var changedReasonWorld = new FakeWorld(plan with { TargetQuantity = 3 })
 {
     Available = false,
@@ -1001,6 +1196,13 @@ Check(!File.Exists(staleDependencyStore.Path) &&
       recoveredSessionWorld.Count("철괴") == 3 &&
       recoveredLane.Snapshot("금속 가공 시설").IntermediateDepth == 0,
     "satisfied dependency deletes stale resume state after an existing completed batch is received");
+Check(recoveredLane.QueueDirectiveFor(satisfiedIronPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+      recoveredLane.Snapshot(satisfiedIronPlan.FacilityName).LiveWorks == 0 &&
+      recoveredLane.QueueDirectiveFor("목재 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H4: dependency boundary receipt confirms only the proven same-facility onsite state after all seven-slot works are gone");
+
 
 bool recoveredWorldQueueIsUnchanged() => recoveredSessionWorld.Queued.Count == 0;
 
@@ -1017,6 +1219,57 @@ Check(recoveredSessionWorld.Count("철괴") == 6 &&
       recoveredSessionWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)" }) &&
       !File.Exists(staleDependencyStore.Path),
     "later request for the same intermediate starts fresh after completed-work checkpoint cleanup");
+Check(recoveredSessionWorld.QueueDirectives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }),
+    "H4: first intermediate registration after boundary receipt reuses manager-confirmed facility without second move");
+
+var residualWorld = new RecursiveProductionWorld
+{
+    InjectResidualAfterReceipt = true
+};
+residualWorld.AddExternalWork(
+    "철괴", "금속 가공 시설", "Completed", isCompleted: true, remainingSeconds: 0);
+residualWorld.AddExternalWork(
+    "철괴", "금속 가공 시설", "Completed", isCompleted: true, remainingSeconds: 0);
+var residualLane = new FacilityLaneState(await residualWorld.WorksAsync(default));
+var residualScheduler = new MultiAlteringDependencyScheduler(
+    residualWorld,
+    residualWorld,
+    testIdentity,
+    Path.Combine(Path.GetTempPath(),
+        "mabi-h4-residual-" + Guid.NewGuid().ToString("N")),
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: residualLane);
+var residualResolver = new RecursiveAlteringSupplyResolver(
+    residualWorld, residualWorld, residualWorld, residualWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+bool residualRejected = false;
+try
+{
+    await residualScheduler.RunAsync(
+        satisfiedIronPlan, 0, 9, residualResolver, default);
+}
+catch (InvalidOperationException ex)
+{
+    // M4 now rejects a partial receive earlier, before the dependency
+    // scheduler's post-collection lane observation. Both fail closed, but the
+    // earlier receipt guard must not rewrite the manager ledger as success.
+    residualRejected =
+        ex.Message.Contains("시설 전체 대기열 0건") ||
+        ex.Message.Contains("작업이 남아 있어 중간재료가 시설을 소유하지 않습니다");
+}
+Check(residualRejected &&
+      residualLane.QueueDirectiveFor("금속 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      (await residualWorld.WorksAsync(default)).Count(x =>
+          x.FacilityName == "금속 가공 시설") == 1 &&
+      residualLane.Snapshot("금속 가공 시설").LiveWorks >= 1 &&
+      residualWorld.QueueDirectives.Count == 0,
+    "H4: residual facility work after boundary receipt prevents onsite confirmation and intermediate registration");
+
+
 if (Directory.Exists(satisfiedSessionDir))
     Directory.Delete(satisfiedSessionDir, recursive: true);
 
@@ -1063,10 +1316,15 @@ if (Directory.Exists(dependencySessionDir))
 
 var multiWorld = new RecursiveProductionWorld();
 multiWorld.SetCount("석탄", 0);
+var multiLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+multiLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: previous intermediate confirmed metal facility");
+multiWorld.ManagerObservedDuringGather = multiLane;
 var multiResolver = new RecursiveAlteringSupplyResolver(
     multiWorld, multiWorld, multiWorld, multiWorld,
     delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-    verificationAttempts: 4);
+    verificationAttempts: 4,
+    laneState: multiLane);
 var multiAuto = new AlteringAutomation(
     multiWorld, multiWorld,
     (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
@@ -1079,14 +1337,24 @@ Check(multiWorld.Count("강철괴") == 3 &&
     "multi-gather batches iron ore and coal in one field transition before recursive processing");
 Check(multiWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)", "강철괴" }),
     "multi-gather preserves recursive caller return: intermediate iron then final steel");
+Check(multiLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      multiWorld.LaneDirectivesAtGatherStart.Count == 2 &&
+      multiWorld.LaneDirectivesAtGatherStart.All(d =>
+          d == AlteringFacilityEntryDirective.FreshMoveRequired),
+    "H5: after an intermediate onsite confirmation, a subsequent grouped field exit clears manager onsite before gathering input");
 
 var wholePlanWorld = new RecursiveProductionWorld();
 wholePlanWorld.SetCount("석탄", 0);
 wholePlanWorld.SetCount("철 광석", 0);
+var preflightLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+preflightLane.ConfirmOnsite(steelPlan.FacilityName, "H5 test: previously confirmed facility");
+wholePlanWorld.ManagerObservedDuringGather = preflightLane;
 var wholePlanResolver = new RecursiveAlteringSupplyResolver(
     wholePlanWorld, wholePlanWorld, wholePlanWorld, wholePlanWorld,
     delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-    verificationAttempts: 4);
+    verificationAttempts: 4,
+    laneState: preflightLane);
 var wholeSteelRecipe = (await wholePlanWorld.RecipesAsync(default))
     .Single(x => x.DisplayName == "강철괴");
 var alloyPlan = new AlteringPlan("금속 가공 시설", "합금괴", 3, 3, false);
@@ -1115,6 +1383,88 @@ Check(wholePlanWorld.FieldExitCalls == 1 &&
       wholePlanWorld.Count("철 광석") >= 20 &&
       wholePlanWorld.Count("석탄") >= 6,
     "whole-plan material preflight merges shared proven raw shortages into one field gathering session");
+Check(preflightLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      wholePlanWorld.LaneDirectivesAtGatherStart.Count == 2 &&
+      wholePlanWorld.LaneDirectivesAtGatherStart.All(d =>
+          d == AlteringFacilityEntryDirective.FreshMoveRequired),
+    "H5: whole-plan preflight announces confirmed field exit to the shared manager before raw gathering");
+
+var fallbackWorld = new RecursiveProductionWorld
+{
+    HideGatheringCatalogOnFirstQuery = true
+};
+fallbackWorld.SetCount("석탄", 0);
+var fallbackLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+fallbackLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: recursive intermediate already confirmed onsite");
+fallbackWorld.ManagerObservedDuringGather = fallbackLane;
+var fallbackResolver = new RecursiveAlteringSupplyResolver(
+    fallbackWorld, fallbackWorld, fallbackWorld, fallbackWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: fallbackLane);
+var fallbackBlocked = new AlteringRecipe(
+    steelPlan.DisplayName, false, steelPlan.ProducedPerWork,
+    "not_enough_ingredient",
+    new[] { new AlteringIngredient("석탄", 4, 0) },
+    steelPlan.FacilityName);
+await fallbackResolver.ResolveAsync(steelPlan, fallbackBlocked, 1, default);
+Check(fallbackWorld.FieldExitCalls == 1 &&
+      fallbackWorld.GatherStarts == 1 &&
+      fallbackWorld.LaneDirectivesAtGatherStart.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.FreshMoveRequired }) &&
+      fallbackLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H5: hidden raw shortage discovered after intermediate processing clears coordinator onsite in recursive single-material fallback");
+
+var failedExitWorld = new RecursiveProductionWorld
+{
+    HideGatheringCatalogOnFirstQuery = true,
+    FailFieldExit = true
+};
+failedExitWorld.SetCount("석탄", 0);
+var failedExitLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+failedExitLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: uncertain navigation from confirmed intermediate facility");
+var failedExitResolver = new RecursiveAlteringSupplyResolver(
+    failedExitWorld, failedExitWorld, failedExitWorld, failedExitWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: failedExitLane);
+bool exitFailed = false;
+try
+{
+    await failedExitResolver.ResolveAsync(steelPlan, fallbackBlocked, 1, default);
+}
+catch (InvalidOperationException ex)
+{
+    exitFailed = ex.Message.Contains("H5 simulated navigation failure");
+}
+Check(exitFailed &&
+      failedExitWorld.FieldExitCalls == 1 &&
+      failedExitWorld.GatherStarts == 0 &&
+      failedExitLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H5: uncertain or failed field exit invalidates stale onsite and prevents subsequent gathering input");
+
+var noDepartureWorld = new RecursiveProductionWorld();
+noDepartureWorld.SetCount("석탄", 12);
+var noDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+noDepartureLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: no field transition required");
+var noDepartureResolver = new RecursiveAlteringSupplyResolver(
+    noDepartureWorld, noDepartureWorld,
+    noDepartureWorld, noDepartureWorld,
+    verificationAttempts: 4, laneState: noDepartureLane);
+await noDepartureResolver.PreGatherKnownShortagesAsync(
+    new[] { new MultiAlteringSupplyPreflight(steelPlan, fallbackBlocked, 1) },
+    default);
+Check(noDepartureWorld.FieldExitCalls == 0 &&
+      noDepartureLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+    "H5: resolver preflight without actual field departure preserves the manager's existing onsite proof");
+
 
 var skipWorld = new RecursiveProductionWorld();
 skipWorld.SetCount("철 광석", 20);
@@ -1127,6 +1477,126 @@ await skipCoordinator.RunAsync(
     default);
 Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
+
+// M2 follow-up: the coordinator (not per-slot RunCoreAsync) observes idle
+// queues across batch-yield cycles, with a separate timer per facility.
+DateTimeOffset m2WatchClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2Watch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => m2WatchClock);
+var m2WatchWork = new AlteringWork(
+    "목재", "목재 가공 시설", "InProgress", false, 90);
+m2Watch.Observe("목재 가공 시설", new[] { m2WatchWork });
+m2WatchClock = m2WatchClock.AddSeconds(119);
+m2Watch.Observe("목재 가공 시설", new[] { m2WatchWork });
+m2WatchClock = m2WatchClock.AddSeconds(2);
+bool m2StagnantStopped = false;
+try
+{
+    m2Watch.Observe("목재 가공 시설", new[] { m2WatchWork });
+}
+catch (InvalidOperationException ex)
+{
+    m2StagnantStopped = ex.Message.Contains("다중가공 시설별 정체 감지") &&
+        ex.Message.Contains("임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지");
+}
+Check(m2StagnantStopped,
+    "M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely after a bounded idle interval");
+
+DateTimeOffset m2ProgressClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2ProgressWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => m2ProgressClock);
+m2ProgressWatch.Observe("금속 가공 시설",
+    new[] { m2WatchWork with { FacilityName = "금속 가공 시설" } });
+m2ProgressClock = m2ProgressClock.AddSeconds(110);
+m2ProgressWatch.Observe("금속 가공 시설",
+    new[] { m2WatchWork with { FacilityName = "금속 가공 시설", RemainingSeconds = 80 } });
+m2ProgressClock = m2ProgressClock.AddSeconds(110);
+m2ProgressWatch.Observe("금속 가공 시설",
+    new[] { m2WatchWork with { FacilityName = "금속 가공 시설", RemainingSeconds = 60 } });
+Check(true,
+    "M2 wait: genuine countdown decreases refresh the facility watchdog during long legitimate processing");
+
+DateTimeOffset m2NoiseClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2NoiseWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => m2NoiseClock);
+m2NoiseWatch.Observe("목재 가공 시설", new[] { m2WatchWork });
+m2NoiseClock = m2NoiseClock.AddSeconds(100);
+m2NoiseWatch.Observe("목재 가공 시설",
+    new[] { m2WatchWork with { RemainingSeconds = 120 } });
+m2NoiseClock = m2NoiseClock.AddSeconds(21);
+bool m2NoiseRejected = false;
+try
+{
+    m2NoiseWatch.Observe("목재 가공 시설",
+        new[] { m2WatchWork with { RemainingSeconds = 120 } });
+}
+catch (InvalidOperationException)
+{
+    m2NoiseRejected = true;
+}
+Check(m2NoiseRejected,
+    "M2 wait: an increasing or noisy countdown cannot conceal a truly stalled facility");
+
+DateTimeOffset m2ScheduleClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2BlockedWorks = new List<AlteringWork>
+{
+    new("목재", "목재 가공 시설", "InProgress", false, 100),
+    new("강철괴", "금속 가공 시설", "InProgress", false, 100)
+};
+var m2BlockedLane = new FacilityLaneState(m2BlockedWorks);
+m2BlockedLane.ConfirmOnsite("목재 가공 시설",
+    "M2 wait test: known onsite before idle");
+var m2BlockedScheduler = new MultiAlteringCoordinator(
+    m2BlockedLane, FacilityLaneOwner.Main,
+    now: () => m2ScheduleClock,
+    idleThreshold: TimeSpan.FromSeconds(60));
+var m2BlockedPlans = new[]
+{
+    new AlteringPlan("목재 가공 시설", "목재", 3, 1, false),
+    new AlteringPlan("금속 가공 시설", "강철괴", 3, 1, false)
+};
+int m2UnexpectedRegistrations = 0, m2WaitCycles = 0;
+bool m2PerFacilityStopped = false;
+try
+{
+    await m2BlockedScheduler.RunAsync(
+        m2BlockedPlans,
+        (_, _, _) =>
+        {
+            m2UnexpectedRegistrations++;
+            return Task.FromResult(false);
+        },
+        token =>
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<AlteringWork>>(
+                m2BlockedWorks.ToArray());
+        },
+        (delay, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            m2WaitCycles++;
+            m2ScheduleClock = m2ScheduleClock.Add(delay);
+            // Metal is healthy: countdown decreases, but wood is stalled.
+            m2BlockedWorks[1] = m2BlockedWorks[1] with
+            {
+                RemainingSeconds = m2BlockedWorks[1].RemainingSeconds - 10
+            };
+            return Task.CompletedTask;
+        },
+        default);
+}
+catch (InvalidOperationException ex)
+{
+    m2PerFacilityStopped =
+        ex.Message.Contains("다중가공 시설별 정체 감지") &&
+        ex.Message.Contains("목재 가공 시설");
+}
+Check(m2PerFacilityStopped && m2UnexpectedRegistrations == 0 &&
+      m2WaitCycles >= 2 &&
+      m2BlockedLane.QueueDirectiveFor("목재 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M2 wait: stalled wood lane stops after 60s despite progressing metal lane, revokes onsite, and never clicks or registers");
 
 var mixedLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
 var multiAltering = new MultiAlteringCoordinator(
@@ -1283,22 +1753,333 @@ Check(managedWorld.DirectiveAfterCollection ==
       AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
     "07:01 regression: after completed-work receipt the next same-facility registration reuses coordinator-confirmed onsite state");
 
+Check(AlteringStallRecoveryPolicy.CanRetainOnsite(
+        wasPreviouslyConfirmedOnsite: true,
+        AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel) &&
+      !AlteringStallRecoveryPolicy.CanRetainOnsite(
+        wasPreviouslyConfirmedOnsite: false,
+        AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel) &&
+      !AlteringStallRecoveryPolicy.CanRetainOnsite(
+        wasPreviouslyConfirmedOnsite: true,
+        AlteringStallRecoveryObservation.Unknown),
+    "M2: only a previously confirmed onsite plus proven UI-only recovery can retain central location authority");
+
+var m2Plan = managedPlan;
+var m2World = new FakeWorld(m2Plan);
+var m2Lane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m2Lane.ConfirmOnsite(m2Plan.FacilityName, "M2 test previously confirmed onsite");
+var m2Auto = new AlteringAutomation(
+    m2World, m2World, (_, _) => Task.CompletedTask, 4,
+    facilityState: m2Lane);
+await m2Auto.RecoverStallUnderManagerAsync(m2Plan, 1, "M2 verified same-site UI-only stall", default);
+Check(m2Lane.IsOnsiteConfirmed(m2Plan.FacilityName) &&
+      m2World.ManagedRecoveryCalls == 1 &&
+      m2World.LegacyRecoveryCalls == 0 &&
+      m2World.QueueCalls == 0,
+    "M2: coordinator re-confirms previously proven onsite after safe UI-only stall recovery without any recipe or move input");
+
+var m2UnknownWorld = new FakeWorld(m2Plan);
+var m2UnknownLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var m2UnknownAuto = new AlteringAutomation(
+    m2UnknownWorld, m2UnknownWorld, (_, _) => Task.CompletedTask, 4,
+    facilityState: m2UnknownLane);
+await m2UnknownAuto.RecoverStallUnderManagerAsync(
+    m2Plan, 1, "M2 unknown prior location", default);
+Check(m2UnknownLane.QueueDirectiveFor(m2Plan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m2UnknownWorld.ManagedRecoveryCalls == 1 &&
+      m2UnknownWorld.QueueCalls == 0,
+    "M2: UI recovery cannot create onsite authority when manager had no prior confirmed location");
+
+var m2AmbiguousWorld = new FakeWorld(m2Plan)
+{
+    RecoveryObservation = AlteringStallRecoveryObservation.Unknown
+};
+var m2AmbiguousLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m2AmbiguousLane.ConfirmOnsite(m2Plan.FacilityName, "M2 test onsite before uncertain recovery");
+await new AlteringAutomation(
+    m2AmbiguousWorld, m2AmbiguousWorld, (_, _) => Task.CompletedTask, 4,
+    facilityState: m2AmbiguousLane)
+    .RecoverStallUnderManagerAsync(m2Plan, 1, "M2 uncertain UI/CLI proof", default);
+Check(m2AmbiguousLane.QueueDirectiveFor(m2Plan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m2AmbiguousWorld.ManagedRecoveryCalls == 1,
+    "M2: popup, travel, missing header or unknown CLI cannot restore coordinator onsite");
+
+var m2FailureWorld = new FakeWorld(m2Plan) { FailManagedRecovery = true };
+var m2FailureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+m2FailureLane.ConfirmOnsite(m2Plan.FacilityName, "M2 test onsite before failed recovery");
+bool m2Failed = false;
+try
+{
+    await new AlteringAutomation(
+        m2FailureWorld, m2FailureWorld, (_, _) => Task.CompletedTask, 4,
+        facilityState: m2FailureLane)
+        .RecoverStallUnderManagerAsync(m2Plan, 1, "M2 failed recovery", default);
+}
+catch (InvalidOperationException ex)
+{
+    m2Failed = ex.Message.Contains("M2 simulated recovery verification failure");
+}
+Check(m2Failed &&
+      m2FailureLane.QueueDirectiveFor(m2Plan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m2FailureWorld.QueueCalls == 0,
+    "M2: manager invalidates onsite before failed stall recovery and never issues automatic travel");
+
+var m2LegacyWorld = new FakeWorld(m2Plan);
+await new AlteringAutomation(m2LegacyWorld, m2LegacyWorld)
+    .RecoverStallUnderManagerAsync(m2Plan, 1, "M2 single-mode legacy", default);
+Check(m2LegacyWorld.LegacyRecoveryCalls == 1 &&
+      m2LegacyWorld.ManagedRecoveryCalls == 0,
+    "M2: single-altering keeps its bounded legacy recovery route unchanged");
+
+
+Check(managedWorld.ReceiptDirectives.Count > 0 &&
+      managedWorld.ReceiptDirectives.All(x =>
+          x == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite),
+    "H2: completed same-facility works are collected under the manager's Reuse directive");
+Check(AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        remoteConfirmed: true) &&
+      AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        remoteConfirmed: true),
+    "H3: two-frame paid-detail OCR under either manager directive requires manager conflict reporting");
+Check(!AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        remoteConfirmed: false) &&
+      !AlteringRemoteProcessGuard.MustReportToCoordinator(
+        AlteringFacilityEntryDirective.Automatic,
+        remoteConfirmed: true),
+    "H3: a single-frame OCR candidate is not authority to abort, and Automatic keeps legacy recovery");
+
+var conflictPlan = lanePlan;
+var conflictWorld = new FakeWorld(conflictPlan)
+{
+    TriggerCoordinatorDetailConflict = true
+};
+var conflictLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+conflictLane.ConfirmOnsite(conflictPlan.FacilityName, "H3 test established onsite");
+var conflictAutomation = new AlteringAutomation(
+    conflictWorld, conflictWorld, (_, _) => Task.CompletedTask,
+    8, facilityState: conflictLane);
+bool conflictReported = false;
+try
+{
+    await conflictAutomation.RunAsync(conflictPlan, default);
+}
+catch (AlteringCoordinatorFacilityMismatchException ex)
+{
+    conflictReported = ex.FacilityName == conflictPlan.FacilityName;
+}
+Check(conflictReported &&
+      conflictWorld.QueueCalls == 0 &&
+      conflictWorld.Directives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }) &&
+      conflictLane.QueueDirectiveFor(conflictPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H3: coordinator receives two-frame detail contradiction, invalidates onsite, and stops without additional queue input");
+var aggregateConflict = new AggregateException(
+    new AlteringCoordinatorFacilityMismatchException(
+        conflictPlan.FacilityName, "H3 remote-detail OCR conflict"),
+    new InvalidOperationException("H3 independent currency-verification failure"));
+Check(AlteringCoordinatorFacilityMismatchException.IsForFacility(
+        aggregateConflict, conflictPlan.FacilityName) &&
+      !AlteringCoordinatorFacilityMismatchException.IsForFacility(
+        aggregateConflict, "목재 가공 시설"),
+    "H3: typed OCR conflict survives aggregated wing-safety failure without matching another facility");
+
+var aggregateWorld = new FakeWorld(conflictPlan)
+{
+    TriggerCoordinatorDetailConflict = true,
+    AggregateCoordinatorDetailConflict = true
+};
+var aggregateLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+aggregateLane.ConfirmOnsite(conflictPlan.FacilityName, "H3 aggregate test onsite");
+bool preservedSafetyError = false;
+try
+{
+    var aggregateAutomation = new AlteringAutomation(
+        aggregateWorld, aggregateWorld, (_, _) => Task.CompletedTask,
+        8, facilityState: aggregateLane);
+    await aggregateAutomation.RunAsync(conflictPlan, default);
+}
+catch (AggregateException ex)
+{
+    preservedSafetyError = ex.InnerExceptions.Count == 2 &&
+        ex.InnerExceptions.Any(x => x is AlteringCoordinatorFacilityMismatchException) &&
+        ex.InnerExceptions.Any(x => x.Message.Contains("currency-verification"));
+}
+Check(preservedSafetyError && aggregateWorld.QueueCalls == 0 &&
+      aggregateLane.QueueDirectiveFor(conflictPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H3: wing-safety aggregate preserves both failures while manager invalidates location without queue input");
+
+
+
+var freshReceiptWorld = new FakeWorld(lanePlan);
+freshReceiptWorld.AddCompleted(1);
+var freshReceiptLane = new FacilityLaneState(
+    Array.Empty<AlteringWork>());
+var freshReceiptAutomation = new AlteringAutomation(
+    freshReceiptWorld, freshReceiptWorld, (_, _) => Task.CompletedTask,
+    8, facilityState: freshReceiptLane);
+Check(await freshReceiptAutomation.CollectReadyBatchAsync(lanePlan, default) &&
+      freshReceiptWorld.ReceiptDirectives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.FreshMoveRequired }),
+    "H2: receiving existing complete work at startup requires manager Fresh directive");
+
+var failedReceiptWorld = new FakeWorld(lanePlan) { TwoStageCollect = true };
+failedReceiptWorld.AddCompleted(1);
+var failedReceiptLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+failedReceiptLane.ConfirmOnsite(lanePlan.FacilityName, "test same-site receipt");
+var failedReceiptAutomation = new AlteringAutomation(
+    failedReceiptWorld, failedReceiptWorld, (_, _) => Task.CompletedTask,
+    8, facilityState: failedReceiptLane);
+bool blockedUnsafeFallback = false;
+try
+{
+    await failedReceiptAutomation.CollectReadyBatchAsync(lanePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    blockedUnsafeFallback = ex.Message.Contains("자체 재이동/2차 수령 금지");
+}
+Check(blockedUnsafeFallback &&
+      failedReceiptWorld.SecondStageCalls == 0 &&
+      failedReceiptWorld.ReceiptDirectives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }),
+    "H2: manager receipt failure cannot fall through to autonomous travel or second Space");
+
+// M4: "모두 받기" spans the entire facility, including another recipe
+// in the same seven-slot mixed lane. The chosen plan alone is not the scope.
+var m4MixedCompleted = new AlteringWork[]
+{
+    new(lanePlan.OutputName, lanePlan.FacilityName, "Completed", true, 0),
+    new("다른 완성품", lanePlan.FacilityName, "Completed", true, 0)
+};
+var m4MixedPartial = new AlteringWork[]
+{
+    m4MixedCompleted[0],
+    m4MixedCompleted[1] with
+    {
+        State = "InProgress",
+        IsCompleted = false,
+        RemainingSeconds = 60
+    }
+};
+Check(AlteringReceiptPolicy.CanCollectManagedFacility(
+        m4MixedCompleted, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        m4MixedPartial, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        Array.Empty<AlteringWork>(), lanePlan.FacilityName),
+    "M4: manager permits receive-all only when every work in the selected facility is complete");
+Check(AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 0) &&
+      !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 6) &&
+      !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 1) &&
+      !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(0, 0),
+    "M4: partial CLI decrease or empty pre-receipt baseline cannot confirm an entire mixed facility receipt");
+
+var m4World = new FakeWorld(lanePlan);
+m4World.AddCompleted(1);
+m4World.AddForeignFacilityWork("다른 완성품", isCompleted: true);
+var m4Lane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var m4Automation = new AlteringAutomation(
+    m4World, m4World, (_, _) => Task.CompletedTask,
+    4, facilityState: m4Lane);
+Check(await m4Automation.CollectReadyBatchAsync(lanePlan, default) &&
+      m4World.CollectionCount == 1 &&
+      (await m4World.WorksAsync(default)).Count(x =>
+          x.FacilityName == lanePlan.FacilityName) == 0 &&
+      m4World.ReceiptDirectives.Count == 1,
+    "M4: manager verifies blue receive-all removed both selected and other recipe from the same facility");
+
+var m4PartialWorld = new FakeWorld(lanePlan) { Freeze = true };
+m4PartialWorld.AddCompleted(1);
+m4PartialWorld.AddForeignFacilityWork("아직 진행 중", isCompleted: false);
+var m4PartialAutomation = new AlteringAutomation(
+    m4PartialWorld, m4PartialWorld, (_, _) => Task.CompletedTask,
+    4, facilityState: new FacilityLaneState(Array.Empty<AlteringWork>()));
+bool m4PartialBlocked = false;
+try
+{
+    await m4PartialAutomation.CollectReadyBatchAsync(lanePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    m4PartialBlocked = ex.Message.Contains("일부만 완료된 7칸 배치");
+}
+Check(m4PartialBlocked && m4PartialWorld.CollectionCount == 0 &&
+      m4PartialWorld.ReceiptDirectives.Count == 0,
+    "M4: partial mixed facility batch is rejected before moving, receive-all, or Space");
+
+var m4UndrainedWorld = new FakeWorld(lanePlan)
+{
+    LeaveOtherRecipesOnCollect = true
+};
+m4UndrainedWorld.AddCompleted(1);
+m4UndrainedWorld.AddForeignFacilityWork("남은 다른 품목", isCompleted: true);
+var m4UndrainedAutomation = new AlteringAutomation(
+    m4UndrainedWorld, m4UndrainedWorld, (_, _) => Task.CompletedTask,
+    2, facilityState: new FacilityLaneState(Array.Empty<AlteringWork>()));
+bool m4UndrainedRejected = false;
+try
+{
+    await m4UndrainedAutomation.CollectReadyBatchAsync(lanePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    m4UndrainedRejected = ex.Message.Contains("시설 전체 대기열 0건");
+}
+Check(m4UndrainedRejected &&
+      m4UndrainedWorld.CollectionCount == 1 &&
+      m4UndrainedWorld.SecondStageCalls == 0 &&
+      (await m4UndrainedWorld.WorksAsync(default)).Count(x =>
+          x.FacilityName == lanePlan.FacilityName) == 1,
+    "M4: selected item disappearing while another completed recipe remains fails closed without repeat receive input");
+
+Check(!AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "H2: coordinator-confirmed onsite receipt ignores always-visible move label");
+Check(!AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "H2: manager-directed fresh arrival ignores persistent label after proven travel");
+Check(AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective.Automatic,
+        trustedOnsiteFacility: true,
+        visualMoveButton: true,
+        exactMoveLabelVisible: true),
+    "H2: legacy single-altering exact move label still vetoes receipt");
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
 catch(Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
 
-internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen
+internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen
 {
     private readonly AlteringPlan _plan;
     private readonly List<AlteringWork> _works = new();
     private int _polls;
     internal int QueueCalls, MaxQueue, Bonus, ExistingRemaining, SecondStageCalls, CollectionCount;
+    internal int ManagedRecoveryCalls, LegacyRecoveryCalls;
+    internal AlteringStallRecoveryObservation RecoveryObservation =
+        AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel;
+    internal bool FailManagedRecovery;
     internal long Owned;
     internal readonly List<AlteringFacilityEntryDirective> Directives = new();
+    internal readonly List<AlteringFacilityEntryDirective> ReceiptDirectives = new();
     internal AlteringFacilityEntryDirective? DirectiveAfterCollection;
     internal bool QueuedWhileExisting;
-    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect;
+    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
@@ -1344,6 +2125,17 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         Directives.Add(directive);
         if (CollectionCount > 0)
             DirectiveAfterCollection = directive;
+        if (TriggerCoordinatorDetailConflict)
+        {
+            var conflict = new AlteringCoordinatorFacilityMismatchException(
+                plan.FacilityName,
+                "H3 test: conflicting two-frame remote detail OCR");
+            if (AggregateCoordinatorDetailConflict)
+                throw new AggregateException(
+                    conflict,
+                    new InvalidOperationException("H3 independent currency-verification failure"));
+            throw conflict;
+        }
         return QueueAsync(plan, reserveFiveWings, ct);
     }
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
@@ -1352,6 +2144,14 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         if (TwoStageCollect) return Task.FromResult(false);
         ApplyCollection(plan);
         return Task.FromResult(true);
+    }
+    public Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct)
+    {
+        ReceiptDirectives.Add(directive);
+        return CollectAsync(plan, ct);
     }
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
     {
@@ -1366,10 +2166,32 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         CollectionCount++;
         ExistingRemaining = Math.Max(0, ExistingRemaining - _works.Count(x => x.IsCompleted));
         if (CreditRewards) Owned += _works.Count(x => x.IsCompleted) * (plan.ProducedPerWork + Bonus);
-        _works.RemoveAll(x => x.IsCompleted);
+        _works.RemoveAll(x => x.IsCompleted &&
+            (!LeaveOtherRecipesOnCollect || x.DisplayName == _plan.OutputName));
+    }
+    public Task RecoverStallAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        LegacyRecoveryCalls++;
+        return Task.CompletedTask;
+    }
+    public Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ManagedRecoveryCalls++;
+        if (FailManagedRecovery)
+            throw new InvalidOperationException("M2 simulated recovery verification failure");
+        return Task.FromResult(RecoveryObservation);
     }
     internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
     internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
+    internal void AddForeignFacilityWork(string displayName, bool isCompleted)
+        => _works.Add(new(
+            displayName, _plan.FacilityName,
+            isCompleted ? "Completed" : "InProgress",
+            isCompleted, isCompleted ? 0 : 120));
     public void Dispose() { }
 }
 
@@ -1377,17 +2199,20 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
 internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 {
     internal int Calls;
+    internal bool FailBeforeLeaving;
     public Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Calls++;
+        if (FailBeforeLeaving)
+            throw new InvalidOperationException("M1 simulated material validation failure");
         world.Available = true;
         return Task.CompletedTask;
     }
 }
 
 
-internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
+internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringFieldExitScreen, IGatheringData, IGatheringScreen
 {
     private static readonly GatheringActivity Idle =
         new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
@@ -1399,9 +2224,13 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     private readonly List<AlteringWork> _works = new();
     private string? _gathering;
     internal readonly List<string> Queued = new();
+    internal readonly List<AlteringFacilityEntryDirective> QueueDirectives = new();
     internal readonly List<string> Gathered = new();
-    internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls;
-    internal bool NestedSameFacilityChain;
+    internal readonly List<AlteringFacilityEntryDirective> LaneDirectivesAtGatherStart = new();
+    internal FacilityLaneState? ManagerObservedDuringGather;
+    internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
+    internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
+        HideGatheringCatalogOnFirstQuery, FailFieldExit;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -1499,7 +2328,10 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         AlteringFacilityEntryDirective directive,
         Action reserveFiveWings,
         CancellationToken ct)
-        => QueueAsync(plan, reserveFiveWings, ct);
+    {
+        QueueDirectives.Add(directive);
+        return QueueAsync(plan, reserveFiveWings, ct);
+    }
 
 
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
@@ -1525,8 +2357,17 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             _items[output] = Count(output) + produced;
         }
         _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
+        if (InjectResidualAfterReceipt)
+            _works.Add(new(
+                "외부 대기 작업", plan.FacilityName, "InProgress", false, 30));
         return Task.FromResult(true);
     }
+
+    public Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct)
+        => CollectAsync(plan, ct);
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
         => Task.FromResult(false);
@@ -1534,6 +2375,10 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        CatalogCalls++;
+        if (HideGatheringCatalogOnFirstQuery && CatalogCalls == 1)
+            return Task.FromResult<IReadOnlyList<GatherableItem>>(
+                Array.Empty<GatherableItem>());
         return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]
         {
             new GatherableItem("철 광석", true),
@@ -1559,6 +2404,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task StartAsync(GatheringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (ManagerObservedDuringGather is not null)
+            LaneDirectivesAtGatherStart.Add(
+                ManagerObservedDuringGather.QueueDirectiveFor("금속 가공 시설"));
         GatherStarts++;
         Gathered.Add(plan.DisplayName);
         _gathering = plan.DisplayName;
@@ -1576,6 +2424,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     {
         ct.ThrowIfCancellationRequested();
         FieldExitCalls++;
+        if (FailFieldExit)
+            throw new InvalidOperationException("H5 simulated navigation failure");
         return Task.CompletedTask;
     }
 

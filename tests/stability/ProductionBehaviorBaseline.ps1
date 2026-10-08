@@ -55,6 +55,38 @@ Match-Required $multiAlter 'facilityWorks\.All\(x => x\.IsCompleted\)' 'multi-al
 Match-Required $multiAlter 'runBatch\(plan, 1, ct\)' 'same-facility work remains one-slot round-robin'
 Match-Required $multiAlter '같은 시설 여러 품목은 라운드로빈 혼합' 'round-robin mixed-facility behavior remains explicit'
 Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slot completion never causes a facility move'
+# M2 long wait: coordinator must track each facility's actual CLI progress
+# across slot-wise RunBatch returns, not reset the watch with every loop.
+Match-Required $multiAlter 'class MultiAlteringWaitWatchdog' 'multi coordinator keeps per-facility idle history'
+Match-Required $multiAlter 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' 'whole multi run shares a single watchdog across batches'
+Match-Required $multiAlter 'idleWatchdog.Observe\(facility, observed\)' 'every pending facility is observed before new actions'
+Match-Required $multiAlter 'lowestRunning < previous.LowestRunningSeconds' 'only genuine countdown progress refreshes idle timer'
+Match-Required $multiAlter 'idleWatchdog.ConfirmManagerProgress\(facility\)' 'manager-confirmed registration or completion refreshes progress'
+Match-Required $multiAlter '다중가공 시설별 정체 감지' 'persistent idle queue fails closed with diagnostic'
+Match-Required $multiAlter '_laneState\?\.InvalidateOnsite' 'stalled facility revokes cached manager onsite proof'
+Match-Required $alterTests 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' 'M2 long wait timeout has executable regression'
+Match-Required $alterTests 'M2 wait: genuine countdown decreases refresh' 'M2 legitimate long work is not prematurely stopped'
+Match-Required $alterTests 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane' 'M2 one healthy facility cannot hide another stalled lane'
+
+# M3: saved jobs/sessions do not attest where the character stands after F9.
+# The central manager must distinguish Unknown from both verified onsite and
+# confirmed remote rather than trusting an always-visible move label.
+Match-Required $lane 'enum FacilityLocationProof' 'startup location has explicit cold-start/current-run/uncertain states'
+Match-Required $lane 'ColdStartUnknown' 'initial location is unknown, not automatically remote'
+Match-Required $lane 'ConfirmedThisRun' 'only same-run verified onsite can be reused'
+Match-Required $lane 'RuntimeUncertain' 'uncertain location after field exit/recovery is explicit'
+Match-Required $lane 'class FacilityStartupLocationPolicy' 'startup move decision is centralized'
+Match-Required $lane 'proof == FacilityLocationProof.ConfirmedThisRun' 'stale saved facility names never authorize reuse'
+Match-Required $lane '_locationProof = FacilityLocationProof.ConfirmedThisRun' 'onsite proof is granted only by manager confirmation'
+Match-Required $lane '_locationProof = FacilityLocationProof.RuntimeUncertain' 'runtime exit invalidates current-run onsite proof'
+Match-Required $lane '초기 위치 미확정\(원격 확정 아님\)' 'cold start distinguishes unknown from remote in logs'
+Match-Required (Read-Source 'source/FishingAutomation/MainForm.MultiAltering.cs') '이전 실행의 현장확정은 복원하지 않음' 'multi runner never restores saved physical location'
+Match-Required $alterTests 'M3: F9 resume with existing works cannot inherit a prior-run onsite proof' 'M3 restart with saved works begins Fresh'
+Match-Required $alterTests 'M3: observing the same CLI seven-slot ledger is not physical location evidence' 'M3 queue observation alone cannot prove onsite'
+Match-Required $alterTests 'M3: current-run onsite verification permits same-facility reuse' 'M3 same-run proof permits proper reuse'
+Match-Required $alterTests 'M3: post-start location uncertainty is distinct from cold-start unknown' 'M3 later invalidation never recycles stale onsite'
+Match-Required $alterTests 'M3: even a stale same-name location cannot authorize reuse' 'M3 cold start policy rejects persisted location hints'
+
 Match-Forbidden $multiAlter 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime|0x39' 'multi-altering coordinator owns no direct UI input'
 
 # 1b) V3.1.49 speed-up changes polling only; input order/coordinates stay owned by existing guards.
@@ -69,7 +101,7 @@ Match-Required $multiAlterDependency 'Math\.Clamp\(waitSeconds, 1, 30\)' 'depend
 # 1c) V3.1.50 receipt input waits for the visible blue button to become input-stable.
 Match-Required $alter '파란 수령 버튼 입력 전 400ms 안정화' 'receipt waits 400ms after the proven blue collect button'
 Match-Required $alter 'Task\.Delay\(400, ct\)' 'receipt stabilization delay remains 400ms'
-Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct\)' 'receipt state is re-proven immediately before Space'
+Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct, directive\)' 'receipt state is re-proven immediately before Space under manager directive'
 Match-Required $alter '현장 수령 화면 재확인 완료' 'receipt Space is emitted only after the post-delay recheck'
 Match-Required $alter 'Space 1회' 'receipt input remains a single Space after stabilization'
 
@@ -82,6 +114,52 @@ Match-Required $receiptPolicy 'visualMoveButton && exactMoveLabelVisible' 'post-
 Match-Required $receiptPolicy 'visualMoveButton && !trustedOnsiteFacility' 'legacy visual veto remains conservative before onsite proof'
 Match-Required $alterTests '04:05 receipt regression' '04:05 teal false-positive receipt failure remains executable coverage'
 
+# L2: the compiled production screen, not a FakeWorld, must be covered by
+# executable Windows regressions for fixed cards, medicine, cached selection,
+# two-frame detail conflict, receive and completion return.
+$realScreenProject = Read-Source 'tests/altering-screen-integration/Regression.csproj'
+$realScreenTests = Read-Source 'tests/altering-screen-integration/Program.cs'
+$ciWorkflow = Read-Source '.github/workflows/ci.yml'
+Match-Required $realScreenProject 'ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj"' 'L2 harness references real production assembly'
+Match-Required $realScreenTests 'Assembly.Load\("FishingAutomation"\)' 'L2 harness loads real app assembly'
+Match-Required $realScreenTests 'AsyncStateMachineAttribute' 'L2 harness inspects real async screen state machines'
+Match-Required $realScreenTests 'TrySelectFixedRecipeAsync' 'L2 tests actual fixed recipe route'
+Match-Required $realScreenTests 'TrySelectMedicineRecipeBySearchAsync' 'L2 tests actual medicine route'
+Match-Required $realScreenTests 'WaitForReceiptFacilityReturnAsync' 'L2 tests actual receipt facility return route'
+Match-Required $realScreenTests 'HasFacilityMoveButtonVisual' 'L2 tests actual teal move detector'
+Match-Required $realScreenTests 'HasCollectButtonVisual' 'L2 tests actual blue receive detector'
+Match-Required $realScreenTests 'HasBottomConfirmationModal' 'L2 tests actual completion modal detector'
+Match-Required $ciWorkflow 'dotnet run --project tests/altering-screen-integration/Regression.csproj' 'L2 executes in Windows CI, not build-only'
+Match-Forbidden $realScreenTests 'new FakeWorld' 'L2 does not rely on fake directive-only screen'
+Match-Forbidden $realScreenTests 'TapFresh\(' 'L2 tests must not send game Space input'
+Match-Forbidden $realScreenTests 'ClickFresh\(' 'L2 tests must not click game controls'
+
+# L1: local screen cache is an Automatic(single-altering) observation,
+# never another multi-altering decision authority.
+Match-Required $alterPlan 'class AlteringScreenOnsiteCachePolicy' 'L1 local cache ownership policy'
+Match-Required $alterPlan 'directive == AlteringFacilityEntryDirective.Automatic \? facilityName : null' 'L1 managed entry cache remains empty'
+Match-Required $alterPlan 'managedReceipt \? null : facilityName' 'L1 managed receipt return cache remains empty'
+Match-Required $alter 'AlteringScreenOnsiteCachePolicy.MayTrustForReceipt' 'L1 receive cache read is gated by directive'
+Match-Required $alter 'AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry' 'L1 manager entry cannot grant local authority'
+Match-Required $alter 'AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn' 'L1 manager receipt cannot grant local authority'
+Match-Required $alterTests 'L1: managed receipt ignores lower screen cache' 'L1 cache cannot affect manager receipt'
+Match-Required $alterTests 'L1: successful managed reuse/fresh screen entries' 'L1 cache cannot affect manager entry'
+Match-Required $alterTests 'L1: managed receipt return reports success' 'L1 receipt return cache remains single only'
+
+# M5: a CLI receipt count drop is not physical bench evidence. The
+# coordinator must remain uncertain until a clean two-frame facility return.
+Match-Required $receiptPolicy 'CanConfirmReceiptFacilityReturn' 'M5 receipt return has centralized proof criteria'
+Match-Required $receiptPolicy 'autoTraveling == false' 'M5 receipt return needs known idle CLI'
+Match-Required $alter 'facilityFrames = cleanReturn \? facilityFrames \+ 1 : 0' 'M5 facility title must stay clean across both frames'
+Match-Required $alter 'completionModalVisible: completionModal' 'M5 title behind completion popup cannot prove onsite'
+Match-Required $alter 'if \(managedReceipt\)' 'M5 FIELD outcome cannot silently reenter under manager authority'
+Match-Required $alter '필드에서 K로 연 가공창은 물리적 현장 증거가 아니므로' 'M5 rejects field K menu as bench proof'
+Match-Required $alter '수령 완료창 Space 직전 재검증 실패' 'M5 confirmation Space needs fresh modal proof'
+Match-Required $alter 'managedReceipt: directive != AlteringFacilityEntryDirective.Automatic' 'M5 manager receipt flag reaches result handling'
+Match-Required $alterPlan '_facilityState\.InvalidateOnsite\([\s\S]*?수령 진입' 'M5 manager clears stale onsite proof before receipt'
+Match-Required $alterTests 'M5: facility title behind completion modal must not prove onsite' 'M5 popup overlay regression'
+Match-Required $alterTests 'M5: active or unknown CLI movement prevents false onsite reuse' 'M5 movement uncertainty regression'
+
 # 1e) V3.1.52: the multi-altering facility manager owns location decisions.
 Match-Required $lane 'QueueDirectiveFor' 'facility manager issues the next facility-entry directive'
 Match-Required $lane 'ConfirmOnsite' 'facility manager records proven same-facility onsite state'
@@ -92,7 +170,102 @@ Match-Required $alterPlan '완료품 수령 후 같은 시설창 복귀 확인' 
 Match-Required $alter 'IAlteringCoordinatorQueueScreen' 'altering screen exposes a coordinator-command execution path'
 Match-Required $alter '설비 이동 버튼 색상/형태 재판정 없음' 'coordinator-confirmed reuse cannot be downgraded by teal move-button heuristics'
 Match-Required $zeroWing 'IAlteringCoordinatorQueueScreen' 'zero-wing safety wrapper forwards coordinator facility commands'
+Match-Required $alterPlan 'IAlteringCoordinatorReceiptScreen' 'manager receipt interface exists'
+Match-Required $alterPlan '_facilityState\.QueueDirectiveFor' 'manager decides receipt travel before invocation'
+Match-Required $alterPlan '자체 재이동/2차 수령 금지' 'manager-led receipt failure cannot trigger autonomous fallback'
+Match-Required $alter '중간관리자 수령 지시' 'receipt screen implements coordinator movement directive'
+Match-Required $alter '설비 이동 0회' 'same-facility receipt cannot send a second travel command'
+Match-Required $receiptPolicy 'Alterin[g]?FacilityEntryDirective' 'receipt policy recognizes manager instruction'
+Match-Required $zeroWing 'IAlteringCoordinatorReceiptScreen' 'wing-safety wrapper preserves receipt directive'
 Match-Required $alterTests '07:01 regression' '07:01 repeated facility-move regression remains executable coverage'
+# H3: detailed paid-action OCR can be contradictory evidence, not travel permission.
+# The manager alone may invalidate its onsite state; Automatic still gets the old
+# single guarded remote-detail recovery.
+Match-Required $alterPlan 'class AlteringCoordinatorFacilityMismatchException' 'remote detail conflict carries a typed manager report'
+Match-Required $alterPlan 'catch \(Exception conflict\) when' 'manager receives the child detail contradiction'
+Match-Required $alterPlan '_facilityState\.InvalidateOnsite' 'manager invalidates stale onsite authority on detail conflict'
+Match-Required (Read-Source 'source/FishingAutomation/AlteringRemoteProcessGuard.cs') 'MustReportToCoordinator' 'managed remote-detail OCR conflict has a dedicated policy'
+Match-Required $alter 'MustReportToCoordinator' 'managed queue branches before any remote travel recovery'
+Match-Required $alter 'throw new AlteringCoordinatorFacilityMismatchException' 'managed detail contradiction fails closed'
+Match-Required $alter '가공 클릭/설비 이동 0회' 'OCR conflict prevents free or paid input and extra travel'
+Match-Required $alterTests 'H3: coordinator receives two-frame detail contradiction' 'H3 manager state invalidation regression stays executable'
+Match-Required $alterPlan 'AlteringCoordinatorFacilityMismatchException\.IsForFacility' 'manager detects typed conflict even inside safety aggregate'
+Match-Required $alterTests 'H3: wing-safety aggregate preserves both failures' 'aggregated currency-verification failure cannot hide onsite invalidation'
+
+# H4: intermediate scheduler must keep the shared manager onsite after a
+# confirmed whole-facility receipt. Observation/empty verification comes first.
+$dependencyRun = Method-Block $multiAlterDependency 'public async Task RunAsync' '\r?\n    private async Task<AlteringWork\[\]> WaitForFacilityBatchBoundaryAsync' 'intermediate dependency run'
+Match-Required $dependencyRun 'CollectReadyBatchAsync\(requestedPlan, ct\)' 'boundary receipt runs through the protected collector'
+Match-Required $dependencyRun '_laneState\?\.Observe' 'boundary receipt updates the shared seven-slot ledger'
+Match-Required $dependencyRun 'afterFacilityCollection.Length > 0' 'boundary receipt must prove facility empty before granting onsite state'
+Match-Required $dependencyRun '_laneState\?\.ConfirmOnsite' 'only the manager confirms same-facility receipt return'
+Require (
+    $dependencyRun.IndexOf('_laneState?.Observe(') -ge 0 -and
+    $dependencyRun.IndexOf('if (afterFacilityCollection.Length > 0)') -gt $dependencyRun.IndexOf('_laneState?.Observe(') -and
+    $dependencyRun.IndexOf('_laneState?.ConfirmOnsite(') -gt $dependencyRun.IndexOf('if (afterFacilityCollection.Length > 0)')
+) 'H4 boundary onsite confirmation follows ledger observation and verified empty queue'
+Match-Required $alterTests 'H4: dependency boundary receipt confirms only the proven same-facility onsite state' 'verified boundary receipt preserves onsite in regression'
+Match-Required $alterTests 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility' 'first boundary handoff queue is a reuse, never an unnecessary travel'
+Match-Required $alterTests 'H4: residual facility work after boundary receipt prevents onsite confirmation' 'unfinished or foreign works prevent premature onsite proof'
+
+# H5: verified field departure is authoritative evidence that the old
+# processing-facility location can no longer be reused. The multi resolver
+# reports this to the same manager used by main and intermediate queueing.
+Match-Required $multiAlter 'FacilityLaneState' 'facility manager ownership is retained'
+Match-Required (Read-Source 'source/FishingAutomation/MainForm.MultiAltering.cs') 'dependencyScheduler: dependencyScheduler,\s*laneState: laneState' 'multi resolver receives the shared lane state'
+$resolverH5 = Read-Source 'source/FishingAutomation/RecursiveAlteringSupplyResolver.cs'
+Match-Required $resolverH5 'FacilityLaneState\? laneState = null' 'single altering retains optional manager-free resolver'
+$exitH5 = Method-Block $resolverH5 'private async Task ExitToFieldAndNotifyManagerAsync' '\r?\n    public async Task ResolveAsync' 'resolver manager field-exit notification'
+Match-Required $exitH5 'await fieldExit.ExitToFieldAsync\(ct\)' 'actual field transition must finish before normal onsite invalidation'
+Match-Required $exitH5 '실제 필드 복귀 확인' 'confirmed field exit is reported to manager'
+Match-Required $exitH5 '필드 이탈 진행 중 위치 미확정' 'failed partial field exit invalidates unknown location'
+Match-Required $exitH5 '_laneState\?\.InvalidateOnsite' 'only shared lane manager loses confirmed onsite'
+Require ([regex]::Matches($resolverH5,'await ExitToFieldAndNotifyManagerAsync\(').Count -eq 3) 'all three grouped/preflight/fallback field departures notify lane state'
+Match-Required $alterTests 'H5: after an intermediate onsite confirmation, a subsequent grouped field exit' 'H5 grouped follow-up gather invalidates onsite'
+Match-Required $alterTests 'H5: whole-plan preflight announces confirmed field exit' 'H5 initial preflight invalidates only when leaving'
+Match-Required $alterTests 'H5: hidden raw shortage discovered after intermediate processing' 'H5 late recursive gather invalidates onsite'
+Match-Required $alterTests 'H5: uncertain or failed field exit invalidates stale onsite' 'H5 failed navigation never reuses stale onsite'
+Match-Required $alterTests 'H5: resolver preflight without actual field departure' 'H5 no-departure preserves onsite'
+
+# M1: only proven movement may invalidate onsite; material resolution itself
+# is still read-only planning until H5 or intermediate queue reports movement.
+$m1Resolve = [regex]::Match(
+    $alterPlan,
+    'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, remainingWorks, ct\);').Value
+Require (-not [string]::IsNullOrWhiteSpace($m1Resolve)) 'M1 material resolver call stays in registration flow'
+Match-Forbidden $m1Resolve '_facilityState\?\.InvalidateOnsite' 'M1 cannot revoke onsite merely because materials are missing'
+Match-Required $m1Resolve '실제 필드/타 시설 이탈 전 현장확정 유지' 'M1 defers location changes to confirmed travel'
+Match-Required $alterTests 'M1: material inspection and same-facility resolution without travel retain manager onsite' 'M1 same-site resolution preserves reuse directive'
+Match-Required $alterTests 'M1: material inspection cannot invent onsite proof' 'M1 initial unknown requires a first facility move'
+Match-Required $alterTests 'M1: material-only failure stops without queueing or revoking proven onsite' 'M1 failed inspection cannot falsely revoke onsite'
+
+# M2: stall UI recovery returns evidence; only the lane manager may restore
+# onsite after a previously confirmed location and non-travel UI-only recovery.
+Match-Required $alterPlan 'interface IAlteringCoordinatorStallRecoveryScreen' 'M2 coordinator recovery observation interface exists'
+Match-Required $alterPlan 'AlteringStallRecoveryPolicy.CanRetainOnsite' 'M2 manager reconciles prior authority with recovery proof'
+$m2Manager = Method-Block $alterPlan 'internal async Task RecoverStallUnderManagerAsync' '\r?\n    internal void NoteStage' 'manager stall recovery'
+Match-Required $m2Manager '_facilityState.InvalidateOnsite' 'M2 manager invalidates onsite before recovery input'
+Match-Required $m2Manager 'RecoverStallForCoordinatorAsync' 'M2 screen only returns observation'
+Match-Required $m2Manager '_facilityState.ConfirmOnsite' 'M2 only manager re-confirms valid onsite'
+Match-Required $m2Manager '_facilityState.IsOnsiteConfirmed' 'M2 recovery cannot invent a prior confirmed location'
+Match-Required $zeroWing 'IAlteringCoordinatorStallRecoveryScreen' 'M2 guarded screen forwards manager recovery'
+$m2Screen = Method-Block $alter 'public async Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync' '\r?\n    public async Task RecoverStallAsync' 'managed stall UI recovery'
+Match-Required $m2Screen 'await TryAutoTravelingAsync\(ct\)' 'M2 requires known idle travel state'
+Match-Required $m2Screen 'for \(int pass = 0; pass < 2; pass\+\+\)' 'M2 must prove two stable facility frames'
+Match-Required $m2Screen 'HasBottomConfirmationModal' 'M2 must reject confirmation popups'
+Match-Required $m2Screen 'SameFacilityUiRestoredWithoutTravel' 'M2 reports nontravel UI-only proof'
+Match-Forbidden $m2Screen 'HasFacilityMoveButtonVisual\(' 'M2 move button cannot override coordinator location authority'
+Match-Forbidden $m2Screen 'TravelToFacilityAsync\(' 'M2 recovery is forbidden from physical facility travel'
+Match-Forbidden $m2Screen 'TapFresh\(0x39' 'M2 recovery must never press Space on an ambiguous popup'
+Match-Required $alterTests 'M2: coordinator re-confirms previously proven onsite' 'M2 safe same-facility UI-only recovery keeps reuse'
+Match-Required $alterTests 'M2: UI recovery cannot create onsite authority' 'M2 unknown previous location remains Fresh'
+Match-Required $alterTests 'M2: popup, travel, missing header or unknown CLI' 'M2 ambiguous recovery remains Fresh'
+Match-Required $alterTests 'M2: manager invalidates onsite before failed stall recovery' 'M2 failed recovery revokes old proof'
+Match-Required $alterTests 'M2: single-altering keeps its bounded legacy recovery' 'M2 single-altering legacy isolation'
+
+
+
+
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
@@ -139,7 +312,7 @@ $receiptReturn = Method-Block $alter 'private async Task<bool> WaitForReceiptFac
 Match-Required $receiptReturn '일반 필드 3회 확인' 'field-return recovery needs three stable observations'
 Match-Required $receiptReturn 'CanRecoverFieldAfterCompletion' 'field-return recovery uses explicit safety policy'
 Match-Required $receiptReturn 'await EnterFacilityAsync\(plan, ct\)' 'field-return recovery performs one bounded facility re-entry'
-Match-Required $receiptReturn 'IsProvenReceiptAfterReopen' 'reopened facility requires actual same-recipe queue decrease'
+Match-Required $receiptReturn 'IsProvenReceiptAfterReopen' 'reopened facility requires actual facility-wide queue decrease'
 Match-Required $receiptReturn '재수령 Space 금지' 'field-return path explicitly forbids a second receipt Space'
 Match-Required $receiptReturn '추가 Space 0회' 'successful recovery records zero additional Space inputs'
 Match-Forbidden $receiptReturn 'TapFresh\(0x39|QueueAsync\(|CollectAsync\(|CollectAfterTravelAsync\(' 'field-return recovery cannot send Space, queue, or collect again'
@@ -149,6 +322,23 @@ Match-Required $receiptPolicy 'IsCliReceiptConfirmed\(start, end\)' 'post-reopen
 Match-Required $alterTests '14:23 receipt regression' '14:23 live failure remains an executable regression case'
 Match-Required $alterTests 'unknown CLI state blocks field re-entry' 'unknown CLI state cannot authorize field recovery'
 Match-Required $alterTests 'reopened facility cannot falsely confirm unchanged' 'unchanged queue cannot falsely confirm receipt'
+
+# M4: "모두 받기" is scoped to an entire facility, not the current recipe.
+# Mixed-slot receipts are blocked before input unless all jobs are complete;
+# the post-click managed proof requires a fully drained facility queue.
+Match-Required $receiptPolicy 'CanCollectManagedFacility' 'M4 manager can only receive a fully completed facility batch'
+Match-Required $receiptPolicy 'facilityWorks.All\(x => x.IsCompleted\)' 'M4 all seven slots must be done before receive-all'
+Match-Required $receiptPolicy 'IsManagedFacilityReceiptConfirmed' 'M4 managed receive requires whole-facility empty queue'
+Match-Required $receiptPolicy 'before > 0 && after == 0' 'M4 rejects partial decreases as mixed-batch receipt success'
+Match-Required $alterPlan 'CanCollectManagedFacility\(works, plan.FacilityName\)' 'M4 manager checks full facility before any receive input'
+Match-Required $alterPlan 'IsManagedFacilityReceiptConfirmed' 'M4 manager checks full facility after receive input'
+Match-Required $alter 'receiptWorkCountBefore = await TryFacilityWorkCountAsync\(plan, ct\)' 'M4 screen captures facility-wide pre-Space count'
+Match-Forbidden $alter 'TryMatchingWorkCountAsync' 'M4 screen cannot confuse a chosen recipe with the whole receiving facility'
+Match-Required $receiptReturn 'TryFacilityWorkCountAsync\(plan, ct\)' 'M4 field-return receipt proof uses facility-wide CLI'
+Match-Required $alterTests 'M4: manager verifies blue receive-all removed both selected and other recipe' 'M4 mixed recipe receive-all succeeds only when fully cleared'
+Match-Required $alterTests 'M4: partial mixed facility batch is rejected before moving' 'M4 partial batch never authorizes blue receive or movement'
+Match-Required $alterTests 'M4: selected item disappearing while another completed recipe remains fails closed' 'M4 partial drain stops without a second receive'
+
 
 # 4b) 16:43 real-world regression: transient move-button disappearance cannot prove arrival.
 $facilityTravel = Method-Block $alter 'private async Task TravelToFacilityAsync' '\r?\n    // Free navigation only' 'facility travel arrival'
@@ -174,7 +364,7 @@ $queueFlow = Method-Block $alter 'public async Task QueueAsync' '\r?\n    privat
 Match-Required $queueFlow 'TryReuseOnsiteFacilityAsync' 'only proven same-facility reuse may skip a fresh move'
 Match-Required $queueFlow 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)' 'fresh facility entry forces one move before recipe selection'
 Match-Required $queueFlow '새 시설 첫 등록' 'fresh facility move-first order is explicit in diagnostics'
-Match-Required $queueFlow 'await SelectRecipeAsync\(plan, ct\)' 'recipe selection remains after facility travel'
+Match-Required $queueFlow 'await SelectRecipeAsync\(plan, directive, ct\)' 'recipe selection remains after facility travel with manager directive'
 Match-Required $facilityTravel '설비 이동 1회 필수 경로' 'forced first-entry travel ignores move-detector false negatives for ordering'
 Match-Required $facilityTravel '버튼 검출 결과로 품목 선택 순서를 바꾸지 않음' 'move detector cannot authorize recipe-before-move'
 Match-Required $facilityTravel '품목 선택 전 실행' 'one-shot move input is explicitly before recipe selection'

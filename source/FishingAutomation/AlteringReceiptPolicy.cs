@@ -24,8 +24,54 @@ internal static class AlteringReceiptPolicy
         => exactMoveLabelVisible ||
            (visualMoveButton && !trustedOnsiteFacility);
 
+    // A manager-directed receipt has already chosen onsite reuse or completed
+    // a fresh travel. On those paths the always-visible move label is not
+    // evidence of physical distance. Facility/title, modal, activity, completed
+    // queue, blue-button and receipt-CLI checks remain separately mandatory.
+    internal static bool ShouldBlockReceiptForMoveButton(
+        AlteringFacilityEntryDirective directive,
+        bool trustedOnsiteFacility,
+        bool visualMoveButton,
+        bool exactMoveLabelVisible)
+        => directive == AlteringFacilityEntryDirective.Automatic &&
+           ShouldBlockReceiptForMoveButton(
+               trustedOnsiteFacility, visualMoveButton, exactMoveLabelVisible);
+
+    // The blue "모두 받기" belongs to the entire facility, not the
+    // selected recipe. Managed mixed-batch receipt requires all works in this
+    // facility to be completed before that single UI input, and requires zero
+    // works afterwards. Automatic/single-altering keeps its existing bounded
+    // decrease verification because unfinished neighboring work can coexist.
+    internal static bool CanCollectManagedFacility(
+        IReadOnlyList<AlteringWork> works,
+        string facilityName)
+    {
+        ArgumentNullException.ThrowIfNull(works);
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        var facilityWorks = works.Where(x =>
+            x.FacilityName == facilityName).ToArray();
+        return facilityWorks.Length > 0 &&
+               facilityWorks.All(x => x.IsCompleted);
+    }
+
+    internal static bool IsManagedFacilityReceiptConfirmed(int before, int after)
+        => before > 0 && after == 0;
+
     internal static bool IsCliReceiptConfirmed(int before, int after)
         => before >= 0 && after >= 0 && after < before;
+
+    // A facility title or a lowered CLI work count is not physical location
+    // evidence if a result/travel dialog remains, or movement is unresolved.
+    // Caller must observe this condition in two consecutive fresh frames.
+    internal static bool CanConfirmReceiptFacilityReturn(
+        bool facilityHeaderVisible,
+        bool completionModalVisible,
+        bool travelDialogVisible,
+        bool? autoTraveling)
+        => facilityHeaderVisible &&
+           !completionModalVisible &&
+           !travelDialogVisible &&
+           autoTraveling == false;
 
     internal static bool CanConfirmCompletion(
         bool greenConfirmVisible,

@@ -96,6 +96,15 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             if (afterFacilityCollection.Length > 0)
                 throw new InvalidOperationException(
                     $"{requestedPlan.FacilityName} 완료 배치 수령 후에도 작업이 남아 있어 중간재료가 시설을 소유하지 않습니다.");
+
+            // The collector's safe receipt path confirms that the facility UI
+            // returned; Observe above proves that the entire seven-slot batch
+            // was received. Only the shared manager may record onsite authority.
+            // Without this handoff the very next intermediate registration
+            // incorrectly receives FreshMoveRequired and repeats facility travel.
+            _laneState?.ConfirmOnsite(
+                requestedPlan.FacilityName,
+                "중간재료 전환 경계 · 완료 배치 수령 및 시설 작업 0건 확인 · 같은 시설 재사용");
         }
 
         long current = await _data.ItemCountAsync(requestedPlan.OutputName, ct);

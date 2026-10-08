@@ -7,19 +7,109 @@ namespace FishingAutomation;
 /// after its whole current lane has completed, so one completed slot never causes an
 /// extra trip.
 /// </summary>
+// A coordinator-scoped watchdog survives RunBatchAsync boundaries. Each
+// facility is tracked independently, so healthy progress elsewhere cannot
+// hide a stalled seven-slot lane. Read-only CLI observations never authorize
+// new screen input, receipt or a facility move.
+internal sealed class MultiAlteringWaitWatchdog
+{
+    private sealed record Checkpoint(
+        string Shape,
+        long LowestRunningSeconds,
+        DateTimeOffset LastProgressAt);
+
+    private readonly Dictionary<string, Checkpoint> _last = new(StringComparer.Ordinal);
+    private readonly TimeSpan _threshold;
+    private readonly Func<DateTimeOffset> _now;
+
+    internal MultiAlteringWaitWatchdog(
+        TimeSpan threshold,
+        Func<DateTimeOffset>? now = null)
+    {
+        if (threshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(threshold));
+        _threshold = threshold;
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    // The CLI exposes no stable work IDs. Compare sorted recipe/status shapes
+    // and the lowest in-progress countdown; a decreasing countdown is real
+    // evidence of progress even if the queue count remains seven.
+    internal void Observe(string facility, IReadOnlyList<AlteringWork> works)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facility);
+        ArgumentNullException.ThrowIfNull(works);
+
+        string shape = string.Join("|",
+            works.OrderBy(x => x.DisplayName, StringComparer.Ordinal)
+                .ThenBy(x => x.State, StringComparer.Ordinal)
+                .ThenBy(x => x.IsCompleted)
+                .Select(x => $"{x.DisplayName}:{x.State}:{x.IsCompleted}"));
+        long lowestRunning = works
+            .Where(x => !x.IsCompleted && x.State == "InProgress")
+            .Select(x => x.RemainingSeconds)
+            .DefaultIfEmpty(long.MaxValue)
+            .Min();
+
+        DateTimeOffset now = _now();
+        if (!_last.TryGetValue(facility, out var previous) ||
+            !string.Equals(shape, previous.Shape, StringComparison.Ordinal))
+        {
+            _last[facility] = new(shape, lowestRunning, now);
+            return;
+        }
+
+        // A timer jumping back UP is not proof of work being completed. Do not
+        // keep resetting the watchdog on a noisy CLI countdown.
+        if (lowestRunning < previous.LowestRunningSeconds)
+        {
+            _last[facility] = new(shape, lowestRunning, now);
+            return;
+        }
+
+        TimeSpan idle = now - previous.LastProgressAt;
+        if (idle < _threshold)
+            return;
+
+        int completed = works.Count(x => x.IsCompleted);
+        string remaining = lowestRunning == long.MaxValue
+            ? "진행 타이머 없음"
+            : $"최소 진행 남은시간 {lowestRunning}초";
+        throw new InvalidOperationException(
+            $"다중가공 시설별 정체 감지 · {facility} · CLI 작업 {works.Count}건 " +
+            $"(완료 {completed}건) · {remaining} · " +
+            $"실질 변화 없이 {Math.Max(0, idle.TotalSeconds):0}초 경과 " +
+            $"(한도 {_threshold.TotalSeconds:0}초). " +
+            "임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지합니다.");
+    }
+
+    // Successful managed registration/collection or plan completion is
+    // authoritative progress even if a same-count batch replaces old works.
+    internal void ConfirmManagerProgress(string facility)
+        => _last.Remove(facility);
+}
+
 internal sealed class MultiAlteringCoordinator
 {
     private readonly FacilityLaneState? _laneState;
     private readonly FacilityLaneOwner _laneOwner;
+    private readonly Func<DateTimeOffset> _now;
+    private readonly TimeSpan _idleThreshold;
 
     internal event Action<string>? Log;
 
     internal MultiAlteringCoordinator(
         FacilityLaneState? laneState = null,
-        FacilityLaneOwner laneOwner = FacilityLaneOwner.Main)
+        FacilityLaneOwner laneOwner = FacilityLaneOwner.Main,
+        Func<DateTimeOffset>? now = null,
+        TimeSpan? idleThreshold = null)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+        _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(2);
+        if (_idleThreshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
 
     internal async Task RunAsync(
@@ -67,6 +157,7 @@ internal sealed class MultiAlteringCoordinator
             _ => 0,
             StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
+        var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
 
         (string Facility, string Display, int Ordinal) Key(AlteringPlan p)
             => (p.FacilityName, p.DisplayName, p.RecipeOrdinal);
@@ -99,6 +190,29 @@ internal sealed class MultiAlteringCoordinator
             ct.ThrowIfCancellationRequested();
             var works = await readWorks(ct);
             bool acted = false;
+
+            // Persist per-facility evidence across all 1-slot RunBatch returns.
+            // Never reset just because the scheduler went around another loop.
+            foreach (string facility in orderedFacilities)
+            {
+                if (PendingCount(facility) == 0)
+                    continue;
+                var observed = works.Where(x => x.FacilityName == facility).ToArray();
+                try
+                {
+                    idleWatchdog.Observe(facility, observed);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // A stalled facility is no longer a safe onsite assumption.
+                    // Invalidate its shared authority and surface the CLI-only
+                    // diagnostic; never start an autonomous movement or receipt.
+                    _laneState?.InvalidateOnsite(
+                        $"시설별 대기 정체 · {facility} · 화면 재확인 필요");
+                    Log?.Invoke($"[다중가공] {ex.Message}");
+                    throw;
+                }
+            }
 
             foreach (string facility in orderedFacilities)
             {
@@ -172,6 +286,9 @@ internal sealed class MultiAlteringCoordinator
 
                     if (planCompleted || afterCount != beforeCount)
                     {
+                        // Count changes or confirmed completion prove a manager
+                        // action, not merely another idle poll.
+                        idleWatchdog.ConfirmManagerProgress(facility);
                         idleSelections = 0;
                     }
                     else

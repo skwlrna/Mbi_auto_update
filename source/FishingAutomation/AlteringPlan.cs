@@ -102,12 +102,84 @@ internal enum AlteringFacilityEntryDirective
     ReuseCoordinatorConfirmedOnsite
 }
 
+// A lower screen can report contradictory two-frame detail evidence, but only
+// the facility manager may invalidate its location authority. Never re-travel
+// from a managed queue callback based on OCR alone.
+internal sealed class AlteringCoordinatorFacilityMismatchException : InvalidOperationException
+{
+    internal string FacilityName { get; }
+
+    internal AlteringCoordinatorFacilityMismatchException(
+        string facilityName,
+        string message,
+        Exception? inner = null) : base(message, inner)
+        => FacilityName = facilityName;
+
+    // The zero-wing wrapper may aggregate this error with an independent
+    // currency-verification failure. Keep both failures intact while still
+    // letting the manager revoke stale location authority.
+    internal static bool IsForFacility(Exception error, string facilityName)
+        => error is AlteringCoordinatorFacilityMismatchException direct
+               && string.Equals(direct.FacilityName, facilityName, StringComparison.Ordinal)
+           || error is AggregateException aggregate
+               && aggregate.Flatten().InnerExceptions
+                   .OfType<AlteringCoordinatorFacilityMismatchException>()
+                   .Any(conflict => string.Equals(
+                       conflict.FacilityName, facilityName, StringComparison.Ordinal));
+}
+
+// The coordinator's completed facility-entry directive remains authoritative
+// throughout recipe selection. A move-button visual may appear even onsite.
+// Automatic (single-altering) keeps the legacy visual veto unchanged.
+internal static class AlteringFacilityEntryPolicy
+{
+    internal static bool ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective directive,
+        bool moveButtonVisible)
+        => directive == AlteringFacilityEntryDirective.Automatic &&
+           moveButtonVisible;
+}
+
+// L1: lower-screen onsite is a local Automatic(single-altering) observation,
+// not the facility manager's physical onsite authority. Manager-directed
+// entry/receipt must never populate or consume this private cache.
+internal static class AlteringScreenOnsiteCachePolicy
+{
+    internal static bool MayTrustForReceipt(
+        AlteringFacilityEntryDirective directive,
+        string? cachedFacility,
+        string requestedFacility)
+        => directive == AlteringFacilityEntryDirective.Automatic &&
+           string.Equals(cachedFacility, requestedFacility, StringComparison.Ordinal);
+
+    internal static string? AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective directive,
+        string facilityName)
+        => directive == AlteringFacilityEntryDirective.Automatic ? facilityName : null;
+
+    internal static string? AfterVerifiedReceiptReturn(
+        bool managedReceipt,
+        string facilityName)
+        => managedReceipt ? null : facilityName;
+}
+
 internal interface IAlteringCoordinatorQueueScreen
 {
     Task QueueAsync(
         AlteringPlan plan,
         AlteringFacilityEntryDirective directive,
         Action reserveFiveWings,
+        CancellationToken ct);
+}
+
+// All multi-altering receipt movement is commanded by the same manager that
+// owns the processing lane. The legacy IAlteringScreen API remains Automatic
+// for single processing.
+internal interface IAlteringCoordinatorReceiptScreen
+{
+    Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
         CancellationToken ct);
 }
 
@@ -119,6 +191,33 @@ internal interface IDirectCliAlteringScreen
 internal interface IAlteringRecoveryScreen
 {
     Task RecoverStallAsync(AlteringPlan plan, int attempt, string reason, CancellationToken ct);
+}
+
+// Facility recovery can restore a safe UI, but it cannot independently grant
+// physical onsite authority. The manager reconciles this observation with its
+// previously confirmed onsite proof.
+internal enum AlteringStallRecoveryObservation
+{
+    Unknown,
+    SameFacilityUiRestoredWithoutTravel
+}
+
+internal static class AlteringStallRecoveryPolicy
+{
+    internal static bool CanRetainOnsite(
+        bool wasPreviouslyConfirmedOnsite,
+        AlteringStallRecoveryObservation observation)
+        => wasPreviouslyConfirmedOnsite &&
+           observation == AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel;
+}
+
+internal interface IAlteringCoordinatorStallRecoveryScreen
+{
+    Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync(
+        AlteringPlan plan,
+        int attempt,
+        string reason,
+        CancellationToken ct);
 }
 
 internal interface IAlteringFieldExitScreen
@@ -416,18 +515,9 @@ internal sealed class AlteringAutomation
                 Log?.Invoke($"[자동 가공] 정체 감지 {stallRecoveries}/{MaxStallRecoveries} · {reason}");
                 SaveStage($"정체 복구 {stallRecoveries}/{MaxStallRecoveries}");
 
-                if (_screen is IAlteringRecoveryScreen recovery)
-                {
-                    _facilityState?.InvalidateOnsite(
-                        $"정체 복구 진입 {stallRecoveries}/{MaxStallRecoveries}");
-                    await recovery.RecoverStallAsync(plan, stallRecoveries, reason, ct);
-                    lastProgressAt = DateTime.UtcNow;
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"가공 진행이 {StallThreshold.TotalSeconds:0}초 동안 변하지 않았고 화면 복구 기능을 사용할 수 없어 정지합니다.");
-                }
+                await RecoverStallUnderManagerAsync(
+                    plan, stallRecoveries, reason, ct);
+                lastProgressAt = DateTime.UtcNow;
             }
 
             await ReportProgressAsync(works, plan, baseline, initialExistingCount, "재료 정상", ct);
@@ -497,8 +587,14 @@ internal sealed class AlteringAutomation
                             Log?.Invoke(
                                 $"[자동 가공] 재료 부족 감지 · Reason={recipe.Reason ?? "unknown"} · {missingText} · 남은 등록 {remainingWorks}회 · 하위 재료 해결 시작");
 
-                            _facilityState?.InvalidateOnsite(
-                                $"재료 해결 진입 · {plan.DisplayName}");
+                            // M1: Checking or producing missing materials does not,
+                            // by itself, mean that the character left this facility.
+                            // The shared manager keeps onsite authority until the
+                            // H5 field-exit notification or a genuinely different
+                            // facility's verified queue/receipt changes its state.
+                            Log?.Invoke(
+                                $"[자동 가공] 재료 해결 진입 · {plan.DisplayName} · " +
+                                "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
                             await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
 
                             recipes = await _data.RecipesAsync(ct);
@@ -556,11 +652,26 @@ internal sealed class AlteringAutomation
                             _facilityState.QueueDirectiveFor(plan.FacilityName);
                         Log?.Invoke(
                             $"[자동 가공] 중간관리자 시설 지시 · {plan.ScreenTitle} · {directive}");
-                        await coordinatorScreen.QueueAsync(
-                            plan,
-                            directive,
-                            reserveCallback,
-                            ct);
+                        try
+                        {
+                            await coordinatorScreen.QueueAsync(
+                                plan,
+                                directive,
+                                reserveCallback,
+                                ct);
+                        }
+                        catch (Exception conflict) when (
+                            AlteringCoordinatorFacilityMismatchException.IsForFacility(
+                                conflict, plan.FacilityName))
+                        {
+                            _facilityState.InvalidateOnsite(
+                                $"상세 OCR/현장확정 충돌 · {plan.DisplayName} · " +
+                                $"기존 지시={directive} · 하위 임의 재이동 금지");
+                            Log?.Invoke(
+                                $"[자동 가공] 중간관리자 현장 판단 충돌 수신 · " +
+                                $"{plan.ScreenTitle} · {conflict.Message} · 추가 입력 없이 정지");
+                            throw;
+                        }
                     }
                     else
                     {
@@ -631,6 +742,55 @@ internal sealed class AlteringAutomation
             }
 
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
+        }
+    }
+
+    // Public-to-test internal boundary for the same recovery path used by
+    // RunCoreAsync. Every managed decision is made against the shared lane.
+    internal async Task RecoverStallUnderManagerAsync(
+        AlteringPlan plan,
+        int attempt,
+        string reason,
+        CancellationToken ct)
+    {
+        if (_screen is not IAlteringRecoveryScreen legacyRecovery)
+            throw new InvalidOperationException(
+                $"가공 진행이 {StallThreshold.TotalSeconds:0}초 동안 변하지 않았고 화면 복구 기능을 사용할 수 없어 정지합니다.");
+
+        if (_facilityState is null)
+        {
+            // Single altering keeps the original bounded UI recovery.
+            await legacyRecovery.RecoverStallAsync(plan, attempt, reason, ct);
+            return;
+        }
+
+        bool wasOnsite = _facilityState.IsOnsiteConfirmed(plan.FacilityName);
+        _facilityState.InvalidateOnsite(
+            $"정체 복구 진입 {attempt}/{MaxStallRecoveries} · 복구 결과 확인 전 위치 미확정");
+
+        if (_screen is not IAlteringCoordinatorStallRecoveryScreen coordinated)
+            throw new InvalidOperationException(
+                "다중가공 정체 복구 결과를 중간관리자에게 반환할 수 없는 화면 구현입니다.");
+
+        AlteringStallRecoveryObservation observation =
+            await coordinated.RecoverStallForCoordinatorAsync(
+                plan, attempt, reason, ct);
+
+        if (AlteringStallRecoveryPolicy.CanRetainOnsite(
+                wasOnsite, observation))
+        {
+            _facilityState.ConfirmOnsite(
+                plan.FacilityName,
+                "정체 복구 · 기존 현장확정 + UI만 복귀 + 동일 시설 2프레임 + CLI 비이동 확인");
+            Log?.Invoke(
+                $"[자동 가공] 정체 복구 중간관리자 승인 · {plan.ScreenTitle} " +
+                "같은 현장 유지 · 다음 등록 Reuse");
+        }
+        else
+        {
+            Log?.Invoke(
+                $"[자동 가공] 정체 복구 중간관리자 판단 · {plan.ScreenTitle} " +
+                "기존 현장 미확정 또는 안전 복귀 근거 부족 · Fresh 유지 · 설비 이동 임의 실행 없음");
         }
     }
 
@@ -795,7 +955,19 @@ internal sealed class AlteringAutomation
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
         int totalBefore = works.Count(x => x.FacilityName == plan.FacilityName);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 {count}건 수령 시작");
+        // "모두 받기" drains every completed work in this FACILITY, not just
+        // the recipe displayed by plan. Never authorize a managed mixed-lane
+        // receipt while another slot is still in progress.
+        if (_facilityState is not null &&
+            !AlteringReceiptPolicy.CanCollectManagedFacility(works, plan.FacilityName))
+            throw new InvalidOperationException(
+                $"{plan.FacilityName} 다중가공 묶음 수령 차단 · " +
+                $"시설 전체 {totalBefore}건 중 완료 {count}건 · " +
+                "일부만 완료된 7칸 배치는 모두 받기/Space 입력 없이 대기해야 합니다.");
+
+        Log?.Invoke(
+            $"[자동 가공] {plan.ScreenTitle} 시설 전체 {totalBefore}건 · " +
+            $"완료 {count}건 · 모두 받기 수령 시작");
 
         if (_screen is IDirectCliAlteringScreen direct)
         {
@@ -808,14 +980,61 @@ internal sealed class AlteringAutomation
             return true;
         }
 
-        bool firstCollected = await _screen.CollectAsync(plan, ct);
+        bool firstCollected;
+        if (_facilityState is not null)
+        {
+            if (_screen is not IAlteringCoordinatorReceiptScreen coordinated)
+                throw new InvalidOperationException(
+                    "다중가공 중간관리자 수령 지시를 현재 가공 화면이 지원하지 않습니다.");
+
+            AlteringFacilityEntryDirective directive =
+                _facilityState.QueueDirectiveFor(plan.FacilityName);
+            Log?.Invoke(
+                $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} · {directive}");
+            // The manager alone owns onsite authority. Receipt might close
+            // into FIELD, or the completion result might still cover the UI.
+            // Do not preserve a reusable bench proof across that uncertainty.
+            _facilityState.InvalidateOnsite(
+                $"수령 진입 · {plan.DisplayName} · 완료창 닫기 및 현장 복귀 검증 대기");
+            firstCollected = await coordinated.CollectAsync(plan, directive, ct);
+
+            // Coordinator-controlled receipt must never fall through to a second,
+            // independently selected travel or receive action.
+            if (!firstCollected)
+                throw new InvalidOperationException(
+                    "중간관리자 수령 지시 후 수령 미완료 · 하위 자체 재이동/2차 수령 금지 · 안전 정지");
+        }
+        else
+        {
+            firstCollected = await _screen.CollectAsync(plan, ct);
+        }
+
         if (firstCollected)
         {
-            await VerifyAsync(async token =>
-                (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
-                "1차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 입력 없이 정지합니다.",
-                ct, TimeSpan.FromSeconds(1));
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 1차 모두 받기");
+            if (_facilityState is not null)
+            {
+                // M4: one blue input covers ALL recipes in the facility.
+                // A partial drop is not proof of a completed mixed batch.
+                await VerifyAsync(async token =>
+                    AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(
+                        totalBefore,
+                        (await _data.WorksAsync(token))
+                            .Count(x => x.FacilityName == plan.FacilityName)),
+                    "다중가공 모두 받기 후 시설 전체 대기열 0건을 확인하지 못했습니다. " +
+                    "다른 품목이 남거나 CLI가 불확실하여 추가 수령 없이 정지합니다.",
+                    ct, TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                await VerifyAsync(async token =>
+                    (await _data.WorksAsync(token))
+                        .Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
+                    "1차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 입력 없이 정지합니다.",
+                    ct, TimeSpan.FromSeconds(1));
+            }
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} 시설 전체 수령 확인 · " +
+                $"수령 전 {totalBefore}건 · 다중가공={_facilityState is not null} · 1차 모두 받기");
             return true;
         }
 
