@@ -181,8 +181,15 @@ try
         "real queue checks manager conflict BEFORE Automatic-only remote-detail recovery");
 
     var travel = ScreenCalls("TravelToFacilityAsync", 5);
-    Check(Has(travel, "IsManagedFreshArrivalObservation"),
-        "real managed Fresh travel checks independent transition evidence for arrival");
+    Check(Has(travel, "IsManagedFreshArrivalObservation") &&
+          Has(travel, "HasVerifiedManagedMoveTransition"),
+        "F01 compiled managed Fresh travel derives confirmed transition before stable arrival proof");
+    Check(!CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 0) &&
+          !CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 1) &&
+          !CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", false, true, 2) &&
+          CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, true, 0) &&
+          CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 2),
+        "F01 compiled policy rejects uncorrelated OCR title misses, CLI-only loading and missing move input");
     var enter = ScreenCalls("EnterFacilityAsync", 3);
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
