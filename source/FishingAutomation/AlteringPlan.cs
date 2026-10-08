@@ -123,6 +123,17 @@ internal interface IAlteringCoordinatorQueueScreen
         CancellationToken ct);
 }
 
+// All multi-altering receipt movement is commanded by the same manager that
+// owns the processing lane. The legacy IAlteringScreen API remains Automatic
+// for single processing.
+internal interface IAlteringCoordinatorReceiptScreen
+{
+    Task<bool> CollectAsync(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        CancellationToken ct);
+}
+
 internal interface IDirectCliAlteringScreen
 {
     Task CompleteAsync(string displayName, CancellationToken ct);
@@ -820,7 +831,30 @@ internal sealed class AlteringAutomation
             return true;
         }
 
-        bool firstCollected = await _screen.CollectAsync(plan, ct);
+        bool firstCollected;
+        if (_facilityState is not null)
+        {
+            if (_screen is not IAlteringCoordinatorReceiptScreen coordinated)
+                throw new InvalidOperationException(
+                    "다중가공 중간관리자 수령 지시를 현재 가공 화면이 지원하지 않습니다.");
+
+            AlteringFacilityEntryDirective directive =
+                _facilityState.QueueDirectiveFor(plan.FacilityName);
+            Log?.Invoke(
+                $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} · {directive}");
+            firstCollected = await coordinated.CollectAsync(plan, directive, ct);
+
+            // Coordinator-controlled receipt must never fall through to a second,
+            // independently selected travel or receive action.
+            if (!firstCollected)
+                throw new InvalidOperationException(
+                    "중간관리자 수령 지시 후 수령 미완료 · 하위 자체 재이동/2차 수령 금지 · 안전 정지");
+        }
+        else
+        {
+            firstCollected = await _screen.CollectAsync(plan, ct);
+        }
+
         if (firstCollected)
         {
             await VerifyAsync(async token =>
