@@ -96,6 +96,7 @@ internal sealed class MultiAlteringCoordinator
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _idleThreshold;
     private readonly Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? _restoreCompleted;
+    private readonly bool _fillInitialVacancies;
 
     internal event Action<string>? Log;
 
@@ -104,13 +105,15 @@ internal sealed class MultiAlteringCoordinator
         FacilityLaneOwner laneOwner = FacilityLaneOwner.Main,
         Func<DateTimeOffset>? now = null,
         TimeSpan? idleThreshold = null,
-        Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null)
+        Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null,
+        bool fillInitialVacancies = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(2);
         _restoreCompleted = restoreCompleted;
+        _fillInitialVacancies = fillInitialVacancies;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -161,6 +164,13 @@ internal sealed class MultiAlteringCoordinator
             StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
+        // Only the explicit new-F9 mode gets one initial pass into vacant
+        // slots already occupied by old game jobs. Ordinary batching is unchanged.
+        var startupVacancies = new HashSet<string>(
+            orderedFacilities.Where(f => _fillInitialVacancies &&
+                _laneState is not null &&
+                _laneState.Snapshot(f).InitialObservedWorks > 0),
+            StringComparer.Ordinal);
 
         (string Facility, string Display, int Ordinal) Key(AlteringPlan p)
             => (p.FacilityName, p.DisplayName, p.RecipeOrdinal);
@@ -243,11 +253,16 @@ internal sealed class MultiAlteringCoordinator
                 bool laneReady =
                     facilityWorks.Length == 0 ||
                     facilityWorks.All(x => x.IsCompleted);
+                bool initialVacancy = startupVacancies.Contains(facility) &&
+                    facilityWorks.Length is > 0 and < 7;
 
-                if (!laneReady)
+                if (!laneReady && !initialVacancy)
                     continue;
 
-                if (facilityWorks.Length > 0)
+                if (initialVacancy)
+                    Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} " +
+                        $"기존 작업 그대로 · 빈 {7 - facilityWorks.Length}칸에 새 F9 등록");
+                else if (facilityWorks.Length > 0)
                     Log?.Invoke(
                         $"[다중가공] {facility.Replace(" 시설", "")} 배치 완료 · " +
                         $"{facilityWorks.Length}건 모아서 수령 후 혼합 재충전");
@@ -275,7 +290,8 @@ internal sealed class MultiAlteringCoordinator
                     // still being seeded. Do not call an Automation whose entry
                     // could attempt a prohibited partial "collect all". Leave the
                     // running slots intact and revisit at the full batch boundary.
-                    if (AlteringReceiptPolicy.IsPartialManagedFacility(facilityWorks, facility))
+                    if (AlteringReceiptPolicy.IsPartialManagedFacility(facilityWorks, facility) &&
+                        !initialVacancy)
                     {
                         Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} 부분 완료 · " +
                                     "수령/추가 등록 보류 · 시설 전체 완료까지 다른 시설로 양보");
@@ -337,6 +353,9 @@ internal sealed class MultiAlteringCoordinator
                     }
                 }
 
+                // Never revisit a partially completed batch to top up slots
+                // merely because a job finished after this initial fill pass.
+                startupVacancies.Remove(facility);
                 works = await readWorks(ct);
                 facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
                 _laneState?.Observe(facility, facilityWorks, allowShrink: false);
