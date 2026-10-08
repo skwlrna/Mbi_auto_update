@@ -1414,7 +1414,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     }
 
     // Screenshot 2026-10-09 07:00, 800x1000: the genuine processing-result
-    // screen has THREE independent anchors (blue chest halo, white centered
+    // screen has FOUR independent anchors (blue chest halo, brown chest body, white centered
     // result heading, cyan reward cards). A green travel popup has none of
     // this fixed reward layout. Visual proof never replaces CLI receipt proof.
     private static bool HasManagedCompletionResultVisual(Bitmap frame)
@@ -1435,6 +1435,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         int chestBlue = Pixels(frame, new Rectangle(295, 58, 215, 145), 4,
             p => p.B >= 110 && p.G >= 65 &&
                  p.B >= p.R + 28 && p.B >= p.G + 12);
+        // The processing result specifically shows a wooden materials chest
+        // inside the halo, not only a generic blue celebration background.
+        int woodenChest = Pixels(frame, new Rectangle(350, 90, 105, 111), 3,
+            p => p.R >= 94 && p.G >= 48 && p.R >= p.G + 18 &&
+                 p.G >= p.B + 8 && p.B <= 125);
         int titleWhite = Pixels(frame, new Rectangle(329, 202, 151, 50), 2,
             p => p.R >= 165 && p.G >= 165 && p.B >= 165 &&
                  Math.Max(p.R, Math.Max(p.G, p.B)) -
@@ -1443,7 +1448,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             p => p.B >= 80 && p.G >= 72 &&
                  p.B >= p.R + 24 && p.G >= p.R + 24);
 
-        return chestBlue >= 20 && titleWhite >= 20 && rewardCyan >= 32;
+        return chestBlue >= 20 && woodenChest >= 18 &&
+               titleWhite >= 20 && rewardCyan >= 32;
     }
 
     private async Task TravelToFacilityAsync(
@@ -2078,7 +2084,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         bool green = HasBottomConfirmationModal(frame);
         bool visualResult = green && HasManagedCompletionResultVisual(frame);
         // A result title OCR miss on the real white-on-blue result is not a
-        // veto once the fixed three-anchor result screen is positively proven.
+        // veto once the fixed reward result screen is positively proven.
         bool heading = green && !visualResult &&
             await FindAsync(frame, new Rectangle(325, 195, 165, 75),
                 "가공 완료", ct) is not null;
