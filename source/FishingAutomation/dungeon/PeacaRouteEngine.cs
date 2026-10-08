@@ -76,7 +76,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
 
         using var beforeMapOpen = await CaptureGameWindowAsync(ct);
         Log?.Invoke("[던전 자동이동] M 입력 -> 지도 열기");
-        _input.TapScanCode(0x32); // M
+        _input.TapScanCode(0x32, ct); // M
         await Task.Delay(1200, ct);
 
         using var localMapFrame = await CaptureGameWindowAsync(ct);
@@ -89,7 +89,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
         NativeMethods.SetForegroundWindow(_hwnd);
         var ullaBreadcrumbPoint = new Point(82, 66);
         Log?.Invoke($"[던전 자동이동] 좌측 상단 울라 대륙 고정 위치 클릭 @ {ullaBreadcrumbPoint}");
-        _input.ClickClientPoint(_hwnd, ullaBreadcrumbPoint);
+        _input.ClickClientPoint(_hwnd, ullaBreadcrumbPoint, ct);
         await Task.Delay(1200, ct);
 
         using var worldMapFrame = await CaptureGameWindowAsync(ct);
@@ -113,7 +113,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
         _hwnd = await ResolveRequiredGameWindowAsync(ct);
         NativeMethods.SetForegroundWindow(_hwnd);
         Log?.Invoke($"[던전 자동이동] {dungeonName} OCR 확인 -> 위 던전 아이콘 클릭 @ {iconBounds}");
-        _input.ClickClientPoint(_hwnd, iconCenter);
+        _input.ClickClientPoint(_hwnd, iconCenter, ct);
         await Task.Delay(700, ct);
 
         bool popupReady = await WaitForTargetPairAsync(popupTarget, "route_go_here", 8, ct);
@@ -121,7 +121,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
             throw new TimeoutException($"{dungeonName} 아이콘 클릭 후 '{dungeonName} + 여기로 가기' 확인에 실패했습니다. Space를 누르지 않습니다.");
 
         Log?.Invoke($"[던전 자동이동] {dungeonName} + 여기로 가기 확인 -> Space");
-        _input.TapScanCode(0x39);
+        _input.TapScanCode(0x39, ct);
         await Task.Delay(800, ct);
 
         if (isPeaca)
@@ -138,7 +138,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
 
             _hwnd = await ResolveRequiredGameWindowAsync(ct);
             Log?.Invoke($"[던전 자동이동] 심층 던전 탭 클릭 @ {deepTab.Bounds}");
-            _input.ClickClientPoint(_hwnd, deepTab.Center);
+            _input.ClickClientPoint(_hwnd, deepTab.Center, ct);
             await Task.Delay(900, ct);
         }
         else
@@ -162,7 +162,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
 
         _hwnd = await ResolveRequiredGameWindowAsync(ct);
         Log?.Invoke($"[던전 자동이동] {destination} 구역 확인 -> 클릭 @ {slot.Bounds}");
-        _input.ClickClientPoint(_hwnd, slot.Center);
+        _input.ClickClientPoint(_hwnd, slot.Center, ct);
         await Task.Delay(650, ct);
 
         var enter = await WaitForTargetAsync(enterTarget, 8, ct);
@@ -170,7 +170,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
             throw new TimeoutException($"{destination} 선택 후 정확한 진입 문구를 확인하지 못했습니다. Space를 누르지 않습니다.");
 
         Log?.Invoke($"[던전 자동이동] {destination} 진입 문구 확인 -> Space");
-        _input.TapScanCode(0x39);
+        _input.TapScanCode(0x39, ct);
 
         await EnterPeacaAtFixedPointAsync(ct);
         Log?.Invoke("[페카 심층] 입장 입력 완료 -> 이동 모드 종료");
@@ -199,7 +199,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                 NativeMethods.SetForegroundWindow(_hwnd);
                 Log?.Invoke("[페카 심층] 페카/심층/입장 화면 2회 확인 -> 클라이언트 (493,952) 클릭");
-                _input.ClickClientPoint(_hwnd, new Point(493, 952));
+                _input.ClickClientPoint(_hwnd, new Point(493, 952), ct);
                 return;
             }
             await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
@@ -284,7 +284,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
             ct.ThrowIfCancellationRequested();
             using var before = await CaptureGameWindowAsync(ct);
             _hwnd = await ResolveRequiredGameWindowAsync(ct);
-            _input.DragClientPoint(_hwnd, new Point(270, 330), new Point(520, 620), 800);
+            _input.DragClientPoint(_hwnd, new Point(270, 330), new Point(520, 620), 800, ct);
             await Task.Delay(650, ct);
             using var after = await CaptureGameWindowAsync(ct);
             double diff = MapFrameDifference(before, after);
@@ -327,7 +327,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
                 var from = moveViewportRight ? new Point(530, 440) : new Point(220, 440);
                 var to = moveViewportRight ? new Point(220, 440) : new Point(530, 440);
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
-                _input.DragClientPoint(_hwnd, from, to, 850);
+                _input.DragClientPoint(_hwnd, from, to, 850, ct);
                 await Task.Delay(600, ct);
                 using var after = await CaptureGameWindowAsync(ct);
                 double diff = MapFrameDifference(frame, after);
@@ -345,7 +345,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
 
             using var beforeDown = await CaptureGameWindowAsync(ct);
             _hwnd = await ResolveRequiredGameWindowAsync(ct);
-            _input.DragClientPoint(_hwnd, new Point(380, 650), new Point(380, 320), 850);
+            _input.DragClientPoint(_hwnd, new Point(380, 650), new Point(380, 320), 850, ct);
             await Task.Delay(650, ct);
             using var afterDown = await CaptureGameWindowAsync(ct);
             double downDiff = MapFrameDifference(beforeDown, afterDown);
@@ -353,7 +353,7 @@ internal sealed class PeacaRouteEngine : IScenarioRunner
             if (downDiff <= EdgeThreshold)
             {
                 using var confirmBefore = await CaptureGameWindowAsync(ct);
-                _input.DragClientPoint(_hwnd, new Point(380, 650), new Point(380, 320), 850);
+                _input.DragClientPoint(_hwnd, new Point(380, 650), new Point(380, 320), 850, ct);
                 await Task.Delay(650, ct);
                 using var confirmAfter = await CaptureGameWindowAsync(ct);
                 double confirmDiff = MapFrameDifference(confirmBefore, confirmAfter);
