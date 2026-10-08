@@ -26,6 +26,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _verificationAttempts;
     private readonly FacilityLaneState? _laneState;
+    private readonly IAlteringInternalConsumptionObserver? _internalConsumptionObserver;
+    private readonly Func<DateTimeOffset> _boundaryNow;
+    private readonly TimeSpan _boundaryIdleThreshold;
 
     internal event Action<string>? Log;
 
@@ -36,7 +39,10 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         string sessionDirectory,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         int verificationAttempts = 120,
-        FacilityLaneState? laneState = null)
+        FacilityLaneState? laneState = null,
+        IAlteringInternalConsumptionObserver? internalConsumptionObserver = null,
+        Func<DateTimeOffset>? boundaryNow = null,
+        TimeSpan? boundaryIdleThreshold = null)
     {
         _data = data;
         _screen = screen;
@@ -45,6 +51,11 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         _delay = delay ?? Task.Delay;
         _verificationAttempts = Math.Clamp(verificationAttempts, 1, 120);
         _laneState = laneState;
+        _internalConsumptionObserver = internalConsumptionObserver;
+        _boundaryNow = boundaryNow ?? (() => DateTimeOffset.UtcNow);
+        _boundaryIdleThreshold = boundaryIdleThreshold ?? TimeSpan.FromMinutes(2);
+        if (_boundaryIdleThreshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(boundaryIdleThreshold));
     }
 
     public async Task RunAsync(
@@ -198,6 +209,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             resolver,
             store,
             session,
+            // F05: child registration may consume a still-pending main output.
+            // Credit the same durable producer session via its shared observer.
+            internalConsumptionObserver: _internalConsumptionObserver,
             onConfirmedReceipt: (receiptPlan, remainingWorks) =>
                 _laneState?.Observe(
                     receiptPlan.FacilityName,
@@ -258,6 +272,10 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         AlteringPlan plan,
         CancellationToken ct)
     {
+        // F06: this boundary runs while the parent Coordinator is awaited and
+        // cannot execute its own watchdog. Reuse exactly its progress policy.
+        var boundaryWatch = new MultiAlteringWaitWatchdog(
+            _boundaryIdleThreshold, _boundaryNow);
         while (true)
         {
             ct.ThrowIfCancellationRequested();
@@ -273,6 +291,18 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             if (facilityWorks.Length == 0 ||
                 facilityWorks.All(x => x.IsCompleted))
                 return facilityWorks;
+
+            try
+            {
+                boundaryWatch.Observe(plan.FacilityName, facilityWorks);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _laneState?.InvalidateOnsite(
+                    $"중간재료 경계 정체 · {plan.FacilityName} · 이동/수령 없이 정지");
+                Log?.Invoke($"[중간재료 스케줄] {ex.Message}");
+                throw;
+            }
 
             long waitSeconds = facilityWorks
                 .Where(x => x.State == "InProgress")
