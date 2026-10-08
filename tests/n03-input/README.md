@@ -32,8 +32,17 @@ followed by a new DOWN after F10. Paste also lacked exception-safe Ctrl/V releas
 - The cancellation callback only performs `Interlocked.Exchange`. It never
   takes the input/window lock or waits for a native send. Lock order remains
   shared guard gate -> instance input gate; neither callback reverses that order.
-- The clipboard STA worker cannot transmit input. Its caller can exit on
-  cancellation without waiting for a blocked clipboard operation to finish.
+- The clipboard STA worker cannot transmit input. It is explicitly a
+  **background** thread, so a stuck Windows clipboard call cannot keep the app
+  process alive after shutdown. Its caller exits promptly on cancellation.
+- Clipboard writes are serialized across runs using a shared worker gate. A
+  cancelled worker still waiting for the gate checks its token before writing;
+  an already-running cancelled writer finishes (or remains blocked) before a
+  restarted run can commit a newer clipboard value. Thus an old STA worker
+  cannot overwrite a newer successfully prepared search term. A native
+  Clipboard.SetText already in progress cannot be forcibly terminated; if it
+  hangs, later clipboard operations wait until cancelled rather than bypassing
+  the gate and accepting a stale write.
 
 ## Precisely bounded guarantee
 
@@ -83,6 +92,9 @@ The suite reports each named case. Covered families:
   and after DOWN. Consecutive keys stop without a second independent input.
 - Paste cancellation at clipboard preparation, Ctrl DOWN, V DOWN and V UP;
   Ctrl/V order and released state. Drag cancellation after DOWN and mid-movement.
+- Windows-only compiled-production STA tests check cancellation before write,
+  cancellation during blocked STA write (prompt F10 return, background STA),
+  restart write ordering, and cancellation of queued stale writers.
 - DOWN/wait exceptions, attempted release, Ctrl release despite V UP failure,
   and failure blocking any future input on that instance.
 - Normal click/Space/paste/drag, unchanged target coordinates, click cursor
