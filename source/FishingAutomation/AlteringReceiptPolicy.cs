@@ -42,6 +42,16 @@ internal static class AlteringReceiptPolicy
     // facility to be completed before that single UI input, and requires zero
     // works afterwards. Automatic/single-altering keeps its existing bounded
     // decrease verification because unfinished neighboring work can coexist.
+    // F02: partial completion is a normal waiting/registration state, not a
+    // blanket authorization to collect and not a fatal scheduler error.
+    internal static bool IsPartialManagedFacility(
+        IReadOnlyList<AlteringWork> works, string facilityName)
+    {
+        var facilityWorks = works.Where(x => x.FacilityName == facilityName).ToArray();
+        return facilityWorks.Any(x => x.IsCompleted) &&
+               facilityWorks.Any(x => !x.IsCompleted);
+    }
+
     internal static bool CanCollectManagedFacility(
         IReadOnlyList<AlteringWork> works,
         string facilityName)
