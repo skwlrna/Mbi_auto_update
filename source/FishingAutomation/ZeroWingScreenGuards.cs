@@ -19,7 +19,7 @@ internal static class SpiritWingSafety
     }
 }
 
-internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringReceiptBoundaryScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly IAlteringScreen _inner;
     private readonly MabinogiMobileCli _cli;
@@ -77,6 +77,19 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordin
                 throw new InvalidOperationException(
                     "현재 가공 화면은 다중가공 중간관리자 수령 지시를 지원하지 않습니다.");
             return coordinated.CollectAsync(plan, directive, ct);
+        }, ct);
+
+    public Task<bool> CollectAsyncAtBoundary(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Func<CancellationToken, Task> beforeReceiveInput,
+        CancellationToken ct)
+        => GuardAsync("[자동 가공] 중간관리자 지시 수령 입력 경계", () =>
+        {
+            if (_inner is not IAlteringReceiptBoundaryScreen bounded)
+                throw new InvalidOperationException(
+                    "수령 입력 직전 영구 기록을 보장할 수 없는 화면 구현입니다. 입력 없이 정지합니다.");
+            return bounded.CollectAsyncAtBoundary(plan, directive, beforeReceiveInput, ct);
         }, ct);
 
     public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)

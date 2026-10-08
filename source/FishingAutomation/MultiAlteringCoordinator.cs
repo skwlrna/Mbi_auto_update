@@ -95,6 +95,7 @@ internal sealed class MultiAlteringCoordinator
     private readonly FacilityLaneOwner _laneOwner;
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _idleThreshold;
+    private readonly Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? _restoreCompleted;
 
     internal event Action<string>? Log;
 
@@ -102,12 +103,14 @@ internal sealed class MultiAlteringCoordinator
         FacilityLaneState? laneState = null,
         FacilityLaneOwner laneOwner = FacilityLaneOwner.Main,
         Func<DateTimeOffset>? now = null,
-        TimeSpan? idleThreshold = null)
+        TimeSpan? idleThreshold = null,
+        Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(2);
+        _restoreCompleted = restoreCompleted;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -161,6 +164,18 @@ internal sealed class MultiAlteringCoordinator
 
         (string Facility, string Display, int Ordinal) Key(AlteringPlan p)
             => (p.FacilityName, p.DisplayName, p.RecipeOrdinal);
+
+        void RestoreCompleted()
+        {
+            if (_restoreCompleted is null) return;
+            foreach (var restored in _restoreCompleted(plans))
+            {
+                if (!plans.Contains(restored))
+                    throw new InvalidOperationException("복원 완료 품목이 현재 배치와 다릅니다.");
+                completed.Add(Key(restored));
+            }
+        }
+        RestoreCompleted();
 
         int FindNextPendingIndex(string facility)
         {
@@ -245,6 +260,11 @@ internal sealed class MultiAlteringCoordinator
                 while (PendingCount(facility) > 0)
                 {
                     ct.ThrowIfCancellationRequested();
+                    // A facility-wide receipt can complete another main item
+                    // inside this turn or a recursive dependency. Rehydrate before
+                    // selecting the next round-robin slot, not just at startup.
+                    RestoreCompleted();
+                    if (PendingCount(facility) == 0) break;
                     works = await readWorks(ct);
                     facilityWorks = works.Where(x => x.FacilityName == facility).ToArray();
                     _laneState?.Observe(facility, facilityWorks, allowShrink: false);
@@ -282,6 +302,9 @@ internal sealed class MultiAlteringCoordinator
 
                     if (planCompleted)
                     {
+                        RestoreCompleted();
+                        if (_restoreCompleted is not null && !completed.Contains(Key(plan)))
+                            throw new InvalidOperationException("품목 완료의 영구 저장 증거 부족 · 안전 정지");
                         completed.Add(Key(plan));
                         Log?.Invoke(
                             $"[다중가공] 품목 완료 {completed.Count}/{plans.Count} · {plan.DisplayName}");

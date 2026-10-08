@@ -179,12 +179,16 @@ try
     Check(!Has(prompt, "TravelToFacilityAsync"),
         "receive prompt cannot make an independent travel decision");
 
-    var collect = ScreenCalls("CollectAsync", 3);
-    Check(Count(collect, "WaitForCollectPromptAsync") >= 2 &&
+    // N02 moves the actual managed-receipt async body into a boundary-aware
+    // method. Inspect that compiled production body, not the thin old overload.
+    var collect = ScreenCalls("CollectAsyncAtBoundary", 4);
+    Check(Has(ScreenCalls("CollectAsync", 3), "CollectAsyncAtBoundary") &&
+          Count(collect, "WaitForCollectPromptAsync") >= 2 &&
           Has(collect, "TravelToFacilityAsync") &&
           Has(collect, "ConfirmCompletionResultAsync") &&
-          Has(collect, "AfterVerifiedFacilityEntry"),
-        "real receipt uses manager travel, stabilized blue recheck and completion proof");
+          Has(collect, "AfterVerifiedFacilityEntry") &&
+          Has(collect, "Invoke") && Has(collect, "TapFresh"),
+        "real receipt keeps manager travel, blue recheck, completion proof and durable receive-input boundary");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),

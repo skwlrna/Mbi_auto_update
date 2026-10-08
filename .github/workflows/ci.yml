@@ -2,7 +2,7 @@ name: Check V3 Production Engine
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, fix/n02-multi-altering-resume ]
   pull_request:
     branches: [ main ]
 
@@ -33,6 +33,12 @@ jobs:
       - name: Stability regression tests
         shell: pwsh
         run: dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
+
+      - name: N02 deterministic batch persistence regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'N02 batch persistence regressions failed' }
 
       - name: N03 deterministic input cancellation regressions
         shell: pwsh

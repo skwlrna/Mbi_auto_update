@@ -4,9 +4,14 @@ using System.Text.Json;
 
 namespace FishingAutomation;
 
+internal enum MultiAlteringItemState { NotStarted, InProgress, Completed, RecoveryRequired }
+
 internal sealed record AlteringSessionState
 {
     public int Version { get; init; } = 1;
+    public string? BatchId { get; init; }
+    public MultiAlteringItemState MultiState { get; init; }
+    public DateTimeOffset? CompletedAt { get; init; }
     public string FacilityName { get; init; } = "";
     public string DisplayName { get; init; } = "";
     public int TargetQuantity { get; init; }
@@ -72,7 +77,7 @@ internal sealed record AlteringSessionState
     };
 }
 
-internal sealed class AlteringSessionStore
+internal class AlteringSessionStore
 {
     private readonly string _path;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -104,7 +109,7 @@ internal sealed class AlteringSessionStore
             System.IO.Path.GetFileNameWithoutExtension(path),
             out _);
 
-    internal AlteringSessionState? Load()
+    internal virtual AlteringSessionState? Load()
     {
         if (!File.Exists(_path)) return null;
         try
@@ -131,7 +136,7 @@ internal sealed class AlteringSessionStore
         }
     }
 
-    internal void Save(AlteringSessionState state)
+    internal virtual void Save(AlteringSessionState state)
     {
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
         string temp = _path + ".tmp";
@@ -140,7 +145,7 @@ internal sealed class AlteringSessionStore
         File.Move(temp, _path, true);
     }
 
-    internal void Delete()
+    internal virtual void Delete()
     {
         try
         {

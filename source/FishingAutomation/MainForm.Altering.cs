@@ -24,6 +24,13 @@ public sealed partial class MainForm
         _cancelStart = false;
         try
         {
+            if (requestedPlan is null && !batchChild &&
+                MultiAlteringBatchStore.ReadPendingPlans(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MabiAuto", "multi-altering")).Count > 0)
+                throw new InvalidOperationException(
+                    "미종료 다중가공 배치가 있습니다. 작업 목록을 새로고침해 기존 배치를 이어하세요. " +
+                    "목록을 비워 새 단일가공으로 자동 재등록하지 않습니다.");
             var plan = requestedPlan ?? SelectedAlteringPlan();
             plan.Validate();
 
