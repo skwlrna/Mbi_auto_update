@@ -101,6 +101,72 @@ var sameIdentity = new CliIdentityContext("char-1", "테스트", "account-1", "�
 var changedIdentity = new CliIdentityContext("char-2", "테스트", "account-1", "서버A");
 Check(identity.Matches(sameIdentity) && !identity.Matches(changedIdentity), "identity change guard failed");
 
+// Production CLI may return scoped fields; never mistake Account.Id for the
+// character's ID, or accept inconsistent nested/top-level identity fields.
+var nested = CliAutomationGuards.ParseIdentity(MabinogiMobileCli.Parse("get_my_info", new(0,
+    """{"Character":{"Id":"char-7","Nickname":"테스트"},"Account":{"Id":"account-7"},"Server":{"Name":"서버7"}}""", "")));
+Check(nested == new CliIdentityContext("char-7", "테스트", "account-7", "서버7"),
+    "nested CLI character/account/server identity not parsed");
+var accountAndName = CliAutomationGuards.ParseIdentity(MabinogiMobileCli.Parse("get_my_info", new(0,
+    """{"CharacterName":"테스트","AccountCode":"account-7"}""", "")));
+Check(accountAndName.HasDurableMultiIdentity && accountAndName.CharacterId is null &&
+    accountAndName.RealmName is null, "account+name fallback blocked");
+Check(!new CliIdentityContext(null, "테스트", null, null).HasDurableMultiIdentity &&
+    !new CliIdentityContext(null, null, "account-7", null).HasDurableMultiIdentity,
+    "weak identity could bypass durable batch guard");
+try
+{
+    _ = CliAutomationGuards.ParseIdentity(MabinogiMobileCli.Parse("get_my_info", new(0,
+        """{"CharacterId":"char-1","Character":{"Id":"char-2"}}""", "")));
+    throw new Exception("conflicting nested character IDs accepted");
+}
+catch (InvalidDataException) { checks++; }
+
+int identityReads = 0;
+var stableIdentityCli = new MabinogiMobileCli(log, true, (command, _) =>
+{
+    if (command != "get_my_info") throw new Exception("unexpected CLI identity command");
+    identityReads++;
+    string content = identityReads == 1
+        ? """{"CharacterName":"테스트"}"""
+        : """{"CharacterName":"테스트","AccountCode":"account-7"}""";
+    return Task.FromResult(new CliProcessOutput(0, content, ""));
+});
+var stable = await CliIdentityGuard.CaptureForMultiAlteringAsync(stableIdentityCli, default);
+Check(stable.Baseline == accountAndName && identityReads >= 3,
+    "stable multi identity should require two matching strong snapshots");
+
+int changedReads = 0;
+var changedIdentityCli = new MabinogiMobileCli(log, true, (_, _) =>
+    Task.FromResult(new CliProcessOutput(0,
+        ++changedReads == 1
+            ? """{"CharacterName":"테스트","AccountCode":"account-7"}"""
+            : """{"CharacterName":"다른캐릭터","AccountCode":"account-7"}""", "")));
+try
+{
+    _ = await CliIdentityGuard.CaptureForMultiAlteringAsync(changedIdentityCli, default);
+    throw new Exception("mid-preflight character swap accepted");
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("바뀌었습니다")) { checks++; }
+
+int interruptedIdentityReads = 0;
+var interruptedCli = new MabinogiMobileCli(log, true, (_, _) =>
+{
+    string snapshot = ++interruptedIdentityReads switch
+    {
+        1 => """{"CharacterId":"char-1","CharacterName":"테스트"}""",
+        2 => """{"CharacterName":"테스트"}""",
+        _ => """{"CharacterId":"char-2","CharacterName":"테스트"}"""
+    };
+    return Task.FromResult(new CliProcessOutput(0, snapshot, ""));
+});
+try
+{
+    _ = await CliIdentityGuard.CaptureForMultiAlteringAsync(interruptedCli, default);
+    throw new Exception("identity swap across weak frame accepted");
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("바뀌었습니다")) { checks++; }
+
 var currenciesBefore = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
     "[{\"DisplayName\":\"정령의 날개\",\"Amount\":100},{\"DisplayName\":\"골드\",\"Amount\":5000}]", "")));
 var currenciesAfter = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,

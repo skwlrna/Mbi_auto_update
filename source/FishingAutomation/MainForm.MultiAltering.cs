@@ -57,7 +57,7 @@ public sealed partial class MainForm
 
             var rawAlteringData = new AlteringCliData(_cli);
             var gatheringData = new GatheringCliData(_cli);
-            var identity = await CliIdentityGuard.CaptureAsync(_cli, token);
+            var identity = await CliIdentityGuard.CaptureForMultiAlteringAsync(_cli, token);
             _log.Write("[다중가공] 캐릭터 문맥 저장 · " + identity.Description);
             _alteringPage.CharacterStatus = "확인됨";
 

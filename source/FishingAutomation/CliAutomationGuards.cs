@@ -21,6 +21,33 @@ internal sealed record CliIdentityContext(
         CharacterId is not null || AccountCode is not null ? "강함" :
         CharacterName is not null && RealmName is not null ? "보통" : "기본";
 
+    // A name by itself is not sufficient to bind durable N02 batch checkpoints
+    // across restarts. Account+name is an allowed legacy CLI alternative when
+    // the API omits realm, provided both fields remain stable across queries.
+    internal bool HasDurableMultiIdentity =>
+        !string.IsNullOrWhiteSpace(CharacterId) ||
+        !string.IsNullOrWhiteSpace(CharacterName) &&
+        (!string.IsNullOrWhiteSpace(RealmName) || !string.IsNullOrWhiteSpace(AccountCode));
+
+    internal string PresentFields =>
+        string.Join(", ", new[]
+        {
+            CharacterId is null ? null : "CharacterId",
+            CharacterName is null ? null : "CharacterName",
+            AccountCode is null ? null : "AccountCode",
+            RealmName is null ? null : "RealmName"
+        }.Where(x => x is not null));
+
+    internal bool ConflictsWith(CliIdentityContext other)
+    {
+        static bool Different(string? a, string? b) =>
+            a is not null && b is not null && !string.Equals(a, b, StringComparison.Ordinal);
+        return Different(CharacterId, other.CharacterId) ||
+               Different(CharacterName, other.CharacterName) ||
+               Different(AccountCode, other.AccountCode) ||
+               Different(RealmName, other.RealmName);
+    }
+
     internal bool Matches(CliIdentityContext current)
     {
         static bool Same(string? baseline, string? now) =>
@@ -54,6 +81,54 @@ internal sealed class CliIdentityGuard
     {
         var baseline = CliAutomationGuards.ParseIdentity(await cli.GetMyInfoAsync(ct).ConfigureAwait(false));
         return new(cli, baseline);
+    }
+
+    // Require two matching complete snapshots: a transient/partially populated
+    // get_my_info must never create or resume a durable multi-altering batch.
+    // Unlike VerifyWithLoadingRetryAsync this preflight is bounded.
+    internal static async Task<CliIdentityGuard> CaptureForMultiAlteringAsync(
+        MabinogiMobileCli cli, CancellationToken ct)
+    {
+        const int maxAttempts = 5;
+        CliIdentityContext? previous = null;
+        CliIdentityContext? confirmedCandidate = null;
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var response = await cli.GetMyInfoAsync(ct).ConfigureAwait(false);
+            if (!response.Success && CliAutomationGuards.IsTransientLoadingRejection(response))
+            {
+                confirmedCandidate = null;
+            }
+            else
+            {
+                var identity = CliAutomationGuards.ParseIdentity(response);
+                if (previous is not null && previous.ConflictsWith(identity))
+                    throw new InvalidOperationException(
+                        "다중가공 CLI 캐릭터 식별 결과가 재조회 중 바뀌었습니다 · 기록 보존 · 입력 차단");
+                // Retain every non-null field seen so far. A weak middle
+                // response must not hide a change between two strong frames.
+                previous = previous is null ? identity : new CliIdentityContext(
+                    previous.CharacterId ?? identity.CharacterId,
+                    previous.CharacterName ?? identity.CharacterName,
+                    previous.AccountCode ?? identity.AccountCode,
+                    previous.RealmName ?? identity.RealmName);
+                if (identity.HasDurableMultiIdentity)
+                {
+                    if (identity == confirmedCandidate)
+                        return new CliIdentityGuard(cli, identity);
+                    confirmedCandidate = identity;
+                }
+                else confirmedCandidate = null;
+            }
+            if (attempt + 1 < maxAttempts)
+                await Task.Delay(350, ct).ConfigureAwait(false);
+        }
+
+        throw new InvalidOperationException(
+            "다중가공 캐릭터 식별 정보가 부족합니다 · get_my_info 유효 필드: " +
+            (previous?.PresentFields is { Length: > 0 } fields ? fields : "없음") +
+            " · 고유 ID 또는 캐릭터 이름+서버/계정이 필요합니다 · 기존 작업 기록 보존 · 입력 없음");
     }
 
     internal async Task VerifyAsync(CancellationToken ct)
@@ -142,10 +217,25 @@ internal static class CliAutomationGuards
         if (!response.Success || response.Data is not JsonElement root || root.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("get_my_info 조회 결과가 올바르지 않습니다.");
 
-        string? characterId = FirstText(root, "CharacterId", "CharacterID", "CharacterCode", "CharacterEntityId");
-        string? characterName = FirstText(root, "CharacterName", "Name", "DisplayName");
-        string? accountCode = FirstText(root, "AccountCode", "AccountId", "AccountID");
-        string? realm = FirstText(root, "RealmName", "Realm", "ServerName", "Server");
+        // Some CLI releases put details under Character/Account/Server instead of
+        // top-level fields. Never interpret a generic Account.Id as CharacterId.
+        var character = FirstObject(root, "Character", "CharacterInfo", "CurrentCharacter", "Player", "PlayerInfo");
+        var account = FirstObject(root, "Account", "AccountInfo");
+        var server = FirstObject(root, "Realm", "RealmInfo", "Server", "ServerInfo");
+        string? characterId = Consistent(
+            FirstText(root, "CharacterId", "CharacterID", "CharacterCode", "CharacterEntityId", "CharId"),
+            character is JsonElement ch ? FirstText(ch, "CharacterId", "CharacterCode", "CharacterEntityId", "CharId", "Id", "UID") : null);
+        string? characterName = Consistent(
+            FirstText(root, "CharacterName", "Name", "DisplayName", "Nickname", "NickName"),
+            character is JsonElement chName ? FirstText(chName, "CharacterName", "Name", "DisplayName", "Nickname", "NickName") : null);
+        string? accountCode = Consistent(
+            FirstText(root, "AccountCode", "AccountId", "AccountID"),
+            account is JsonElement acc ? FirstText(acc, "AccountCode", "AccountId", "AccountID", "Id", "Code") : null);
+        string? realm = Consistent(
+            FirstText(root, "RealmName", "ServerName", "WorldName") ??
+                (TryProperty(root, "Realm") is JsonElement rn && rn.ValueKind == JsonValueKind.String ? rn.GetString() : null) ??
+                (TryProperty(root, "Server") is JsonElement sn && sn.ValueKind == JsonValueKind.String ? sn.GetString() : null),
+            server is JsonElement srv ? FirstText(srv, "RealmName", "ServerName", "WorldName", "Name") : null);
 
         var identity = new CliIdentityContext(characterId, characterName, accountCode, realm);
         if (identity.ComparableFields == 0)
@@ -222,6 +312,23 @@ internal static class CliAutomationGuards
             changes.Add($"{name} {oldValue}→{newValue} ({(delta > 0 ? "+" : "")}{delta})");
         }
         return changes.ToArray();
+    }
+
+    private static JsonElement? FirstObject(JsonElement root, params string[] names)
+    {
+        foreach (var name in names)
+            if (TryProperty(root, name) is JsonElement value && value.ValueKind == JsonValueKind.Object)
+                return value;
+        return null;
+    }
+
+    private static string? Consistent(string? outer, string? inner)
+    {
+        if (outer is not null && inner is not null &&
+            !string.Equals(outer, inner, StringComparison.Ordinal))
+            throw new InvalidDataException(
+                "get_my_info 캐릭터/계정/서버 식별 정보가 서로 충돌합니다 · 입력 차단");
+        return outer ?? inner;
     }
 
     private static string? FirstText(JsonElement root, params string[] names)

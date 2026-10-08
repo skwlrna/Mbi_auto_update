@@ -201,6 +201,56 @@ static class Program
                 await Reject(() => Open(conflict, world, identity: changed), "저장 충돌");
                 Check(File.ReadAllText(temp.Manifest) == before && world.Registered.Count == 0, "Identity conflict destroyed batch");
             });
+        await Test("H/account+character fallback preserves complete ledger on restart", async () =>
+        {
+            var accountNamed = new CliIdentityContext(null, "테스트", "account-7", null);
+            using var temp = new Temp(); var world = new World(Plans);
+            using (var first = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(first, world, identity: accountNamed);
+                await Finish(Wood, first, world);
+                Check(first.CompletedPlans(Plans).SequenceEqual(new[] { Wood }),
+                    "fallback identity lost completed item");
+            }
+            string saved = File.ReadAllText(temp.Manifest);
+            world.Registered.Clear();
+            using (var resumed = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(resumed, world, identity: accountNamed);
+                Check(resumed.CompletedPlans(Plans).SequenceEqual(new[] { Wood }),
+                    "fallback identity reopened finished wood");
+                Check(resumed.Session(Wood).MultiState == MultiAlteringItemState.Completed,
+                    "fallback identity erased tombstone");
+            }
+            using var wrongAccount = new MultiAlteringBatchStore(temp.Path);
+            await Reject(() => Open(wrongAccount, world, identity:
+                accountNamed with { AccountCode = "different" }), "저장 충돌");
+            Check(File.ReadAllText(temp.Manifest) == saved && world.Registered.Count == 0,
+                "fallback identity conflict mutated durable manifest");
+        });
+        await Test("H/insufficient identity blocks new batch without any manifest", async () =>
+        {
+            foreach (var weak in new[]
+            {
+                new CliIdentityContext(null, "테스트", null, null),
+                new CliIdentityContext(null, null, "account-7", null),
+                new CliIdentityContext(null, null, null, "서버7")
+            })
+            {
+                using var temp = new Temp(); var world = new World(Plans);
+                using var batch = new MultiAlteringBatchStore(temp.Path);
+                await Reject(() => Open(batch, world, identity: weak), "식별 정보가 부족");
+                Check(!File.Exists(temp.Manifest) && world.Registered.Count == 0,
+                    "weak identity silently created an unbound durable batch");
+            }
+        });
+        await Test("H/character+realm without ID remains valid", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            using var batch = new MultiAlteringBatchStore(temp.Path);
+            await Open(batch, world, identity: new CliIdentityContext(null, "테스트", null, "서버7"));
+            Check(File.Exists(temp.Manifest), "old character+realm identity unexpectedly blocked");
+        });
         foreach (string filename in new[] { "plan-key.json", "0.json" })
             await Test("I/v1 record readable but missing full-batch evidence fails closed " + filename, async () =>
             {
