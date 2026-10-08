@@ -22,7 +22,7 @@ internal static class AlteringRecipeIdentityPolicy
             string.Equals(displayName, outputName, StringComparison.Ordinal))
             return false;
         return catalog.Count(name =>
-            string.Equals(Regex.Replace(name, @"\\([^()]*\\)$", "").Trim(),
+            string.Equals(Regex.Replace(name, @"\([^()]*\)$", "").Trim(),
                 outputName, StringComparison.Ordinal)) == 1;
     }
 
