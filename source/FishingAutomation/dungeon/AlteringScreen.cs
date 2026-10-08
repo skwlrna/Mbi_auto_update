@@ -97,9 +97,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             _ = AlteringQueries.ParseWorks(worksResponse); // preserve existing hard failure diagnostics
         }
 
-        bool hasCompleted = AlteringQueries.ParseWorks(worksResponse)
-            .Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
-        if (!hasCompleted)
+        var currentWorks = AlteringQueries.ParseWorks(worksResponse);
+        // F02: a blue "모두 받기" drains the entire facility, not only the
+        // selected item. The coordinator's earlier all-completed snapshot may
+        // have gone stale while travelling or running OCR. Every managed
+        // prompt observation must independently prove that ALL facility jobs
+        // are completed; a mixed completed/running queue authorizes zero Space.
+        bool eligible = directive == AlteringFacilityEntryDirective.Automatic
+            ? currentWorks.Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted)
+            : AlteringReceiptPolicy.CanCollectManagedFacility(
+                currentWorks, plan.FacilityName);
+        if (!eligible)
             return false;
 
         return HasCollectButtonVisual(frame);
@@ -2185,6 +2193,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // before the irreversible receive key, not before navigation/OCR.
         // A failure before this callback leaves the last known safe checkpoint.
         await beforeReceiveInput(ct);
+        ct.ThrowIfCancellationRequested();
+        if (directive != AlteringFacilityEntryDirective.Automatic)
+        {
+            // The durable receipt marker may require file IO. Revalidate the
+            // actual facility queue and blue UI on a NEW frame afterwards,
+            // immediately before the irreversible Space. A late running/new
+            // work slot must not be partially collected. Because the marker
+            // was already persisted, any failure remains RecoveryRequired:
+            // fail closed rather than inferring a receipt never happened.
+            using var finalFrame = Capture(ct);
+            if (!await HasCollectPromptAsync(finalFrame, plan, directive, ct))
+                Fail(finalFrame,
+                    "F02 수령 입력 직전 시설 전체 완료 증거 소실(부분 완료/신규 대기/화면·CLI 변경) · " +
+                    "모두 받기 Space 0회 · RecoveryRequired 유지 · 자동 재수령 금지");
+        }
         ct.ThrowIfCancellationRequested();
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);

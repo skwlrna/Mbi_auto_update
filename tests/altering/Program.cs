@@ -2075,6 +2075,30 @@ Check(AlteringReceiptPolicy.CanCollectManagedFacility(
       !AlteringReceiptPolicy.CanCollectManagedFacility(
         Array.Empty<AlteringWork>(), lanePlan.FacilityName),
     "M4: manager permits receive-all only when every work in the selected facility is complete");
+// F02 final-input revalidation: the manager could approve an all-completed
+// snapshot, then a new (or newly running) work appears during 400ms settle,
+// OCR or the N02 durable receipt journal. The final input gate must veto it.
+var f02LateExternal = m4MixedCompleted.Concat(
+    new[] { new AlteringWork("새로 등록된 다른 품목", lanePlan.FacilityName,
+        "InProgress", false, 180) }).ToArray();
+var f02OtherFacility = m4MixedCompleted.Concat(
+    new[] { new AlteringWork("타 시설 작업", "목재 가공 시설",
+        "InProgress", false, 180) }).ToArray();
+Check(AlteringReceiptPolicy.CanCollectManagedFacility(
+        m4MixedCompleted, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        f02LateExternal, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        m4MixedPartial, lanePlan.FacilityName) &&
+      AlteringReceiptPolicy.CanCollectManagedFacility(
+        f02OtherFacility, lanePlan.FacilityName),
+    "F02: last-moment new/running slot blocks blue Space; unrelated facility does not");
+Check(!AlteringReceiptPolicy.CanCollectManagedFacility(
+        f02LateExternal.Where(w => !w.IsCompleted).ToArray(), lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        Array.Empty<AlteringWork>(), lanePlan.FacilityName),
+    "F02: empty or running-only facility never authorizes collect-all");
+
 Check(AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 0) &&
       !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 6) &&
       !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 1) &&
