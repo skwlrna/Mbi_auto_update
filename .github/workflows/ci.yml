@@ -513,7 +513,10 @@ jobs:
           if ($altering -notmatch 'ct, TimeSpan\.FromSeconds\(1\)') { throw 'registration verification must poll every second' }
           if ($altering -notmatch '기존 .* 작업 .*건 유지 · 완료되는 즉시 수령하고 빈 슬롯에 새 목표 작업을 채웁니다') { throw 'legacy jobs must remain while freed slots are refilled' }
           if ($altering -match '기존 동일 품목 작업 수령 완료') { throw 'legacy jobs must not be fully drained before new target registration' }
-          if ($altering -notmatch 'bool firstCollected = await _screen\.CollectAsync') { throw 'first receive must report collection versus travel immediately' }
+          if ($altering -notmatch 'bool firstCollected;' -or
+              $altering -notmatch 'firstCollected = await coordinated\.CollectAsync\(plan, directive, ct\)' -or
+              $altering -notmatch 'firstCollected = await _screen\.CollectAsync\(plan, ct\)' -or
+              $altering -notmatch '자체 재이동/2차 수령 금지') { throw 'first receive must obey manager authority while Automatic keeps legacy behavior' }
           if ($altering -match 'for \(int i = 0; i < 4; i\+\+\)[\s\S]{0,500}TimeSpan\.FromSeconds\(2\)') { throw 'old eight-second first-receipt queue polling returned' }
           if ($altering -notmatch '1차 모두 받기 = 설비 이동 · 즉시 가공대 수령 화면 대기') { throw 'immediate travel branch diagnostic missing' }
           if ($altering -notmatch 'TimeSpan delay = pollDelay \?\? TimeSpan\.FromSeconds\(5\)') { throw 'non-registration verification default delay changed unexpectedly' }
