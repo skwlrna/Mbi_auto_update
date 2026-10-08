@@ -128,6 +128,7 @@ Require (
 ) 'H4 boundary onsite confirmation follows ledger observation and verified empty queue'
 Match-Required $alterTests 'H4: dependency boundary receipt confirms only the proven same-facility onsite state' 'verified boundary receipt preserves onsite in regression'
 Match-Required $alterTests 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility' 'first boundary handoff queue is a reuse, never an unnecessary travel'
+Match-Required $alterTests 'H4: residual facility work after boundary receipt prevents onsite confirmation' 'unfinished or foreign works prevent premature onsite proof'
 
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
