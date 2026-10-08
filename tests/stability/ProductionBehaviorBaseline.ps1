@@ -410,6 +410,21 @@ Match-Required $startMulti 'fillInitialVacancies: true' 'fresh F9 opts in to pre
 Match-Required (Read-Source 'source/FishingAutomation/MultiAlteringCoordinator.cs') 'startupVacancies' 'coordinator initial vacancy fill is scoped to first pass'
 Match-Forbidden $startMulti 'MultiAlteringFreshStartCleanup|이전 작업 정리 완료' 'F9 does not pre-clean or wait out old works'
 
+# V3.1.59: after the FIRST verified fixed coordinate registration, repeat
+# facility and recipe checks must not depend on Korean OCR again. Preserve
+# original fixed move geometry and CLI/visual no-blind-input guards.
+$fixedAlter = Read-Source 'source/FishingAutomation/dungeon/AlteringScreen.cs'
+$fixedOcr = Read-Source 'source/FishingAutomation/dungeon/OcrRecognizer.cs'
+Match-Required $fixedAlter '_verifiedFacilityTitles' 'first successful manager facility verification is stored only in this run'
+Match-Required $fixedAlter '_verifiedFixedRecipes' 'first successful exact fixed recipe verification is stored only in this run'
+Match-Required $fixedAlter '_repeatOcrFreeRecipe' 'known fixed recipe repeat avoids OCR'
+Match-Required $fixedAlter 'HasFixedFacilityHeaderVisual' 'facility title and subtitle use fixed pixel anchors'
+Match-Required $fixedAlter '_postTravelProvenFacilityTitle' 'after proven first arrival re-entry cannot fail on a second OCR pass'
+Match-Required $fixedOcr 'new Rectangle\(12, 24, 250, 80\)' 'first title OCR covers leftmost title glyph'
+Match-Required (Read-Source 'tests/altering-screen-integration/Program.cs') 'verified repeat detail uses fixed free-button shape without OCR' 'real screen OCR-free repeated path is tested'
+Match-Required $fixedAlter 'RequireManagedIdleAsync\(' 'managed CLI activity safety checks remain in place'
+Match-Required $fixedAlter 'TryFindFreeProcessButtonVisual\(' 'repeat still checks the free processing button geometry'
+
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'
 Match-Required $fieldExit '일반 필드 2프레임 확인' 'processing UI exit still requires stable field confirmation'
