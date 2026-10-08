@@ -167,6 +167,25 @@ try
 }
 catch (InvalidOperationException ex) when (ex.Message.Contains("바뀌었습니다")) { checks++; }
 
+int realmOnlyReads = 0;
+var realmOnlyCli = new MabinogiMobileCli(log, true, (_, _) =>
+{
+    realmOnlyReads++;
+    return Task.FromResult(new CliProcessOutput(0, """{"RealmName":"server"}""", ""));
+});
+var realmOnly = await CliIdentityGuard.CaptureForMultiAlteringAsync(
+    realmOnlyCli, default, allowLimitedFreshTest: true);
+Check(realmOnly.Baseline == new CliIdentityContext(null, null, null, "server") &&
+    realmOnlyReads == 5 && !realmOnly.Baseline.HasDurableMultiIdentity,
+    "five consistent realm-only CLI snapshots did not authorize limited fresh test");
+realmOnlyReads = 0;
+try
+{
+    _ = await CliIdentityGuard.CaptureForMultiAlteringAsync(realmOnlyCli, default);
+    throw new Exception("realm-only CLI bypassed durable identity guard");
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("식별 정보가 부족")) { checks++; }
+
 var currenciesBefore = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
     "[{\"DisplayName\":\"정령의 날개\",\"Amount\":100},{\"DisplayName\":\"골드\",\"Amount\":5000}]", "")));
 var currenciesAfter = CliAutomationGuards.ParseCurrencies(MabinogiMobileCli.Parse("get_currencies", new(0,
