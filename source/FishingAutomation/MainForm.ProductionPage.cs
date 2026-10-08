@@ -765,62 +765,11 @@ public sealed partial class MainForm
         private void ApplySavedAlteringSessionSelection()
         {
             if (!IsAltering) return;
-            try
-            {
-                string multiDirectory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "MabiAuto", "multi-altering");
-                // V3.1.55 realm-only runs saved a separate isolated manifest.
-                // Prefer its full roster so F10 can restore completed peers
-                // even when the pre-N02 main directory still has legacy files.
-                string oneCharacterDirectory = Path.Combine(multiDirectory, "limited-fresh-test");
-                var pendingPlans = File.Exists(Path.Combine(oneCharacterDirectory, "batch.json"))
-                    ? MultiAlteringBatchStore.ReadPendingPlans(oneCharacterDirectory)
-                    : Array.Empty<AlteringPlan>();
-                if (pendingPlans.Count == 0)
-                    pendingPlans = MultiAlteringBatchStore.ReadPendingPlans(multiDirectory);
-                if (pendingPlans.Count > 0)
-                {
-                    if (_alteringQueue.Items.Count == 0)
-                        _alteringQueue.Items.AddRange(pendingPlans.Select(p => (object)new AlteringQueueChoice(p)).ToArray());
-                    Filter();
-                    _owner._productionProgressSummary = $"다중가공 이어하기 대기 · 저장 배치 {pendingPlans.Count}종 · 시작 시 캐릭터/계획 및 완료 기록 검증";
-                    _owner._log.Write("[다중가공] 저장 배치 작업 목록 복원 · 완료 품목 포함 · 신규 등록 전 배치 검증");
-                    return;
-                }
-                var saved = new AlteringSessionStore().Load();
-                if (saved is null)
-                {
-                    Filter();
-                    return;
-                }
-
-                if (Facility.Items.Contains(saved.FacilityName))
-                    Facility.SelectedItem = saved.FacilityName;
-                Filter();
-
-                int recipeIndex = Items.Items.Cast<object>().ToList().FindIndex(x =>
-                    x is RecipeChoice r && r.Recipe.DisplayName == saved.DisplayName);
-                if (recipeIndex < 0) return;
-
-                Items.SelectedIndex = recipeIndex;
-                Quantity.Value = Math.Clamp(saved.TargetQuantity, Quantity.Minimum, Quantity.Maximum);
-                _owner._productionProgressSummary =
-                    $"이어하기 대기 · {saved.DisplayName} · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 마지막 단계 {saved.Stage}";
-                _owner._log.Write(
-                    $"[자동 가공] 이어하기 기록 발견 · {saved.DisplayName} {saved.TargetQuantity}개 · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 단계={saved.Stage}");
-            }
-            catch (Exception ex)
-            {
-                _owner._log.Write("[자동 가공] 이어하기 기록 확인 실패: " + ex.Message);
-                if (ex.Message.Contains("구형 다중가공 기록 발견", StringComparison.Ordinal))
-                {
-                    _owner._productionProgressSummary =
-                        "구형 다중가공 세션 검토 필요 · 자동 목록 복원/단일가공 우회 차단 · " +
-                        "남은 품목을 수동 선택한 뒤 안전 이관 확인";
-                    _owner.SetStatus("구형 다중가공 기록 검토 필요", Color.DarkOrange);
-                }
-            }
+            // F9 does not offer implicit recovery of previous multi/single
+            // batches. The user explicitly selects this run's orders and the
+            // middle manager controls every facility and registration.
+            // Historical N02/F05 files remain on disk for diagnostics only.
+            Filter();
         }
 
         private void Filter()
