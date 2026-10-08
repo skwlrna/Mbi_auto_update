@@ -329,7 +329,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         var exact = await FindAsync(frame, Popup, plan.DisplayName, ct);
         if (exact is not null) return exact;
 
-        if (!plan.OutputName.Equals(plan.DisplayName, StringComparison.Ordinal))
+        // F07: a qualified recipe title is *not* interchangeable with its
+        // output item title when multiple CLI recipes create that output.
+        // "철괴(광석)" and "철괴(철 광석)" would otherwise both pass on "철괴".
+        if (plan.MayUseBaseOutputTitle &&
+            !plan.OutputName.Equals(plan.DisplayName, StringComparison.Ordinal))
         {
             var output = await FindAsync(frame, Popup, plan.OutputName, ct);
             if (output is not null)
@@ -1159,24 +1163,61 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 await RequireManagedIdleAsync(plan, directive, "무료 가공 등록 버튼 직전", ct);
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
+                    // F07: require matching recipe identity and the intended
+                    // free button in TWO new images. Ambiguous output aliases
+                    // never stand in for two differently-qualified recipes.
+                    Point priorVerifiedCenter = Point.Empty;
                     bool exactDetail = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsAsync(
                         async token =>
                         {
                             using var fresh = Capture(token);
-                            return await IsRecipeDetailStructureAsync(fresh, token) &&
-                                   await FindRecipeAsync(fresh, plan, token) is not null;
+                            if (!await IsRecipeDetailStructureAsync(fresh, token) ||
+                                await FindRecipeAsync(fresh, plan, token) is null ||
+                                (await DetectRemoteProcessStateAsync(fresh, token)).IsRemote ||
+                                !TryFindFreeProcessButtonVisual(fresh, out Point candidate))
+                                return false;
+                            if (priorVerifiedCenter != Point.Empty &&
+                                !AlteringRecipeIdentityPolicy.IsStableFreshFreeActionTarget(
+                                    priorVerifiedCenter, candidate, FreeProcessVisualButton))
+                                return false;
+                            priorVerifiedCenter = candidate;
+                            return true;
                         },
                         Task.Delay,
                         ct);
                     if (!exactDetail)
                     {
-                        const string reason = "관리 품목 상세 제목 2회 확인 실패 · 오등록 차단";
+                        const string reason = "F07 관리 제법 제목/무료 버튼 동일성 2회 확인 실패 · 출력명 중복/원격/좌표 변경 시 오등록 차단";
                         throw new AlteringCoordinatorFacilityMismatchException(
                             plan.FacilityName, reason, new InvalidOperationException(reason));
                     }
+                    visualActionCenter = priorVerifiedCenter;
                     await RequireManagedIdleAsync(plan, directive, "품목명 확인 후 입력 직전", ct);
                 }
-                _ui.ClickFresh(visualActionCenter, ct);
+
+                // N01: never click an earlier bitmap's remembered button
+                // center after awaited OCR/activity checks. Take ONE last
+                // live screenshot and click that exact image's center only
+                // if the expected detail, free button and stable geometry
+                // are all still present. This also protects single-altering.
+                using var immediate = Capture(ct);
+                bool correctDetail = await IsRecipeDetailStructureAsync(immediate, ct);
+                bool correctIdentity = directive == AlteringFacilityEntryDirective.Automatic ||
+                    await FindRecipeAsync(immediate, plan, ct) is not null;
+                bool stillRemote = (await DetectRemoteProcessStateAsync(immediate, ct)).IsRemote;
+                bool buttonFound = TryFindFreeProcessButtonVisual(immediate, out Point liveCenter);
+                if (!correctDetail || !correctIdentity || stillRemote || !buttonFound ||
+                    !AlteringRecipeIdentityPolicy.IsStableFreshFreeActionTarget(
+                        visualActionCenter, liveCenter, FreeProcessVisualButton))
+                {
+                    const string reason = "N01/F07 무료 가공 버튼 입력 직전 최신 화면의 제법/버튼/좌표 불일치";
+                    if (directive != AlteringFacilityEntryDirective.Automatic)
+                        throw new AlteringCoordinatorFacilityMismatchException(
+                            plan.FacilityName, reason, new InvalidOperationException(reason));
+                    Fail(immediate, reason);
+                }
+                ct.ThrowIfCancellationRequested();
+                _ui.ClickFresh(liveCenter, ct);
             }
 
             if (restartAfterRemoteRecovery)

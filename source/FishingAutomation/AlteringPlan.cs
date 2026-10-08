@@ -43,6 +43,7 @@ internal sealed record AlteringPlan(string FacilityName, string DisplayName, int
     int ProducedPerWork, bool AllowPaidButton, int RecipeOrdinal = 1)
 {
     internal string? VerifiedOcrAlias { get; init; }
+    internal bool MayUseBaseOutputTitle { get; init; }
     internal int RecipeCount { get; init; } = 1;
     internal int RequiredWorks => checked((int)(((long)TargetQuantity + ProducedPerWork - 1) / ProducedPerWork));
     internal long ExpectedQuantity => (long)RequiredWorks * ProducedPerWork;
@@ -360,7 +361,9 @@ internal sealed class AlteringAutomation
         plan = plan with
         {
             RecipeCount = selected.Length,
-            VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName))
+            VerifiedOcrAlias = AlteringText.UniqueOcrAlias(plan.DisplayName, recipes.Select(x => x.DisplayName)),
+            MayUseBaseOutputTitle = AlteringRecipeIdentityPolicy.MayUseBaseOutputTitle(
+                plan.DisplayName, plan.OutputName, recipes.Select(x => x.DisplayName))
         };
 
         var works = await _data.WorksAsync(ct);
