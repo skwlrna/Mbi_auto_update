@@ -14,6 +14,7 @@ try
     Type receiptPolicy = production.GetType("FishingAutomation.AlteringReceiptPolicy", true)!;
     Type cachePolicy = production.GetType("FishingAutomation.AlteringScreenOnsiteCachePolicy", true)!;
     Type remotePolicy = production.GetType("FishingAutomation.AlteringRemoteProcessGuard", true)!;
+    Type travelPolicy = production.GetType("FishingAutomation.AlteringFacilityTravelConfirmPolicy", true)!;
     const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic |
                              BindingFlags.Instance | BindingFlags.Static;
     object automatic = Enum.Parse(directiveType, "Automatic");
@@ -160,6 +161,9 @@ try
           queue.ToList().FindIndex(s => s.EndsWith(".RecoverRemoteDetailToOnsiteAsync")),
         "real queue checks manager conflict BEFORE Automatic-only remote-detail recovery");
 
+    var travel = ScreenCalls("TravelToFacilityAsync", 5);
+    Check(Has(travel, "IsManagedFreshArrivalObservation"),
+        "real managed Fresh travel checks independent transition evidence for arrival");
     var prompt = ScreenCalls("HasCollectPromptAsync", 4);
     Check(Has(prompt, "ShouldBlockReceiptForMoveButton") &&
           Has(prompt, "HasBottomConfirmationModal") &&
@@ -199,6 +203,12 @@ try
           !CallBoolean(entryPolicy, "ShouldVetoRecipeMoveButton", fresh, true) &&
           !CallBoolean(entryPolicy, "ShouldVetoRecipeMoveButton", reuse, true),
         "real recipe policy preserves manager Fresh/Reuse despite teal move button");
+    Check(CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation", true, false, true, true) &&
+          !CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation", true, false, true, false) &&
+          !CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation", true, null, true, true) &&
+          !CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation", true, true, true, true) &&
+          !CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation", false, false, true, true),
+        "managed Fresh arrival requires title, explicit idle, click and transition");
     Check(!CallBoolean(remotePolicy, "MustReportToCoordinator", automatic, true) &&
           CallBoolean(remotePolicy, "MustReportToCoordinator", fresh, true) &&
           CallBoolean(remotePolicy, "MustReportToCoordinator", reuse, true),

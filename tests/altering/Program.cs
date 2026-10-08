@@ -1598,6 +1598,59 @@ Check(m2PerFacilityStopped && m2UnexpectedRegistrations == 0 &&
           AlteringFacilityEntryDirective.FreshMoveRequired,
     "M2 wait: stalled wood lane stops after 60s despite progressing metal lane, revokes onsite, and never clicks or registers");
 
+
+var partialRaceWorks = new AlteringWork[]
+{
+    new("목재", "목재 가공 시설", "Completed", true, 0),
+    new("목재+", "목재 가공 시설", "InProgress", false, 100)
+};
+Check(AlteringReceiptPolicy.IsPartialManagedFacility(partialRaceWorks, "목재 가공 시설") &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(partialRaceWorks, "목재 가공 시설"),
+    "F02 partially complete mixed facility must wait, never collect");
+
+var partialRaceJobs = new[]
+{
+    new AlteringPlan("목재 가공 시설", "목재", 1, 1, false),
+    new AlteringPlan("목재 가공 시설", "목재+", 1, 1, false)
+};
+var raceWorks = new List<AlteringWork>();
+int raceRunCalls = 0, raceCallsDuringPartial = 0, raceWaitingPasses = 0;
+await new MultiAlteringCoordinator().RunAsync(
+    partialRaceJobs,
+    (job, budget, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        if (AlteringReceiptPolicy.IsPartialManagedFacility(raceWorks, job.FacilityName))
+            raceCallsDuringPartial++;
+        raceRunCalls++;
+        if (raceRunCalls == 1)
+        {
+            // A finishes while B is still in progress and free slots remain.
+            raceWorks.Add(new("목재", "목재 가공 시설", "Completed", true, 0));
+            raceWorks.Add(new("목재+", "목재 가공 시설", "InProgress", false, 100));
+            return Task.FromResult(false);
+        }
+        if (raceWorks.All(x => x.IsCompleted))
+            raceWorks.Clear(); // Mock the central whole-facility receipt boundary.
+        return Task.FromResult(true);
+    },
+    token =>
+    {
+        token.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<AlteringWork>>(raceWorks.ToArray());
+    },
+    (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        raceWaitingPasses++;
+        for (int i = 0; i < raceWorks.Count; i++)
+            raceWorks[i] = raceWorks[i] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+        return Task.CompletedTask;
+    },
+    default);
+Check(raceCallsDuringPartial == 0 && raceWaitingPasses > 0 && raceRunCalls == 3,
+    "F02 coordinator defers partial completion and resumes at full-facility boundary");
+
 var mixedLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
 var multiAltering = new MultiAlteringCoordinator(
     mixedLaneState,

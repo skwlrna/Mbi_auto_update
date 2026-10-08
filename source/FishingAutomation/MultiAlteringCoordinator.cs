@@ -251,6 +251,16 @@ internal sealed class MultiAlteringCoordinator
                     bool completedLaneNeedsCollection =
                         facilityWorks.Length > 0 &&
                         facilityWorks.All(x => x.IsCompleted);
+                    // A fast item may complete while the 7-slot mixed lane is
+                    // still being seeded. Do not call an Automation whose entry
+                    // could attempt a prohibited partial "collect all". Leave the
+                    // running slots intact and revisit at the full batch boundary.
+                    if (AlteringReceiptPolicy.IsPartialManagedFacility(facilityWorks, facility))
+                    {
+                        Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} 부분 완료 · " +
+                                    "수령/추가 등록 보류 · 시설 전체 완료까지 다른 시설로 양보");
+                        break;
+                    }
                     if (facilityWorks.Length >= 7 && !completedLaneNeedsCollection)
                         break;
 
