@@ -1378,6 +1378,126 @@ await skipCoordinator.RunAsync(
 Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
 
+// M2 follow-up: the coordinator (not per-slot RunCoreAsync) observes idle
+// queues across batch-yield cycles, with a separate timer per facility.
+DateTimeOffset m2WatchClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2Watch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => m2WatchClock);
+var m2WatchWork = new AlteringWork(
+    "목재", "목재 가공 시설", "InProgress", false, 90);
+m2Watch.Observe("목재 가공 시설", new[] { m2WatchWork });
+m2WatchClock = m2WatchClock.AddSeconds(119);
+m2Watch.Observe("목재 가공 시설", new[] { m2WatchWork });
+m2WatchClock = m2WatchClock.AddSeconds(2);
+bool m2StagnantStopped = false;
+try
+{
+    m2Watch.Observe("목재 가공 시설", new[] { m2WatchWork });
+}
+catch (InvalidOperationException ex)
+{
+    m2StagnantStopped = ex.Message.Contains("다중가공 시설별 정체 감지") &&
+        ex.Message.Contains("임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지");
+}
+Check(m2StagnantStopped,
+    "M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely after a bounded idle interval");
+
+DateTimeOffset m2ProgressClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2ProgressWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => m2ProgressClock);
+m2ProgressWatch.Observe("금속 가공 시설",
+    new[] { m2WatchWork with { FacilityName = "금속 가공 시설" } });
+m2ProgressClock = m2ProgressClock.AddSeconds(110);
+m2ProgressWatch.Observe("금속 가공 시설",
+    new[] { m2WatchWork with { FacilityName = "금속 가공 시설", RemainingSeconds = 80 } });
+m2ProgressClock = m2ProgressClock.AddSeconds(110);
+m2ProgressWatch.Observe("금속 가공 시설",
+    new[] { m2WatchWork with { FacilityName = "금속 가공 시설", RemainingSeconds = 60 } });
+Check(true,
+    "M2 wait: genuine countdown decreases refresh the facility watchdog during long legitimate processing");
+
+DateTimeOffset m2NoiseClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2NoiseWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => m2NoiseClock);
+m2NoiseWatch.Observe("목재 가공 시설", new[] { m2WatchWork });
+m2NoiseClock = m2NoiseClock.AddSeconds(100);
+m2NoiseWatch.Observe("목재 가공 시설",
+    new[] { m2WatchWork with { RemainingSeconds = 120 } });
+m2NoiseClock = m2NoiseClock.AddSeconds(21);
+bool m2NoiseRejected = false;
+try
+{
+    m2NoiseWatch.Observe("목재 가공 시설",
+        new[] { m2WatchWork with { RemainingSeconds = 120 } });
+}
+catch (InvalidOperationException)
+{
+    m2NoiseRejected = true;
+}
+Check(m2NoiseRejected,
+    "M2 wait: an increasing or noisy countdown cannot conceal a truly stalled facility");
+
+DateTimeOffset m2ScheduleClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var m2BlockedWorks = new List<AlteringWork>
+{
+    new("목재", "목재 가공 시설", "InProgress", false, 100),
+    new("강철괴", "금속 가공 시설", "InProgress", false, 100)
+};
+var m2BlockedLane = new FacilityLaneState(m2BlockedWorks);
+m2BlockedLane.ConfirmOnsite("목재 가공 시설",
+    "M2 wait test: known onsite before idle");
+var m2BlockedScheduler = new MultiAlteringCoordinator(
+    m2BlockedLane, FacilityLaneOwner.Main,
+    now: () => m2ScheduleClock,
+    idleThreshold: TimeSpan.FromSeconds(60));
+var m2BlockedPlans = new[]
+{
+    new AlteringPlan("목재 가공 시설", "목재", 3, 1, false),
+    new AlteringPlan("금속 가공 시설", "강철괴", 3, 1, false)
+};
+int m2UnexpectedRegistrations = 0, m2WaitCycles = 0;
+bool m2PerFacilityStopped = false;
+try
+{
+    await m2BlockedScheduler.RunAsync(
+        m2BlockedPlans,
+        (_, _, _) =>
+        {
+            m2UnexpectedRegistrations++;
+            return Task.FromResult(false);
+        },
+        token =>
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<AlteringWork>>(
+                m2BlockedWorks.ToArray());
+        },
+        (delay, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            m2WaitCycles++;
+            m2ScheduleClock = m2ScheduleClock.Add(delay);
+            // Metal is healthy: countdown decreases, but wood is stalled.
+            m2BlockedWorks[1] = m2BlockedWorks[1] with
+            {
+                RemainingSeconds = m2BlockedWorks[1].RemainingSeconds - 10
+            };
+            return Task.CompletedTask;
+        },
+        default);
+}
+catch (InvalidOperationException ex)
+{
+    m2PerFacilityStopped =
+        ex.Message.Contains("다중가공 시설별 정체 감지") &&
+        ex.Message.Contains("목재 가공 시설");
+}
+Check(m2PerFacilityStopped && m2UnexpectedRegistrations == 0 &&
+      m2WaitCycles >= 2 &&
+      m2BlockedLane.QueueDirectiveFor("목재 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M2 wait: stalled wood lane stops after 60s despite progressing metal lane, revokes onsite, and never clicks or registers");
+
 var mixedLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
 var multiAltering = new MultiAlteringCoordinator(
     mixedLaneState,
