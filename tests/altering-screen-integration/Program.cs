@@ -262,12 +262,15 @@ try
           Has(close, "CanRetryCliReceiptCompletionClose") &&
           Has(close, "WaitForReceiptFacilityReturnAsync"),
         "real completion-close path rechecks modal and awaits facility return");
-    var completionClose = ScreenCalls("RequireManagedCompletionCloseAsync", 2);
+    var completionClose = ScreenCalls("RequireManagedCompletionCloseAsync", 3);
     Check(Has(close, "RequireManagedCompletionCloseAsync") &&
           Has(completionClose, "CanCloseManagedCompletionResult") &&
+          Has(completionClose, "HasManagedCompletionResultVisual") &&
+          Has(completionClose, "TryFacilityWorkCountAsync") &&
+          Has(completionClose, "IsManagedFacilityReceiptConfirmed") &&
           Has(completionClose, "RequireManagedIdleAsync") &&
           Has(completionClose, "FindAsync"),
-        "F03/F04 compiled close paths require positive result OCR and fresh activity");
+        "F04 REAL close guard accepts fixed result layout with fresh all-facility CLI receipt, OCR secondary and idle activity");
     Check(CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, true, false, false, false) &&
           !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
@@ -281,6 +284,21 @@ try
           !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, true, false, false, null),
         "F04 rejects unrelated green, facility, travel popup, moving or unknown CLI");
+    // The live 07:00 screenshot has a reward layout even though Korean OCR
+    // may miss the white completion heading. True reward + CLI whole receipt
+    // is permitted; no receipt or unrelated green button remains forbidden.
+    Check(CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, false, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, false, true, false, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, false, false, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, false, true, true, false, true, false) &&
+          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+              true, false, true, true, false, false, null),
+        "F04 7-arg compiled manager policy authorizes visual+zero CLI only; blocks generic green/travel/unknown");
+
     var returning = ScreenCalls("WaitForReceiptFacilityReturnAsync", 4);
     Check(Has(returning, "CanConfirmReceiptFacilityReturn") &&
           Has(returning, "CanRecoverFieldAfterCompletion") &&
@@ -464,6 +482,32 @@ try
             "real completion modal detector sees green result confirmation");
         Check(!PixelGate("HasCollectButtonVisual", completionFrame),
             "real completion modal cannot be mistaken for another blue receipt");
+    }
+
+    // F04 synthetic 800x1000 representation of the actual 07:00 result.
+    // Test one anchor at a time; green-only/travel panels must NEVER
+    // accidentally look like a complete processing reward screen.
+    using (var result = BlackFrame())
+    {
+        Paint(result, new Rectangle(180, 921, 440, 56), Color.FromArgb(0, 185, 90));
+        Check(!PixelGate("HasManagedCompletionResultVisual", result),
+            "generic green result popup is not a processing reward layout");
+        Paint(result, new Rectangle(340, 78, 135, 105), Color.FromArgb(22, 103, 226));
+        Check(!PixelGate("HasManagedCompletionResultVisual", result),
+            "blue glow plus generic green popup without title/cards cannot authorize Space");
+        Paint(result, new Rectangle(340, 217, 112, 23), Color.White);
+        Check(!PixelGate("HasManagedCompletionResultVisual", result),
+            "blue chest glow plus white heading alone is insufficient without reward cards");
+        Paint(result, new Rectangle(102, 405, 53, 58), Color.FromArgb(24, 154, 215));
+        Paint(result, new Rectangle(372, 405, 53, 58), Color.FromArgb(24, 154, 215));
+        Paint(result, new Rectangle(640, 405, 53, 58), Color.FromArgb(24, 154, 215));
+        Check(PixelGate("HasManagedCompletionResultVisual", result) &&
+              PixelGate("HasBottomConfirmationModal", result),
+            "verified fixed blue chest + result heading + reward cards + green confirms real result without OCR");
+        // A wrong client size must not be trusted even with painted anchors.
+        using var badSize = new Bitmap(799, 1000);
+        Check(!PixelGate("HasManagedCompletionResultVisual", badSize),
+            "reward pixel shortcut never operates on an unknown client size");
     }
 
     // V3.1.59: the original capture shows the facility title at (20,50),
