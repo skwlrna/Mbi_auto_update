@@ -24,6 +24,8 @@ internal sealed record AlteringSessionState
     public long CreditedInternalConsumptionQuantity { get; init; }
     public int InitialExistingWorks { get; init; }
     public bool PendingRegistration { get; init; }
+    // F05: ties the pending registration to ONE durable applied transaction ID.
+    public string? PendingConsumptionTransactionId { get; init; }
     public int PendingBeforeMatchingCount { get; init; }
     public string Stage { get; init; } = "가공 준비";
     public string? CharacterId { get; init; }
