@@ -366,7 +366,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         {
             TransactionId = transactionId,
             ConsumerKey = Key(consumer),
-            BeforeCounts = new(before, StringComparer.Ordinal)
+            BeforeCounts = before.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal)
         } });
         ct.ThrowIfCancellationRequested();
     }
