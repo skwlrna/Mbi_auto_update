@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.58"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.59"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.58</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3158-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.58"')) {
+          if ($p -notmatch '<Version>3\.1\.59</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3159-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.59"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
