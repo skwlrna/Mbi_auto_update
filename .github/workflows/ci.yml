@@ -701,6 +701,29 @@ jobs:
              $multiAlter -notmatch 'facilityWorks\.All\(x => x\.IsCompleted\)' -or
              $multiAlter -notmatch '배치 전체 완료 전 이동 없음') { throw 'multi-altering must use whole-facility batch scheduling' }
           if($multiAlter -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'multi-altering coordinator must never own direct input' }
+          # M2 wait: per-facility progress evidence must survive each
+          # one-slot batch return. A stagnant lane stops without extra input,
+          # even while other facilities continue legitimately progressing.
+          $watchCore = [regex]::Match(
+              $multiAlter,
+              'internal sealed class MultiAlteringWaitWatchdog[\s\S]*?(?=\r?\ninternal sealed class MultiAlteringCoordinator)').Value
+          if ([string]::IsNullOrWhiteSpace($watchCore) -or
+              $watchCore -notmatch 'DateTimeOffset LastProgressAt' -or
+              $watchCore -notmatch 'lowestRunning < previous.LowestRunningSeconds' -or
+              $watchCore -notmatch 'Shape' -or
+              $watchCore -notmatch 'idle < _threshold' -or
+              $watchCore -notmatch '다중가공 시설별 정체 감지' -or
+              $watchCore -notmatch '임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지' -or
+              $multiAlter -notmatch 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' -or
+              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed\)' -or
+              $multiAlter -notmatch 'idleWatchdog.ConfirmManagerProgress\(facility\)' -or
+              $multiAlter -notmatch '_laneState\?\.InvalidateOnsite' -or
+              $alterTests -notmatch 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' -or
+              $alterTests -notmatch 'M2 wait: genuine countdown decreases refresh' -or
+              $alterTests -notmatch 'M2 wait: an increasing or noisy countdown cannot conceal' -or
+              $alterTests -notmatch 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane') {
+              throw 'M2 long batch-wait watchdog missing per-facility safety and regression coverage'
+          }
           if($multiAlter -notmatch '같은 시설 여러 품목은 라운드로빈 혼합' -or
              $multiAlter -notmatch 'runBatch\(plan, 1, ct\)') { throw 'same-facility round-robin slot mixing missing' }
           $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
