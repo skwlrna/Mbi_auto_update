@@ -54,15 +54,56 @@ jobs:
           if(-not (Test-Path source/RELEASE_NOTES.md)){throw 'Release notes missing'}
           $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
           if($LASTEXITCODE-ne0){throw 'Release list check failed'}
-          if(@($releases | Where-Object { $_.tag_name -eq 'V3.1.53' }).Count -gt 0){
+          $matching=@($releases | Where-Object { $_.tag_name -eq 'V3.1.53' })
+          if($matching.Count -gt 1){throw 'Ambiguous duplicated V3.1.53 releases'}
+          if($matching.Count -eq 1){
+            $existing=$matching[0]
+            if(-not $existing.draft){
+              if($existing.prerelease){throw 'V3.1.53 exists only as ignored prerelease'}
+              "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+              "recover=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+              Write-Host 'V3.1.53 already public; no overwrite'
+              exit 0
+            }
+            if($existing.prerelease){throw 'V3.1.53 draft unexpectedly marked prerelease'}
+            # One-time recovery for the CI-built assets from the original approved
+            # release source. Never move the existing tag or silently rebuild
+            # different binaries when recovering a draft.
+            $approvedSha='7e7846371b2eac17d810c9c54e37b05efc37b2b0'
+            $tag=(git ls-remote origin refs/tags/V3.1.53 | Select-Object -First 1)
+            if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($tag) -or
+                (($tag -split "\s+")[0]).Trim() -ne $approvedSha){
+              throw 'Draft tag does not point at the previously CI-approved build; refuse publication'
+            }
+            git merge-base --is-ancestor $approvedSha $sha
+            if($LASTEXITCODE-ne0){throw 'Previously built release commit is not an ancestor of current main'}
+            $ci=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs?head_sha=$approvedSha&per_page=30" | ConvertFrom-Json
+            if($LASTEXITCODE-ne0 -or -not @($ci.workflow_runs | Where-Object {
+                  $_.name -eq 'Check V3 Production Engine' -and
+                  $_.event -eq 'push' -and $_.conclusion -eq 'success' -and
+                  $_.head_sha -eq $approvedSha
+                }).Count){throw 'Original release source push CI success cannot be verified'}
+            $expected=@('MabiAuto_V3.1.53_Windows_Lite.zip',
+                        'MabiAuto_V3.1.53_Windows_Lite.zip.sha256',
+                        'MabiAuto_V3.1.53_Source.zip')
+            foreach($n in $expected){
+              $matches=@($existing.assets | Where-Object { $_.name -eq $n -and $_.state -eq 'uploaded' })
+              if($matches.Count -ne 1){throw "Draft asset missing or ambiguous: $n"}
+              $min=if($n -eq 'MabiAuto_V3.1.53_Windows_Lite.zip'){100000000}
+                   elseif($n.EndsWith('.sha256')){64}else{1000}
+              if($matches[0].size -lt $min){throw "Draft asset suspiciously small: $n"}
+            }
             "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
-            Write-Host 'V3.1.53 release exists: no automatic overwrite'
+            "recover=true" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            "recovery_release_id=$($existing.id)" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Host "Recovering complete, CI-verified V3.1.53 draft #$($existing.id) from $approvedSha"
             exit 0
           }
           $tag=(git ls-remote --tags origin refs/tags/V3.1.53 | Select-Object -First 1)
           if($LASTEXITCODE-ne0){throw 'Tag lookup failed'}
           if(-not [string]::IsNullOrWhiteSpace($tag)){throw 'Tag exists without release; manual recovery required'}
           "publish=true" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          "recover=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
           Write-Host "Eligible V3.1.53 CI-approved SHA: $sha"
 
       - name: Publish verified Windows binaries
@@ -194,12 +235,61 @@ jobs:
           gh release create V3.1.53 artifacts/MabiAuto_V3.1.53_Windows_Lite.zip artifacts/MabiAuto_V3.1.53_Windows_Lite.zip.sha256 artifacts/MabiAuto_V3.1.53_Source.zip --draft --verify-tag --title 'Mabi Auto V3.1.53' --notes-file source/RELEASE_NOTES.md
           if($LASTEXITCODE-ne0){throw 'Draft release failed'}
           $expected=@('MabiAuto_V3.1.53_Windows_Lite.zip','MabiAuto_V3.1.53_Windows_Lite.zip.sha256','MabiAuto_V3.1.53_Source.zip')
-          $draft=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.1.53" | ConvertFrom-Json
-          if($LASTEXITCODE-ne0 -or -not $draft -or -not $draft.draft -or $draft.prerelease){throw 'Draft release invalid'}
+          # GitHub's releases/tags endpoint returns HTTP 404 for draft releases.
+          # Find the authenticated draft by ID in the releases list, publish via
+          # release ID, then verify the now-public tag endpoint.
+          $listed=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Draft release list lookup failed'}
+          $found=@($listed | Where-Object { $_.tag_name -eq 'V3.1.53' })
+          if($found.Count -ne 1){throw 'Created draft not uniquely identified'}
+          $draft=$found[0]
+          if(-not $draft.draft -or $draft.prerelease){throw 'Created draft invalid'}
           foreach($n in $expected){if($n -notin $draft.assets.name){throw "Missing release asset: $n"}}
-          gh release edit V3.1.53 --draft=false
-          if($LASTEXITCODE-ne0){throw 'Release publication failed'}
-          $published=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.1.53" | ConvertFrom-Json
-          if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){throw 'Public auto-update not verified'}
-          foreach($n in $expected){if($n -notin $published.assets.name){throw "Published release missing asset: $n"}}
+          $published=gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($draft.id)" -F draft=false | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){
+            throw 'Release publication failed'
+          }
+          $public=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.1.53" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $public -or $public.draft -or $public.prerelease){
+            throw 'Public auto-update not verified'
+          }
+          foreach($n in $expected){if($n -notin $public.assets.name){throw "Published release missing asset: $n"}}
           Write-Host "Auto-update V3.1.53 publicly published from commit $sha"
+
+      - name: Recover previously verified draft without rebuilding or moving tag
+        if: steps.eligibility.outputs.recover == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_RELEASE_ID: ${{ steps.eligibility.outputs.recovery_release_id }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $approvedSha='7e7846371b2eac17d810c9c54e37b05efc37b2b0'
+          $remote=(git ls-remote origin refs/tags/V3.1.53 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($remote) -or
+              (($remote -split "\s+")[0]).Trim() -ne $approvedSha){
+            throw 'Release tag changed after eligibility verification'
+          }
+          $id=$env:RECOVERY_RELEASE_ID
+          if($id -notmatch '^[0-9]+$'){throw 'Unsafe recovery release ID'}
+          $draft=gh api "repos/$env:GITHUB_REPOSITORY/releases/$id" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $draft -or -not $draft.draft -or $draft.prerelease -or
+              $draft.tag_name -ne 'V3.1.53'){throw 'Recovery draft no longer matches'}
+          $expected=@('MabiAuto_V3.1.53_Windows_Lite.zip',
+                      'MabiAuto_V3.1.53_Windows_Lite.zip.sha256',
+                      'MabiAuto_V3.1.53_Source.zip')
+          foreach($n in $expected){
+            $found=@($draft.assets | Where-Object { $_.name -eq $n -and $_.state -eq 'uploaded' })
+            if($found.Count -ne 1){throw "Recovery release asset absent: $n"}
+          }
+          # Do not recreate tag, build, or upload: publishing the already
+          # smoke-tested immutable three-asset draft is the sole mutation.
+          $published=gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$id" -F draft=false | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){
+            throw 'Recovery publication failed'
+          }
+          $public=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.1.53" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $public -or $public.id -ne [long]$id -or
+              $public.draft -or $public.prerelease){throw 'Public V3.1.53 release not verified'}
+          foreach($n in $expected){if($n -notin $public.assets.name){throw "Published asset missing: $n"}}
+          Write-Host "Recovered/public auto-update V3.1.53 from CI-approved SHA $approvedSha"
