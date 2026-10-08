@@ -67,6 +67,26 @@ Match-Required $multiAlter '_laneState\?\.InvalidateOnsite' 'stalled facility re
 Match-Required $alterTests 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' 'M2 long wait timeout has executable regression'
 Match-Required $alterTests 'M2 wait: genuine countdown decreases refresh' 'M2 legitimate long work is not prematurely stopped'
 Match-Required $alterTests 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane' 'M2 one healthy facility cannot hide another stalled lane'
+
+# M3: saved jobs/sessions do not attest where the character stands after F9.
+# The central manager must distinguish Unknown from both verified onsite and
+# confirmed remote rather than trusting an always-visible move label.
+Match-Required $lane 'enum FacilityLocationProof' 'startup location has explicit cold-start/current-run/uncertain states'
+Match-Required $lane 'ColdStartUnknown' 'initial location is unknown, not automatically remote'
+Match-Required $lane 'ConfirmedThisRun' 'only same-run verified onsite can be reused'
+Match-Required $lane 'RuntimeUncertain' 'uncertain location after field exit/recovery is explicit'
+Match-Required $lane 'class FacilityStartupLocationPolicy' 'startup move decision is centralized'
+Match-Required $lane 'proof == FacilityLocationProof.ConfirmedThisRun' 'stale saved facility names never authorize reuse'
+Match-Required $lane '_locationProof = FacilityLocationProof.ConfirmedThisRun' 'onsite proof is granted only by manager confirmation'
+Match-Required $lane '_locationProof = FacilityLocationProof.RuntimeUncertain' 'runtime exit invalidates current-run onsite proof'
+Match-Required $lane '초기 위치 미확정\(원격 확정 아님\)' 'cold start distinguishes unknown from remote in logs'
+Match-Required (Read-Source 'source/FishingAutomation/MainForm.MultiAltering.cs') '이전 실행의 현장확정은 복원하지 않음' 'multi runner never restores saved physical location'
+Match-Required $alterTests 'M3: F9 resume with existing works cannot inherit a prior-run onsite proof' 'M3 restart with saved works begins Fresh'
+Match-Required $alterTests 'M3: observing the same CLI seven-slot ledger is not physical location evidence' 'M3 queue observation alone cannot prove onsite'
+Match-Required $alterTests 'M3: current-run onsite verification permits same-facility reuse' 'M3 same-run proof permits proper reuse'
+Match-Required $alterTests 'M3: post-start location uncertainty is distinct from cold-start unknown' 'M3 later invalidation never recycles stale onsite'
+Match-Required $alterTests 'M3: even a stale same-name location cannot authorize reuse' 'M3 cold start policy rejects persisted location hints'
+
 Match-Forbidden $multiAlter 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime|0x39' 'multi-altering coordinator owns no direct UI input'
 
 # 1b) V3.1.49 speed-up changes polling only; input order/coordinates stay owned by existing guards.
