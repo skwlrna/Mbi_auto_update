@@ -702,7 +702,8 @@ jobs:
               $boundaryReceipt -notmatch 'allowShrink: true' -or
               $boundaryReceipt -notmatch '중간재료 전환 경계 · 완료 배치 수령 및 시설 작업 0건 확인' -or
               $alterTests -notmatch 'H4: dependency boundary receipt confirms only the proven same-facility onsite state' -or
-              $alterTests -notmatch 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility') { throw 'H4 dependency boundary did not preserve coordinator onsite authority after verified receipt' }
+              $alterTests -notmatch 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility' -or
+              $alterTests -notmatch 'H4: residual facility work after boundary receipt prevents onsite confirmation') { throw 'H4 dependency boundary did not preserve coordinator onsite authority after verified receipt' }
           if($dependencyScheduler -match 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime') { throw 'dependency scheduler must not own direct input' }
           if($laneOwnership -notmatch 'FacilityLaneOwner' -or
              $laneOwnership -notmatch 'InitialObservedWorks' -or
