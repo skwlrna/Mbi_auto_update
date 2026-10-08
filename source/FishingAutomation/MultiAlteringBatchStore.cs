@@ -202,7 +202,9 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                     throw new InvalidOperationException(
                         "F05 미확정 소비 거래가 있습니다 · RecoveryRequired · 중복 등록/보정 없이 안전 정지");
                 if (saved.Items.Any(x => x.PendingRegistration &&
-                    saved.AppliedConsumption.Any(t => t.ConsumerKey == Key(x))))
+                    x.PendingConsumptionTransactionId is not null &&
+                    saved.AppliedConsumption.Any(t =>
+                        t.ConsumerKey == Key(x) && t.TransactionId == x.PendingConsumptionTransactionId)))
                     throw new InvalidOperationException(
                         "F05 소비 보정 저장 후 등록 확정 전 중단 · RecoveryRequired · 재등록/이중 보정 차단");
                 // Recursive child session is a separate legacy checkpoint; if a
@@ -214,7 +216,10 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                     {
                         var child = new AlteringSessionStore(file).Load();
                         if (child is not null && child.PendingRegistration &&
-                            saved.AppliedConsumption.Any(t => t.ConsumerKey == Key(child)))
+                            child.PendingConsumptionTransactionId is not null &&
+                            saved.AppliedConsumption.Any(t =>
+                                t.ConsumerKey == Key(child) &&
+                                t.TransactionId == child.PendingConsumptionTransactionId))
                             throw new InvalidOperationException(
                                 "F05 중간재료 등록 확정 전 종료 · RecoveryRequired · 자식 작업 중복 등록 차단");
                     }
@@ -288,6 +293,9 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 !Enum.IsDefined(s.MultiState) || s.QueuedWorks < 0 || s.QueuedWorks > s.RequiredWorks ||
                 s.BaselineQuantity < 0 || s.LastObservedOutputQuantity < s.BaselineQuantity ||
                 s.CreditedInternalConsumptionQuantity < 0 || s.InitialExistingWorks < 0 || s.PendingBeforeMatchingCount < 0 ||
+                (s.PendingConsumptionTransactionId is not null &&
+                    (!s.PendingRegistration ||
+                     !Guid.TryParseExact(s.PendingConsumptionTransactionId, "N", out _))) ||
                 s.MultiState == MultiAlteringItemState.Completed &&
                 (s.CompletedAt is null || s.QueuedWorks != s.RequiredWorks || s.PendingRegistration ||
                  s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity))
