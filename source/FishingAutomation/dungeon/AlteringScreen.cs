@@ -591,12 +591,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
                     await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
-                    if (!await ClickLabelAsync(plan.ScreenTitle, AlteringFacilityLayout.TitleArea(plan.ScreenTitle), "가공", ct, facilityTitle: true))
-                    {
-                        Log?.Invoke($"[자동 가공] 시설 제목 확인 실패 {attempt}/{maxAttempts} · 추가 입력 없이 재판정합니다.");
-                        await Task.Delay(1200, ct);
-                        continue;
-                    }
+                    // Hub cards use confirmed 800x1000 fixed title rectangles.
+                    // Once the '가공' hub itself is shown, select the known
+                    // facility by its fixed center, not by a fresh OCR hit.
+                    Rectangle titleArea = AlteringFacilityLayout.TitleArea(plan.ScreenTitle);
+                    Point titleCenter = new(titleArea.Left + titleArea.Width / 2,
+                        titleArea.Top + titleArea.Height / 2);
+                    _ui.ClickFresh(titleCenter, ct);
+                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 제목 고정좌표 클릭 ({titleCenter.X},{titleCenter.Y}) · 카드 OCR 없음");
+                    await Task.Delay(550, ct);
 
                     // The chosen facility card was positively clicked in
                     // the fixed hub. A fixed facility screen (title + level)
