@@ -114,6 +114,20 @@ Match-Required $receiptPolicy 'visualMoveButton && exactMoveLabelVisible' 'post-
 Match-Required $receiptPolicy 'visualMoveButton && !trustedOnsiteFacility' 'legacy visual veto remains conservative before onsite proof'
 Match-Required $alterTests '04:05 receipt regression' '04:05 teal false-positive receipt failure remains executable coverage'
 
+# M5: a CLI receipt count drop is not physical bench evidence. The
+# coordinator must remain uncertain until a clean two-frame facility return.
+Match-Required $receiptPolicy 'CanConfirmReceiptFacilityReturn' 'M5 receipt return has centralized proof criteria'
+Match-Required $receiptPolicy 'autoTraveling == false' 'M5 receipt return needs known idle CLI'
+Match-Required $alter 'facilityFrames = cleanReturn \? facilityFrames \+ 1 : 0' 'M5 facility title must stay clean across both frames'
+Match-Required $alter 'completionModalVisible: completionModal' 'M5 title behind completion popup cannot prove onsite'
+Match-Required $alter 'if \(managedReceipt\)' 'M5 FIELD outcome cannot silently reenter under manager authority'
+Match-Required $alter '필드에서 K로 연 가공창은 물리적 현장 증거가 아니므로' 'M5 rejects field K menu as bench proof'
+Match-Required $alter '수령 완료창 Space 직전 재검증 실패' 'M5 confirmation Space needs fresh modal proof'
+Match-Required $alter 'managedReceipt: directive != AlteringFacilityEntryDirective.Automatic' 'M5 manager receipt flag reaches result handling'
+Match-Required $alterPlan '_facilityState\.InvalidateOnsite\([\s\S]*?수령 진입' 'M5 manager clears stale onsite proof before receipt'
+Match-Required $alterTests 'M5: facility title behind completion modal must not prove onsite' 'M5 popup overlay regression'
+Match-Required $alterTests 'M5: active or unknown CLI movement prevents false onsite reuse' 'M5 movement uncertainty regression'
+
 # 1e) V3.1.52: the multi-altering facility manager owns location decisions.
 Match-Required $lane 'QueueDirectiveFor' 'facility manager issues the next facility-entry directive'
 Match-Required $lane 'ConfirmOnsite' 'facility manager records proven same-facility onsite state'
