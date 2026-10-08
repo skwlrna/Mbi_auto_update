@@ -145,6 +145,31 @@ Check(AlteringRemoteProcessGuard.ShouldBlock(
     "one missing onsite action frame preserves the two-frame remote safety veto");
 
 
+// L1: child screen cannot act as an independent manager-owned onsite cache.
+Check(AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.Automatic, "금속 가공 시설", "금속 가공 시설") &&
+      !AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.Automatic, "금속 가공 시설", "목재 가공 시설"),
+    "L1: Automatic-only receipt cache remains facility-scoped");
+Check(!AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        "금속 가공 시설", "금속 가공 시설") &&
+      !AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        "금속 가공 시설", "금속 가공 시설"),
+    "L1: managed receipt ignores lower screen cache even when facility names match");
+Check(AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective.Automatic, "금속 가공 시설") == "금속 가공 시설" &&
+      AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, "금속 가공 시설") is null &&
+      AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+        AlteringFacilityEntryDirective.FreshMoveRequired, "금속 가공 시설") is null,
+    "L1: successful managed reuse/fresh screen entries cannot grant local onsite authority");
+Check(AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn(
+        managedReceipt: false, facilityName: "목재 가공 시설") == "목재 가공 시설" &&
+      AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn(
+        managedReceipt: true, facilityName: "목재 가공 시설") is null,
+    "L1: managed receipt return reports success but never repopulates Automatic cache");
 Check(AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
         AlteringFacilityEntryDirective.Automatic,
         moveButtonVisible: true),
