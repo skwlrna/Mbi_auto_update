@@ -143,6 +143,91 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         return saved.ToArray();
     }
 
+    // A weak CLI profile does not identify a character across restarts.
+    // This path is isolated from the normal N02 ledger and is deliberately
+    // NEW-ONLY. It cannot resume even its own unacknowledged prior run.
+    internal async Task OpenNewLimitedTestAsync(
+        IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
+        IAlteringData data, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        foreach (var plan in plans) plan.Validate();
+        if (plans.Count == 0 || plans.Select(Key).Distinct().Count() != plans.Count)
+            throw new InvalidDataException("다중가공 테스트 계획이 비었거나 품목 키가 중복됩니다.");
+        if (identity.HasDurableMultiIdentity ||
+            string.IsNullOrWhiteSpace(identity.RealmName))
+            throw new InvalidOperationException(
+                "제한적 새 테스트는 서버명만 확인된 CLI에서만 허용됩니다.");
+
+        // No old manifest may be silently overwritten or interpreted as a
+        // resumable session. Only a previously acknowledged Closed test can
+        // be replaced by the user's next explicit new-test confirmation.
+        MultiAlteringBatch? previous = null;
+        try
+        {
+            previous = JsonSerializer.Deserialize<MultiAlteringBatch>(
+                File.ReadAllText(_path), JsonOptions)
+                ?? throw new InvalidDataException("제한적 테스트 기록이 비어 있습니다.");
+        }
+        catch (FileNotFoundException) { }
+        catch (JsonException ex) { throw new InvalidDataException(
+            "제한적 테스트 기록 손상 · 이전 기록 보존 · 신규 등록 차단", ex); }
+        if (previous is not null)
+        {
+            Validate(previous);
+            if (previous.State != MultiAlteringBatchState.Closed)
+                throw new InvalidOperationException(
+                    "기존 제한적 테스트 배치가 미완료입니다 · 캐릭터 식별 불가능하므로 F10/재시작 자동 이어하기 및 새 등록 차단 · 기록 보존");
+        }
+
+        if (Directory.EnumerateFiles(_directory, "*.tmp").Any() ||
+            Directory.EnumerateFiles(_directory, "plan-*.json").Any() ||
+            Directory.Exists(System.IO.Path.Combine(_directory, "dependencies")) &&
+            Directory.EnumerateFiles(System.IO.Path.Combine(_directory, "dependencies"), "*.json").Any())
+            throw new InvalidOperationException(
+                "제한적 테스트 이전 미확정 임시/하위 기록이 남아 있어 새 등록 차단 · 기록 보존");
+
+        var works = await data.WorksAsync(ct);
+        if (works.Count != 0)
+            throw new InvalidOperationException(
+                "제한적 새 테스트는 모든 시설의 CLI 대기 작업이 0건일 때만 가능합니다 · 기존 대기열 보존 · 등록 없음");
+
+        string id = Guid.NewGuid().ToString("N");
+        var sessions = new List<AlteringSessionState>();
+        foreach (var plan in plans)
+        {
+            long baseline = await data.ItemCountAsync(plan.OutputName, ct);
+            sessions.Add(AlteringSessionState.Create(plan, identity, baseline, 0) with { BatchId = id });
+        }
+        // Recheck immediately before committing: a queue appearing during
+        // inventory reads invalidates all captured fresh-run baselines.
+        if ((await data.WorksAsync(ct)).Count != 0)
+            throw new InvalidOperationException(
+                "제한적 테스트 준비 도중 대기열이 변했습니다 · 신규 등록 차단");
+
+        ct.ThrowIfCancellationRequested();
+        Commit(new MultiAlteringBatch { BatchId = id, Identity = identity,
+            Items = sessions.ToArray() });
+    }
+
+    internal static void EnsureNoActiveVerifiedBatch(string directory)
+    {
+        MultiAlteringBatch? saved;
+        try
+        {
+            saved = JsonSerializer.Deserialize<MultiAlteringBatch>(
+                File.ReadAllText(System.IO.Path.Combine(directory, "batch.json")), JsonOptions)
+                ?? throw new InvalidDataException("기존 다중가공 기록이 비어 있습니다.");
+        }
+        catch (FileNotFoundException) { return; }
+        catch (JsonException ex) { throw new InvalidDataException(
+            "기존 다중가공 기록 손상 · 새 테스트 차단 · 기록 보존", ex); }
+        Validate(saved);
+        if (saved.State != MultiAlteringBatchState.Closed)
+            throw new InvalidOperationException(
+                "미완료/미확정 기존 다중가공 배치가 있습니다 · 제한적 새 테스트 중복 가공 위험 · 기록 보존 · 신규 등록 차단");
+    }
+
     internal async Task OpenAsync(IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
         IAlteringData data, CancellationToken ct)
     {
