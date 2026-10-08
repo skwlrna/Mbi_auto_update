@@ -86,6 +86,31 @@ static class Program
                 await Reject(() => Open(restarted, world, new[] { Wood }), "RecoveryRequired");
                 Check(world.Registered.Count == registrations && File.Exists(temp.Manifest), "Uncertain item registered or record lost");
             });
+        await Test("C/read-only receipt preflight failure preserves resumable state", async () =>
+        {
+            using var temp = new Temp(); var world = new World(new[] { Wood });
+            using (var batch = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(batch, world, new[] { Wood });
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                { QueuedWorks = Wood.RequiredWorks, MultiState = MultiAlteringItemState.InProgress });
+                world.AddCompleted(Wood, Wood.RequiredWorks);
+                world.BeforeReceiptPrompt = () => throw new InvalidOperationException("OCR preflight failure");
+                await Reject(() => new Harness(batch, new[] { Wood }, world).Run(),
+                    "OCR preflight failure");
+                Check(batch.Session(Wood).MultiState == MultiAlteringItemState.InProgress,
+                    "Pre-input OCR failure poisoned an unstarted receipt");
+                Check(world.Receipts == 0, "Pre-input OCR failure transmitted receive input");
+            }
+            world.BeforeReceiptPrompt = null;
+            using var resumed = new MultiAlteringBatchStore(temp.Path);
+            await Open(resumed, world, new[] { Wood });
+            await new Harness(resumed, new[] { Wood }, world).Run();
+            Check(resumed.Session(Wood).MultiState == MultiAlteringItemState.Completed,
+                "Verified no-input receipt cannot resume safely");
+            Check(world.Registered.Count == 0 && world.Receipts == 1,
+                "Safe pre-input resume caused duplicate registration/receipt");
+        });
         await Test("D/completed intermediate consumed, no inventory-based reopening", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
@@ -192,6 +217,62 @@ static class Program
                 await Reject(() => Open(batch, world), "RecoveryRequired");
                 Check(File.ReadAllText(path) == before && !File.Exists(temp.Manifest) && world.Registered.Count == 0, "Legacy file discarded");
             });
+        await Test("I/proven zero-work stable v1 records migrate without new work", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            foreach (var plan in Plans)
+            {
+                var path = AlteringSessionStore.MultiPlanPath(temp.Path, plan);
+                new AlteringSessionStore(path).Save(AlteringSessionState.Create(plan, Identity, 0, 0));
+            }
+            Check(MultiAlteringBatchStore.ReadPendingPlans(temp.Path)
+                .OrderBy(MultiAlteringBatchStore.Key).SequenceEqual(Plans.OrderBy(MultiAlteringBatchStore.Key)),
+                "Verified legacy zero-work roster not visible in UI");
+            using (var batch = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(batch, world);
+                Check(batch.IsResuming == false && batch.CompletedPlans(Plans).Count == 0,
+                    "Zero-work migration claimed completion");
+                await new Harness(batch, Plans, world).Run();
+                batch.Complete(); batch.Cleanup(); batch.AcknowledgeClearedPlan();
+                foreach (var plan in Plans)
+                {
+                    string prior = AlteringSessionStore.MultiPlanPath(temp.Path, plan);
+                    Check(!File.Exists(prior), "Migrated legacy record left blocking next new batch");
+                    Check(File.Exists(System.IO.Path.Combine(temp.Path, "legacy-archive", batch.BatchId,
+                        System.IO.Path.GetFileName(prior))), "Legacy history was deleted instead of archived");
+                }
+            }
+            using var fresh = new MultiAlteringBatchStore(temp.Path); await Open(fresh, world);
+            Check(fresh.CompletedPlans(Plans).Count == 0, "Closed migration prevented new batch");
+        });
+        await Test("I/zero-work legacy still blocks changed inventory and live works", async () =>
+        {
+            foreach (bool changedInventory in new[] { true, false })
+            {
+                using var temp = new Temp(); var world = new World(Plans);
+                foreach (var plan in Plans)
+                    new AlteringSessionStore(AlteringSessionStore.MultiPlanPath(temp.Path, plan))
+                        .Save(AlteringSessionState.Create(plan, Identity, 0, 0));
+                if (changedInventory) world.Counts[Wood.OutputName] = 10;
+                else world.AddCompleted(Wood, 1);
+                using var batch = new MultiAlteringBatchStore(temp.Path);
+                await Reject(() => Open(batch, world), "RecoveryRequired");
+                Check(!File.Exists(temp.Manifest) && world.Registered.Count == 0,
+                    "Changed legacy history silently authorized new registration");
+            }
+        });
+        await Test("I/incomplete legacy roster never reprocesses deleted completed peer", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            foreach (var plan in new[] { Steel, Rice })
+                new AlteringSessionStore(AlteringSessionStore.MultiPlanPath(temp.Path, plan))
+                    .Save(AlteringSessionState.Create(plan, Identity, 0, 0));
+            using var batch = new MultiAlteringBatchStore(temp.Path);
+            await Reject(() => Open(batch, world), "RecoveryRequired");
+            Check(!File.Exists(temp.Manifest) && world.Registered.Count == 0,
+                "Incomplete legacy roster reset missing completed wood");
+        });
         await Test("I/orphan initial temp cannot become a fresh batch", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans); File.WriteAllText(temp.Manifest + ".tmp", "partial");
@@ -390,7 +471,7 @@ static class Program
     }
     sealed class Resolver : IAlteringSupplyResolver
     { public Task ResolveAsync(AlteringPlan p, AlteringRecipe r, int remaining, CancellationToken ct) => throw new Exception("Unexpected resolver"); }
-    sealed class World : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen
+    sealed class World : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringReceiptBoundaryScreen
     {
         readonly IReadOnlyList<AlteringPlan> plans;
         public readonly List<AlteringWork> Works = new();
@@ -400,7 +481,7 @@ static class Program
         public bool ImmediateCompletion = true, InjectPartial, PartialSeen;
         public int MaxQueue, Receipts, PartialReceipts;
         public string? FailInventory;
-        public Action? BeforeReceipt, AfterReceipt;
+        public Action? BeforeReceipt, AfterReceipt, BeforeReceiptPrompt;
         public World(IReadOnlyList<AlteringPlan> plans) { this.plans = plans; foreach (var p in plans) Counts[p.OutputName] = 0; }
         public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
         { ct.ThrowIfCancellationRequested(); return Task.FromResult<IReadOnlyList<AlteringRecipe>>(plans.Select(p => new AlteringRecipe(p.DisplayName, true, p.ProducedPerWork, null, Array.Empty<AlteringIngredient>(), p.FacilityName)).ToArray()); }
@@ -431,6 +512,15 @@ static class Program
             Works.RemoveAll(w => w.FacilityName == p.FacilityName && w.IsCompleted); AfterReceipt?.Invoke(); return Task.FromResult(true);
         }
         public Task<bool> CollectAsync(AlteringPlan p, AlteringFacilityEntryDirective d, CancellationToken ct) => CollectAsync(p, ct);
+        public async Task<bool> CollectAsyncAtBoundary(
+            AlteringPlan p, AlteringFacilityEntryDirective d,
+            Func<CancellationToken, Task> beforeReceiveInput, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            BeforeReceiptPrompt?.Invoke(); // Simulate fallible OCR/preflight with no receive input.
+            await beforeReceiveInput(ct);
+            return await CollectAsync(p, d, ct);
+        }
         public Task<bool> CollectAfterTravelAsync(AlteringPlan p, CancellationToken ct) => CollectAsync(p, ct);
         public void Dispose() { }
     }
