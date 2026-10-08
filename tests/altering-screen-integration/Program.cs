@@ -464,6 +464,50 @@ try
             "real completion modal cannot be mistaken for another blue receipt");
     }
 
+    // V3.1.59: the original capture shows the facility title at (20,50),
+    // with a second facility-level label at (20,155). Detect both independent
+    // fixed anchors without running Korean OCR or accessing a game window.
+    using (var fixedFrame = BlackFrame())
+    {
+        Check(!PixelGate("HasFixedFacilityHeaderVisual", fixedFrame),
+            "empty frame cannot prove the fixed facility UI");
+        Paint(fixedFrame, new Rectangle(20, 50, 75, 24), Color.White);
+        Check(!PixelGate("HasFixedFacilityHeaderVisual", fixedFrame),
+            "one top-left heading alone cannot prove facility UI");
+        Paint(fixedFrame, new Rectangle(20, 154, 150, 19), Color.White);
+        Check(PixelGate("HasFixedFacilityHeaderVisual", fixedFrame),
+            "fixed title and facility-level anchors prove the actual facility layout");
+
+        // No UI runtime/OCR engine is initialized. Any accidental OCR
+        // invocation in the repeated path will throw instead of passing.
+        object probe = RuntimeHelpers.GetUninitializedObject(screen);
+        screen.GetField("_repeatOcrFreeFacilityTitle", all)!
+            .SetValue(probe, "목재 가공");
+        screen.GetField("_repeatOcrFreeRecipe", all)!
+            .SetValue(probe, true);
+        async Task<object?> ProbeAsync(string method, params object?[] parameters)
+        {
+            var task = (Task)Method(screen, method, parameters.Length)
+                .Invoke(probe, parameters)!;
+            await task;
+            return task.GetType().GetProperty("Result")?.GetValue(task);
+        }
+        Check(await ProbeAsync("FindFacilityHeaderAsync",
+                  fixedFrame, "목재 가공", CancellationToken.None) is not null,
+            "verified fixed facility title skips OCR entirely");
+        Paint(fixedFrame, new Rectangle(20, 154, 150, 19), Color.Black);
+        Check(await ProbeAsync("FindFacilityHeaderAsync",
+                  fixedFrame, "목재 가공", CancellationToken.None) is null,
+            "repeat visual structure missing must not silently authorize a click");
+        Check(await ProbeAsync("IsRecipeDetailStructureAsync",
+                  fixedFrame, CancellationToken.None) is bool initialDetail && !initialDetail,
+            "repeat detail does not fall back to OCR on an absent free button");
+        Paint(fixedFrame, new Rectangle(220, 915, 390, 50), Color.FromArgb(10, 165, 160));
+        Check(await ProbeAsync("IsRecipeDetailStructureAsync",
+                  fixedFrame, CancellationToken.None) is bool fixedDetail && fixedDetail,
+            "verified repeat detail uses fixed free-button shape without OCR");
+    }
+
     Console.WriteLine($"PASS L2: {checks} real-screen integration checks (no injected input)");
 }
 catch (Exception error)
