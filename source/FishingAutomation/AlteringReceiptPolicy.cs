@@ -88,6 +88,19 @@ internal static class AlteringReceiptPolicy
     internal static bool CanSendCompletionCloseSpace(bool managedReceipt, bool? autoTraveling)
         => !managedReceipt || autoTraveling == false;
 
+    // F04: a green button may belong to a travel or unrelated modal.
+    // Only a positively identified processing-completed result can authorize
+    // manager-controlled confirmation Space. Unknown activity fails closed.
+    internal static bool CanCloseManagedCompletionResult(
+        bool greenConfirmVisible,
+        bool completedTitleVisible,
+        bool facilityVisible,
+        bool travelDialogVisible,
+        bool? autoTraveling)
+        => greenConfirmVisible && completedTitleVisible &&
+           !facilityVisible && !travelDialogVisible &&
+           autoTraveling == false;
+
     internal static bool CanConfirmCompletion(
         bool greenConfirmVisible,
         bool facilityVisible,
