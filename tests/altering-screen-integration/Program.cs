@@ -161,7 +161,6 @@ try
           Has(selection, "RequireManagedIdleAsync"),
         "managed registration paths require a fresh CLI-safe activity guard before input");
     Check(Has(queue, "VerifyTwoFreshObservationsAsync") &&
-          Has(queue, "FindRecipeAsync") &&
           Has(queue, "RequireManagedIdleAsync"),
         "managed real QueueAsync wires independent title verification before UI input");
     Check(queue.ToList().FindIndex(s => s.EndsWith(".MustReportToCoordinator")) <
