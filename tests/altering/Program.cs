@@ -1234,6 +1234,82 @@ Check(preflightLane.QueueDirectiveFor(steelPlan.FacilityName) ==
           d == AlteringFacilityEntryDirective.FreshMoveRequired),
     "H5: whole-plan preflight announces confirmed field exit to the shared manager before raw gathering");
 
+var fallbackWorld = new RecursiveProductionWorld
+{
+    HideGatheringCatalogOnFirstQuery = true
+};
+fallbackWorld.SetCount("석탄", 0);
+var fallbackLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+fallbackLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: recursive intermediate already confirmed onsite");
+fallbackWorld.ManagerObservedDuringGather = fallbackLane;
+var fallbackResolver = new RecursiveAlteringSupplyResolver(
+    fallbackWorld, fallbackWorld, fallbackWorld, fallbackWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: fallbackLane);
+var fallbackBlocked = new AlteringRecipe(
+    steelPlan.DisplayName, false, steelPlan.ProducedPerWork,
+    "not_enough_ingredient",
+    new[] { new AlteringIngredient("석탄", 4, 0) },
+    steelPlan.FacilityName);
+await fallbackResolver.ResolveAsync(steelPlan, fallbackBlocked, 1, default);
+Check(fallbackWorld.FieldExitCalls == 1 &&
+      fallbackWorld.GatherStarts == 1 &&
+      fallbackWorld.LaneDirectivesAtGatherStart.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.FreshMoveRequired }) &&
+      fallbackLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H5: hidden raw shortage discovered after intermediate processing clears coordinator onsite in recursive single-material fallback");
+
+var failedExitWorld = new RecursiveProductionWorld
+{
+    HideGatheringCatalogOnFirstQuery = true,
+    FailFieldExit = true
+};
+failedExitWorld.SetCount("석탄", 0);
+var failedExitLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+failedExitLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: uncertain navigation from confirmed intermediate facility");
+var failedExitResolver = new RecursiveAlteringSupplyResolver(
+    failedExitWorld, failedExitWorld, failedExitWorld, failedExitWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4,
+    laneState: failedExitLane);
+bool exitFailed = false;
+try
+{
+    await failedExitResolver.ResolveAsync(steelPlan, fallbackBlocked, 1, default);
+}
+catch (InvalidOperationException ex)
+{
+    exitFailed = ex.Message.Contains("H5 simulated navigation failure");
+}
+Check(exitFailed &&
+      failedExitWorld.FieldExitCalls == 1 &&
+      failedExitWorld.GatherStarts == 0 &&
+      failedExitLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H5: uncertain or failed field exit invalidates stale onsite and prevents subsequent gathering input");
+
+var noDepartureWorld = new RecursiveProductionWorld();
+noDepartureWorld.SetCount("석탄", 12);
+var noDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+noDepartureLane.ConfirmOnsite(steelPlan.FacilityName,
+    "H5 test: no field transition required");
+var noDepartureResolver = new RecursiveAlteringSupplyResolver(
+    noDepartureWorld, noDepartureWorld,
+    noDepartureWorld, noDepartureWorld,
+    verificationAttempts: 4, laneState: noDepartureLane);
+await noDepartureResolver.PreGatherKnownShortagesAsync(
+    new[] { new MultiAlteringSupplyPreflight(steelPlan, fallbackBlocked, 1) },
+    default);
+Check(noDepartureWorld.FieldExitCalls == 0 &&
+      noDepartureLane.QueueDirectiveFor(steelPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+    "H5: resolver preflight without actual field departure preserves the manager's existing onsite proof");
+
+
 var skipWorld = new RecursiveProductionWorld();
 skipWorld.SetCount("철 광석", 20);
 var skipCoordinator = new MultiGatheringCoordinator(
