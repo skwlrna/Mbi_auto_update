@@ -153,6 +153,9 @@ static class Program
                     PendingRegistration = true, PendingBeforeMatchingCount = 0 });
                 var ledger = Ledger(batch, world, Wood);
                 var before = await ledger.CaptureBeforeRegistrationAsync(Steel, default);
+                batch.PlanStore(Steel).Save(batch.Session(Steel) with {
+                    PendingConsumptionTransactionId = before.TransactionId
+                });
                 world.Set(Wood.OutputName, 99);
                 await ledger.CommitAfterRegistrationAsync(Steel, before, default);
             }
@@ -175,9 +178,31 @@ static class Program
             Directory.CreateDirectory(dep);
             new AlteringSessionStore(AlteringSessionStore.MultiPlanPath(dep, child)).Save(
                 AlteringSessionState.Create(child, Identity, 0, 0) with {
-                    PendingRegistration = true });
+                    PendingRegistration = true,
+                    PendingConsumptionTransactionId =
+                        JsonNode.Parse(File.ReadAllText(temp.Manifest))!["AppliedConsumption"]![0]!["TransactionId"]!.GetValue<string>()
+                });
             using var reopened = new MultiAlteringBatchStore(temp.Dir);
             await Reject(() => Open(reopened, world), "중간재료 등록 확정 전 종료");
+        });
+        await Test("old applied transaction cannot poison unrelated later pending registration", async () =>
+        {
+            using var temp = new Temp(); var world = new World();
+            using (var batch = new MultiAlteringBatchStore(temp.Dir))
+            {
+                await Open(batch, world);
+                var ledger = Ledger(batch, world, Wood);
+                var old = await ledger.CaptureBeforeRegistrationAsync(Steel, default);
+                world.Set(Wood.OutputName, 97);
+                await ledger.CommitAfterRegistrationAsync(Steel, old, default);
+                batch.PlanStore(Steel).Save(batch.Session(Steel) with {
+                    QueuedWorks = 1, PendingRegistration = true,
+                    PendingConsumptionTransactionId = null });
+            }
+            using var next = new MultiAlteringBatchStore(temp.Dir);
+            await Open(next, world);
+            Assert(next.Session(Steel).PendingRegistration,
+                "Independent later pending registration was incorrectly treated as applied replay");
         });
         await Test("v1 partially registered manifest cannot bypass unjournaled history", async () =>
         {
