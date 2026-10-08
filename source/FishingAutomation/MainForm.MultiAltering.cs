@@ -89,6 +89,16 @@ public sealed partial class MainForm
             batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
             await Task.Run(() => batchStore.OpenFreshAsync(
                 plans, identity.Baseline, rawAlteringData, token), token);
+            // The fresh order uses its own zero-based goal even when an older
+            // game queue remains. Refresh observations after the new baseline.
+            currentWorks = await rawAlteringData.WorksAsync(token);
+            foreach (string facility in plans.Select(p => p.FacilityName).Distinct())
+            {
+                int older = currentWorks.Count(w => w.FacilityName == facility);
+                if (older > 0)
+                    _log.Write($"[다중가공] 이번 F9 새 목표 0부터 시작 · {facility} 이전 작업 {older}건은 " +
+                        "새 등록/완료 수량에서 제외 · 시설 전체 완료 시 묶음 수령");
+            }
             _log.Write("[다중가공] 독립 신규 장부 생성 · " + sessionDir +
                 " · 과거 F05 미확정 기록 변경 없음");
             _log.Write($"[다중가공] 배치 식별 · {batchStore.BatchId} · 완료 기록 {batchStore.CompletedPlans(plans).Count}/{plans.Count}");
@@ -129,7 +139,7 @@ public sealed partial class MainForm
             // physical onsite proof. This fresh in-memory manager owns all
             // subsequent location decisions for this F9 multi-altering run.
             _log.Write(
-                "[다중가공] 시작/이어하기 위치 정책 · " +
+                "[다중가공] 이번 F9 위치 정책 · " +
                 "저장된 작업/이전 실행의 현장확정은 복원하지 않음 · " +
                 "초기 위치 미확정은 원격 확정이 아님 · " +
                 "첫 시설은 Fresh 이동 1회, 이후 현장 CLI 확인 시 같은 시설 Reuse");
@@ -274,7 +284,7 @@ public sealed partial class MainForm
                 progress[key] = restoredConfirmed;
                 SeedAlteringStatus(plan, restoredConfirmed, restoredEta);
                 _log.Write(
-                    $"[다중가공] 시작 상태 복원 · {plan.DisplayName} " +
+                    $"[다중가공] 새 목표 시작 상태 · {plan.DisplayName} " +
                     $"{restoredConfirmed:N0}/{plan.TargetQuantity:N0} · " +
                     $"등록 {session.QueuedWorks}/{plan.RequiredWorks} · " +
                     $"ETA={(restoredEta?.ToString() ?? "계산 중")}초");
