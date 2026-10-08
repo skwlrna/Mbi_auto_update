@@ -114,6 +114,26 @@ Match-Required $receiptPolicy 'visualMoveButton && exactMoveLabelVisible' 'post-
 Match-Required $receiptPolicy 'visualMoveButton && !trustedOnsiteFacility' 'legacy visual veto remains conservative before onsite proof'
 Match-Required $alterTests '04:05 receipt regression' '04:05 teal false-positive receipt failure remains executable coverage'
 
+# L2: the compiled production screen, not a FakeWorld, must be covered by
+# executable Windows regressions for fixed cards, medicine, cached selection,
+# two-frame detail conflict, receive and completion return.
+$realScreenProject = Read-Source 'tests/altering-screen-integration/Regression.csproj'
+$realScreenTests = Read-Source 'tests/altering-screen-integration/Program.cs'
+$ciWorkflow = Read-Source '.github/workflows/ci.yml'
+Match-Required $realScreenProject 'ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj"' 'L2 harness references real production assembly'
+Match-Required $realScreenTests 'Assembly.Load\("FishingAutomation"\)' 'L2 harness loads real app assembly'
+Match-Required $realScreenTests 'AsyncStateMachineAttribute' 'L2 harness inspects real async screen state machines'
+Match-Required $realScreenTests 'TrySelectFixedRecipeAsync' 'L2 tests actual fixed recipe route'
+Match-Required $realScreenTests 'TrySelectMedicineRecipeBySearchAsync' 'L2 tests actual medicine route'
+Match-Required $realScreenTests 'WaitForReceiptFacilityReturnAsync' 'L2 tests actual receipt facility return route'
+Match-Required $realScreenTests 'HasFacilityMoveButtonVisual' 'L2 tests actual teal move detector'
+Match-Required $realScreenTests 'HasCollectButtonVisual' 'L2 tests actual blue receive detector'
+Match-Required $realScreenTests 'HasBottomConfirmationModal' 'L2 tests actual completion modal detector'
+Match-Required $ciWorkflow 'dotnet run --project tests/altering-screen-integration/Regression.csproj' 'L2 executes in Windows CI, not build-only'
+Match-Forbidden $realScreenTests 'new FakeWorld' 'L2 does not rely on fake directive-only screen'
+Match-Forbidden $realScreenTests 'TapFresh\(' 'L2 tests must not send game Space input'
+Match-Forbidden $realScreenTests 'ClickFresh\(' 'L2 tests must not click game controls'
+
 # L1: local screen cache is an Automatic(single-altering) observation,
 # never another multi-altering decision authority.
 Match-Required $alterPlan 'class AlteringScreenOnsiteCachePolicy' 'L1 local cache ownership policy'
