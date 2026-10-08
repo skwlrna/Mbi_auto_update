@@ -1085,7 +1085,7 @@ internal sealed class AlteringAutomation
                 // marker. The marker is written directly before receive Space.
                 firstCollected = await bounded.CollectAsyncAtBoundary(
                     plan, directive,
-                    _beforeReceipt ?? (_ => Task.CompletedTask), ct);
+                    token => _beforeReceipt is null ? Task.CompletedTask : _beforeReceipt(plan, token), ct);
             }
             else
             {
