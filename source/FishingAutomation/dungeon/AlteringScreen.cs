@@ -2,7 +2,7 @@ using FishingAutomation;
 
 namespace DungeonVisionBot;
 
-internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringReceiptBoundaryScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("가공");
@@ -2093,11 +2093,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
         => CollectAsync(plan, AlteringFacilityEntryDirective.Automatic, ct);
 
-    public async Task<bool> CollectAsync(
+    public Task<bool> CollectAsync(
         AlteringPlan plan,
         AlteringFacilityEntryDirective directive,
         CancellationToken ct)
+        => CollectAsyncAtBoundary(plan, directive, _ => Task.CompletedTask, ct);
+
+    public async Task<bool> CollectAsyncAtBoundary(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Func<CancellationToken, Task> beforeReceiveInput,
+        CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(beforeReceiveInput);
         // L1: never retain a single-mode observation through managed receipt.
         if (directive != AlteringFacilityEntryDirective.Automatic)
             _confirmedOnsiteFacility = null;
@@ -2173,6 +2181,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Log?.Invoke(
             $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 수령 현장 확정 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
             $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+        // All visual/CLI checks have passed. Persist RecoveryRequired right
+        // before the irreversible receive key, not before navigation/OCR.
+        // A failure before this callback leaves the last known safe checkpoint.
+        await beforeReceiveInput(ct);
+        ct.ThrowIfCancellationRequested();
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
