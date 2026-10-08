@@ -767,6 +767,19 @@ public sealed partial class MainForm
             if (!IsAltering) return;
             try
             {
+                string multiDirectory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MabiAuto", "multi-altering");
+                var pendingPlans = MultiAlteringBatchStore.ReadPendingPlans(multiDirectory);
+                if (pendingPlans.Count > 0)
+                {
+                    if (_alteringQueue.Items.Count == 0)
+                        _alteringQueue.Items.AddRange(pendingPlans.Select(p => (object)new AlteringQueueChoice(p)).ToArray());
+                    Filter();
+                    _owner._productionProgressSummary = $"다중가공 이어하기 대기 · 저장 배치 {pendingPlans.Count}종 · 시작 시 캐릭터/계획 및 완료 기록 검증";
+                    _owner._log.Write("[다중가공] 저장 배치 작업 목록 복원 · 완료 품목 포함 · 신규 등록 전 배치 검증");
+                    return;
+                }
                 var saved = new AlteringSessionStore().Load();
                 if (saved is null)
                 {

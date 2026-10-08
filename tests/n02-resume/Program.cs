@@ -308,6 +308,32 @@ static class Program
             await Finish(Wood, restored, world); restored.Complete();
             Check(world.Registered.Count == 0 && restored.IsTerminal, "Terminal save cut reopened item");
         });
+        await Test("restart UI roster includes completed and pending plans until acknowledged", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            Check(MultiAlteringBatchStore.ReadPendingPlans(temp.Path).Count == 0, "Missing record invented a roster");
+            using (var batch = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(batch, world); await Finish(Wood, batch, world);
+                Check(MultiAlteringBatchStore.ReadPendingPlans(temp.Path).SequenceEqual(Plans), "Restart roster lost a completed peer");
+                await new Harness(batch, Plans, world).Run(); batch.Complete(); batch.Cleanup();
+                Check(MultiAlteringBatchStore.ReadPendingPlans(temp.Path).SequenceEqual(Plans), "Unacknowledged completion became a fresh selection");
+                batch.AcknowledgeClearedPlan();
+                Check(MultiAlteringBatchStore.ReadPendingPlans(temp.Path).Count == 0, "Closed batch blocked new UI selection");
+            }
+        });
+        await Test("mismatched item batch ID is preserved and stops restoration", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            using (var batch = new MultiAlteringBatchStore(temp.Path)) await Open(batch, world);
+            var json = JsonSerializer.SerializeToNode(JsonSerializer.Deserialize<MultiAlteringBatch>(File.ReadAllText(temp.Manifest)))!;
+            json["Items"]![0]!["BatchId"] = Guid.NewGuid().ToString("N");
+            string changed = json.ToJsonString(); File.WriteAllText(temp.Manifest, changed);
+            using var bad = new MultiAlteringBatchStore(temp.Path);
+            await Reject(() => Open(bad, world), "불일치/손상");
+            await Reject(() => { _ = MultiAlteringBatchStore.ReadPendingPlans(temp.Path); return Task.CompletedTask; }, "불일치/손상");
+            Check(File.ReadAllText(temp.Manifest) == changed && world.Registered.Count == 0, "Batch-ID conflict reset production");
+        });
         await Test("two live instances cannot own the same batch", async () =>
         {
             using var temp = new Temp(); using var first = new MultiAlteringBatchStore(temp.Path);

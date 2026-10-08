@@ -43,6 +43,24 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
 
+    internal static IReadOnlyList<AlteringPlan> ReadPendingPlans(string directory)
+    {
+        MultiAlteringBatch? saved;
+        try
+        {
+            saved = JsonSerializer.Deserialize<MultiAlteringBatch>(
+                File.ReadAllText(System.IO.Path.Combine(directory, "batch.json")), JsonOptions)
+                ?? throw new InvalidDataException("다중가공 배치 기록이 비어 있습니다.");
+        }
+        catch (FileNotFoundException) { return Array.Empty<AlteringPlan>(); }
+        catch (DirectoryNotFoundException) { return Array.Empty<AlteringPlan>(); }
+        catch (JsonException ex) { throw new InvalidDataException("다중가공 배치 기록 손상 · 원본 보존", ex); }
+        Validate(saved);
+        if (saved.State == MultiAlteringBatchState.Closed) return Array.Empty<AlteringPlan>();
+        return saved.Items.Select(s => new AlteringPlan(s.FacilityName, s.DisplayName,
+            s.TargetQuantity, s.ProducedPerWork, false, s.RecipeOrdinal)).ToArray();
+    }
+
     internal async Task OpenAsync(IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
         IAlteringData data, CancellationToken ct)
     {

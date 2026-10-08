@@ -36,6 +36,7 @@ experiment and not a string-search test.
 | `AlteringPlan.cs / RunCoreAsync` | Refreshes batch item views at entry. Completed items return saved target progress before inventory queries or game input. Multi completion is persisted; single and standalone dependency checkpoint deletion remains unchanged. SaveSession publishes only after saving. |
 | `BeginReceiptAsync / ConfirmReceiptAsync` | Marks unfinished main items in the entire facility RecoveryRequired before receipt input. After existing guarded receipt verification, rechecks the empty lane and quantities for all main peers and commits their receipt/completion together. This includes receipts made by the recursive scheduler before subsequent material consumption. |
 | `MultiAlteringCoordinator / RunAsync` | Restores completed identities at startup and before each selection. Excludes them from the registration loop; a claimed completion requires durable evidence. Existing one-slot round robin, watchdog and lane policy are preserved. |
+| `MainForm.ProductionPage.cs / ApplySavedAlteringSessionSelection`, `MainForm.Altering.cs` | Rehydrates the entire pending roster including completed peers into the UI. A pending batch cannot be bypassed by emptying that roster and starting an automatic single plan; normal single processing without a pending batch remains unchanged. |
 | `MainForm.MultiAltering.cs` | Wires the batch views and both main/dependency receipt hooks. Completed producers leave the existing consumption observer; no credits are fabricated. Restores completed progress without inventory-based reopening. Filesystem work runs off the hotkey/UI thread. |
 | `MultiAlteringDependencyScheduler.cs` | Forwards the same receipt hooks through both the existing-lane collector and recursive work automation. Its scheduler and own session lifetime otherwise stay unchanged. |
 | `AssemblyInfo.cs`, test projects, `ci.yml` | Windows N02 tests reference the compiled app; portable tests link the same source. Existing suites/expectations remain intact. The N02 branch push also runs Windows CI before PR creation. |
@@ -81,7 +82,7 @@ dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
 dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
 ```
 
-The N02 executable reports 37 named cases. It uses unique temporary directories,
+The N02 executable reports 39 named cases. It uses unique temporary directories,
 actual file persistence and fresh store/automation/coordinator objects. It never
 opens a game window or loads the Interception driver.
 
@@ -99,18 +100,18 @@ opens a game window or loads the Interception driver.
 | J | Whole completion committed; termination after only one dependency file is deleted; restart does cleanup with zero registration. |
 | K | New equal wood 100 batch after acknowledged completion: different batch ID, ten normal new registrations. |
 | L | A/B/A/B/A/B/A seven-slot mix, a completed slot while others run, no partial receipt, two whole-lane receipts, one Fresh queue directive then Reuse; completed A is never registered again. |
-| Additional | Recursive collector persists main peer completion before child use; successful single checkpoint deletion; cancellation before save/receipt; cancellation while checkpoint IO is deliberately blocked; whole-completion replace failure; concurrent instance lease. |
+| Additional | Recursive collector persists main peer completion before child use; successful single checkpoint deletion; cancellation before save/receipt; cancellation while checkpoint IO is deliberately blocked; whole-completion replace failure; concurrent instance lease; pending UI roster lifecycle; forged item batch-ID conflict. |
 
 ## Validation classification and limits
 
 - **Confirmed:** baseline loss of item evidence, actual negative reproduction,
   no code changes to input/N03, F05 ledger, fixed screen coordinates or policies.
-- **Passed locally:** N02 37, altering 238, crafting 75, gathering 64, portable N03
+- **Passed locally:** N02 39, altering 238, crafting 75, gathering 64, portable N03
   55 (Windows adds three STA tests for 58). Windows-target production cross-build
   via .NET 8 MSBuild succeeds with zero errors. The host's dotnet CLI sometimes
   fails retrieving Process.StartTime; direct MSBuild/Roslyn execution was used as
   appropriate and is not claimed as execution on Windows.
-- **Windows CI:** full existing workflow plus N02 37 and N03 58; final run links
+- **Windows CI:** full existing workflow plus N02 39 and N03 58; final run links
   and results are recorded in the PR and final response.
 - **Conditional:** atomic replacement/Flush(true) relies on a functioning local
   filesystem. Physical disk/OS corruption, manual record removal, or a native IO
