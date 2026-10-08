@@ -89,6 +89,18 @@ Check(!AlteringReceiptPolicy.CanRetryCompletionClose(true, true, false, false),
 Check(!AlteringReceiptPolicy.CanRetryCompletionClose(true, false, true, false) &&
       !AlteringReceiptPolicy.CanRetryCompletionClose(true, false, false, true),
     "travel dialog or active travel blocks completion-close retry");
+Check(AlteringReceiptPolicy.CanConfirmManagedCompletion(
+        greenConfirmVisible: true, facilityVisible: false,
+        travelDialogVisible: false, autoTraveling: false) &&
+      !AlteringReceiptPolicy.CanConfirmManagedCompletion(
+        true, false, false, (bool?)null) &&
+      !AlteringReceiptPolicy.CanConfirmManagedCompletion(
+        true, false, false, (bool?)true) &&
+      !AlteringReceiptPolicy.CanConfirmManagedCompletion(
+        true, true, false, (bool?)false) &&
+      !AlteringReceiptPolicy.CanConfirmManagedCompletion(
+        true, false, true, (bool?)false),
+    "F04: managed completion Space requires known idle activity and the real modal");
 Check(AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
         greenConfirmVisible: true,
         facilityVisible: false,
@@ -289,6 +301,17 @@ Check(!AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
         moveButtonVisible: false,
         autoTraveling: true),
     "unknown CLI, visible move button or active travel never proves facility arrival");
+Check(AlteringFacilityTravelConfirmPolicy.IsManagedFreshOnsiteObservation(
+        facilityVisible: true, autoTraveling: false, observedTravelTransition: true) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedFreshOnsiteObservation(
+        facilityVisible: true, autoTraveling: false, observedTravelTransition: false) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedFreshOnsiteObservation(
+        facilityVisible: true, autoTraveling: true, observedTravelTransition: true) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedFreshOnsiteObservation(
+        facilityVisible: true, autoTraveling: null, observedTravelTransition: true) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedFreshOnsiteObservation(
+        facilityVisible: false, autoTraveling: false, observedTravelTransition: true),
+    "F01: managed arrival ignores persistent move label only after travel transition and safe CLI");
 Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames - 1,
         TimeSpan.FromSeconds(4)) &&
@@ -1976,6 +1999,13 @@ Check(AlteringReceiptPolicy.CanCollectManagedFacility(
       !AlteringReceiptPolicy.CanCollectManagedFacility(
         Array.Empty<AlteringWork>(), lanePlan.FacilityName),
     "M4: manager permits receive-all only when every work in the selected facility is complete");
+Check(AlteringReceiptPolicy.IsManagedFacilityPartiallyComplete(
+        m4MixedPartial, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.IsManagedFacilityPartiallyComplete(
+        m4MixedCompleted, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.IsManagedFacilityPartiallyComplete(
+        Array.Empty<AlteringWork>(), lanePlan.FacilityName),
+    "F02: partially completed mixed lane is normal pending work, not receive-ready");
 Check(AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 0) &&
       !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 6) &&
       !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 1) &&
