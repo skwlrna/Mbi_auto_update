@@ -24,6 +24,18 @@ internal static class AlteringFacilityTravelConfirmPolicy
            !moveButtonVisible &&
            autoTraveling == false;
 
+    // Manager-directed fresh travel must not use the K-menu move label as a
+    // distance sensor: it remains visible at the facility. Require a real
+    // travel transition, a matching facility, and an explicit idle CLI instead.
+    // Automatic/single-altering continues to use the legacy button veto.
+    internal static bool IsManagedFreshOnsiteObservation(
+        bool facilityVisible,
+        bool? autoTraveling,
+        bool observedTravelTransition)
+        => facilityVisible &&
+           observedTravelTransition &&
+           autoTraveling == false;
+
     internal static bool HasStableOnsiteEvidence(
         int stableFrames,
         TimeSpan stableDuration)
