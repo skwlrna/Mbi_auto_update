@@ -559,7 +559,7 @@ jobs:
           if ($mainAltering -notmatch '시작 전.*materialEstimate') { throw 'start-time material estimate log missing' }
 
           $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
-          if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -notmatch '이어하기 대기') { throw 'saved altering session is not restored into the production page' }
+          if ($productionPage -notmatch 'ApplySavedAlteringSessionSelection' -or $productionPage -match '이어하기 대기|ReadPendingPlans\\(') { throw 'fresh F9 production page must not auto-restore a historical session' }
           $alteringQueries = Get-Content source/FishingAutomation/AlteringQueries.cs -Raw
           if ($alteringQueries -notmatch 'AlteringFacilityResolver' -or $alteringQueries -notmatch 'FoodRecipes' -or $alteringQueries -notmatch 'MedicineRecipes') { throw 'shared facility resolver for food/medicine missing' }
           foreach($foodName in @('마요네즈','밀가루','치즈','면','생크림')){
