@@ -71,25 +71,25 @@ internal sealed class ProductionUiRuntime : IDisposable
     internal void TapFresh(ushort scanCode, CancellationToken ct)
     {
         using var frame = Capture(ct);
-        _input.TapScanCode(scanCode);
+        _input.TapScanCode(scanCode, ct);
     }
 
     internal void PasteFresh(string text, CancellationToken ct)
     {
         using var frame = Capture(ct);
-        _input.PasteText(text);
+        _input.PasteText(text, ct);
     }
 
     internal void ClickFresh(Point point, CancellationToken ct)
     {
         using var frame = Capture(ct);
-        _input.ClickClientPoint(_hwnd, point);
+        _input.ClickClientPoint(_hwnd, point, ct);
     }
 
     internal void DragFresh(Point start, Point end, int durationMs, CancellationToken ct)
     {
         using var frame = Capture(ct);
-        _input.DragClientPoint(_hwnd, start, end, durationMs);
+        _input.DragClientPoint(_hwnd, start, end, durationMs, ct);
     }
 
     internal async Task<DetectionResult?> FindUniqueAsync(
@@ -191,7 +191,7 @@ internal sealed class ProductionUiRuntime : IDisposable
                 fresh,
                 failure + " · 클릭 직전 대상 위치가 바뀌었습니다.");
 
-        _input.ClickClientPoint(_hwnd, current.Value.Center);
+        _input.ClickClientPoint(_hwnd, current.Value.Center, ct);
         return current.Value;
     }
 
@@ -215,7 +215,7 @@ internal sealed class ProductionUiRuntime : IDisposable
             throw Failure(fresh, failure + " · 클릭 직전 기준점이 바뀌었습니다.");
 
         Point point = clickPoint(current.Value);
-        _input.ClickClientPoint(_hwnd, point);
+        _input.ClickClientPoint(_hwnd, point, ct);
         return current.Value;
     }
 
@@ -307,7 +307,7 @@ internal sealed class ProductionUiRuntime : IDisposable
                 fresh,
                 failure + " · 계산된 클릭 좌표가 게임 화면 밖입니다.");
 
-        _input.ClickClientPoint(_hwnd, point);
+        _input.ClickClientPoint(_hwnd, point, ct);
         return current;
     }
 

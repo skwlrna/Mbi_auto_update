@@ -34,6 +34,12 @@ jobs:
         shell: pwsh
         run: dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
 
+      - name: N03 deterministic input cancellation regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'N03 input cancellation regressions failed' }
+
       - name: Stable production behavior lock
         shell: pwsh
         run: ./tests/stability/ProductionBehaviorBaseline.ps1

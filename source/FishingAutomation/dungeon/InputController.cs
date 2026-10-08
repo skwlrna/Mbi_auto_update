@@ -2,16 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace DungeonVisionBot;
 
-internal interface IInputController : IDisposable
-{
-    string ModeName { get; }
-    void ClickClientPoint(nint hwnd, Point clientPoint);
-    void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs);
-    void TapScanCode(ushort scanCode);
-    void PasteText(string text);
-}
-
-internal sealed class InterceptionInput : IInputController
+internal sealed class InterceptionInput : IInputController, IInputTransport
 {
     private readonly nint _context;
     private readonly int _mouseDevice;
@@ -19,13 +10,14 @@ internal sealed class InterceptionInput : IInputController
     // V0163_GLOBAL_INPUT_LOCK: macro-generated mouse/keyboard input shares one gate.
     // This does not block the user's physical input; it only serializes automation sends.
     private readonly object _inputGate = new();
-    private bool _disposed;
+    private readonly CancellableInputSequence _sequence;
 
     public string ModeName =>
         $"Interception(mouse={_mouseDevice}, keyboard={_keyboardDevice}, verified-cursor, input-locked)";
 
     public InterceptionInput(int preferredMouseDevice, int keyboardDevice)
     {
+        _sequence = new CancellableInputSequence(this, NativeInputWindow.Instance, InputTiming.Instance, _inputGate);
         _keyboardDevice = keyboardDevice;
 
         _context = interception_create_context();
@@ -51,192 +43,45 @@ internal sealed class InterceptionInput : IInputController
         }
     }
 
-    public void ClickClientPoint(nint hwnd, Point clientPoint)
+    // Test-only dependency injection: this constructor performs no native calls.
+    internal InterceptionInput(IInputTransport transport, IInputWindow window, IInputTiming timing)
+        => _sequence = new CancellableInputSequence(transport, window, timing, _inputGate);
+
+    public void ClickClientPoint(nint hwnd, Point clientPoint, CancellationToken ct)
+        => _sequence.Click(hwnd, clientPoint, ct);
+    public void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs, CancellationToken ct)
+        => _sequence.Drag(hwnd, startClientPoint, endClientPoint, durationMs, ct);
+    public void TapScanCode(ushort scanCode, CancellationToken ct) => _sequence.Tap(scanCode, ct);
+    public void PasteText(string text, CancellationToken ct) => _sequence.Paste(text, ct);
+
+    void IInputTransport.Move(Point point) => SendAbsolute(_mouseDevice, point.X, point.Y);
+    void IInputTransport.MouseButton(bool down)
+        => SendMouse(_mouseDevice, new InterceptionMouseStroke { state = down ? MOUSE_LEFT_DOWN : MOUSE_LEFT_UP });
+    void IInputTransport.Key(ushort scanCode, bool down)
     {
-        lock (_inputGate)
-        {
-            try { ClickClientPointCore(hwnd, clientPoint); }
-            finally { SendMouse(_mouseDevice, new InterceptionMouseStroke { state = MOUSE_LEFT_UP }); }
-        }
+        var stroke = new InterceptionKeyStroke { code = scanCode, state = down ? (ushort)0 : KEY_UP };
+        if (interception_send(_context, _keyboardDevice, ref stroke, 1) <= 0)
+            throw new InvalidOperationException($"Interception keyboard device {_keyboardDevice} 입력 전송 실패");
     }
+    void IInputTransport.Clipboard(string text, CancellationToken ct) => SetClipboardText(text, ct);
 
-    private void ClickClientPointCore(nint hwnd, Point clientPoint)
+    private static void SetClipboardText(string text, CancellationToken ct)
     {
-        if (hwnd == 0)
-            throw new InvalidOperationException("게임 창 핸들이 없습니다.");
-
-        var origin = new NativeMethods.POINT { X = 0, Y = 0 };
-
-        if (!NativeMethods.ClientToScreen(hwnd, ref origin))
-            throw new InvalidOperationException("게임 창 좌표를 화면 좌표로 변환하지 못했습니다.");
-
-        int sx = origin.X + clientPoint.X;
-        int sy = origin.Y + clientPoint.Y;
-
-        // The click is only useful when Mabinogi Mobile is foreground.
-        NativeMethods.SetForegroundWindow(hwnd);
-        Thread.Sleep(100);
-
-        // Move with the selected Interception mouse device.
-        SendAbsolute(_mouseDevice, sx, sy);
-        Thread.Sleep(70);
-
-        // Verify that the driver-level move actually reached Windows.
-        if (!GetCursorPos(out var actual) ||
-            Math.Abs(actual.X - sx) > 5 ||
-            Math.Abs(actual.Y - sy) > 5)
-        {
-            // One retry is useful when the game/window has just changed focus.
-            SendAbsolute(_mouseDevice, sx, sy);
-            Thread.Sleep(100);
-
-            if (!GetCursorPos(out actual) ||
-                Math.Abs(actual.X - sx) > 5 ||
-                Math.Abs(actual.Y - sy) > 5)
-            {
-                throw new InvalidOperationException(
-                    $"Interception 입력은 전송했지만 실제 커서가 목표 위치로 이동하지 않았습니다. " +
-                    $"device={_mouseDevice}, target=({sx},{sy}), " +
-                    $"cursor=({actual.X},{actual.Y}).");
-            }
-        }
-
-        SendMouse(_mouseDevice, new InterceptionMouseStroke
-        {
-            state = MOUSE_LEFT_DOWN
-        });
-
-        // A slightly longer physical-style press is more reliable in games.
-        Thread.Sleep(75);
-
-        SendMouse(_mouseDevice, new InterceptionMouseStroke
-        {
-            state = MOUSE_LEFT_UP
-        });
-
-        Thread.Sleep(30);
-    }
-
-    public void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs)
-    {
-        lock (_inputGate)
-        {
-            try { DragClientPointCore(hwnd, startClientPoint, endClientPoint, durationMs); }
-            finally { SendMouse(_mouseDevice, new InterceptionMouseStroke { state = MOUSE_LEFT_UP }); }
-        }
-    }
-
-    private void DragClientPointCore(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs)
-    {
-        if (hwnd == 0) throw new InvalidOperationException("게임 창 핸들이 없습니다.");
-        var origin = new NativeMethods.POINT { X = 0, Y = 0 };
-        if (!NativeMethods.ClientToScreen(hwnd, ref origin))
-            throw new InvalidOperationException("게임 창 좌표를 화면 좌표로 변환하지 못했습니다.");
-
-        int sx = origin.X + startClientPoint.X;
-        int sy = origin.Y + startClientPoint.Y;
-        int ex = origin.X + endClientPoint.X;
-        int ey = origin.Y + endClientPoint.Y;
-        NativeMethods.SetForegroundWindow(hwnd);
-        Thread.Sleep(100);
-        SendAbsolute(_mouseDevice, sx, sy);
-        Thread.Sleep(90);
-        SendMouse(_mouseDevice, new InterceptionMouseStroke { state = MOUSE_LEFT_DOWN });
-        Thread.Sleep(80);
-
-        int steps = Math.Clamp(Math.Max(8, durationMs / 40), 8, 30);
-        int delay = Math.Max(15, durationMs / steps);
-        for (int i = 1; i <= steps; i++)
-        {
-            double t = i / (double)steps;
-            int x = (int)Math.Round(sx + (ex - sx) * t);
-            int y = (int)Math.Round(sy + (ey - sy) * t);
-            SendAbsolute(_mouseDevice, x, y);
-            Thread.Sleep(delay);
-        }
-
-        SendMouse(_mouseDevice, new InterceptionMouseStroke { state = MOUSE_LEFT_UP });
-        Thread.Sleep(120);
-        if (!GetCursorPos(out var actual) || Math.Abs(actual.X - ex) > 8 || Math.Abs(actual.Y - ey) > 8)
-            throw new InvalidOperationException($"Interception 드래그 후 커서 검증 실패: target=({ex},{ey}) cursor=({actual.X},{actual.Y})");
-    }
-
-    public void TapScanCode(ushort scanCode)
-    {
-        lock (_inputGate)
-        {
-            TapScanCodeCore(scanCode);
-        }
-    }
-
-    public void PasteText(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text) || text.Length > 256 || text.Any(char.IsControl))
-            throw new InvalidOperationException("붙여넣을 검색어가 올바르지 않습니다.");
-
-        lock (_inputGate)
-        {
-            SetClipboardText(text);
-            var ctrlDown = new InterceptionKeyStroke { code = 0x1D, state = 0 };
-            var vDown = new InterceptionKeyStroke { code = 0x2F, state = 0 };
-            var vUp = new InterceptionKeyStroke { code = 0x2F, state = KEY_UP };
-            var ctrlUp = new InterceptionKeyStroke { code = 0x1D, state = KEY_UP };
-
-            int a = interception_send(_context, _keyboardDevice, ref ctrlDown, 1);
-            Thread.Sleep(30);
-            int b = interception_send(_context, _keyboardDevice, ref vDown, 1);
-            Thread.Sleep(30);
-            int d = interception_send(_context, _keyboardDevice, ref vUp, 1);
-            Thread.Sleep(30);
-            int e = interception_send(_context, _keyboardDevice, ref ctrlUp, 1);
-            if (a <= 0 || b <= 0 || d <= 0 || e <= 0)
-                throw new InvalidOperationException("Interception Ctrl+V 입력 전송 실패");
-            Thread.Sleep(80);
-        }
-    }
-
-    private static void SetClipboardText(string text)
-    {
+        ct.ThrowIfCancellationRequested();
         Exception? failure = null;
         var thread = new Thread(() =>
         {
-            try { System.Windows.Forms.Clipboard.SetText(text); }
+            try { ct.ThrowIfCancellationRequested(); System.Windows.Forms.Clipboard.SetText(text); }
             catch (Exception ex) { failure = ex; }
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        thread.Join();
+        // Cancellation never waits on the STA clipboard worker. The worker can
+        // only prepare clipboard contents; it has no input transport reference.
+        while (!thread.Join(20)) ct.ThrowIfCancellationRequested();
+        ct.ThrowIfCancellationRequested();
         if (failure is not null)
             throw new InvalidOperationException("검색어를 클립보드에 준비하지 못했습니다.", failure);
-    }
-
-    private void TapScanCodeCore(ushort scanCode)
-    {
-        var down = new InterceptionKeyStroke
-        {
-            code = scanCode,
-            state = 0
-        };
-
-        var up = new InterceptionKeyStroke
-        {
-            code = scanCode,
-            state = KEY_UP
-        };
-
-        int sentDown = interception_send(
-            _context,
-            _keyboardDevice,
-            ref down,
-            1);
-
-        int sentUp;
-        try { Thread.Sleep(30); }
-        finally { sentUp = interception_send(_context, _keyboardDevice, ref up, 1); }
-
-        if (sentDown <= 0 || sentUp <= 0)
-            throw new InvalidOperationException(
-                $"Interception keyboard device {_keyboardDevice} 입력 전송 실패");
     }
 
     private int FindWorkingMouseDevice(int preferred)
@@ -360,15 +205,10 @@ internal sealed class InterceptionInput : IInputController
                 $"Interception mouse device {device} 클릭 입력 전송 실패");
     }
 
-    public void Dispose()
+    public void Dispose() => _sequence.Dispose(() =>
     {
-        lock (_inputGate)
-        {
-            if (_disposed) return;
-            _disposed = true;
-            if (_context != 0) interception_destroy_context(_context);
-        }
-    }
+        if (_context != 0) interception_destroy_context(_context);
+    });
 
     private const ushort MOUSE_LEFT_DOWN = 0x001;
     private const ushort MOUSE_LEFT_UP = 0x002;
@@ -439,26 +279,26 @@ internal sealed class SendInputFallback : IInputController
 {
     public string ModeName => "Windows SendInput (fallback)";
 
-    public void ClickClientPoint(nint hwnd, Point clientPoint)
+    public void ClickClientPoint(nint hwnd, Point clientPoint, CancellationToken ct)
     {
         throw new InvalidOperationException(
             "SendInput fallback은 비활성화되어 있습니다. " +
             "게임 클릭은 Interception으로만 전송합니다.");
     }
 
-    public void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs)
+    public void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs, CancellationToken ct)
     {
         throw new InvalidOperationException(
             "SendInput fallback은 비활성화되어 있습니다. 지도 드래그는 Interception으로만 전송합니다.");
     }
 
-    public void TapScanCode(ushort scanCode)
+    public void TapScanCode(ushort scanCode, CancellationToken ct)
     {
         throw new InvalidOperationException(
             "SendInput fallback은 비활성화되어 있습니다.");
     }
 
-    public void PasteText(string text)
+    public void PasteText(string text, CancellationToken ct)
     {
         throw new InvalidOperationException(
             "SendInput fallback은 비활성화되어 있습니다.");

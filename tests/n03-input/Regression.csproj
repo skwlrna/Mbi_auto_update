@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>N03InputRegression</AssemblyName>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+    <DefineConstants>$(DefineConstants);PRODUCTION_ASSEMBLY</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <!-- Portable local pass executes the same source; Windows CI executes the compiled app. -->
+    <Compile Include="../../source/FishingAutomation/dungeon/InputSafety.cs" Link="InputSafety.cs" />
+    <Compile Include="../../source/FishingAutomation/dungeon/GuardedInputController.cs" Link="GuardedInputController.cs" />
+    <Compile Include="../../source/FishingAutomation/dungeon/NativeInputWindow.cs" Link="NativeInputWindow.cs" />
+    <Compile Include="../../source/FishingAutomation/dungeon/NativeMethods.cs" Link="NativeMethods.cs" />
+  </ItemGroup>
+</Project>
