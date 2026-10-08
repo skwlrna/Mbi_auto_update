@@ -183,6 +183,19 @@ internal interface IAlteringCoordinatorReceiptScreen
         CancellationToken ct);
 }
 
+// Optional guarded-screen contract: the durable ambiguous-receipt marker is
+// committed only after all read-only prompt checks, immediately before the
+// first irreversible receive input. Unknown screen implementations fail closed
+// through the legacy pre-action marker rather than assuming no input occurred.
+internal interface IAlteringReceiptBoundaryScreen
+{
+    Task<bool> CollectAsyncAtBoundary(
+        AlteringPlan plan,
+        AlteringFacilityEntryDirective directive,
+        Func<CancellationToken, Task> beforeReceiveInput,
+        CancellationToken ct);
+}
+
 internal interface IDirectCliAlteringScreen
 {
     Task CompleteAsync(string displayName, CancellationToken ct);
@@ -1031,7 +1044,6 @@ internal sealed class AlteringAutomation
                 "일부만 완료된 7칸 배치는 모두 받기/Space 입력 없이 대기해야 합니다.");
         }
 
-        if (_beforeReceipt is not null) await _beforeReceipt(plan, ct);
         ct.ThrowIfCancellationRequested();
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 시설 전체 {totalBefore}건 · " +
@@ -1039,6 +1051,8 @@ internal sealed class AlteringAutomation
 
         if (_screen is IDirectCliAlteringScreen direct)
         {
+            // Direct CLI completion has no separate visual preflight boundary.
+            if (_beforeReceipt is not null) await _beforeReceipt(plan, ct);
             var completed = works.First(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
             await direct.CompleteAsync(completed.DisplayName, ct);
             await VerifyAsync(async token =>
@@ -1065,7 +1079,21 @@ internal sealed class AlteringAutomation
             // Do not preserve a reusable bench proof across that uncertainty.
             _facilityState.InvalidateOnsite(
                 $"수령 진입 · {plan.DisplayName} · 완료창 닫기 및 현장 복귀 검증 대기");
-            firstCollected = await coordinated.CollectAsync(plan, directive, ct);
+            if (_screen is IAlteringReceiptBoundaryScreen bounded)
+            {
+                // Move/onsite/OCR checks run before the durable ambiguous-receipt
+                // marker. The marker is written directly before receive Space.
+                firstCollected = await bounded.CollectAsyncAtBoundary(
+                    plan, directive,
+                    _beforeReceipt ?? (_ => Task.CompletedTask), ct);
+            }
+            else
+            {
+                // Unknown implementations have no proven input boundary:
+                // retain the conservative early journal and fail closed.
+                if (_beforeReceipt is not null) await _beforeReceipt(plan, ct);
+                firstCollected = await coordinated.CollectAsync(plan, directive, ct);
+            }
 
             // Coordinator-controlled receipt must never fall through to a second,
             // independently selected travel or receive action.
@@ -1075,6 +1103,7 @@ internal sealed class AlteringAutomation
         }
         else
         {
+            if (_beforeReceipt is not null) await _beforeReceipt(plan, ct);
             firstCollected = await _screen.CollectAsync(plan, ct);
         }
 
