@@ -1413,6 +1413,45 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return sampled > 0 && green * 100 >= sampled * 8;
     }
 
+    // Screenshot 2026-10-09 07:00, 800x1000: the genuine processing-result
+    // screen has FOUR independent anchors (blue chest halo, brown chest body, white centered
+    // result heading, cyan reward cards). A green travel popup has none of
+    // this fixed reward layout. Visual proof never replaces CLI receipt proof.
+    private static bool HasManagedCompletionResultVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+
+        static int Pixels(Bitmap bitmap, Rectangle roi, int step, Func<Color, bool> match)
+        {
+            int found = 0;
+            for (int y = roi.Top; y < roi.Bottom; y += step)
+            for (int x = roi.Left; x < roi.Right; x += step)
+                if (match(bitmap.GetPixel(x, y)))
+                    found++;
+            return found;
+        }
+
+        int chestBlue = Pixels(frame, new Rectangle(295, 58, 215, 145), 4,
+            p => p.B >= 110 && p.G >= 65 &&
+                 p.B >= p.R + 28 && p.B >= p.G + 12);
+        // The processing result specifically shows a wooden materials chest
+        // inside the halo, not only a generic blue celebration background.
+        int woodenChest = Pixels(frame, new Rectangle(350, 90, 105, 111), 3,
+            p => p.R >= 94 && p.G >= 48 && p.R >= p.G + 18 &&
+                 p.G >= p.B + 8 && p.B <= 125);
+        int titleWhite = Pixels(frame, new Rectangle(329, 202, 151, 50), 2,
+            p => p.R >= 165 && p.G >= 165 && p.B >= 165 &&
+                 Math.Max(p.R, Math.Max(p.G, p.B)) -
+                 Math.Min(p.R, Math.Min(p.G, p.B)) <= 48);
+        int rewardCyan = Pixels(frame, new Rectangle(92, 398, 618, 93), 3,
+            p => p.B >= 80 && p.G >= 72 &&
+                 p.B >= p.R + 24 && p.G >= p.R + 24);
+
+        return chestBlue >= 20 && woodenChest >= 18 &&
+               titleWhite >= 20 && rewardCyan >= 32;
+    }
+
     private async Task TravelToFacilityAsync(
         AlteringPlan plan,
         CancellationToken ct,
@@ -2025,29 +2064,49 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return false;
     }
 
-    // Managed receipt: distinguish the actual "가공 완료" result from
-    // unrelated green confirmations. The title is a positive OCR signal;
-    // absence is uncertainty, never permission to press Space.
+    // Called ONLY by manager-directed receive-close. Require a fresh whole-
+    // facility CLI empty queue after the authorized blue-button input.
+    // Reward-layout pixels may stand in for a missed title OCR, but NEVER
+    // for receipt, safe idle, facility or travel-popup verification.
     private async Task RequireManagedCompletionCloseAsync(
-        AlteringPlan plan, CancellationToken ct)
+        AlteringPlan plan, int? receiptWorkCountBefore, CancellationToken ct)
     {
         await RequireManagedIdleAsync(
             plan, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
             "완료 결과창 Space 직전 활동 검사", ct);
+
+        int? receiptWorkCountAfter = await TryFacilityWorkCountAsync(plan, ct);
+        bool verifiedWholeReceipt = receiptWorkCountBefore is int before &&
+            receiptWorkCountAfter is int after &&
+            AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(before, after);
+
         using var frame = Capture(ct);
         bool green = HasBottomConfirmationModal(frame);
-        bool heading = green &&
-            await FindAsync(frame, Whole, "가공 완료", ct) is not null;
+        bool visualResult = green && HasManagedCompletionResultVisual(frame);
+        // A result title OCR miss on the real white-on-blue result is not a
+        // veto once the fixed reward result screen is positively proven.
+        bool heading = green && !visualResult &&
+            await FindAsync(frame, new Rectangle(325, 195, 165, 75),
+                "가공 완료", ct) is not null;
         bool facility = await FindFacilityHeaderAsync(
             frame, plan.ScreenTitle, ct) is not null;
         bool travelDialog = await IsFacilityTravelDialogAsync(frame, ct);
         bool? traveling = await TryAutoTravelingAsync(ct);
+
+        Log?.Invoke(
+            $"[자동 가공] 관리 수령 완료창 검증 · 초록버튼={green} · " +
+            $"보상화면고정={visualResult} · 제목OCR={heading} · " +
+            $"시설작업={receiptWorkCountBefore?.ToString() ?? "불명"}->{receiptWorkCountAfter?.ToString() ?? "불명"} · " +
+            $"시설창={facility} · 이동팝업={travelDialog} · CLI이동={traveling?.ToString() ?? "불명"}");
+
         if (!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
-                green, heading, facility, travelDialog, traveling))
+                green, heading, visualResult, verifiedWholeReceipt,
+                facility, travelDialog, traveling))
             Fail(frame,
-                "관리 수령 완료 결과창 고유 제목/초록 버튼/CLI 비이동 증거 부족 · 다른 초록 팝업 Space 차단");
-        // A second fresh activity gate after OCR prevents its await from
-        // extending the lifetime of the input authorization.
+                "관리 수령 완료창 고정 보상구조/OCR/시설 전체 수령/CLI 비이동 증거 부족 · " +
+                "다른 초록 팝업 Space 차단");
+
+        // OCR may be slow; the final managed activity check remains mandatory.
         await RequireManagedIdleAsync(
             plan, AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
             "완료 결과창 최종 CLI 허가", ct);
@@ -2084,7 +2143,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
 
         if (managedReceipt)
-            await RequireManagedCompletionCloseAsync(plan, ct);
+            await RequireManagedCompletionCloseAsync(plan, receiptWorkCountBefore, ct);
         Log?.Invoke($"[자동 가공] {reason} · 완료창 닫기 Space 1차 입력");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
@@ -2138,7 +2197,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (canRetryAgain)
                 {
                     if (managedReceipt)
-                        await RequireManagedCompletionCloseAsync(plan, ct);
+                        await RequireManagedCompletionCloseAsync(plan, receiptWorkCountBefore, ct);
                     _ui.TapFresh(0x39, ct);
                     Log?.Invoke("[자동 가공] 완료창 닫기 Space 2차 입력 완료 · 추가 재시도 없음");
                     await Task.Delay(450, ct);

@@ -101,6 +101,26 @@ internal static class AlteringReceiptPolicy
            !facilityVisible && !travelDialogVisible &&
            autoTraveling == false;
 
+    // Manager-only OCR-independent completion close. The visual reward layout
+    // is an alternative to result-title OCR, NEVER an alternative to a confirmed
+    // whole-facility receipt, modal/onsite separation or fresh idle CLI.
+    // Keep the original five-parameter predicate for legacy call/test coverage.
+    internal static bool CanCloseManagedCompletionResult(
+        bool greenConfirmVisible,
+        bool completedTitleVisible,
+        bool fixedRewardLayoutVisible,
+        bool cliWholeFacilityReceiptConfirmed,
+        bool facilityVisible,
+        bool travelDialogVisible,
+        bool? autoTraveling)
+        => cliWholeFacilityReceiptConfirmed &&
+           CanCloseManagedCompletionResult(
+               greenConfirmVisible,
+               completedTitleVisible || fixedRewardLayoutVisible,
+               facilityVisible,
+               travelDialogVisible,
+               autoTraveling);
+
     internal static bool CanConfirmCompletion(
         bool greenConfirmVisible,
         bool facilityVisible,
