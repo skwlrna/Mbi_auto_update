@@ -1897,6 +1897,94 @@ Check(blockedUnsafeFallback &&
           new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }),
     "H2: manager receipt failure cannot fall through to autonomous travel or second Space");
 
+// M4: "모두 받기" spans the entire facility, including another recipe
+// in the same seven-slot mixed lane. The chosen plan alone is not the scope.
+var m4MixedCompleted = new AlteringWork[]
+{
+    new(lanePlan.OutputName, lanePlan.FacilityName, "Completed", true, 0),
+    new("다른 완성품", lanePlan.FacilityName, "Completed", true, 0)
+};
+var m4MixedPartial = new AlteringWork[]
+{
+    m4MixedCompleted[0],
+    m4MixedCompleted[1] with
+    {
+        State = "InProgress",
+        IsCompleted = false,
+        RemainingSeconds = 60
+    }
+};
+Check(AlteringReceiptPolicy.CanCollectManagedFacility(
+        m4MixedCompleted, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        m4MixedPartial, lanePlan.FacilityName) &&
+      !AlteringReceiptPolicy.CanCollectManagedFacility(
+        Array.Empty<AlteringWork>(), lanePlan.FacilityName),
+    "M4: manager permits receive-all only when every work in the selected facility is complete");
+Check(AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 0) &&
+      !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 6) &&
+      !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(7, 1) &&
+      !AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(0, 0),
+    "M4: partial CLI decrease or empty pre-receipt baseline cannot confirm an entire mixed facility receipt");
+
+var m4World = new FakeWorld(lanePlan);
+m4World.AddCompleted(1);
+m4World.AddForeignFacilityWork("다른 완성품", isCompleted: true);
+var m4Lane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var m4Automation = new AlteringAutomation(
+    m4World, m4World, (_, _) => Task.CompletedTask,
+    4, facilityState: m4Lane);
+Check(await m4Automation.CollectReadyBatchAsync(lanePlan, default) &&
+      m4World.CollectionCount == 1 &&
+      (await m4World.WorksAsync(default)).Count(x =>
+          x.FacilityName == lanePlan.FacilityName) == 0 &&
+      m4World.ReceiptDirectives.Count == 1,
+    "M4: manager verifies blue receive-all removed both selected and other recipe from the same facility");
+
+var m4PartialWorld = new FakeWorld(lanePlan) { Freeze = true };
+m4PartialWorld.AddCompleted(1);
+m4PartialWorld.AddForeignFacilityWork("아직 진행 중", isCompleted: false);
+var m4PartialAutomation = new AlteringAutomation(
+    m4PartialWorld, m4PartialWorld, (_, _) => Task.CompletedTask,
+    4, facilityState: new FacilityLaneState(Array.Empty<AlteringWork>()));
+bool m4PartialBlocked = false;
+try
+{
+    await m4PartialAutomation.CollectReadyBatchAsync(lanePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    m4PartialBlocked = ex.Message.Contains("일부만 완료된 7칸 배치");
+}
+Check(m4PartialBlocked && m4PartialWorld.CollectionCount == 0 &&
+      m4PartialWorld.ReceiptDirectives.Count == 0,
+    "M4: partial mixed facility batch is rejected before moving, receive-all, or Space");
+
+var m4UndrainedWorld = new FakeWorld(lanePlan)
+{
+    LeaveOtherRecipesOnCollect = true
+};
+m4UndrainedWorld.AddCompleted(1);
+m4UndrainedWorld.AddForeignFacilityWork("남은 다른 품목", isCompleted: true);
+var m4UndrainedAutomation = new AlteringAutomation(
+    m4UndrainedWorld, m4UndrainedWorld, (_, _) => Task.CompletedTask,
+    2, facilityState: new FacilityLaneState(Array.Empty<AlteringWork>()));
+bool m4UndrainedRejected = false;
+try
+{
+    await m4UndrainedAutomation.CollectReadyBatchAsync(lanePlan, default);
+}
+catch (InvalidOperationException ex)
+{
+    m4UndrainedRejected = ex.Message.Contains("시설 전체 대기열 0건");
+}
+Check(m4UndrainedRejected &&
+      m4UndrainedWorld.CollectionCount == 1 &&
+      m4UndrainedWorld.SecondStageCalls == 0 &&
+      (await m4UndrainedWorld.WorksAsync(default)).Count(x =>
+          x.FacilityName == lanePlan.FacilityName) == 1,
+    "M4: selected item disappearing while another completed recipe remains fails closed without repeat receive input");
+
 Check(!AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
         AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
         trustedOnsiteFacility: true,
@@ -1936,7 +2024,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal readonly List<AlteringFacilityEntryDirective> ReceiptDirectives = new();
     internal AlteringFacilityEntryDirective? DirectiveAfterCollection;
     internal bool QueuedWhileExisting;
-    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict;
+    internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
@@ -2023,7 +2111,8 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         CollectionCount++;
         ExistingRemaining = Math.Max(0, ExistingRemaining - _works.Count(x => x.IsCompleted));
         if (CreditRewards) Owned += _works.Count(x => x.IsCompleted) * (plan.ProducedPerWork + Bonus);
-        _works.RemoveAll(x => x.IsCompleted);
+        _works.RemoveAll(x => x.IsCompleted &&
+            (!LeaveOtherRecipesOnCollect || x.DisplayName == _plan.OutputName));
     }
     public Task RecoverStallAsync(
         AlteringPlan plan, int attempt, string reason, CancellationToken ct)
@@ -2043,6 +2132,11 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     }
     internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
     internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
+    internal void AddForeignFacilityWork(string displayName, bool isCompleted)
+        => _works.Add(new(
+            displayName, _plan.FacilityName,
+            isCompleted ? "Completed" : "InProgress",
+            isCompleted, isCompleted ? 0 : 120));
     public void Dispose() { }
 }
 
