@@ -69,7 +69,7 @@ Match-Required $multiAlterDependency 'Math\.Clamp\(waitSeconds, 1, 30\)' 'depend
 # 1c) V3.1.50 receipt input waits for the visible blue button to become input-stable.
 Match-Required $alter '파란 수령 버튼 입력 전 400ms 안정화' 'receipt waits 400ms after the proven blue collect button'
 Match-Required $alter 'Task\.Delay\(400, ct\)' 'receipt stabilization delay remains 400ms'
-Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct\)' 'receipt state is re-proven immediately before Space'
+Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 100, ct, directive\)' 'receipt state is re-proven immediately before Space under manager directive'
 Match-Required $alter '현장 수령 화면 재확인 완료' 'receipt Space is emitted only after the post-delay recheck'
 Match-Required $alter 'Space 1회' 'receipt input remains a single Space after stabilization'
 
@@ -92,6 +92,13 @@ Match-Required $alterPlan '완료품 수령 후 같은 시설창 복귀 확인' 
 Match-Required $alter 'IAlteringCoordinatorQueueScreen' 'altering screen exposes a coordinator-command execution path'
 Match-Required $alter '설비 이동 버튼 색상/형태 재판정 없음' 'coordinator-confirmed reuse cannot be downgraded by teal move-button heuristics'
 Match-Required $zeroWing 'IAlteringCoordinatorQueueScreen' 'zero-wing safety wrapper forwards coordinator facility commands'
+Match-Required $alterPlan 'IAlteringCoordinatorReceiptScreen' 'manager receipt interface exists'
+Match-Required $alterPlan '_facilityState\.QueueDirectiveFor' 'manager decides receipt travel before invocation'
+Match-Required $alterPlan '자체 재이동/2차 수령 금지' 'manager-led receipt failure cannot trigger autonomous fallback'
+Match-Required $alter '중간관리자 수령 지시' 'receipt screen implements coordinator movement directive'
+Match-Required $alter '설비 이동 0회' 'same-facility receipt cannot send a second travel command'
+Match-Required $receiptPolicy 'Alterin[g]?FacilityEntryDirective' 'receipt policy recognizes manager instruction'
+Match-Required $zeroWing 'IAlteringCoordinatorReceiptScreen' 'wing-safety wrapper preserves receipt directive'
 Match-Required $alterTests '07:01 regression' '07:01 repeated facility-move regression remains executable coverage'
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
