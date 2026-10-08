@@ -24,6 +24,20 @@ internal static class AlteringFacilityTravelConfirmPolicy
            !moveButtonVisible &&
            autoTraveling == false;
 
+    // F01: a hidden facility title alone is NOT a travel transition. A brief
+    // OCR miss can happen on a static/remote menu; CLI loading alone also
+    // occurs during unrelated UI requests. For managed Fresh, allow only a
+    // positive post-click auto-travel reading OR at least two CONSECUTIVE
+    // transient CLI loading rejections observed while the header is absent.
+    // The caller still requires stable return of the exact facility title,
+    // a known idle CLI, no modal, and a delayed independent final check.
+    internal static bool HasVerifiedManagedMoveTransition(
+        bool moveClickSent,
+        bool observedAutoTraveling,
+        int consecutiveLoadingWithMissingHeader)
+        => moveClickSent &&
+           (observedAutoTraveling || consecutiveLoadingWithMissingHeader >= 2);
+
     // F01: a manager-directed Fresh move can leave a visible "move" button
     // even on-site. Only a POSITIVELY OBSERVED travel transition (not the
     // button's absence or merely a click) can replace that visual veto.

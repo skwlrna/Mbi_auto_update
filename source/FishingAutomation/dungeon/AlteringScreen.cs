@@ -1402,9 +1402,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         int onsiteStableFrames = 0;
         DateTime? onsiteCandidateSince = null;
         int travelConfirmationSpaces = 0;
-        // F01: a visible move button is not location proof. Require a separate
-        // observed departure/loading transition before managed Fresh arrival.
-        int missingFacilityHeaderFrames = 0;
+        // F01: do not treat an isolated OCR title miss or unrelated CLI
+        // loading rejection as a genuine relocation. Evidence must be
+        // correlated in the same POST-CLICK frames, or CLI must report active
+        // auto-travel. The counter is consecutive and resets on readable CLI.
+        int loadingDepartureStreak = 0;
         bool confirmedMoveTransition = false;
 
         for (int attempt = 0; attempt < 120; attempt++)
@@ -1490,6 +1492,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             var activityResponse = await _cli.GetActivityAsync(ct);
             if (activityResponse.Success)
             {
+                loadingDepartureStreak = 0;
                 activity = GatheringQueries.ParseActivity(activityResponse);
                 if (!activity.IsSafeField)
                     throw new InvalidOperationException(
@@ -1504,23 +1507,31 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             else if (CliAutomationGuards.IsTransientLoadingRejection(activityResponse))
             {
                 loadingCliRejects++;
-                sawDeparture = true;
+                // A transient CLI rejection with the facility header STILL
+                // visible is not proof of leaving this facility. Count only
+                // consecutive reject+header-absent observations after the
+                // actual move click; do not combine unrelated observations.
+                if (moveClickSent && !facilityVisible)
+                    loadingDepartureStreak++;
+                else
+                    loadingDepartureStreak = 0;
+                if (!facilityVisible)
+                    sawDeparture = true;
                 if (loadingCliRejects == 1 || loadingCliRejects % 5 == 0)
                     Log?.Invoke(
                         $"[자동 가공] 지역 이동 로딩 중 CLI 일시 거부 · 재시도 {loadingCliRejects}회");
             }
             else
             {
+                loadingDepartureStreak = 0;
                 _ = GatheringQueries.ParseActivity(activityResponse);
             }
 
             if (!facilityVisible)
                 sawDeparture = true;
 
-            missingFacilityHeaderFrames =
-                moveClickSent && !facilityVisible ? missingFacilityHeaderFrames + 1 : 0;
-            if (moveClickSent &&
-                (sawTravel || loadingCliRejects >= 2 || missingFacilityHeaderFrames >= 2))
+            if (AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedMoveTransition(
+                    moveClickSent, sawTravel, loadingDepartureStreak))
                 confirmedMoveTransition = true;
 
             bool moveVisible = false;
@@ -1651,6 +1662,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"[자동 가공] 설비 이동 대기 · 이동감지={sawTravel} · " +
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
                     $"이동버튼확정={moveVisible} · 수령상태분리={receiptMode && moveClickSent} · " +
+                    $"F01 검증전환={confirmedMoveTransition} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
                     $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
         }
 

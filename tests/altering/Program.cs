@@ -288,6 +288,38 @@ Check(!AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
         confirmationSpaceCount: 0,
         departureAlreadySeen: true),
     "travel Space is blocked without the popup, after two attempts, or once departure is already proven");
+// F01 regression: two unrelated "loading" API rejections with a visible
+// facility title, or two OCR title misses with readable nontravel CLI, are
+// NOT movement evidence. Only positive auto-travel or consecutive correlated
+// reject+header-absent frames after the exact move click can prove departure.
+Check(!AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedMoveTransition(
+        moveClickSent: true, observedAutoTraveling: false,
+        consecutiveLoadingWithMissingHeader: 0) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedMoveTransition(
+        moveClickSent: true, observedAutoTraveling: false,
+        consecutiveLoadingWithMissingHeader: 1) &&
+      !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedMoveTransition(
+        moveClickSent: false, observedAutoTraveling: true,
+        consecutiveLoadingWithMissingHeader: 2),
+    "F01 standalone stale UI/OCR, single transient loading, or no click may not confirm movement");
+Check(AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedMoveTransition(
+        moveClickSent: true, observedAutoTraveling: true,
+        consecutiveLoadingWithMissingHeader: 0) &&
+      AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedMoveTransition(
+        moveClickSent: true, observedAutoTraveling: false,
+        consecutiveLoadingWithMissingHeader: 2),
+    "F01 confirmed post-click auto-travel or consecutive correlated loading-and-departure authorizes candidate only");
+Check(!AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
+        facilityVisible: true, autoTraveling: false,
+        moveClickSent: true, transitionObserved: false) &&
+      AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
+        facilityVisible: true, autoTraveling: false,
+        moveClickSent: true, transitionObserved: true) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
+        facilityVisible: false, autoTraveling: false,
+        moveClickSent: true, transitionObserved: true),
+    "F01 final return must include same facility title, idle CLI and previously verified travel transition");
+
 Check(AlteringFacilityTravelConfirmPolicy.MaxTravelConfirmationSpaces == 2,
     "travel confirmation Space retry is strictly bounded");
 Check(AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
