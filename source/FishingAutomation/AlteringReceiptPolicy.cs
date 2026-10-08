@@ -54,6 +54,26 @@ internal static class AlteringReceiptPolicy
                facilityWorks.All(x => x.IsCompleted);
     }
 
+    internal static bool IsManagedFacilityPartiallyComplete(
+        IReadOnlyList<AlteringWork> works, string facilityName)
+    {
+        var facilityWorks = works.Where(x => x.FacilityName == facilityName).ToArray();
+        return facilityWorks.Any(x => x.IsCompleted) &&
+               facilityWorks.Any(x => !x.IsCompleted);
+    }
+
+    // A completion modal alone (or a decreased queue count) cannot override
+    // unknown/true CLI activity on a manager-directed receipt.
+    internal static bool CanConfirmManagedCompletion(
+        bool greenConfirmVisible,
+        bool facilityVisible,
+        bool travelDialogVisible,
+        bool? autoTraveling)
+        => greenConfirmVisible &&
+           !facilityVisible &&
+           !travelDialogVisible &&
+           autoTraveling == false;
+
     internal static bool IsManagedFacilityReceiptConfirmed(int before, int after)
         => before > 0 && after == 0;
 
