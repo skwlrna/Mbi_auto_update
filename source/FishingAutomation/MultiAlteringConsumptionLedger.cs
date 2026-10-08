@@ -1,7 +1,7 @@
 namespace FishingAutomation;
 
 internal sealed record AlteringInternalConsumptionSnapshot(
-    IReadOnlyDictionary<string, long> Counts);
+    IReadOnlyDictionary<string, long> Counts, string? TransactionId = null);
 
 internal interface IAlteringInternalConsumptionObserver
 {
@@ -27,14 +27,17 @@ internal sealed class MultiAlteringConsumptionLedger : IAlteringInternalConsumpt
         Task<IReadOnlyDictionary<string, long>>> _readCounts;
     private readonly Dictionary<string, Action<long, string>> _creditByOutput =
         new(StringComparer.Ordinal);
+    private readonly MultiAlteringBatchStore? _durableBatch;
 
     internal event Action<string>? Log;
 
     internal MultiAlteringConsumptionLedger(
         Func<IReadOnlyList<string>, CancellationToken,
-            Task<IReadOnlyDictionary<string, long>>> readCounts)
+            Task<IReadOnlyDictionary<string, long>>> readCounts,
+        MultiAlteringBatchStore? durableBatch = null)
     {
         _readCounts = readCounts ?? throw new ArgumentNullException(nameof(readCounts));
+        _durableBatch = durableBatch;
     }
 
     internal void RegisterProducer(
@@ -79,7 +82,12 @@ internal sealed class MultiAlteringConsumptionLedger : IAlteringInternalConsumpt
             snapshot[name] = quantity;
         }
 
-        return new(snapshot);
+        if (_durableBatch is null)
+            return new(snapshot);
+        string transactionId = Guid.NewGuid().ToString("N");
+        // Persist the exact before-image BEFORE the irreversible registration.
+        _durableBatch.PrepareConsumption(consumerPlan, transactionId, snapshot, ct);
+        return new(snapshot, transactionId);
     }
 
     public async Task CommitAfterRegistrationAsync(
@@ -97,6 +105,33 @@ internal sealed class MultiAlteringConsumptionLedger : IAlteringInternalConsumpt
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToArray();
         var after = await _readCounts(names, ct);
+
+        if (_durableBatch is not null)
+        {
+            if (string.IsNullOrWhiteSpace(before.TransactionId))
+                throw new InvalidOperationException(
+                    "F05 등록 확인용 소비 거래 ID 소실 · 중복 보정 차단");
+            // The store commits ALL producer credits and the applied transaction
+            // in one atomic batch.json replacement. No callback writes credits.
+            bool applied = _durableBatch.ApplyConsumption(
+                consumerPlan, before.TransactionId, after, ct);
+            if (applied)
+            {
+                foreach (var (name, previous) in before.Counts)
+                {
+                    long current = after[name];
+                    if (current >= previous) continue;
+                    if (!_creditByOutput.TryGetValue(name, out var refresh))
+                        throw new InvalidOperationException(
+                            "F05 소비 확정 후 생산자 메모리 새로고침 실패 · 안전 정지");
+                    refresh(checked(previous - current), consumerPlan.DisplayName);
+                    Log?.Invoke(
+                        $"[다중가공] 거래형 내부 소비 확정 · {before.TransactionId} · " +
+                        $"{consumerPlan.DisplayName} → {name} {previous:N0}→{current:N0}");
+                }
+            }
+            return; // Already-applied transaction is a strict no-op.
+        }
 
         foreach (string name in names)
         {
