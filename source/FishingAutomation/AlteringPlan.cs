@@ -490,8 +490,9 @@ internal sealed class AlteringAutomation
             if (QueuedWorks > plan.RequiredWorks)
                 throw new InvalidOperationException("저장된 등록 횟수가 현재 목표 작업 수를 초과해 이어서 실행하지 않습니다.");
 
+            string runLabel = _session.BatchId is null ? "이어하기" : "이번 F9 새 목표";
             Log?.Invoke(
-                $"[자동 가공] 이어하기 · 저장 등록 {QueuedWorks}/{plan.RequiredWorks} · 기준 보유 {baseline:N0}개 · 기존 작업 {initialExistingCount}건 · 저장 단계={_session.Stage}");
+                $"[자동 가공] {runLabel} · 등록 {QueuedWorks}/{plan.RequiredWorks} · 기준 보유 {baseline:N0}개 · 기존 슬롯 {initialExistingCount}건 · 저장 단계={_session.Stage}");
         }
         else
         {
