@@ -942,7 +942,7 @@ internal sealed class AlteringAutomation
     {
         plan.Validate();
         var works = await _data.WorksAsync(ct);
-        return await CollectIfReadyAsync(plan, works, ct);
+        return await CollectIfReadyAsync(plan, works, ct, explicitCollection: true);
     }
 
     private static IEnumerable<AlteringWork> Matching(IEnumerable<AlteringWork> works, AlteringPlan plan)
@@ -950,7 +950,8 @@ internal sealed class AlteringAutomation
             x.FacilityName == plan.FacilityName);
 
     private async Task<bool> CollectIfReadyAsync(
-        AlteringPlan plan, IReadOnlyList<AlteringWork> works, CancellationToken ct)
+        AlteringPlan plan, IReadOnlyList<AlteringWork> works, CancellationToken ct,
+        bool explicitCollection = false)
     {
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
@@ -960,10 +961,20 @@ internal sealed class AlteringAutomation
         // receipt while another slot is still in progress.
         if (_facilityState is not null &&
             !AlteringReceiptPolicy.CanCollectManagedFacility(works, plan.FacilityName))
+        {
+            // RunCore can encounter a normal partially completed lane while
+            // filling slots. Defer receipt there; an explicit CollectReady call
+            // still fails closed and never presses the blue receive button.
+            if (!explicitCollection)
+            {
+                Log?.Invoke($"[다중가공] {plan.FacilityName} 부분 완료 · 전체 완료까지 수령 보류");
+                return false;
+            }
             throw new InvalidOperationException(
                 $"{plan.FacilityName} 다중가공 묶음 수령 차단 · " +
                 $"시설 전체 {totalBefore}건 중 완료 {count}건 · " +
                 "일부만 완료된 7칸 배치는 모두 받기/Space 입력 없이 대기해야 합니다.");
+        }
 
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 시설 전체 {totalBefore}건 · " +

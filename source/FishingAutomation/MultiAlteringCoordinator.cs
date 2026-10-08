@@ -251,7 +251,12 @@ internal sealed class MultiAlteringCoordinator
                     bool completedLaneNeedsCollection =
                         facilityWorks.Length > 0 &&
                         facilityWorks.All(x => x.IsCompleted);
-                    if (facilityWorks.Length >= 7 && !completedLaneNeedsCollection)
+                    // A fast first recipe may complete while slower recipes are
+                    // being registered. This is a normal mixed-lane state, not
+                    // permission to call the receipt path or throw on a partial batch.
+                    if (AlteringReceiptPolicy.IsManagedFacilityPartiallyComplete(
+                            facilityWorks, facility) ||
+                        (facilityWorks.Length >= 7 && !completedLaneNeedsCollection))
                         break;
 
                     int pendingBefore = PendingCount(facility);
