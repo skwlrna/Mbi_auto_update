@@ -428,6 +428,51 @@ var laneInitial = new[]
 {
     new AlteringWork(lanePlan.OutputName, lanePlan.FacilityName, "InProgress", false, 10)
 };
+// M3: a fresh F9 session is location-unknown even with populated CLI works,
+// resume JSON, or a previously confirmed lane from a different run.
+var m3PriorRun = new FacilityLaneState(laneInitial);
+m3PriorRun.ConfirmOnsite(lanePlan.FacilityName,
+    "M3 prior run had independently verified the old facility");
+var m3ColdResume = new FacilityLaneState(laneInitial);
+var m3ColdLogs = new List<string>();
+m3ColdResume.Log += m3ColdLogs.Add;
+Check(m3PriorRun.IsOnsiteConfirmed(lanePlan.FacilityName) &&
+      m3ColdResume.LocationProof == FacilityLocationProof.ColdStartUnknown &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      m3ColdLogs.Count(x => x.Contains("초기 위치 미확정(원격 확정 아님)")) == 1,
+    "M3: F9 resume with existing works cannot inherit a prior-run onsite proof or claim the player is remote");
+m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName);
+Check(m3ColdLogs.Count(x => x.Contains("초기 위치 미확정(원격 확정 아님)")) == 1,
+    "M3: cold-start diagnostics are emitted once per facility rather than every round-robin turn");
+m3ColdResume.Observe(lanePlan.FacilityName, laneInitial, allowShrink: false);
+Check(m3ColdResume.LocationProof == FacilityLocationProof.ColdStartUnknown &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: observing the same CLI seven-slot ledger is not physical location evidence");
+m3ColdResume.ConfirmOnsite(lanePlan.FacilityName,
+    "M3 current run verified physical arrival and CLI-confirmed registration");
+Check(m3ColdResume.LocationProof == FacilityLocationProof.ConfirmedThisRun &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+      m3ColdResume.QueueDirectiveFor("목재 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: current-run onsite verification permits same-facility reuse, never a different facility");
+m3ColdResume.InvalidateOnsite("M3 field exit or contradictory location evidence");
+Check(m3ColdResume.LocationProof == FacilityLocationProof.RuntimeUncertain &&
+      m3ColdResume.QueueDirectiveFor(lanePlan.FacilityName) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: post-start location uncertainty is distinct from cold-start unknown and cannot reuse stale onsite");
+Check(FacilityStartupLocationPolicy.DecideEntry(
+          lanePlan.FacilityName, lanePlan.FacilityName,
+          FacilityLocationProof.ColdStartUnknown) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired &&
+      FacilityStartupLocationPolicy.DecideEntry(
+          lanePlan.FacilityName, lanePlan.FacilityName,
+          FacilityLocationProof.RuntimeUncertain) ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "M3: even a stale same-name location cannot authorize reuse without current-run confirmation");
+
 var laneOwnership = new FacilityLaneState(laneInitial);
 Check(laneOwnership.Snapshot(lanePlan.FacilityName).InitialObservedWorks == 1,
     "facility ownership captures works that existed before automation start");
