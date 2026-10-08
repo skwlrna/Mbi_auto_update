@@ -324,18 +324,112 @@ static class Program
             Check(File.ReadAllText(Path.Combine(firstPath, "batch.json")) == firstJson,
                 "previous run manifest changed");
         });
-        await Test("K/fresh F9 rejects selected facility completed or active works", async () =>
+        await Test("K/fresh F9 starts at zero with an old completed job and orders full target", async () =>
         {
-            using var temp = new Temp(); var world = new World(Plans);
-            world.AddCompleted(Wood, 1);
+            using var temp = new Temp(); var world = new World(new[] { Wood });
+            world.AddCompleted(Wood, 1); // old game queue from a previous run
             string path = Path.Combine(temp.Path, "fresh-runs", "f9-new");
             using var fresh = new MultiAlteringBatchStore(path);
-            await Reject(() => fresh.OpenFreshAsync(new[] { Wood },
-                new CliIdentityContext(null, null, null, "server"), world, default),
-                "선택 시설에 이전 대기/완료 작업");
-            Check(!File.Exists(Path.Combine(path, "batch.json")) &&
-                world.Registered.Count == 0 && world.Works.Count == 1,
-                "fresh supervisor received or silently replaced unrelated completed work");
+            await fresh.OpenFreshAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default);
+            Check(!fresh.IsResuming && fresh.Session(Wood).QueuedWorks == 0 &&
+                fresh.Session(Wood).InitialExistingWorks == 1 &&
+                fresh.CompletedPlans(new[] { Wood }).Count == 0,
+                "prior job was counted as newly entered F9 target");
+            Check(world.Receipts == 0 && world.Registered.Count == 0,
+                "fresh F9 preflight must not issue receipt or registration input");
+            await new Harness(fresh, new[] { Wood }, world).Run();
+            Check(world.Registered.Count == Wood.RequiredWorks &&
+                world.Counts[Wood.OutputName] == (Wood.RequiredWorks + 1) * Wood.ProducedPerWork &&
+                fresh.CompletedPlans(new[] { Wood }).Count == 1,
+                "old completed job contaminated the 100-new-unit target");
+        });
+        await Test("K/previous F9 one registered then restart orders a NEW full target", async () =>
+        {
+            using var temp = new Temp(); var world = new World(new[] { Wood });
+            var realm = new CliIdentityContext(null, null, null, "server");
+            string oldPath = Path.Combine(temp.Path, "fresh-runs", "f9-old");
+            string oldJson;
+            using (var previous = new MultiAlteringBatchStore(oldPath))
+            {
+                await previous.OpenFreshAsync(new[] { Wood }, realm, world, default);
+                await new Harness(previous, new[] { Wood }, world)
+                    .Automation(Wood).RunBatchAsync(Wood, 1, default);
+                Check(world.Registered.Count == 1 && previous.Session(Wood).QueuedWorks == 1,
+                    "setup did not queue one previous-run job");
+                oldJson = File.ReadAllText(Path.Combine(oldPath, "batch.json"));
+            }
+            string freshPath = Path.Combine(temp.Path, "fresh-runs", "f9-restart");
+            using (var restarted = new MultiAlteringBatchStore(freshPath))
+            {
+                await restarted.OpenFreshAsync(new[] { Wood }, realm, world, default);
+                Check(!restarted.IsResuming && restarted.Session(Wood).QueuedWorks == 0 &&
+                    restarted.Session(Wood).InitialExistingWorks == 1,
+                    "restart carried the old 1/100 progress into fresh target");
+                await new Harness(restarted, new[] { Wood }, world).Run();
+                Check(world.Registered.Count == Wood.RequiredWorks + 1 &&
+                    world.Counts[Wood.OutputName] == (Wood.RequiredWorks + 1) * Wood.ProducedPerWork &&
+                    restarted.CompletedPlans(new[] { Wood }).Count == 1,
+                    "restart must add ten fresh registrations on top of one old registration");
+            }
+            Check(File.ReadAllText(Path.Combine(oldPath, "batch.json")) == oldJson,
+                "new F9 altered the previous batch's historical evidence");
+        });
+        await Test("K/existing running work remains untouched while six free slots are registered", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            world.Works.Add(new AlteringWork(
+                Wood.OutputName, Wood.FacilityName, "InProgress", false, 60));
+            using var fresh = new MultiAlteringBatchStore(
+                Path.Combine(temp.Path, "fresh-runs", "f9-free-slots"));
+            await fresh.OpenFreshAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default);
+            Check(!fresh.IsResuming && fresh.Session(Wood).QueuedWorks == 0 &&
+                fresh.Session(Wood).InitialExistingWorks == 1 &&
+                world.Works.Count == 1 && world.Receipts == 0,
+                "fresh F9 touched the old job before registration");
+            var result = await new Harness(fresh, new[] { Wood }, world)
+                .Automation(Wood).RunBatchAsync(Wood, 6, default);
+            Check(result == AlteringRunResult.BatchQueued &&
+                world.Registered.Count == 6 && world.Works.Count == 7 &&
+                world.Receipts == 0 && world.PartialReceipts == 0 &&
+                world.Works[0].RemainingSeconds == 60 &&
+                fresh.Session(Wood).QueuedWorks == 6,
+                "fresh F9 failed to register in free slots without changing the old job");
+        });
+        await Test("K/fresh F9 coordinator fills initial vacancies around old running or completed work", async () =>
+        {
+            foreach (bool oldCompleted in new[] { false, true })
+            {
+                var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+                world.Works.Add(new AlteringWork(Wood.OutputName, Wood.FacilityName,
+                    oldCompleted ? "Completed" : "InProgress", oldCompleted, oldCompleted ? 0 : 60));
+                var lane = new FacilityLaneState(world.Works.ToArray());
+                using var stopped = new CancellationTokenSource();
+                int added = 0;
+                var supervisor = new MultiAlteringCoordinator(lane, fillInitialVacancies: true);
+                await Reject(() => supervisor.RunAsync(
+                    new[] { Wood },
+                    (p, budget, token) =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        Check(budget == 1, "manager did not allocate one free slot");
+                        world.Works.Add(new AlteringWork(
+                            Wood.OutputName, Wood.FacilityName, "InProgress", false, 30));
+                        lane.NoteRegistration(p, FacilityLaneOwner.Main, 1);
+                        if (++added == 6) stopped.Cancel();
+                        return Task.FromResult(false);
+                    },
+                    world.WorksAsync,
+                    world.Delay,
+                    stopped.Token), "OperationCanceledException");
+                Check(added == 6 && world.Works.Count == 7 &&
+                    world.Works[0].IsCompleted == oldCompleted &&
+                    world.Works[0].RemainingSeconds == (oldCompleted ? 0 : 60) &&
+                    world.Receipts == 0 && world.PartialReceipts == 0,
+                    "coordinator skipped free slots or modified old work");
+            }
         });
         await Test("K/fresh F9 permits only unrelated facility work", async () =>
         {
