@@ -60,6 +60,19 @@ internal static class AlteringReceiptPolicy
     internal static bool IsCliReceiptConfirmed(int before, int after)
         => before >= 0 && after >= 0 && after < before;
 
+    // A facility title or a lowered CLI work count is not physical location
+    // evidence if a result/travel dialog remains, or movement is unresolved.
+    // Caller must observe this condition in two consecutive fresh frames.
+    internal static bool CanConfirmReceiptFacilityReturn(
+        bool facilityHeaderVisible,
+        bool completionModalVisible,
+        bool travelDialogVisible,
+        bool? autoTraveling)
+        => facilityHeaderVisible &&
+           !completionModalVisible &&
+           !travelDialogVisible &&
+           autoTraveling == false;
+
     internal static bool CanConfirmCompletion(
         bool greenConfirmVisible,
         bool facilityVisible,
