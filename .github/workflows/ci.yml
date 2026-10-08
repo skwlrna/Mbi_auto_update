@@ -306,6 +306,21 @@ jobs:
               [string]::IsNullOrWhiteSpace($remoteRecovery) -or
               $remoteRecovery -notmatch 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)' -or
               [regex]::Matches($remoteRecovery, 'TravelToFacilityAsync').Count -ne 1) { throw 'bounded remote detail recovery missing' }
+          # H3: manager directives never permit child OCR to invoke forced
+          # free-facility movement. Unexpected two-frame evidence is returned to
+          # the manager as a typed conflict and clears the manager's onsite proof.
+          $reportIndex = $queue.IndexOf('AlteringRemoteProcessGuard.MustReportToCoordinator')
+          $forcedRecoveryIndex = $queue.IndexOf('await RecoverRemoteDetailToOnsiteAsync')
+          if ($remoteGuard -notmatch 'internal static bool MustReportToCoordinator' -or
+              $remoteGuard -notmatch 'directive != AlteringFacilityEntryDirective.Automatic' -or
+              $reportIndex -lt 0 -or
+              $forcedRecoveryIndex -le $reportIndex -or
+              $queue -notmatch 'throw new AlteringCoordinatorFacilityMismatchException' -or
+              $queue -notmatch '가공 클릭/설비 이동 0회' -or
+              $alteringPlan -notmatch 'class AlteringCoordinatorFacilityMismatchException' -or
+              $alteringPlan -notmatch 'catch \(AlteringCoordinatorFacilityMismatchException conflict\)' -or
+              $alteringPlan -notmatch '상세 OCR/현장확정 충돌' -or
+              $alteringPlan -notmatch '_facilityState.InvalidateOnsite') {throw 'H3 child remote OCR may override facility manager without explicit conflict reporting'}
           if ($queue -match '설비 이동 후에도 원격 가공 상태가 확인되어 추가 이동 없이 정지') { throw 'duplicate post-select detail/OCR pass returned' }
           if ($queue -match '품목 상세 기준 설비 이동 필요 확정' -or $queue -match '같은 품목을 다시 선택') { throw 'recipe-first backtrack flow returned' }
           if ($queue -match 'HasFreeProcessButtonAsync') { throw 'obsolete free-process OCR helper returned' }
