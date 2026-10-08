@@ -204,6 +204,11 @@ internal sealed class MultiAlteringCoordinator
                 }
                 catch (InvalidOperationException ex)
                 {
+                    // A stalled facility is no longer a safe onsite assumption.
+                    // Invalidate its shared authority and surface the CLI-only
+                    // diagnostic; never start an autonomous movement or receipt.
+                    _laneState?.InvalidateOnsite(
+                        $"시설별 대기 정체 · {facility} · 화면 재확인 필요");
                     Log?.Invoke($"[다중가공] {ex.Message}");
                     throw;
                 }
