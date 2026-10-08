@@ -1193,11 +1193,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         _confirmedOnsiteFacility = null;
 
         // EnterFacilityAsync already owns the bounded detail-close transition.
-        await EnterFacilityAsync(plan, ct, directive);
+        await EnterFacilityAsync(plan, ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 원격 상세 복구 · 무료 설비 이동 1회 실행");
 
         await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
-        await EnterFacilityAsync(plan, ct, directive);
+        await EnterFacilityAsync(plan, ct);
 
         _confirmedOnsiteFacility = plan.FacilityName;
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 무료 설비 이동 복구 완료 · {plan.DisplayName} 다시 선택");
