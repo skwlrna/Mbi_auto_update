@@ -130,6 +130,26 @@ Match-Required $alterTests 'H4: dependency boundary receipt confirms only the pr
 Match-Required $alterTests 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility' 'first boundary handoff queue is a reuse, never an unnecessary travel'
 Match-Required $alterTests 'H4: residual facility work after boundary receipt prevents onsite confirmation' 'unfinished or foreign works prevent premature onsite proof'
 
+# H5: verified field departure is authoritative evidence that the old
+# processing-facility location can no longer be reused. The multi resolver
+# reports this to the same manager used by main and intermediate queueing.
+Match-Required $multiAlter 'FacilityLaneState' 'facility manager ownership is retained'
+Match-Required (Read-Source 'source/FishingAutomation/MainForm.MultiAltering.cs') 'dependencyScheduler: dependencyScheduler,\s*laneState: laneState' 'multi resolver receives the shared lane state'
+$resolverH5 = Read-Source 'source/FishingAutomation/RecursiveAlteringSupplyResolver.cs'
+Match-Required $resolverH5 'FacilityLaneState\? laneState = null' 'single altering retains optional manager-free resolver'
+$exitH5 = Method-Block $resolverH5 'private async Task ExitToFieldAndNotifyManagerAsync' '\r?\n    public async Task ResolveAsync' 'resolver manager field-exit notification'
+Match-Required $exitH5 'await fieldExit.ExitToFieldAsync\(ct\)' 'actual field transition must finish before normal onsite invalidation'
+Match-Required $exitH5 '실제 필드 복귀 확인' 'confirmed field exit is reported to manager'
+Match-Required $exitH5 '필드 이탈 진행 중 위치 미확정' 'failed partial field exit invalidates unknown location'
+Match-Required $exitH5 '_laneState\?\.InvalidateOnsite' 'only shared lane manager loses confirmed onsite'
+Require ([regex]::Matches($resolverH5,'await ExitToFieldAndNotifyManagerAsync\(').Count -eq 3) 'all three grouped/preflight/fallback field departures notify lane state'
+Match-Required $alterTests 'H5: after an intermediate onsite confirmation, a subsequent grouped field exit' 'H5 grouped follow-up gather invalidates onsite'
+Match-Required $alterTests 'H5: whole-plan preflight announces confirmed field exit' 'H5 initial preflight invalidates only when leaving'
+Match-Required $alterTests 'H5: hidden raw shortage discovered after intermediate processing' 'H5 late recursive gather invalidates onsite'
+Match-Required $alterTests 'H5: uncertain or failed field exit invalidates stale onsite' 'H5 failed navigation never reuses stale onsite'
+Match-Required $alterTests 'H5: resolver preflight without actual field departure' 'H5 no-departure preserves onsite'
+
+
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
