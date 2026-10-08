@@ -241,6 +241,7 @@ jobs:
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
           # H1: explicit coordinator directives must survive through every
           # recipe route, including the first-click retry; Automatic remains strict.
+          $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
           if($alteringPlan -notmatch 'class AlteringFacilityEntryPolicy' -or
              $alteringPlan -notmatch 'directive == AlteringFacilityEntryDirective.Automatic' -or
              $alteringPlan -notmatch 'moveButtonVisible'){throw 'H1 centralized recipe move-visual policy missing'}
