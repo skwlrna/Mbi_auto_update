@@ -5,9 +5,22 @@ namespace FishingAutomation;
 
 internal enum MultiAlteringBatchState { Active, Completed, Closed }
 
+// The before-image and successful credits share the same authoritative batch
+// manifest as every producer checkpoint. A prepared but unresolved transaction
+// cannot safely be replayed after F10/crash: no automatic registration is allowed.
+internal sealed record MultiAlteringConsumptionTransaction
+{
+    public string TransactionId { get; init; } = "";
+    public string ConsumerKey { get; init; } = "";
+    public Dictionary<string, long> BeforeCounts { get; init; } = new(StringComparer.Ordinal);
+    public Dictionary<string, long> AppliedCredits { get; init; } = new(StringComparer.Ordinal);
+}
+
 internal sealed record MultiAlteringBatch
 {
-    public int Version { get; init; } = 1;
+    public int Version { get; init; } = 2;
+    public MultiAlteringConsumptionTransaction? PreparedConsumption { get; init; }
+    public MultiAlteringConsumptionTransaction[] AppliedConsumption { get; init; } = [];
     public string BatchId { get; init; } = "";
     public bool MigratedFromLegacy { get; init; }
     public CliIdentityContext Identity { get; init; } = new(null, null, null, null);
@@ -163,6 +176,53 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                         $"다중가공 저장 충돌 · 배치 {saved.BatchId} · 캐릭터/계정/서버 또는 시설/품목/제법/생산량/목표 불일치. " +
                         $"저장: {Describe(saved.Items)} / 선택: {string.Join("; ", plans.Select(p => $"{p.FacilityName}/{p.DisplayName}#{p.RecipeOrdinal} 목표={p.TargetQuantity} 생산={p.ProducedPerWork}"))}. " +
                         "기존 기록을 보존하고 신규 등록 없이 정지합니다.");
+                // A v1 manifest did not journal the registration/consumption
+                // boundary. Never silently upgrade a partially registered batch.
+                if (saved.Version == 1 && saved.State == MultiAlteringBatchState.Active)
+                {
+                    if (saved.Items.Any(x => x.QueuedWorks != 0 ||
+                        x.PendingRegistration || x.InitialExistingWorks != 0 ||
+                        x.CreditedInternalConsumptionQuantity != 0 ||
+                        x.LastObservedOutputQuantity != x.BaselineQuantity) ||
+                        (await data.WorksAsync(ct)).Any(w =>
+                            plans.Any(p => p.FacilityName == w.FacilityName)))
+                        throw new InvalidOperationException(
+                            "F05 이전 배치에 등록/소비 이력이 있어 거래형 소비 장부로 안전 이관 불가 · RecoveryRequired · 원본 보존");
+                    foreach (var plan in plans)
+                        if (await data.ItemCountAsync(plan.OutputName, ct) !=
+                            saved.Items.Single(x => x.MatchesPlan(plan)).BaselineQuantity)
+                            throw new InvalidOperationException(
+                                "F05 이전 배치 기준 수량 변동 · 거래 이력 불확실 · RecoveryRequired · 신규 등록 차단");
+                    ct.ThrowIfCancellationRequested();
+                    _batch = saved;
+                    Commit(saved with { Version = 2 });
+                    saved = Batch;
+                }
+                if (saved.PreparedConsumption is not null)
+                    throw new InvalidOperationException(
+                        "F05 미확정 소비 거래가 있습니다 · RecoveryRequired · 중복 등록/보정 없이 안전 정지");
+                if (saved.Items.Any(x => x.PendingRegistration &&
+                    x.PendingConsumptionTransactionId is not null &&
+                    saved.AppliedConsumption.Any(t =>
+                        t.ConsumerKey == Key(x) && t.TransactionId == x.PendingConsumptionTransactionId)))
+                    throw new InvalidOperationException(
+                        "F05 소비 보정 저장 후 등록 확정 전 중단 · RecoveryRequired · 재등록/이중 보정 차단");
+                // Recursive child session is a separate legacy checkpoint; if a
+                // durable parent credit was applied but child confirmation was
+                // interrupted, it must not be automatically retried.
+                string childDir = System.IO.Path.Combine(_directory, "dependencies");
+                if (Directory.Exists(childDir))
+                    foreach (var file in Directory.EnumerateFiles(childDir, "plan-*.json"))
+                    {
+                        var child = new AlteringSessionStore(file).Load();
+                        if (child is not null && child.PendingRegistration &&
+                            child.PendingConsumptionTransactionId is not null &&
+                            saved.AppliedConsumption.Any(t =>
+                                t.ConsumerKey == Key(child) &&
+                                t.TransactionId == child.PendingConsumptionTransactionId))
+                            throw new InvalidOperationException(
+                                "F05 중간재료 등록 확정 전 종료 · RecoveryRequired · 자식 작업 중복 등록 차단");
+                    }
                 if (saved.Items.Any(x => x.MultiState == MultiAlteringItemState.RecoveryRequired))
                     throw new InvalidOperationException(
                         $"다중가공 배치 {saved.BatchId} 수령 확정 중 중단 · RecoveryRequired · 기록 보존 · 신규 등록 없이 안전 정지");
@@ -220,7 +280,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
 
     private static void Validate(MultiAlteringBatch b)
     {
-        if (b.Version != 1 || !Guid.TryParseExact(b.BatchId, "N", out _) ||
+        if (b.Version is not (1 or 2) || !Guid.TryParseExact(b.BatchId, "N", out _) ||
             !Enum.IsDefined(b.State) || b.Items.Length == 0 ||
             b.Items.Select(Key).Distinct().Count() != b.Items.Length)
             throw new InvalidDataException("다중가공 배치 식별/상태 손상 · 기록 보존");
@@ -233,6 +293,9 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 !Enum.IsDefined(s.MultiState) || s.QueuedWorks < 0 || s.QueuedWorks > s.RequiredWorks ||
                 s.BaselineQuantity < 0 || s.LastObservedOutputQuantity < s.BaselineQuantity ||
                 s.CreditedInternalConsumptionQuantity < 0 || s.InitialExistingWorks < 0 || s.PendingBeforeMatchingCount < 0 ||
+                (s.PendingConsumptionTransactionId is not null &&
+                    (!s.PendingRegistration ||
+                     !Guid.TryParseExact(s.PendingConsumptionTransactionId, "N", out _))) ||
                 s.MultiState == MultiAlteringItemState.Completed &&
                 (s.CompletedAt is null || s.QueuedWorks != s.RequiredWorks || s.PendingRegistration ||
                  s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity))
@@ -241,6 +304,26 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         if (b.State != MultiAlteringBatchState.Active &&
             (b.CompletedAt is null || b.Items.Any(s => s.MultiState != MultiAlteringItemState.Completed)))
             throw new InvalidDataException("다중가공 전체 완료 증거 부족 · 기록 보존");
+        if (b.Version == 1 &&
+            (b.PreparedConsumption is not null || b.AppliedConsumption.Length != 0))
+            throw new InvalidDataException("F05 구형 소비 기록 구조 손상 · 안전 정지");
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tx in b.AppliedConsumption.Concat(
+            b.PreparedConsumption is null ? Array.Empty<MultiAlteringConsumptionTransaction>() :
+            new[] { b.PreparedConsumption }))
+        {
+            if (!Guid.TryParseExact(tx.TransactionId, "N", out _) ||
+                string.IsNullOrWhiteSpace(tx.ConsumerKey) || !ids.Add(tx.TransactionId) ||
+                tx.BeforeCounts is null || tx.AppliedCredits is null ||
+                tx.BeforeCounts.Any(kv => kv.Key.Length == 0 || kv.Value < 0) ||
+                tx.AppliedCredits.Any(kv => kv.Value <= 0 ||
+                    !tx.BeforeCounts.ContainsKey(kv.Key) ||
+                    tx.BeforeCounts[kv.Key] < kv.Value) ||
+                b.PreparedConsumption == tx && tx.AppliedCredits.Count > 0)
+                throw new InvalidDataException("F05 소비 거래 기록 손상 · 안전 정지");
+        }
+        if (b.State != MultiAlteringBatchState.Active && b.PreparedConsumption is not null)
+            throw new InvalidDataException("F05 미확정 소비 거래가 남은 배치 종료 차단");
     }
 
     internal AlteringSessionState Session(AlteringPlan plan)
@@ -258,12 +341,95 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         if (Batch.State != MultiAlteringBatchState.Active || state.BatchId != Batch.BatchId ||
             !state.MatchesPlan(plan) || previous.MultiState == MultiAlteringItemState.Completed && state != previous)
             throw new InvalidOperationException("다중가공 완료/배치 기록 변경 차단");
+        // A producer credit may have been atomically applied by a recursive
+        // consumer while this item's automation still holds an older copy.
+        // Saving its stage must never roll back those durable credits.
+        if (state.CreditedInternalConsumptionQuantity <
+            previous.CreditedInternalConsumptionQuantity)
+            state = state with {
+                CreditedInternalConsumptionQuantity = previous.CreditedInternalConsumptionQuantity
+            };
         Commit(Batch with { Items = Batch.Items.Select(s => Key(s) == Key(plan) ? state : s).ToArray() });
+    }
+
+    internal void PrepareConsumption(
+        AlteringPlan consumer, string transactionId,
+        IReadOnlyDictionary<string, long> before, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Batch.Version != 2 || Batch.State != MultiAlteringBatchState.Active ||
+            Batch.PreparedConsumption is not null ||
+            !Guid.TryParseExact(transactionId, "N", out _))
+            throw new InvalidOperationException(
+                "F05 미확정 거래/구버전 배치 · 신규 입력 없이 안전 정지");
+        if (before.Count == 0) return;
+        foreach (var (output, count) in before)
+        {
+            if (count < 0 || !Batch.Items.Any(s =>
+                s.MultiState != MultiAlteringItemState.Completed &&
+                PlanFrom(s).OutputName == output))
+                throw new InvalidOperationException(
+                    "F05 소비 대상 생산자 불일치 · 기록 보존 · 입력 차단");
+        }
+        Commit(Batch with { PreparedConsumption = new()
+        {
+            TransactionId = transactionId,
+            ConsumerKey = Key(consumer),
+            BeforeCounts = before.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal)
+        } });
+        ct.ThrowIfCancellationRequested();
+    }
+
+    internal bool ApplyConsumption(
+        AlteringPlan consumer, string transactionId,
+        IReadOnlyDictionary<string, long> after, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Batch.AppliedConsumption.Any(t => t.TransactionId == transactionId))
+            return false; // Retried commit is idempotent, not additive.
+        var prepared = Batch.PreparedConsumption;
+        if (Batch.Version != 2 || prepared is null ||
+            prepared.TransactionId != transactionId ||
+            prepared.ConsumerKey != Key(consumer) ||
+            after.Count != prepared.BeforeCounts.Count ||
+            after.Keys.Any(k => !prepared.BeforeCounts.ContainsKey(k)))
+            throw new InvalidOperationException(
+                "F05 소비 거래 ID/스냅샷 불일치 · 이중 보정 차단");
+        var credits = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var (name, initial) in prepared.BeforeCounts)
+        {
+            if (!after.TryGetValue(name, out long current) || current < 0)
+                throw new InvalidDataException("F05 소비 후 보유량 불확실 · 거래 유지");
+            if (current < initial) credits[name] = checked(initial - current);
+        }
+        var items = Batch.Items.ToArray();
+        foreach (var (output, amount) in credits)
+        {
+            int index = Array.FindIndex(items, x =>
+                x.MultiState != MultiAlteringItemState.Completed &&
+                PlanFrom(x).OutputName == output);
+            if (index < 0)
+                throw new InvalidOperationException("F05 소비 생산자 사라짐 · 거래 유지");
+            items[index] = items[index] with
+            {
+                CreditedInternalConsumptionQuantity =
+                    checked(items[index].CreditedInternalConsumptionQuantity + amount)
+            };
+        }
+        ct.ThrowIfCancellationRequested();
+        // Producer credits + transaction identity + final after-image are one
+        // atomic manifest replacement. No callback can double-credit on replay.
+        Commit(Batch with { Items = items, PreparedConsumption = null,
+            AppliedConsumption = [.. Batch.AppliedConsumption,
+                prepared with { AppliedCredits = credits }] });
+        return true;
     }
 
     internal Task BeginReceiptAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (Batch.PreparedConsumption is not null)
+            throw new InvalidOperationException("F05 미확정 등록 소비 거래 · 수령 차단");
         Commit(Batch with { Items = Batch.Items.Select(s =>
             s.FacilityName == plan.FacilityName && s.MultiState != MultiAlteringItemState.Completed
                 ? s with { MultiState = MultiAlteringItemState.RecoveryRequired, Stage = "수령 확정 대기" } : s).ToArray() });
@@ -301,6 +467,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
 
     internal void Complete()
     {
+        if (Batch.PreparedConsumption is not null)
+            throw new InvalidOperationException("F05 미확정 소비 거래 · 배치 종료 차단");
         if (Batch.Items.Any(s => s.MultiState != MultiAlteringItemState.Completed))
             throw new InvalidOperationException("전체 품목 완료 증거 부족 · 배치 종료 차단");
         if (Batch.State == MultiAlteringBatchState.Active)

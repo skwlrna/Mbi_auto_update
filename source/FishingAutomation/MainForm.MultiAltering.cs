@@ -114,7 +114,7 @@ public sealed partial class MainForm
             // One shared consumption ledger covers both main and recursive
             // intermediate registrations in this F9 run.
             var consumptionLedger = new MultiAlteringConsumptionLedger(
-                rawAlteringData.ItemCountsAsync);
+                rawAlteringData.ItemCountsAsync, batchStore);
             async Task ConfirmBatchReceiptAsync(AlteringPlan receiptPlan, CancellationToken ct)
             {
                 await batchStore.ConfirmReceiptAsync(receiptPlan, rawAlteringData, ct);
@@ -222,8 +222,7 @@ public sealed partial class MainForm
                 if (!itemCompleted) consumptionLedger.RegisterProducer(
                     plan,
                     (quantity, consumerDisplayName) =>
-                        automation.CreditInternalConsumption(
-                            quantity, consumerDisplayName));
+                        automation.RefreshDurableConsumption());
 
                 long currentOutputForStatus =
                     itemCompleted ? 0 : await rawAlteringData.ItemCountAsync(plan.OutputName, token);
