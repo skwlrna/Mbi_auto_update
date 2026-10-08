@@ -114,6 +114,21 @@ Match-Required $alterTests 'H3: coordinator receives two-frame detail contradict
 Match-Required $alterPlan 'AlteringCoordinatorFacilityMismatchException\.IsForFacility' 'manager detects typed conflict even inside safety aggregate'
 Match-Required $alterTests 'H3: wing-safety aggregate preserves both failures' 'aggregated currency-verification failure cannot hide onsite invalidation'
 
+# H4: intermediate scheduler must keep the shared manager onsite after a
+# confirmed whole-facility receipt. Observation/empty verification comes first.
+$dependencyRun = Method-Block $multiAlterDependency 'public async Task RunAsync' '\r?\n    private async Task<AlteringWork\[\]> WaitForFacilityBatchBoundaryAsync' 'intermediate dependency run'
+Match-Required $dependencyRun 'CollectReadyBatchAsync\(requestedPlan, ct\)' 'boundary receipt runs through the protected collector'
+Match-Required $dependencyRun '_laneState\?\.Observe' 'boundary receipt updates the shared seven-slot ledger'
+Match-Required $dependencyRun 'afterFacilityCollection.Length > 0' 'boundary receipt must prove facility empty before granting onsite state'
+Match-Required $dependencyRun '_laneState\?\.ConfirmOnsite' 'only the manager confirms same-facility receipt return'
+Require (
+    $dependencyRun.IndexOf('_laneState?.Observe(') -ge 0 -and
+    $dependencyRun.IndexOf('if (afterFacilityCollection.Length > 0)') -gt $dependencyRun.IndexOf('_laneState?.Observe(') -and
+    $dependencyRun.IndexOf('_laneState?.ConfirmOnsite(') -gt $dependencyRun.IndexOf('if (afterFacilityCollection.Length > 0)')
+) 'H4 boundary onsite confirmation follows ledger observation and verified empty queue'
+Match-Required $alterTests 'H4: dependency boundary receipt confirms only the proven same-facility onsite state' 'verified boundary receipt preserves onsite in regression'
+Match-Required $alterTests 'H4: first intermediate registration after boundary receipt reuses manager-confirmed facility' 'first boundary handoff queue is a reuse, never an unnecessary travel'
+
 
 # 2) Facility ownership remains conservative across nested/intermediate batches.
 foreach ($required in @('AssertAccess','AcquireIntermediate','ReleaseIntermediate','IntermediateOwners','IntermediateDepth','ExpectedGrowth')) {
