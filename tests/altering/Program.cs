@@ -1047,6 +1047,13 @@ Check(!File.Exists(staleDependencyStore.Path) &&
       recoveredSessionWorld.Count("철괴") == 3 &&
       recoveredLane.Snapshot("금속 가공 시설").IntermediateDepth == 0,
     "satisfied dependency deletes stale resume state after an existing completed batch is received");
+Check(recoveredLane.QueueDirectiveFor(satisfiedIronPlan.FacilityName) ==
+          AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+      recoveredLane.Snapshot(satisfiedIronPlan.FacilityName).LiveWorks == 0 &&
+      recoveredLane.QueueDirectiveFor("목재 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "H4: dependency boundary receipt confirms only the proven same-facility onsite state after all seven-slot works are gone");
+
 
 bool recoveredWorldQueueIsUnchanged() => recoveredSessionWorld.Queued.Count == 0;
 
@@ -1063,6 +1070,10 @@ Check(recoveredSessionWorld.Count("철괴") == 6 &&
       recoveredSessionWorld.Queued.SequenceEqual(new[] { "철괴(철 광석)" }) &&
       !File.Exists(staleDependencyStore.Path),
     "later request for the same intermediate starts fresh after completed-work checkpoint cleanup");
+Check(recoveredSessionWorld.QueueDirectives.SequenceEqual(
+          new[] { AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite }),
+    "H4: first intermediate registration after boundary receipt reuses manager-confirmed facility without second move");
+
 if (Directory.Exists(satisfiedSessionDir))
     Directory.Delete(satisfiedSessionDir, recursive: true);
 
@@ -1601,6 +1612,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     private readonly List<AlteringWork> _works = new();
     private string? _gathering;
     internal readonly List<string> Queued = new();
+    internal readonly List<AlteringFacilityEntryDirective> QueueDirectives = new();
     internal readonly List<string> Gathered = new();
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls;
     internal bool NestedSameFacilityChain;
@@ -1701,7 +1713,10 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         AlteringFacilityEntryDirective directive,
         Action reserveFiveWings,
         CancellationToken ct)
-        => QueueAsync(plan, reserveFiveWings, ct);
+    {
+        QueueDirectives.Add(directive);
+        return QueueAsync(plan, reserveFiveWings, ct);
+    }
 
 
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
