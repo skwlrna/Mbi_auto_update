@@ -178,6 +178,12 @@ try
         "real blue receive prompt uses directive, popup, idle CLI and visual button");
     Check(!Has(prompt, "TravelToFacilityAsync"),
         "receive prompt cannot make an independent travel decision");
+    // F02 must inspect the COMPILED screen, not only the coordinator's
+    // earlier snapshot. The real blue-button predicate must require ALL
+    // facility jobs complete, and the bounded receipt implementation must
+    // rerun it AFTER the persisted N02 receive boundary and BEFORE Space.
+    Check(Has(prompt, "CanCollectManagedFacility"),
+        "F02 managed blue prompt checks all facility jobs, not any completed slot");
 
     // N02 moves the actual managed-receipt async body into a boundary-aware
     // method. Inspect that compiled production body, not the thin old overload.
@@ -189,6 +195,8 @@ try
           Has(collect, "AfterVerifiedFacilityEntry") &&
           Has(collect, "Invoke") && Has(collect, "TapFresh"),
         "real receipt keeps manager travel, blue recheck, completion proof and durable receive-input boundary");
+    Check(Has(collect, "HasCollectPromptAsync"),
+        "F02 compiled receipt checks fresh entire lane again after durable boundary before Space");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
