@@ -488,6 +488,8 @@ jobs:
           if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion' -or
               $screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCliReceiptCompletion' -or
               $screen -notmatch 'AutoTraveling 잔류값 무시 · 완료창 Space 허용' -or
+              $screen -notmatch 'if \(!managedReceipt && autoTravelAfterReceipt == true\)' -or
+              $screen -notmatch 'CanConfirmManagedCompletion' -or
               $screen -notmatch '실제 이동 확인창 감지 · 완료창 Space 차단' -or
               $screen -notmatch 'cliReceiptConfirmed: true') { throw 'CLI-confirmed receipt stale AutoTraveling override missing' }
           if ($screen -notmatch 'facilityFrames >= 2') { throw 'facility return must be stable before continuing' }
