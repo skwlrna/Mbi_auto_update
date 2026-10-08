@@ -93,6 +93,15 @@ public sealed partial class MainForm
                 await Task.Run(() =>
                     MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(mainSessionDir), token);
             }
+            if (!limitedFreshTest)
+            {
+                // If CLI begins exposing a strong ID again, do NOT open a new
+                // regular ledger while an older realm-only run is still active.
+                // The only authorized continuation remains the isolated roster.
+                await Task.Run(() =>
+                    MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(
+                        Path.Combine(mainSessionDir, "limited-fresh-test")), token);
+            }
             batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
             await Task.Run(() => batchStore.OpenAsync(
                 plans, identity.Baseline, rawAlteringData, token,
