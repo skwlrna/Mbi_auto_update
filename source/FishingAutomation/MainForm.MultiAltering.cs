@@ -97,12 +97,17 @@ public sealed partial class MainForm
                 "저장된 작업/이전 실행의 현장확정은 복원하지 않음 · " +
                 "초기 위치 미확정은 원격 확정이 아님 · " +
                 "첫 시설은 Fresh 이동 1회, 이후 현장 CLI 확인 시 같은 시설 Reuse");
+            // One shared consumption ledger covers both main and recursive
+            // intermediate registrations in this F9 run.
+            var consumptionLedger = new MultiAlteringConsumptionLedger(
+                rawAlteringData.ItemCountsAsync);
             var dependencyScheduler = new MultiAlteringDependencyScheduler(
                 rawAlteringData,
                 screen,
                 identity.Baseline,
                 sessionDir,
-                laneState: laneState);
+                laneState: laneState,
+                internalConsumptionObserver: consumptionLedger);
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData,
                 gatheringData,
@@ -110,8 +115,6 @@ public sealed partial class MainForm
                 gatheringScreen,
                 dependencyScheduler: dependencyScheduler,
                 laneState: laneState);
-            var consumptionLedger = new MultiAlteringConsumptionLedger(
-                rawAlteringData.ItemCountsAsync);
 
             visualAltering.Log += text => Ui(() => _log.Write(text));
             visualGathering.Log += text => Ui(() => _log.Write(text));
