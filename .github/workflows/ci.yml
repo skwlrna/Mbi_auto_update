@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.59"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.60"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.59</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3159-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.59"')) {
+          if ($p -notmatch '<Version>3\.1\.60</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3160-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.60"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -245,9 +245,18 @@ jobs:
             if($fixedLayout -notmatch $point){throw "user-confirmed processing fixed coordinate missing: $point"}
           }
           if($fixedLayout -notmatch '"최상급 목재", 2\).*new\(340, 756\)'){throw 'duplicate wood recipe ordinal coordinate missing'}
-          if($fixedLayout -notmatch 'ProcessingSearchIconPoint = new\(39, 117\)' -or
-             $fixedLayout -notmatch 'ProcessingSearchInputPoint = new\(400, 862\)' -or
-             $fixedLayout -notmatch 'ProcessingSearchFirstResultPoint = new\(219, 412\)'){throw 'medicine crafting-style search geometry missing'}
+          # Food crafting owns search geometry; medicine must share ALL seven values.
+          foreach($part in @(
+            'ProcessingSearchIconPoint = CraftingHubLayout\.ProductSearchIconPoint',
+            'ProcessingSearchDialogArea = CraftingHubLayout\.ProductSearchDialogArea',
+            'ProcessingSearchInputPoint = CraftingHubLayout\.ProductSearchInputPoint',
+            'ProcessingSearchResultArea = CraftingHubLayout\.ProductSearchResultArea',
+            'ProcessingSearchFirstResultPoint = CraftingHubLayout\.ProductFirstResultPoint',
+            'ProcessingSearchOpenChangeRatio = CraftingHubLayout\.SearchDialogOpenChangeRatio',
+            'ProcessingSearchResultChangeRatio = CraftingHubLayout\.SearchResultChangeRatio'
+          )){
+            if($fixedLayout -notmatch $part){throw "medicine search diverged from food crafting: $part"}
+          }
           if($selectRecipe -notmatch 'TrySelectFixedRecipeAsync' -or
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
           $fixedSelect = [regex]::Match($screen, 'private async Task<bool> TrySelectFixedRecipeAsync[\s\S]*?(?=\r?\n    private async Task<bool> TrySelectMedicineRecipeBySearchAsync)').Value
@@ -265,6 +274,14 @@ jobs:
              $fixedRetry -notmatch 'facilityVisible' -or
              $fixedRetry -notmatch '!moveButtonVisible' -or
              $fixedRetry -notmatch '!retryAlreadyUsed'){throw 'fixed recipe retry safety policy missing'}
+          if($medicineSelect -notmatch 'bool exactUnique = exact.Count == 1' -or
+              $medicineSelect -notmatch 'if \(!exactUnique &&' -or
+              $medicineSelect -notmatch 'ProcessingSearchResultChangeRatio' -or
+              $medicineSelect -match 'IsNearMedicineFirstResult|exact.Count != 1' -or
+              $medicineSelect -notmatch 'await Task.Delay\(550, ct\)' -or
+              $medicineSelect -notmatch 'ProcessingSearchFirstResultPoint'){
+              throw 'medicine search must match food: OCR advisory, ROI transition, first-row click and 550ms settle'
+          }
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
