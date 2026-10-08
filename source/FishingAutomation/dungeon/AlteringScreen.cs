@@ -18,6 +18,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private readonly HashSet<string> _verifiedFacilityTitles = new(StringComparer.Ordinal);
     private readonly HashSet<string> _verifiedFixedRecipes = new(StringComparer.Ordinal);
     private string? _repeatOcrFreeFacilityTitle;
+    private string? _postTravelProvenFacilityTitle;
     private bool _repeatOcrFreeRecipe;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
@@ -53,7 +54,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // This is a visual location check, not a guess based on a stale OCR result.
     private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
     {
-        if (string.Equals(_repeatOcrFreeFacilityTitle, title, StringComparison.Ordinal))
+        if (string.Equals(_repeatOcrFreeFacilityTitle, title, StringComparison.Ordinal) ||
+            string.Equals(_postTravelProvenFacilityTitle, title, StringComparison.Ordinal))
         {
             ct.ThrowIfCancellationRequested();
             DetectionResult? fixedHit = HasFixedFacilityHeaderVisual(frame)
@@ -1060,6 +1062,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         // Cache is enabled only after the FIRST successful manager-directed
         // registration of this facility / exact fixed recipe in this run.
+        _postTravelProvenFacilityTitle = null;
         _repeatOcrFreeFacilityTitle =
             directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
             _verifiedFacilityTitles.Contains(plan.ScreenTitle)
@@ -1737,6 +1740,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                     if (finalOnsite)
                     {
+                        // Proven by fixed UI anchors, two timed observations,
+                        // a clean modal state and idle CLI; post-travel facility
+                        // re-entry must not demand a second title OCR pass.
+                        _postTravelProvenFacilityTitle = plan.ScreenTitle;
                         Log?.Invoke(
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
                             $"가공창 유지 + {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
