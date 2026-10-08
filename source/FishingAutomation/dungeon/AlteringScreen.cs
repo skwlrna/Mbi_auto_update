@@ -835,12 +835,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             beforeSearch,
             searchDialog,
             AlteringRecipeLayout.ProcessingSearchDialogArea);
+        Log?.Invoke($"[자동 가공] 약품 검색창 화면 변화 확인 · {openRatio:P1}");
         if (openRatio < AlteringRecipeLayout.ProcessingSearchOpenChangeRatio)
             Fail(searchDialog,
                 $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
 
+        Log?.Invoke("[자동 가공] 약품 검색창 열림 확인 · OCR 미사용 · 다음 입력 허용");
         await RequireManagedIdleAsync(plan, directive, "약품 검색어 입력 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
+        Log?.Invoke($"[자동 가공] 약품 검색 입력칸 · 고정좌표 ({AlteringRecipeLayout.ProcessingSearchInputPoint.X},{AlteringRecipeLayout.ProcessingSearchInputPoint.Y})");
         _ui.PasteFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
         await RequireManagedIdleAsync(plan, directive, "약품 검색 Enter 직전", ct);
@@ -866,23 +869,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             ct,
             cardCandidate: directive == AlteringFacilityEntryDirective.Automatic);
 
-        if (directive != AlteringFacilityEntryDirective.Automatic &&
-            (exact.Count != 1 ||
-             !AlteringRecipeIdentityPolicy.IsNearMedicineFirstResult(
-                 exact[0].Center.X, exact[0].Center.Y,
-                 AlteringRecipeLayout.ProcessingSearchFirstResultPoint.X,
-                 AlteringRecipeLayout.ProcessingSearchFirstResultPoint.Y)))
-            Fail(resultFrame,
-                "관리 약품 검색 결과의 정확 일치·첫 행 위치를 확인하지 못해 선택하지 않습니다.");
-
+        // 음식 제작과 동일: 검색어 OCR은 보조 증거다. 한 건만 일치하면
+        // 성공으로 취급하고, OCR 미검출/중복이어도 검색 목록 화면이
+        // 실제로 전환됐다면 고정 첫 번째 결과를 선택한다.
+        bool exactUnique = exact.Count == 1;
         Log?.Invoke(
-            exact.Count > 0
-                ? $"[자동 가공] 약품 검색 결과 · OCR 후보 {exact.Count}개 · 화면 변화 {resultRatio:P1}"
-                : $"[자동 가공] 약품 검색 결과 · OCR 미검출 · 화면 변화 {resultRatio:P1}");
+            exactUnique
+                ? $"[자동 가공] 약품 검색 결과 · exact OCR 확인 · 화면 변화 {resultRatio:P1}"
+                : $"[자동 가공] 약품 검색 결과 · OCR 미검출/중복 · 화면 변화 {resultRatio:P1}");
 
-        if (exact.Count == 0 && resultRatio < AlteringRecipeLayout.ProcessingSearchResultChangeRatio)
+        if (!exactUnique &&
+            resultRatio < AlteringRecipeLayout.ProcessingSearchResultChangeRatio)
             Fail(resultFrame,
-                $"약품 검색 적용 후 결과 화면 전환을 확인하지 못했습니다. 변화율={resultRatio:P1}");
+                $"약품 검색 적용 후 결과 화면 전환을 확인하지 못했습니다. 변화율={resultRatio:P1} · 첫 결과 클릭 없이 정지");
 
         if (plan.RecipeOrdinal != 1)
             Fail(resultFrame,
@@ -891,9 +890,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         await RequireManagedIdleAsync(plan, directive, "약품 검색 결과 선택 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
         Log?.Invoke(
-            $"[자동 가공] 약품 검색 첫 결과 선택 · 고정좌표 " +
+            $"[자동 가공] 약품 검색 첫 결과 선택 · 음식 제작과 동일한 고정좌표 " +
             $"({AlteringRecipeLayout.ProcessingSearchFirstResultPoint.X},{AlteringRecipeLayout.ProcessingSearchFirstResultPoint.Y})");
-        await Task.Delay(400, ct);
+        await Task.Delay(550, ct);
 
         using var popup = Capture(ct);
         if (!await IsRecipeDetailStructureAsync(popup, ct))
