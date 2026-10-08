@@ -55,6 +55,18 @@ Match-Required $multiAlter 'facilityWorks\.All\(x => x\.IsCompleted\)' 'multi-al
 Match-Required $multiAlter 'runBatch\(plan, 1, ct\)' 'same-facility work remains one-slot round-robin'
 Match-Required $multiAlter '같은 시설 여러 품목은 라운드로빈 혼합' 'round-robin mixed-facility behavior remains explicit'
 Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slot completion never causes a facility move'
+# M2 long wait: coordinator must track each facility's actual CLI progress
+# across slot-wise RunBatch returns, not reset the watch with every loop.
+Match-Required $multiAlter 'class MultiAlteringWaitWatchdog' 'multi coordinator keeps per-facility idle history'
+Match-Required $multiAlter 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' 'whole multi run shares a single watchdog across batches'
+Match-Required $multiAlter 'idleWatchdog.Observe\(facility, observed\)' 'every pending facility is observed before new actions'
+Match-Required $multiAlter 'lowestRunning < previous.LowestRunningSeconds' 'only genuine countdown progress refreshes idle timer'
+Match-Required $multiAlter 'idleWatchdog.ConfirmManagerProgress\(facility\)' 'manager-confirmed registration or completion refreshes progress'
+Match-Required $multiAlter '다중가공 시설별 정체 감지' 'persistent idle queue fails closed with diagnostic'
+Match-Required $multiAlter '_laneState\?\.InvalidateOnsite' 'stalled facility revokes cached manager onsite proof'
+Match-Required $alterTests 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' 'M2 long wait timeout has executable regression'
+Match-Required $alterTests 'M2 wait: genuine countdown decreases refresh' 'M2 legitimate long work is not prematurely stopped'
+Match-Required $alterTests 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane' 'M2 one healthy facility cannot hide another stalled lane'
 Match-Forbidden $multiAlter 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|ProductionUiRuntime|0x39' 'multi-altering coordinator owns no direct UI input'
 
 # 1b) V3.1.49 speed-up changes polling only; input order/coordinates stay owned by existing guards.
