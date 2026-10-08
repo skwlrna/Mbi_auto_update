@@ -87,11 +87,13 @@ internal sealed class CliIdentityGuard
     // get_my_info must never create or resume a durable multi-altering batch.
     // Unlike VerifyWithLoadingRetryAsync this preflight is bounded.
     internal static async Task<CliIdentityGuard> CaptureForMultiAlteringAsync(
-        MabinogiMobileCli cli, CancellationToken ct)
+        MabinogiMobileCli cli, CancellationToken ct, bool allowLimitedFreshTest = false)
     {
         const int maxAttempts = 5;
         CliIdentityContext? previous = null;
         CliIdentityContext? confirmedCandidate = null;
+        CliIdentityContext? weakCandidate = null;
+        int weakConsecutive = 0;
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -99,6 +101,8 @@ internal sealed class CliIdentityGuard
             if (!response.Success && CliAutomationGuards.IsTransientLoadingRejection(response))
             {
                 confirmedCandidate = null;
+                weakCandidate = null;
+                weakConsecutive = 0;
             }
             else
             {
@@ -118,12 +122,30 @@ internal sealed class CliIdentityGuard
                     if (identity == confirmedCandidate)
                         return new CliIdentityGuard(cli, identity);
                     confirmedCandidate = identity;
+                    weakCandidate = null;
+                    weakConsecutive = 0;
                 }
-                else confirmedCandidate = null;
+                else
+                {
+                    confirmedCandidate = null;
+                    // Only the explicit fresh-test entry point may accept a
+                    // consistent realm-only CLI response. This never authorizes
+                    // resuming a durable batch on a later process run.
+                    if (allowLimitedFreshTest && !string.IsNullOrWhiteSpace(identity.RealmName))
+                    {
+                        weakConsecutive = identity == weakCandidate ? weakConsecutive + 1 : 1;
+                        weakCandidate = identity;
+                    }
+                    else { weakCandidate = null; weakConsecutive = 0; }
+                }
             }
             if (attempt + 1 < maxAttempts)
                 await Task.Delay(350, ct).ConfigureAwait(false);
         }
+
+        if (allowLimitedFreshTest && weakConsecutive >= 2 &&
+            weakCandidate is not null && !weakCandidate.HasDurableMultiIdentity)
+            return new CliIdentityGuard(cli, weakCandidate);
 
         throw new InvalidOperationException(
             "다중가공 캐릭터 식별 정보가 부족합니다 · get_my_info 유효 필드: " +

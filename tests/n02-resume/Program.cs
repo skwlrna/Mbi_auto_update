@@ -251,6 +251,73 @@ static class Program
             await Open(batch, world, identity: new CliIdentityContext(null, "테스트", null, "서버7"));
             Check(File.Exists(temp.Manifest), "old character+realm identity unexpectedly blocked");
         });
+        await Test("J/realm-only fresh test begins under isolated manifest", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            var weak = new CliIdentityContext(null, null, null, "server");
+            string original = Path.Combine(temp.Path, "plan-obsolete.json");
+            File.WriteAllText(original, "{old manifest kept exactly}");
+            string existing = File.ReadAllText(original);
+            string isolated = Path.Combine(temp.Path, "limited-fresh-test");
+            using var batch = new MultiAlteringBatchStore(isolated);
+            await batch.OpenNewLimitedTestAsync(Plans, weak, world, default);
+            Check(!batch.IsResuming && batch.CompletedPlans(Plans).Count == 0,
+                "weak test unexpectedly resumed completed items");
+            Check(File.Exists(Path.Combine(isolated, "batch.json")) &&
+                !File.Exists(temp.Manifest) && File.ReadAllText(original) == existing,
+                "weak test overwrote normal or legacy roster");
+            Check(world.Registered.Count == 0, "fresh test registered before scheduler");
+        });
+        await Test("J/limited test rejects F10/restart without duplicate registration", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            var weak = new CliIdentityContext(null, null, null, "server");
+            string path = Path.Combine(temp.Path, "limited-fresh-test");
+            string original;
+            using (var first = new MultiAlteringBatchStore(path))
+            {
+                await first.OpenNewLimitedTestAsync(Plans, weak, world, default);
+                original = File.ReadAllText(Path.Combine(path, "batch.json"));
+            }
+            using var restarted = new MultiAlteringBatchStore(path);
+            await Reject(() => restarted.OpenNewLimitedTestAsync(Plans, weak, world, default),
+                "미완료");
+            Check(original == File.ReadAllText(Path.Combine(path, "batch.json")) &&
+                world.Registered.Count == 0, "weak restart changed checkpoint or registered work");
+        });
+        await Test("J/limited test requires zero queue before a write", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            world.AddCompleted(Wood, 1);
+            using var batch = new MultiAlteringBatchStore(Path.Combine(temp.Path, "limited-fresh-test"));
+            await Reject(() => batch.OpenNewLimitedTestAsync(Plans,
+                new CliIdentityContext(null, null, null, "server"), world, default), "0건");
+            Check(world.Registered.Count == 0 &&
+                !File.Exists(Path.Combine(temp.Path, "limited-fresh-test", "batch.json")),
+                "existing CLI works allowed weak fresh test");
+        });
+        await Test("J/limited test cannot bypass an active verified batch", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            using (var batch = new MultiAlteringBatchStore(temp.Path))
+                await Open(batch, world);
+            await Reject(() =>
+            {
+                MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(temp.Path);
+                return Task.CompletedTask;
+            }, "미완료/미확정");
+            using var weak = new MultiAlteringBatchStore(Path.Combine(temp.Path, "limited-fresh-test"));
+            Check(!File.Exists(Path.Combine(temp.Path, "limited-fresh-test", "batch.json")) &&
+                world.Registered.Count == 0, "active strong ledger allowed implicit weak migration");
+        });
+        await Test("J/weak identity cannot use durable resume API", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            using var batch = new MultiAlteringBatchStore(temp.Path);
+            await Reject(() => Open(batch, world, identity:
+                new CliIdentityContext(null, null, null, "server")), "식별 정보가 부족");
+            Check(!File.Exists(temp.Manifest), "weak identity created normal batch");
+        });
         foreach (string filename in new[] { "plan-key.json", "0.json" })
             await Test("I/v1 record readable but missing full-batch evidence fails closed " + filename, async () =>
             {
