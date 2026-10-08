@@ -1205,8 +1205,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 bool correctIdentity = directive == AlteringFacilityEntryDirective.Automatic ||
                     await FindRecipeAsync(immediate, plan, ct) is not null;
                 bool stillRemote = (await DetectRemoteProcessStateAsync(immediate, ct)).IsRemote;
-                if (!correctDetail || !correctIdentity || stillRemote ||
-                    !TryFindFreeProcessButtonVisual(immediate, out Point liveCenter) ||
+                bool buttonFound = TryFindFreeProcessButtonVisual(immediate, out Point liveCenter);
+                if (!correctDetail || !correctIdentity || stillRemote || !buttonFound ||
                     !AlteringRecipeIdentityPolicy.IsStableFreshFreeActionTarget(
                         visualActionCenter, liveCenter, FreeProcessVisualButton))
                 {
