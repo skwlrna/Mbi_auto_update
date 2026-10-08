@@ -74,6 +74,25 @@ Check(!AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
         facilityHeaderVisible: false, completionModalVisible: false,
         travelDialogVisible: false, autoTraveling: false),
     "M5: missing facility title cannot be treated as completed return");
+// F04: management cannot close an unrelated green result/confirmation,
+// even if the character is otherwise idle and the facility header is absent.
+Check(AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, true, false, false, false),
+    "F04 managed completed-title plus green/idle positively authorizes close");
+Check(!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, false, false, false, false) &&
+      !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, true, true, false, false) &&
+      !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, true, false, true, false) &&
+      !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, true, false, false, true) &&
+      !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, true, false, false, null) &&
+      !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        false, true, false, false, false),
+    "F04 unrecognized green/travel/facility/unknown CLI may not authorize Space");
+
 Check(AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, false),
     "real altering completion result can authorize confirmation");
 Check(!AlteringReceiptPolicy.CanConfirmCompletion(true, false, true, false),
