@@ -100,7 +100,8 @@ public sealed partial class MainForm
                 gatheringData,
                 screen,
                 gatheringScreen,
-                dependencyScheduler: dependencyScheduler);
+                dependencyScheduler: dependencyScheduler,
+                laneState: laneState);
             var consumptionLedger = new MultiAlteringConsumptionLedger(
                 rawAlteringData.ItemCountsAsync);
 
