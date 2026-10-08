@@ -254,6 +254,8 @@ internal sealed class AlteringAutomation
     private readonly Action<AlteringPlan, IReadOnlyList<AlteringWork>>? _onConfirmedReceipt;
     private readonly AlteringSessionStore? _sessionStore;
     private readonly FacilityLaneState? _facilityState;
+    private readonly Func<AlteringPlan, CancellationToken, Task>? _beforeReceipt;
+    private readonly Func<AlteringPlan, CancellationToken, Task>? _afterReceipt;
     private AlteringSessionState? _session;
     private long? _estimatedWorkSeconds;
     private static readonly TimeSpan StallThreshold = TimeSpan.FromSeconds(60);
@@ -272,7 +274,9 @@ internal sealed class AlteringAutomation
         AlteringSessionState? session = null,
         IAlteringInternalConsumptionObserver? internalConsumptionObserver = null,
         Action<AlteringPlan, IReadOnlyList<AlteringWork>>? onConfirmedReceipt = null,
-        FacilityLaneState? facilityState = null)
+        FacilityLaneState? facilityState = null,
+        Func<AlteringPlan, CancellationToken, Task>? beforeReceipt = null,
+        Func<AlteringPlan, CancellationToken, Task>? afterReceipt = null)
     {
         if ((sessionStore is null) != (session is null))
             throw new ArgumentException("이어하기 저장소와 세션 상태는 함께 제공해야 합니다.");
@@ -287,6 +291,8 @@ internal sealed class AlteringAutomation
         _sessionStore = sessionStore;
         _facilityState = facilityState;
         _session = session;
+        _beforeReceipt = beforeReceipt;
+        _afterReceipt = afterReceipt;
     }
 
     internal async Task RunAsync(AlteringPlan plan, CancellationToken ct)
@@ -318,6 +324,17 @@ internal sealed class AlteringAutomation
         CancellationToken ct)
     {
         plan.Validate();
+        ct.ThrowIfCancellationRequested();
+        RefreshBatchSession();
+        if (_session?.BatchId is not null)
+        {
+            if (!_session.MatchesPlan(plan))
+                throw new InvalidOperationException("다중가공 배치 품목 불일치 · 신규 등록 없이 정지");
+            if (_session.MultiState == MultiAlteringItemState.RecoveryRequired)
+                throw new InvalidOperationException("다중가공 수령 확정 중 중단 · RecoveryRequired · 신규 등록 없이 정지");
+            if (_session.MultiState == MultiAlteringItemState.Completed)
+                return ReturnCompleted(plan);
+        }
         QueuedWorks = 0;
         ReservedWings = 0;
 
@@ -497,6 +514,9 @@ internal sealed class AlteringAutomation
                 SaveStage("가공 진행");
             }
 
+            if (_session?.BatchId is not null && _session.MultiState == MultiAlteringItemState.Completed)
+                return ReturnCompleted(plan);
+
             string progressSignature = ProgressSignature(works, plan, QueuedWorks);
             if (!string.Equals(progressSignature, lastProgressSignature, StringComparison.Ordinal))
             {
@@ -536,7 +556,16 @@ internal sealed class AlteringAutomation
 
                 Log?.Invoke(
                     $"[자동 가공] 완료 · {plan.DisplayName} 새 목표 +{targetGained}개 · 등록 {QueuedWorks}회 · 기존 작업 최소 {oldMinimum}개 제외 · 버튼 비용 예약 {ReservedWings}개");
-                _sessionStore?.Delete();
+                if (_session?.BatchId is not null)
+                    SaveSession(_session with
+                    {
+                        MultiState = MultiAlteringItemState.Completed,
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        Stage = "완료",
+                        LastObservedOutputQuantity = checked(grossGained + baseline)
+                    });
+                else
+                    _sessionStore?.Delete(); // single/dependency lifetime remains unchanged
                 Progress?.Invoke(new(
                     plan.TargetQuantity, plan.TargetQuantity, QueuedWorks, plan.RequiredWorks,
                     0, null, "완료"));
@@ -798,6 +827,7 @@ internal sealed class AlteringAutomation
 
     internal void CreditInternalConsumption(long quantity, string consumerDisplayName)
     {
+        RefreshBatchSession();
         if (quantity <= 0)
             throw new ArgumentOutOfRangeException(nameof(quantity));
         if (_session is null || _sessionStore is null)
@@ -827,6 +857,7 @@ internal sealed class AlteringAutomation
     private void SaveStage(string stage)
     {
         if (_session is null || _sessionStore is null) return;
+        if (_session.BatchId is not null && _session.MultiState == MultiAlteringItemState.Completed) return;
         SaveSession(_session with { Stage = stage });
     }
 
@@ -850,6 +881,7 @@ internal sealed class AlteringAutomation
             QueuedWorks = QueuedWorks,
             PendingRegistration = false,
             PendingBeforeMatchingCount = 0,
+            MultiState = _session.BatchId is null ? _session.MultiState : MultiAlteringItemState.InProgress,
             Stage = "가공 진행"
         });
     }
@@ -857,8 +889,29 @@ internal sealed class AlteringAutomation
     private void SaveSession(AlteringSessionState state)
     {
         if (_sessionStore is null) return;
-        _session = state with { UpdatedAt = DateTimeOffset.Now };
-        _sessionStore.Save(_session);
+        var next = state with { UpdatedAt = DateTimeOffset.Now };
+        _sessionStore.Save(next);
+        _session = next;
+    }
+
+    private void RefreshBatchSession()
+    {
+        if (_session?.BatchId is not null && _sessionStore is not null)
+            _session = _sessionStore.Load() ?? throw new InvalidDataException("다중가공 품목 기록 소실 · 안전 정지");
+    }
+
+    private AlteringRunResult ReturnCompleted(AlteringPlan plan)
+    {
+        QueuedWorks = _session!.QueuedWorks;
+        Progress?.Invoke(new(plan.TargetQuantity, plan.TargetQuantity, QueuedWorks,
+            plan.RequiredWorks, 0, null, "완료", 0, 0));
+        return AlteringRunResult.Completed;
+    }
+
+    private async Task ConfirmBatchReceiptAsync(AlteringPlan plan, CancellationToken ct)
+    {
+        if (_afterReceipt is not null) await _afterReceipt(plan, ct);
+        RefreshBatchSession();
     }
 
     private async Task ReportProgressAsync(
@@ -978,6 +1031,8 @@ internal sealed class AlteringAutomation
                 "일부만 완료된 7칸 배치는 모두 받기/Space 입력 없이 대기해야 합니다.");
         }
 
+        if (_beforeReceipt is not null) await _beforeReceipt(plan, ct);
+        ct.ThrowIfCancellationRequested();
         Log?.Invoke(
             $"[자동 가공] {plan.ScreenTitle} 시설 전체 {totalBefore}건 · " +
             $"완료 {count}건 · 모두 받기 수령 시작");
@@ -990,6 +1045,7 @@ internal sealed class AlteringAutomation
                 (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
                 "CLI 완료 작업 수령 후 대기열 감소를 확인하지 못했습니다. 중복 실행 없이 정지합니다.", ct);
             Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · CLI · {completed.DisplayName}");
+            await ConfirmBatchReceiptAsync(plan, ct);
             return true;
         }
 
@@ -1048,6 +1104,7 @@ internal sealed class AlteringAutomation
             Log?.Invoke(
                 $"[자동 가공] {plan.ScreenTitle} 시설 전체 수령 확인 · " +
                 $"수령 전 {totalBefore}건 · 다중가공={_facilityState is not null} · 1차 모두 받기");
+            await ConfirmBatchReceiptAsync(plan, ct);
             return true;
         }
 
@@ -1059,6 +1116,7 @@ internal sealed class AlteringAutomation
             (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
             "2차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 클릭 없이 정지합니다.", ct);
         Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 2차 모두 받기");
+        await ConfirmBatchReceiptAsync(plan, ct);
         return true;
     }
 

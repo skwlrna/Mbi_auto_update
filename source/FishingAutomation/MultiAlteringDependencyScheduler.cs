@@ -29,6 +29,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
     private readonly IAlteringInternalConsumptionObserver? _internalConsumptionObserver;
     private readonly Func<DateTimeOffset> _boundaryNow;
     private readonly TimeSpan _boundaryIdleThreshold;
+    private readonly Func<AlteringPlan, CancellationToken, Task>? _beforeReceipt;
+    private readonly Func<AlteringPlan, CancellationToken, Task>? _afterReceipt;
 
     internal event Action<string>? Log;
 
@@ -42,7 +44,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         FacilityLaneState? laneState = null,
         IAlteringInternalConsumptionObserver? internalConsumptionObserver = null,
         Func<DateTimeOffset>? boundaryNow = null,
-        TimeSpan? boundaryIdleThreshold = null)
+        TimeSpan? boundaryIdleThreshold = null,
+        Func<AlteringPlan, CancellationToken, Task>? beforeReceipt = null,
+        Func<AlteringPlan, CancellationToken, Task>? afterReceipt = null)
     {
         _data = data;
         _screen = screen;
@@ -54,6 +58,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         _internalConsumptionObserver = internalConsumptionObserver;
         _boundaryNow = boundaryNow ?? (() => DateTimeOffset.UtcNow);
         _boundaryIdleThreshold = boundaryIdleThreshold ?? TimeSpan.FromMinutes(2);
+        _beforeReceipt = beforeReceipt;
+        _afterReceipt = afterReceipt;
         if (_boundaryIdleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(boundaryIdleThreshold));
     }
@@ -89,7 +95,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                 _screen,
                 _delay,
                 _verificationAttempts,
-                facilityState: _laneState);
+                facilityState: _laneState,
+                beforeReceipt: _beforeReceipt,
+                afterReceipt: _afterReceipt);
             collector.Log += text => Log?.Invoke(text);
 
             if (!await collector.CollectReadyBatchAsync(requestedPlan, ct))
@@ -217,7 +225,9 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                     receiptPlan.FacilityName,
                     remainingWorks,
                     allowShrink: true),
-            facilityState: _laneState);
+            facilityState: _laneState,
+            beforeReceipt: _beforeReceipt,
+            afterReceipt: _afterReceipt);
         automation.Log += text => Log?.Invoke(text);
 
         var coordinator = new MultiAlteringCoordinator(

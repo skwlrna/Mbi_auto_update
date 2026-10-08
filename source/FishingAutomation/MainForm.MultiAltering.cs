@@ -13,6 +13,7 @@ public sealed partial class MainForm
             return;
 
         bool completed = false;
+        MultiAlteringBatchStore? batchStore = null;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
         _multiAlteringCts = new CancellationTokenSource();
@@ -63,6 +64,24 @@ public sealed partial class MainForm
             var recipes = await rawAlteringData.RecipesAsync(token);
             var currentWorks = await rawAlteringData.WorksAsync(token);
 
+            string sessionDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MabiAuto", "multi-altering");
+            batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
+            await Task.Run(() => batchStore.OpenAsync(plans, identity.Baseline, rawAlteringData, token), token);
+            _log.Write($"[다중가공] 배치 식별 · {batchStore.BatchId} · 완료 기록 {batchStore.CompletedPlans(plans).Count}/{plans.Count}");
+            if (batchStore.IsTerminal)
+            {
+                await Task.Run(batchStore.Cleanup, token);
+                _productionCurrentQuantity = _productionTargetQuantity;
+                foreach (var plan in plans) SeedAlteringStatus(plan, plan.TargetQuantity, 0);
+                _productionProgressSummary = "다중가공 저장된 전체 완료 확인 · 신규 등록 없음";
+                _log.Write("[다중가공] 전체 완료 확정 기록 복원 · 게임 입력 없이 정리만 완료");
+                SetStatus("다중가공 완료", Green);
+                completed = true;
+                return;
+            }
+
             var windows = WindowTools.EnumerateVisibleWindows();
             if (windows.Count != 1)
                 throw new InvalidOperationException("마비노기 모바일 창을 하나만 열어 주세요.");
@@ -83,11 +102,6 @@ public sealed partial class MainForm
 
             _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
 
-            string sessionDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MabiAuto", "multi-altering");
-            Directory.CreateDirectory(sessionDir);
-
             var laneState = new FacilityLaneState(currentWorks);
             // M3: reloading sessions and existing CLI works never restores
             // physical onsite proof. This fresh in-memory manager owns all
@@ -101,13 +115,23 @@ public sealed partial class MainForm
             // intermediate registrations in this F9 run.
             var consumptionLedger = new MultiAlteringConsumptionLedger(
                 rawAlteringData.ItemCountsAsync);
+            async Task ConfirmBatchReceiptAsync(AlteringPlan receiptPlan, CancellationToken ct)
+            {
+                await batchStore.ConfirmReceiptAsync(receiptPlan, rawAlteringData, ct);
+                // Preserve the existing completed-producer lifetime for peers that
+                // finish in one facility-wide receipt, including dependency receipts.
+                foreach (var done in batchStore.CompletedPlans(plans))
+                    consumptionLedger.UnregisterProducer(done);
+            }
             var dependencyScheduler = new MultiAlteringDependencyScheduler(
                 rawAlteringData,
                 screen,
                 identity.Baseline,
                 sessionDir,
                 laneState: laneState,
-                internalConsumptionObserver: consumptionLedger);
+                internalConsumptionObserver: consumptionLedger,
+                beforeReceipt: batchStore.BeginReceiptAsync,
+                afterReceipt: ConfirmBatchReceiptAsync);
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData,
                 gatheringData,
@@ -146,45 +170,11 @@ public sealed partial class MainForm
             });
 
             var automations = new Dictionary<(string Facility, string Display, int Ordinal), AlteringAutomation>();
-            var stores = new List<AlteringSessionStore>();
             var progress = new Dictionary<(string Facility, string Display, int Ordinal), long>();
             var materialPreflight = new List<MultiAlteringSupplyPreflight>();
             bool hasResumableSessionForPreflight = false;
             bool hasSelectedFacilityWorksForPreflight = currentWorks.Any(work =>
                 plans.Any(plan => plan.FacilityName == work.FacilityName));
-
-            AlteringSessionState? TryMigrateLegacySession(
-                AlteringPlan plan,
-                AlteringSessionStore stableStore)
-            {
-                var matches = new List<(AlteringSessionStore Store, AlteringSessionState State)>();
-                foreach (string path in Directory.EnumerateFiles(sessionDir, "*.json"))
-                {
-                    if (!AlteringSessionStore.IsLegacyMultiPath(path))
-                        continue;
-
-                    var legacyStore = new AlteringSessionStore(path);
-                    var legacy = legacyStore.Load();
-                    if (legacy is not null &&
-                        legacy.MatchesPlan(plan) &&
-                        legacy.MatchesIdentity(identity.Baseline))
-                        matches.Add((legacyStore, legacy));
-                }
-
-                if (matches.Count > 1)
-                    throw new InvalidOperationException(
-                        $"{plan.DisplayName}의 이전 다중가공 이어하기 기록이 여러 개라 자동 이관하지 않습니다.");
-
-                if (matches.Count == 0)
-                    return null;
-
-                stableStore.Save(matches[0].State);
-                matches[0].Store.Delete();
-                _log.Write(
-                    $"[다중가공] 이전 순번 세션을 품목 고유키로 이관 · {plan.DisplayName} · " +
-                    $"등록 {matches[0].State.QueuedWorks}/{matches[0].State.RequiredWorks}");
-                return matches[0].State;
-            }
 
             for (int index = 0; index < plans.Count; index++)
             {
@@ -197,48 +187,13 @@ public sealed partial class MainForm
                         $"{plan.DisplayName} 시작 직전 제법 조회 결과가 선택 내용과 달라졌습니다. 목록을 새로고침하세요.");
                 var selectedRecipe = selected[plan.RecipeOrdinal - 1];
 
-                var store = new AlteringSessionStore(
-                    AlteringSessionStore.MultiPlanPath(sessionDir, plan));
-                stores.Add(store);
-                var saved = store.Load();
-                if (saved is null ||
-                    !saved.MatchesPlan(plan) ||
-                    !saved.MatchesIdentity(identity.Baseline))
-                {
-                    saved = TryMigrateLegacySession(plan, store) ?? saved;
-                }
-                AlteringSessionState session;
+                var store = batchStore.PlanStore(plan);
+                var session = store.Load() ?? throw new InvalidDataException("배치 품목 기록 소실 · 안전 정지");
+                bool itemCompleted = session.MultiState == MultiAlteringItemState.Completed;
+                hasResumableSessionForPreflight |= batchStore.IsResuming;
+                _log.Write($"[다중가공] 배치 이어하기 · {plan.DisplayName} · 등록 {session.QueuedWorks}/{session.RequiredWorks} · 상태={session.MultiState}");
 
-                if (saved is not null &&
-                    saved.MatchesPlan(plan) &&
-                    saved.MatchesIdentity(identity.Baseline))
-                {
-                    session = saved;
-                    hasResumableSessionForPreflight = true;
-                    _log.Write(
-                        $"[다중가공] 배치 이어하기 · {plan.DisplayName} · 등록 {saved.QueuedWorks}/{saved.RequiredWorks} · 단계={saved.Stage}");
-                }
-                else
-                {
-                    if (saved is not null)
-                    {
-                        store.Delete();
-                        _log.Write(
-                            $"[다중가공] 이전 배치 기록 불일치 · {plan.DisplayName} 슬롯 기록 새로 생성");
-                    }
-
-                    long baseline = await rawAlteringData.ItemCountAsync(plan.OutputName, token);
-                    int initialExisting = currentWorks.Count(x =>
-                        x.FacilityName == plan.FacilityName &&
-                        (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
-                    session = AlteringSessionState.Create(
-                        plan, identity.Baseline, baseline, initialExisting);
-                    store.Save(session);
-                    _log.Write(
-                        $"[다중가공] 배치 저장 시작 · {plan.DisplayName} · 기준 보유 {baseline:N0}개 · 기존 작업 {initialExisting}건");
-                }
-
-                if (selectedRecipe.MissingIngredients.Count > 0)
+                if (!itemCompleted && selectedRecipe.MissingIngredients.Count > 0)
                 {
                     materialPreflight.Add(new MultiAlteringSupplyPreflight(
                         plan,
@@ -258,19 +213,21 @@ public sealed partial class MainForm
                             receiptPlan.FacilityName,
                             remainingWorks,
                             allowShrink: true),
-                    facilityState: laneState);
+                    facilityState: laneState,
+                    beforeReceipt: batchStore.BeginReceiptAsync,
+                    afterReceipt: ConfirmBatchReceiptAsync);
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);
-                consumptionLedger.RegisterProducer(
+                if (!itemCompleted) consumptionLedger.RegisterProducer(
                     plan,
                     (quantity, consumerDisplayName) =>
                         automation.CreditInternalConsumption(
                             quantity, consumerDisplayName));
 
                 long currentOutputForStatus =
-                    await rawAlteringData.ItemCountAsync(plan.OutputName, token);
-                long restoredConfirmed = Math.Clamp(
+                    itemCompleted ? 0 : await rawAlteringData.ItemCountAsync(plan.OutputName, token);
+                long restoredConfirmed = itemCompleted ? plan.TargetQuantity : Math.Clamp(
                     currentOutputForStatus +
                         session.CreditedInternalConsumptionQuantity -
                         session.BaselineQuantity -
@@ -286,7 +243,7 @@ public sealed partial class MainForm
                     .Select(x => (long?)x.RemainingSeconds)
                     .DefaultIfEmpty(null)
                     .Max();
-                long? restoredEta = AlteringEtaEstimator.Estimate(
+                long? restoredEta = itemCompleted ? 0 : AlteringEtaEstimator.Estimate(
                     plan.RequiredWorks,
                     session.QueuedWorks,
                     matchingWorks.Length,
@@ -345,7 +302,7 @@ public sealed partial class MainForm
                         $"[다중가공] 전체 품목 통합 재료 계획 시작 · " +
                         $"CLI가 현재 부족으로 확정한 {materialPreflight.Count}종만 선행 계산 · " +
                         "현재 충분해서 숨겨진 재료는 실행 중 재검증");
-                    await resolver.PreGatherKnownShortagesAsync(materialPreflight, token);
+                    await Task.Run(() => resolver.PreGatherKnownShortagesAsync(materialPreflight, token), token);
                     _log.Write(
                         "[다중가공] 전체 품목 통합 재료 계획 완료 · 실제 등록 직전 재료 검증은 기존 로직 유지");
                 }
@@ -362,7 +319,8 @@ public sealed partial class MainForm
 
             var coordinator = new MultiAlteringCoordinator(
                 laneState,
-                FacilityLaneOwner.Main);
+                FacilityLaneOwner.Main,
+                restoreCompleted: batchStore.CompletedPlans);
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
@@ -370,7 +328,9 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
-            await coordinator.RunAsync(
+            // Keep durable filesystem IO off the hotkey/UI thread. F10 only
+            // cancels the run token; no callback waits for checkpoint persistence.
+            await Task.Run(() => coordinator.RunAsync(
                 plans,
                 async (plan, slotBudget, coordinatorToken) =>
                 {
@@ -394,8 +354,9 @@ public sealed partial class MainForm
                 },
                 rawAlteringData.WorksAsync,
                 Task.Delay,
-                token);
+                token), token);
 
+            await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
             _productionCurrentQuantity = _productionTargetQuantity;
             _productionProgressSummary =
@@ -403,11 +364,6 @@ public sealed partial class MainForm
             _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 혼합 배치 병렬 운용");
             SetStatus("다중가공 완료", Green);
 
-            foreach (var store in stores)
-                store.Delete();
-            foreach (string legacyPath in Directory.EnumerateFiles(sessionDir, "*.json")
-                         .Where(AlteringSessionStore.IsLegacyMultiPath))
-                new AlteringSessionStore(legacyPath).Delete();
         }
         catch (OperationCanceledException)
         {
@@ -433,8 +389,21 @@ public sealed partial class MainForm
             _mode.Enabled = true;
             _dungeonStoppedAt = DateTime.Now;
 
-            if (completed)
-                _alteringPage.ClearQueuedAlteringPlans();
+            try
+            {
+                if (completed)
+                {
+                    _alteringPage.ClearQueuedAlteringPlans();
+                    if (batchStore is not null) await Task.Run(batchStore.AcknowledgeClearedPlan);
+                }
+            }
+            catch (Exception ex)
+            {
+                _runError = ex.Message;
+                _log.Write("[다중가공] 완료 정리 저장 실패 · 완료 기록 보존: " + ex.Message);
+                SetStatus("다중가공 완료 정리 확인 필요", Color.DarkOrange);
+            }
+            finally { batchStore?.Dispose(); }
 
             UpdateAbyssSelectorVisibility();
             RefreshModeStatus();
