@@ -1036,6 +1036,20 @@ jobs:
           $exitIndex = $resolverGather.IndexOf('await ExitToFieldAndNotifyManagerAsync(')
           $gatherIndex = $resolverGather.IndexOf('await coordinator.RunAsync(multiGather, ct)')
           if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'recursive multi-gather must exit altering UI before opening life skill'}
+          # M1: detecting missing materials is not evidence of travel.
+          # Keep the shared manager's onsite proof until H5 confirms an exit,
+          # another facility transition is proven, or stall/remote recovery fires.
+          $materialEntry = [regex]::Match(
+              $alteringPlan,
+              'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, remainingWorks, ct\);').Value
+          if ([string]::IsNullOrWhiteSpace($materialEntry) -or
+              $materialEntry -match '_facilityState\?\.InvalidateOnsite' -or
+              $materialEntry -notmatch '실제 필드/타 시설 이탈 전 현장확정 유지' -or
+              $alterTests -notmatch 'M1: material inspection and same-facility resolution without travel retain manager onsite' -or
+              $alterTests -notmatch 'M1: material inspection cannot invent onsite proof' -or
+              $alterTests -notmatch 'M1: material-only failure stops without queueing or revoking proven onsite') {
+              throw 'M1 material-only resolution must not revoke valid manager onsite before real departure'
+          }
           if($resolverGather -notmatch '다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'recursive multi-gather field-exit trace missing'}
           # H5: all three supply branches share one confirmed field-exit
           # notification to the lane manager; failed navigation is treated
