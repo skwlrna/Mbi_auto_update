@@ -1313,6 +1313,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         int onsiteStableFrames = 0;
         DateTime? onsiteCandidateSince = null;
         int travelConfirmationSpaces = 0;
+        // F01: a visible move button is not location proof. Require a separate
+        // observed departure/loading transition before managed Fresh arrival.
+        int missingFacilityHeaderFrames = 0;
+        bool confirmedMoveTransition = false;
 
         for (int attempt = 0; attempt < 120; attempt++)
         {
@@ -1406,6 +1410,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             if (!facilityVisible)
                 sawDeparture = true;
 
+            missingFacilityHeaderFrames =
+                moveClickSent && !facilityVisible ? missingFacilityHeaderFrames + 1 : 0;
+            if (moveClickSent &&
+                (sawTravel || loadingCliRejects >= 2 || missingFacilityHeaderFrames >= 2))
+                confirmedMoveTransition = true;
+
             bool moveVisible = false;
             if (facilityVisible)
             {
@@ -1432,10 +1442,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 }
             }
 
-            if (AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
-                    facilityVisible,
-                    moveVisible,
-                    activity?.IsAutoTraveling))
+            bool managedFreshArrival =
+                directive == AlteringFacilityEntryDirective.FreshMoveRequired && moveClickSent;
+            bool onsiteObserved = managedFreshArrival
+                ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
+                    facilityVisible, activity?.IsAutoTraveling,
+                    moveClickSent, confirmedMoveTransition)
+                : AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+                    facilityVisible, moveVisible, activity?.IsAutoTraveling);
+            if (onsiteObserved)
             {
                 onsiteCandidateSince ??= DateTime.UtcNow;
                 onsiteStableFrames++;
@@ -1486,20 +1501,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
                         }
                     }
+                    bool finalArrivalObservation = managedFreshArrival
+                        ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
+                            finalFacilityVisible, finalActivity?.IsAutoTraveling,
+                            moveClickSent, confirmedMoveTransition)
+                        : AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
+                            finalFacilityVisible, finalMoveVisible,
+                            finalActivity?.IsAutoTraveling);
                     bool finalOnsite =
                         !finalPopupVisible &&
                         finalActivity is not null &&
                         GatheringSafetyPolicy.IsSafeField(finalActivity) &&
-                        AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
-                            finalFacilityVisible,
-                            finalMoveVisible,
-                            finalActivity.IsAutoTraveling);
+                        finalArrivalObservation;
 
                     if (finalOnsite)
                     {
                         Log?.Invoke(
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
-                            $"가공창 유지 + 설비로 이동 버튼 없음 {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
+                            $"가공창 유지 + {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
+                            $"(관리 Fresh={managedFreshArrival}, 실제 이동전환={confirmedMoveTransition}, 이동버튼={finalMoveVisible}) " +
                             "+ 1.2초 후행 재확인 · CLI AutoTraveling=false · 이동확인창 없음");
                         return;
                     }
