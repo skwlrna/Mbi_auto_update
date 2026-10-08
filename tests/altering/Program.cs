@@ -121,6 +121,52 @@ Check(AlteringRemoteProcessGuard.ShouldBlock(
         secondOnsiteActionVisible: false),
     "one missing onsite action frame preserves the two-frame remote safety veto");
 
+
+Check(AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.Automatic,
+        moveButtonVisible: true),
+    "single altering preserves the legacy move-button safety veto");
+Check(!AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.Automatic,
+        moveButtonVisible: false),
+    "single altering without a move-button visual keeps the normal recipe route");
+Check(!AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+        moveButtonVisible: true),
+    "H1: coordinator-confirmed same-facility reuse ignores the always-visible move button during recipe selection");
+Check(!AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+        AlteringFacilityEntryDirective.FreshMoveRequired,
+        moveButtonVisible: true),
+    "H1: a completed manager-directed fresh travel cannot be overturned by the move button during recipe selection");
+Check(AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: false),
+    "H1: a dropped first card click can retry once under confirmed reuse, even with the always-present move button");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: false,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: false),
+    "H1: coordinator reuse cannot override a missing facility header before retry");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: true,
+        facilityVisible: true,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: false),
+    "H1: delayed detail opening must prevent a duplicate click even with coordinator reuse");
+Check(!AlteringFixedRecipeRetryPolicy.ShouldRetry(
+        detailVisible: false,
+        facilityVisible: true,
+        moveButtonVisible: AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+            AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite, true),
+        retryAlreadyUsed: true),
+    "H1: coordinator reuse never weakens one-shot recipe retry limit");
+
 Check(AlteringFixedRecipeRetryPolicy.ShouldRetry(
         detailVisible: false,
         facilityVisible: true,
