@@ -2,7 +2,7 @@ using FishingAutomation;
 
 namespace DungeonVisionBot;
 
-internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringFieldExitScreen
+internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen, IAlteringFieldExitScreen
 {
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("가공");
@@ -2139,6 +2139,84 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         using var failed = Capture(ct);
         Fail(failed, "채집 시작 전 가공 UI를 완전히 닫고 일반 필드로 복귀하지 못했습니다.");
+    }
+
+    public async Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync(
+        AlteringPlan plan, int attempt, string reason, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        // Managed recovery may only restore the UI: no travel, recipe selection,
+        // paid/free processing or local onsite decision from the move-button
+        // OCR/colour. Clear the lower cache; the manager alone retains authority.
+        _confirmedOnsiteFacility = null;
+        _cachedRecipeKey = null;
+        _hasCachedRecipeCenter = false;
+
+        using (var snapshot = Capture(ct))
+        {
+            Directory.CreateDirectory(_debugDir);
+            string path = Path.Combine(_debugDir, "altering-stall-last.png");
+            try
+            {
+                snapshot.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                Log?.Invoke($"[자동 가공] 중간관리자 정체 진단 화면 저장 · {path}");
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"[자동 가공] 중간관리자 정체 진단 저장 실패 · {ex.Message}");
+            }
+        }
+
+        // Preflight must prove no character travel is already underway BEFORE
+        // sending any UI-only navigation. Unknown CLI state is not proof.
+        if (await TryAutoTravelingAsync(ct) != false)
+        {
+            Log?.Invoke("[자동 가공] 정체 복구 · CLI 이동/불명확 · 추가 입력 없이 위치 미확정 반환");
+            return AlteringStallRecoveryObservation.Unknown;
+        }
+
+        using (var first = Capture(ct))
+        {
+            if (HasBottomConfirmationModal(first) ||
+                await IsFacilityTravelDialogAsync(first, ct))
+            {
+                Log?.Invoke("[자동 가공] 정체 복구 · 확인/이동 팝업 감지 · 추가 입력 없이 위치 미확정 반환");
+                return AlteringStallRecoveryObservation.Unknown;
+            }
+        }
+
+        // K, facility menu selection, and Esc only affect the menu. The
+        // entry helper never invokes TravelToFacilityAsync or move clicks.
+        await EnterFacilityAsync(plan, ct);
+
+        // Two distinct, stable frames + no modal/detail + proven nontravelling
+        // CLI. The persistent '설비로 이동' visual is deliberately ignored.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            using var frame = Capture(ct);
+            bool correctHeader =
+                await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool detail = await FindAsync(
+                frame, new Rectangle(100, 690, 580, 200), "필요한 재료", ct) is not null;
+            bool dialog = HasBottomConfirmationModal(frame) ||
+                await IsFacilityTravelDialogAsync(frame, ct);
+            bool? traveling = await TryAutoTravelingAsync(ct);
+            if (!correctHeader || detail || dialog || traveling != false)
+            {
+                Log?.Invoke(
+                    $"[자동 가공] 정체 복구 · 현장 화면 검증 실패 {pass + 1}/2 · " +
+                    "추가 이동/클릭 없이 위치 미확정 반환");
+                return AlteringStallRecoveryObservation.Unknown;
+            }
+            if (pass == 0)
+                await Task.Delay(180, ct);
+        }
+
+        Log?.Invoke(
+            $"[자동 가공] 정체 복구 · {plan.ScreenTitle} 시설 UI만 2프레임 복귀 확인 · " +
+            "CLI 비이동 · 설비 이동 버튼으로 위치 재판정 안 함 · 중간관리자에게 보고");
+        return AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel;
     }
 
     public async Task RecoverStallAsync(
