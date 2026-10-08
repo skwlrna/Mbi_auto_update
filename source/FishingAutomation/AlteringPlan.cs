@@ -514,9 +514,23 @@ internal sealed class AlteringAutomation
             ct.ThrowIfCancellationRequested();
             works = await _data.WorksAsync(ct);
 
-            if (works.Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted))
+            // An explicit F9 first fills free slots next to untouched game
+            // jobs, including jobs already completed before F9. Do not issue
+            // early receive-all simply because the old slots are complete.
+            // Subsequent ordinary full-lane receipt keeps the existing guard.
+            var initialLane = _facilityState?.Snapshot(plan.FacilityName);
+            bool fillingInitialVacancies = yieldAtBatchBoundary &&
+                initialLane is not null &&
+                initialLane.InitialObservedWorks > 0 &&
+                initialLane.MainRegisteredWorks <
+                    Math.Max(0, 7 - initialLane.InitialObservedWorks) &&
+                works.Count(x => x.FacilityName == plan.FacilityName) < 7 &&
+                QueuedWorks < plan.RequiredWorks;
+            if (!fillingInitialVacancies &&
+                works.Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted))
                 SaveStage("완료품 수령");
-            if (await CollectIfReadyAsync(plan, works, ct, deferPartialManaged: true))
+            if (!fillingInitialVacancies &&
+                await CollectIfReadyAsync(plan, works, ct, deferPartialManaged: true))
             {
                 _facilityState?.ConfirmOnsite(
                     plan.FacilityName,
