@@ -455,8 +455,19 @@ Check(AlteringRecipeLayout.TryGetFixedCenter(duplicateWood1, out var duplicateWo
       duplicateWoodCenter2 == new System.Drawing.Point(340, 756),
     "duplicate fixed-grid recipes preserve recipe ordinal");
 Check(!AlteringRecipeLayout.IsFixedFacility("약품 가공 시설") &&
-      AlteringRecipeLayout.IsSafeMedicineSearchGeometry(),
-    "medicine uses crafting-style search instead of fixed recipe cards");
+      AlteringRecipeLayout.IsSafeMedicineSearchGeometry() &&
+      CraftingHubLayout.IsSafeSearchGeometry() &&
+      AlteringRecipeLayout.ProcessingSearchIconPoint == CraftingHubLayout.ProductSearchIconPoint &&
+      AlteringRecipeLayout.ProcessingSearchIconPoint == new System.Drawing.Point(30, 118) &&
+      AlteringRecipeLayout.ProcessingSearchInputPoint == CraftingHubLayout.ProductSearchInputPoint &&
+      AlteringRecipeLayout.ProcessingSearchInputPoint == new System.Drawing.Point(400, 862) &&
+      AlteringRecipeLayout.ProcessingSearchFirstResultPoint == CraftingHubLayout.ProductFirstResultPoint &&
+      AlteringRecipeLayout.ProcessingSearchFirstResultPoint == new System.Drawing.Point(218, 613) &&
+      AlteringRecipeLayout.ProcessingSearchDialogArea == CraftingHubLayout.ProductSearchDialogArea &&
+      AlteringRecipeLayout.ProcessingSearchResultArea == CraftingHubLayout.ProductSearchResultArea &&
+      AlteringRecipeLayout.ProcessingSearchOpenChangeRatio == CraftingHubLayout.SearchDialogOpenChangeRatio &&
+      AlteringRecipeLayout.ProcessingSearchResultChangeRatio == CraftingHubLayout.SearchResultChangeRatio,
+    "medicine search exactly matches food crafting coordinates and evidence thresholds");
 Check(AlteringFacilityLayout.IsSafeMoveGeometry() &&
       AlteringFacilityLayout.MoveButtonPoint == new System.Drawing.Point(85, 235) &&
       AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65) &&
