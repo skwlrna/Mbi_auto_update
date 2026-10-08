@@ -398,11 +398,12 @@ Match-Required $startMulti 'fresh-runs' 'fresh F9 stores durable records in a un
 Match-Required $startMulti 'OpenFreshAsync' 'F9 uses explicitly fresh-only N02/F05 opening path'
 Match-Forbidden $startMulti 'OpenNewLimitedTestAsync|batchStore.OpenAsync' 'F9 never opens past resumable or limited-test manifests'
 Match-Required $batchStore 'internal async Task OpenFreshAsync' 'fresh-only store gate exists'
-Match-Required $batchStore '선택 시설에 이전 대기/완료 작업이 있습니다' 'fresh gate refuses existing jobs in selected facilities'
-Match-Required $batchStore 'await OpenAsync\(plans, identity, data, ct, allowSingleCharacter: true\)' 'fresh gate retains full N02/F05 journaling'
+Match-Required $batchStore 'allowPreexistingSelectedFacilityWorks: true' 'F9 snapshots old queued jobs separately from new target'
+Match-Required $batchStore 'InitialExistingWorks' 'existing queued job output is excluded from fresh target'
+Match-Required $batchStore 'allowSingleCharacter: true, allowPreexistingSelectedFacilityWorks: true' 'fresh gate retains full N02/F05 journaling'
 Match-Forbidden $productionPage 'ReadPendingPlans\(' 'new F9 UI never automatically selects a historical roster'
 Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 ignores but preserves old unresolved F05 journal' 'F05 old-record isolation is executable regression'
-Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 rejects selected facility completed or active works' 'fresh selected-lane safety is executable regression'
+Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/previous F9 one registered then restart orders a NEW full target' 'fresh 100 target excludes old 1 job after restart'
 
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'
