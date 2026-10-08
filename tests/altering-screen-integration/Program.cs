@@ -501,9 +501,12 @@ try
         Paint(result, new Rectangle(102, 405, 53, 58), Color.FromArgb(24, 154, 215));
         Paint(result, new Rectangle(372, 405, 53, 58), Color.FromArgb(24, 154, 215));
         Paint(result, new Rectangle(640, 405, 53, 58), Color.FromArgb(24, 154, 215));
+        Check(!PixelGate("HasManagedCompletionResultVisual", result),
+            "blue halo, heading and rewards without the wooden processing chest are not sufficient");
+        Paint(result, new Rectangle(360, 108, 84, 77), Color.FromArgb(154, 101, 45));
         Check(PixelGate("HasManagedCompletionResultVisual", result) &&
               PixelGate("HasBottomConfirmationModal", result),
-            "verified fixed blue chest + result heading + reward cards + green confirms real result without OCR");
+            "verified fixed blue halo + wooden chest + heading + reward cards + green confirms real result without OCR");
         // A wrong client size must not be trusted even with painted anchors.
         using var badSize = new Bitmap(799, 1000);
         Check(!PixelGate("HasManagedCompletionResultVisual", badSize),
