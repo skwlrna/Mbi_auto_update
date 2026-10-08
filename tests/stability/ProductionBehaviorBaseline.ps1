@@ -161,6 +161,31 @@ Match-Required $alterTests 'M1: material inspection and same-facility resolution
 Match-Required $alterTests 'M1: material inspection cannot invent onsite proof' 'M1 initial unknown requires a first facility move'
 Match-Required $alterTests 'M1: material-only failure stops without queueing or revoking proven onsite' 'M1 failed inspection cannot falsely revoke onsite'
 
+# M2: stall UI recovery returns evidence; only the lane manager may restore
+# onsite after a previously confirmed location and non-travel UI-only recovery.
+Match-Required $alterPlan 'interface IAlteringCoordinatorStallRecoveryScreen' 'M2 coordinator recovery observation interface exists'
+Match-Required $alterPlan 'AlteringStallRecoveryPolicy.CanRetainOnsite' 'M2 manager reconciles prior authority with recovery proof'
+$m2Manager = Method-Block $alterPlan 'internal async Task RecoverStallUnderManagerAsync' '\r?\n    internal void NoteStage' 'manager stall recovery'
+Match-Required $m2Manager '_facilityState.InvalidateOnsite' 'M2 manager invalidates onsite before recovery input'
+Match-Required $m2Manager 'RecoverStallForCoordinatorAsync' 'M2 screen only returns observation'
+Match-Required $m2Manager '_facilityState.ConfirmOnsite' 'M2 only manager re-confirms valid onsite'
+Match-Required $m2Manager '_facilityState.IsOnsiteConfirmed' 'M2 recovery cannot invent a prior confirmed location'
+Match-Required $zeroWing 'IAlteringCoordinatorStallRecoveryScreen' 'M2 guarded screen forwards manager recovery'
+$m2Screen = Method-Block $alter 'public async Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync' '\r?\n    public async Task RecoverStallAsync' 'managed stall UI recovery'
+Match-Required $m2Screen 'await TryAutoTravelingAsync\(ct\)' 'M2 requires known idle travel state'
+Match-Required $m2Screen 'for \(int pass = 0; pass < 2; pass\+\+\)' 'M2 must prove two stable facility frames'
+Match-Required $m2Screen 'HasBottomConfirmationModal' 'M2 must reject confirmation popups'
+Match-Required $m2Screen 'SameFacilityUiRestoredWithoutTravel' 'M2 reports nontravel UI-only proof'
+Match-Forbidden $m2Screen 'HasFacilityMoveButtonVisual\(' 'M2 move button cannot override coordinator location authority'
+Match-Forbidden $m2Screen 'TravelToFacilityAsync\(' 'M2 recovery is forbidden from physical facility travel'
+Match-Forbidden $m2Screen 'TapFresh\(0x39' 'M2 recovery must never press Space on an ambiguous popup'
+Match-Required $alterTests 'M2: coordinator re-confirms previously proven onsite' 'M2 safe same-facility UI-only recovery keeps reuse'
+Match-Required $alterTests 'M2: UI recovery cannot create onsite authority' 'M2 unknown previous location remains Fresh'
+Match-Required $alterTests 'M2: popup, travel, missing header or unknown CLI' 'M2 ambiguous recovery remains Fresh'
+Match-Required $alterTests 'M2: manager invalidates onsite before failed stall recovery' 'M2 failed recovery revokes old proof'
+Match-Required $alterTests 'M2: single-altering keeps its bounded legacy recovery' 'M2 single-altering legacy isolation'
+
+
 
 
 
