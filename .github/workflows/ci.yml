@@ -2,7 +2,7 @@ name: Check V3 Production Engine
 
 on:
   push:
-    branches: [ main, fix/n02-multi-altering-resume ]
+    branches: [ main, fix/n02-multi-altering-resume, fix/f05-durable-consumption-journal ]
   pull_request:
     branches: [ main ]
 
@@ -39,6 +39,12 @@ jobs:
         run: |
           dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'N02 batch persistence regressions failed' }
+
+      - name: F05 deterministic durable consumption journal regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/f05-consumption/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'F05 durable consumption regressions failed' }
 
       - name: N03 deterministic input cancellation regressions
         shell: pwsh
