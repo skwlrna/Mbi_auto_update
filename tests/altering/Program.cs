@@ -1273,6 +1273,47 @@ Check(residualRejected &&
 if (Directory.Exists(satisfiedSessionDir))
     Directory.Delete(satisfiedSessionDir, recursive: true);
 
+
+var frozenBoundaryWorld = new RecursiveProductionWorld();
+frozenBoundaryWorld.AddExternalWork(
+    "철괴", "금속 가공 시설", "InProgress", isCompleted: false, remainingSeconds: 90);
+var frozenBoundaryLane = new FacilityLaneState(
+    await frozenBoundaryWorld.WorksAsync(default));
+frozenBoundaryLane.ConfirmOnsite("금속 가공 시설", "F06 frozen boundary initial proof");
+DateTimeOffset frozenBoundaryClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
+var frozenBoundaryScheduler = new MultiAlteringDependencyScheduler(
+    frozenBoundaryWorld, frozenBoundaryWorld, testIdentity,
+    Path.Combine(Path.GetTempPath(), "mabi-f06-frozen-" + Guid.NewGuid().ToString("N")),
+    (_, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        frozenBoundaryClock = frozenBoundaryClock.AddSeconds(6);
+        return Task.CompletedTask;
+    },
+    verificationAttempts: 4,
+    laneState: frozenBoundaryLane,
+    boundaryNow: () => frozenBoundaryClock,
+    boundaryIdleThreshold: TimeSpan.FromSeconds(5));
+var frozenBoundaryResolver = new RecursiveAlteringSupplyResolver(
+    frozenBoundaryWorld, frozenBoundaryWorld, frozenBoundaryWorld, frozenBoundaryWorld);
+bool frozenBoundaryStopped = false;
+try
+{
+    await frozenBoundaryScheduler.RunAsync(
+        new AlteringPlan("금속 가공 시설", "철괴(철 광석)", 3, 3, false),
+        0, 3, frozenBoundaryResolver, default);
+}
+catch (InvalidOperationException ex)
+{
+    frozenBoundaryStopped = ex.Message.Contains("다중가공 시설별 정체 감지",
+        StringComparison.Ordinal);
+}
+Check(frozenBoundaryStopped &&
+      frozenBoundaryWorld.Queued.Count == 0 &&
+      frozenBoundaryLane.QueueDirectiveFor("금속 가공 시설") ==
+          AlteringFacilityEntryDirective.FreshMoveRequired,
+    "F06 stalled intermediate boundary stops without input and invalidates onsite proof");
+
 var nestedProductionWorld = new RecursiveProductionWorld
 {
     NestedSameFacilityChain = true
@@ -1282,10 +1323,12 @@ nestedProductionWorld.SetCount("철 광석", 0);
 string nestedSessionDir = Path.Combine(
     Path.GetTempPath(), "mabi-nested-dependency-" + Guid.NewGuid().ToString("N"));
 var nestedProductionLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var nestedConsumptionObserver = new CountingInternalConsumptionObserver();
 var nestedProductionScheduler = new MultiAlteringDependencyScheduler(
     nestedProductionWorld, nestedProductionWorld, testIdentity, nestedSessionDir,
     (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-    verificationAttempts: 4, laneState: nestedProductionLane);
+    verificationAttempts: 4, laneState: nestedProductionLane,
+    internalConsumptionObserver: nestedConsumptionObserver);
 var nestedProductionResolver = new RecursiveAlteringSupplyResolver(
     nestedProductionWorld,
     nestedProductionWorld,
@@ -1308,6 +1351,9 @@ Check(nestedProductionWorld.Queued.SequenceEqual(new[]
       nestedProductionLane.Snapshot("금속 가공 시설").IntermediateRegisteredWorks == 3 &&
       nestedProductionLane.Snapshot("금속 가공 시설").IntermediateDepth == 0,
     "three-stage same-facility recursive dependency restores parent lease after child batch");
+Check(nestedConsumptionObserver.Captures >= 3 &&
+      nestedConsumptionObserver.Captures == nestedConsumptionObserver.Commits,
+    "F05 recursive intermediate registrations share the main-run consumption observer");
 if (Directory.Exists(nestedSessionDir))
     Directory.Delete(nestedSessionDir, recursive: true);
 
@@ -2483,4 +2529,28 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     }
 
     public void Dispose() { }
+}
+
+internal sealed class CountingInternalConsumptionObserver : IAlteringInternalConsumptionObserver
+{
+    internal int Captures, Commits;
+
+    public Task<AlteringInternalConsumptionSnapshot> CaptureBeforeRegistrationAsync(
+        AlteringPlan consumerPlan, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Captures++;
+        return Task.FromResult(new AlteringInternalConsumptionSnapshot(
+            new Dictionary<string, long>(StringComparer.Ordinal)));
+    }
+
+    public Task CommitAfterRegistrationAsync(
+        AlteringPlan consumerPlan,
+        AlteringInternalConsumptionSnapshot before,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Commits++;
+        return Task.CompletedTask;
+    }
 }
