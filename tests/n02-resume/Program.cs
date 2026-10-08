@@ -268,33 +268,80 @@ static class Program
                 "weak test overwrote normal or legacy roster");
             Check(world.Registered.Count == 0, "fresh test registered before scheduler");
         });
-        await Test("J/limited test rejects F10/restart without duplicate registration", async () =>
+        await Test("J/one-character isolated batch F10 restarts without redoing finished items", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
-            var weak = new CliIdentityContext(null, null, null, "server");
-            string path = Path.Combine(temp.Path, "limited-fresh-test");
-            string original;
-            using (var first = new MultiAlteringBatchStore(path))
+            var realmOnly = new CliIdentityContext(null, null, null, "server");
+            string isolated = Path.Combine(temp.Path, "limited-fresh-test");
+            using (var first = new MultiAlteringBatchStore(isolated))
             {
-                await first.OpenNewLimitedTestAsync(Plans, weak, world, default);
-                original = File.ReadAllText(Path.Combine(path, "batch.json"));
+                await first.OpenAsync(Plans, realmOnly, world, default, allowSingleCharacter: true);
+                await new Harness(first, Plans, world).RunUntilPartial();
+                Check(first.CompletedPlans(Plans).SequenceEqual(new[] { Wood }),
+                    "single-character finished item was not checkpointed");
             }
-            using var restarted = new MultiAlteringBatchStore(path);
-            await Reject(() => restarted.OpenNewLimitedTestAsync(Plans, weak, world, default),
-                "미완료");
-            Check(original == File.ReadAllText(Path.Combine(path, "batch.json")) &&
-                world.Registered.Count == 0, "weak restart changed checkpoint or registered work");
+            int woodRegisteredBefore = world.Registered.Count(x => x == Wood.DisplayName);
+            using var restarted = new MultiAlteringBatchStore(isolated);
+            await restarted.OpenAsync(Plans, realmOnly, world, default, allowSingleCharacter: true);
+            Check(restarted.IsResuming &&
+                restarted.Session(Wood).MultiState == MultiAlteringItemState.Completed &&
+                restarted.Session(Steel).QueuedWorks == 4,
+                "single-character restart reset completed/queued records");
+            await new Harness(restarted, Plans, world).Run();
+            Check(world.Registered.Count(x => x == Wood.DisplayName) == woodRegisteredBefore,
+                "finished wood was queued again after F10");
         });
-        await Test("J/limited test requires zero queue before a write", async () =>
+        await Test("J/one-character unrelated facility jobs allowed at fresh start", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
-            world.AddCompleted(Wood, 1);
-            using var batch = new MultiAlteringBatchStore(Path.Combine(temp.Path, "limited-fresh-test"));
-            await Reject(() => batch.OpenNewLimitedTestAsync(Plans,
-                new CliIdentityContext(null, null, null, "server"), world, default), "0건");
-            Check(world.Registered.Count == 0 &&
-                !File.Exists(Path.Combine(temp.Path, "limited-fresh-test", "batch.json")),
-                "existing CLI works allowed weak fresh test");
+            var lonePlan = new[] { Wood };
+            world.Works.Add(new AlteringWork("비선택 시설 작업", "외부 가공 시설", "InProgress", false, 10));
+            using var batch = new MultiAlteringBatchStore(
+                Path.Combine(temp.Path, "limited-fresh-test"));
+            await batch.OpenAsync(lonePlan, new CliIdentityContext(null, null, null, "server"),
+                world, default, allowSingleCharacter: true);
+            Check(batch.CompletedPlans(lonePlan).Count == 0 && world.Works.Count == 1,
+                "unrelated facility job was canceled or incorrectly attributed");
+        });
+        await Test("J/one-character selected facility queue blocks new batch", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            world.Works.Add(new AlteringWork("다른 목재", Wood.FacilityName, "InProgress", false, 10));
+            string isolated = Path.Combine(temp.Path, "limited-fresh-test");
+            using var batch = new MultiAlteringBatchStore(isolated);
+            await Reject(() => batch.OpenAsync(new[] { Wood },
+                new CliIdentityContext(null, null, null, "server"), world, default,
+                allowSingleCharacter: true), "선택한 시설에 기존 대기 작업");
+            Check(!File.Exists(Path.Combine(isolated, "batch.json")) &&
+                world.Registered.Count == 0, "foreign job at selected facility allowed registration");
+        });
+        await Test("J/one-character changed plan cannot overwrite pending F10 batch", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            string isolated = Path.Combine(temp.Path, "limited-fresh-test");
+            var realmOnly = new CliIdentityContext(null, null, null, "server");
+            using (var first = new MultiAlteringBatchStore(isolated))
+                await first.OpenAsync(Plans, realmOnly, world, default, allowSingleCharacter: true);
+            string before = File.ReadAllText(Path.Combine(isolated, "batch.json"));
+            using var changed = new MultiAlteringBatchStore(isolated);
+            await Reject(() => changed.OpenAsync(new[] { Wood }, realmOnly, world,
+                default, allowSingleCharacter: true), "저장 충돌");
+            Check(before == File.ReadAllText(Path.Combine(isolated, "batch.json")) &&
+                world.Registered.Count == 0, "plan change overwrote isolated checkpoint");
+        });
+        await Test("J/one-character rejects an unjournaled live job on F10 resume", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            string isolated = Path.Combine(temp.Path, "limited-fresh-test");
+            var realmOnly = new CliIdentityContext(null, null, null, "server");
+            using (var first = new MultiAlteringBatchStore(isolated))
+                await first.OpenAsync(Plans, realmOnly, world, default, allowSingleCharacter: true);
+            world.Works.Add(new AlteringWork(Wood.OutputName, Wood.FacilityName,
+                "InProgress", false, 10));
+            using var resume = new MultiAlteringBatchStore(isolated);
+            await Reject(() => resume.OpenAsync(Plans, realmOnly, world,
+                default, allowSingleCharacter: true), "저장된 등록 기록과 다릅니다");
+            Check(world.Registered.Count == 0, "unowned job was automatically re-registered");
         });
         await Test("J/limited test cannot bypass an active verified batch", async () =>
         {
