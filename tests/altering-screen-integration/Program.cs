@@ -506,6 +506,21 @@ try
         Check(await ProbeAsync("IsRecipeDetailStructureAsync",
                   fixedFrame, CancellationToken.None) is bool fixedDetail && fixedDetail,
             "verified repeat detail uses fixed free-button shape without OCR");
+        screen.GetField("_repeatOcrFreeRecipe", all)!.SetValue(probe, false);
+        screen.GetField("_selectedFixedRecipeKey", all)!
+            .SetValue(probe, "목재 가공 시설\u001f목재+\u001f1");
+        Check(await ProbeAsync("IsRecipeDetailStructureAsync",
+                  fixedFrame, CancellationToken.None) is bool firstFixedDetail && firstFixedDetail,
+            "first fixed-card detail accepts confirmed free-button geometry without OCR");
+        Type planType = production.GetType("FishingAutomation.AlteringPlan", true)!;
+        object firstFixedPlan = Activator.CreateInstance(planType,
+            new object[] { "목재 가공 시설", "목재+", 100, 3, false, 1 })!;
+        Check(await ProbeAsync("FindRecipeAsync",
+                  fixedFrame, firstFixedPlan, CancellationToken.None) is not null,
+            "first selected fixed recipe identity does not require title OCR");
+        Check((await ProbeAsync("DetectRemoteProcessStateAsync",
+                  fixedFrame, CancellationToken.None))?.ToString()?.StartsWith("(False") == true,
+            "fixed free-button confirmation avoids remote-label OCR and false stops");
     }
 
     Console.WriteLine($"PASS L2: {checks} real-screen integration checks (no injected input)");
