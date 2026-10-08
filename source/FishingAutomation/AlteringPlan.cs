@@ -170,6 +170,33 @@ internal interface IAlteringRecoveryScreen
     Task RecoverStallAsync(AlteringPlan plan, int attempt, string reason, CancellationToken ct);
 }
 
+// Facility recovery can restore a safe UI, but it cannot independently grant
+// physical onsite authority. The manager reconciles this observation with its
+// previously confirmed onsite proof.
+internal enum AlteringStallRecoveryObservation
+{
+    Unknown,
+    SameFacilityUiRestoredWithoutTravel
+}
+
+internal static class AlteringStallRecoveryPolicy
+{
+    internal static bool CanRetainOnsite(
+        bool wasPreviouslyConfirmedOnsite,
+        AlteringStallRecoveryObservation observation)
+        => wasPreviouslyConfirmedOnsite &&
+           observation == AlteringStallRecoveryObservation.SameFacilityUiRestoredWithoutTravel;
+}
+
+internal interface IAlteringCoordinatorStallRecoveryScreen
+{
+    Task<AlteringStallRecoveryObservation> RecoverStallForCoordinatorAsync(
+        AlteringPlan plan,
+        int attempt,
+        string reason,
+        CancellationToken ct);
+}
+
 internal interface IAlteringFieldExitScreen
 {
     Task ExitToFieldAsync(CancellationToken ct);
@@ -465,18 +492,9 @@ internal sealed class AlteringAutomation
                 Log?.Invoke($"[자동 가공] 정체 감지 {stallRecoveries}/{MaxStallRecoveries} · {reason}");
                 SaveStage($"정체 복구 {stallRecoveries}/{MaxStallRecoveries}");
 
-                if (_screen is IAlteringRecoveryScreen recovery)
-                {
-                    _facilityState?.InvalidateOnsite(
-                        $"정체 복구 진입 {stallRecoveries}/{MaxStallRecoveries}");
-                    await recovery.RecoverStallAsync(plan, stallRecoveries, reason, ct);
-                    lastProgressAt = DateTime.UtcNow;
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"가공 진행이 {StallThreshold.TotalSeconds:0}초 동안 변하지 않았고 화면 복구 기능을 사용할 수 없어 정지합니다.");
-                }
+                await RecoverStallUnderManagerAsync(
+                    plan, stallRecoveries, reason, ct);
+                lastProgressAt = DateTime.UtcNow;
             }
 
             await ReportProgressAsync(works, plan, baseline, initialExistingCount, "재료 정상", ct);
@@ -701,6 +719,55 @@ internal sealed class AlteringAutomation
             }
 
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
+        }
+    }
+
+    // Public-to-test internal boundary for the same recovery path used by
+    // RunCoreAsync. Every managed decision is made against the shared lane.
+    internal async Task RecoverStallUnderManagerAsync(
+        AlteringPlan plan,
+        int attempt,
+        string reason,
+        CancellationToken ct)
+    {
+        if (_screen is not IAlteringRecoveryScreen legacyRecovery)
+            throw new InvalidOperationException(
+                $"가공 진행이 {StallThreshold.TotalSeconds:0}초 동안 변하지 않았고 화면 복구 기능을 사용할 수 없어 정지합니다.");
+
+        if (_facilityState is null)
+        {
+            // Single altering keeps the original bounded UI recovery.
+            await legacyRecovery.RecoverStallAsync(plan, attempt, reason, ct);
+            return;
+        }
+
+        bool wasOnsite = _facilityState.IsOnsiteConfirmed(plan.FacilityName);
+        _facilityState.InvalidateOnsite(
+            $"정체 복구 진입 {attempt}/{MaxStallRecoveries} · 복구 결과 확인 전 위치 미확정");
+
+        if (_screen is not IAlteringCoordinatorStallRecoveryScreen coordinated)
+            throw new InvalidOperationException(
+                "다중가공 정체 복구 결과를 중간관리자에게 반환할 수 없는 화면 구현입니다.");
+
+        AlteringStallRecoveryObservation observation =
+            await coordinated.RecoverStallForCoordinatorAsync(
+                plan, attempt, reason, ct);
+
+        if (AlteringStallRecoveryPolicy.CanRetainOnsite(
+                wasOnsite, observation))
+        {
+            _facilityState.ConfirmOnsite(
+                plan.FacilityName,
+                "정체 복구 · 기존 현장확정 + UI만 복귀 + 동일 시설 2프레임 + CLI 비이동 확인");
+            Log?.Invoke(
+                $"[자동 가공] 정체 복구 중간관리자 승인 · {plan.ScreenTitle} " +
+                "같은 현장 유지 · 다음 등록 Reuse");
+        }
+        else
+        {
+            Log?.Invoke(
+                $"[자동 가공] 정체 복구 중간관리자 판단 · {plan.ScreenTitle} " +
+                "기존 현장 미확정 또는 안전 복귀 근거 부족 · Fresh 유지 · 설비 이동 임의 실행 없음");
         }
     }
 
