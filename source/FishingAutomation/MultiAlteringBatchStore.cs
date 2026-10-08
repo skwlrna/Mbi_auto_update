@@ -173,14 +173,11 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             throw new InvalidOperationException(
                 "새 F9 작업 폴더에 이전 기록이 존재합니다 · 신규 등록 차단 · 기록 보존");
 
-        // An explicit F9 never resumes an old order or carries over its queue.
-        // The caller must first empty the SELECTED game facilities so the new
-        // baseline and registration counters are exclusively this order's.
-        var activeWorks = await data.WorksAsync(ct);
-        if (activeWorks.Any(w => plans.Any(p => p.FacilityName == w.FacilityName)))
-            throw new InvalidOperationException(
-                "새 F9 시작 전 선택 시설의 이전 작업을 정리해야 합니다 · 기존 작업을 새 목표에 포함하지 않음");
-        await OpenAsync(plans, identity, data, ct, allowSingleCharacter: true);
+        // F9 starts a new order at zero without changing the live queue.
+        // The initial queue quantity only prevents unrelated game output
+        // from satisfying this order. Old batches are never reopened.
+        await OpenAsync(plans, identity, data, ct,
+            allowSingleCharacter: true, allowPreexistingSelectedFacilityWorks: true);
         if (IsResuming)
             throw new InvalidOperationException(
                 "F9 새 작업이 기존 배치를 복원하려 했습니다 · 안전 정지");
@@ -205,7 +202,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     }
 
     internal async Task OpenAsync(IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
-        IAlteringData data, CancellationToken ct, bool allowSingleCharacter = false)
+        IAlteringData data, CancellationToken ct, bool allowSingleCharacter = false,
+        bool allowPreexistingSelectedFacilityWorks = false)
     {
         ct.ThrowIfCancellationRequested();
         foreach (var plan in plans) plan.Validate();
@@ -321,7 +319,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         var works = await data.WorksAsync(ct);
         // The 1-character unbound-identity mode owns only the SELECTED
         // facilities. Unrelated facilities are not touched or collected.
-        if (allowSingleCharacter && works.Any(w =>
+        if (allowSingleCharacter && !allowPreexistingSelectedFacilityWorks && works.Any(w =>
                 plans.Any(p => p.FacilityName == w.FacilityName)))
             throw new InvalidOperationException(
                 "1캐릭터 신규 가공: 선택한 시설에 기존 대기 작업이 있습니다 · " +
@@ -358,11 +356,30 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with { BatchId = batchId });
             }
         }
-        // Reject a facility queue appearing while measuring the new target.
-        if (allowSingleCharacter && (await data.WorksAsync(ct)).Any(w =>
+        // Never credit old jobs towards the new target. Also ensure that
+        // another actor did not add/remove jobs while we read inventory
+        // baselines: a changed queue cannot be safely attributed to this F9.
+        if (allowPreexistingSelectedFacilityWorks)
+        {
+            var latest = await data.WorksAsync(ct);
+            foreach (string facility in plans.Select(p => p.FacilityName).Distinct())
+            {
+                static string QueueShape(IEnumerable<AlteringWork> list) =>
+                    string.Join("|", list.GroupBy(w => w.DisplayName, StringComparer.Ordinal)
+                        .OrderBy(g => g.Key, StringComparer.Ordinal)
+                        .Select(g => g.Key + ":" + g.Count()));
+                if (QueueShape(works.Where(w => w.FacilityName == facility)) !=
+                    QueueShape(latest.Where(w => w.FacilityName == facility)))
+                    throw new InvalidOperationException(
+                        "F9 신규 작업 기준 수량 확인 중 기존 대기열이 변했습니다 · " +
+                        "과거 작업을 새 수량으로 오인하지 않도록 등록 없이 정지");
+            }
+        }
+        else if (allowSingleCharacter && (await data.WorksAsync(ct)).Any(w =>
                 plans.Any(p => p.FacilityName == w.FacilityName)))
             throw new InvalidOperationException(
-                "새 F9 기준 수량 확인 중 작업이 등록되었습니다 · 이전 작업 분리 없이 안전 정지");
+                "1캐릭터 신규 가공 준비 도중 선택 시설 대기열이 변했습니다 · " +
+                "기록을 새로 만들지 않고 정지합니다");
         ct.ThrowIfCancellationRequested();
         Commit(new MultiAlteringBatch { BatchId = batchId, Identity = identity,
             MigratedFromLegacy = legacy.Length > 0, Items = items.ToArray() });
