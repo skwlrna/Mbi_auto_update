@@ -1444,7 +1444,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         if(plan.AllowPaidButton) throw new InvalidOperationException("채집 경로는 가공 비용 버튼을 사용할 수 없습니다.");
         await EnterFacilityAsync(plan, ct);
-        await SelectRecipeAsync(plan, ct);
+        // Gathering/recipe-inspection navigation is not a coordinator-issued queue.
+        // Preserve the original Automatic move-visual veto.
+        await SelectRecipeAsync(
+            plan, AlteringFacilityEntryDirective.Automatic, ct);
     }
 
     private async Task<int?> TryFacilityWorkCountAsync(
