@@ -9,6 +9,7 @@ internal sealed record MultiAlteringBatch
 {
     public int Version { get; init; } = 1;
     public string BatchId { get; init; } = "";
+    public bool MigratedFromLegacy { get; init; }
     public CliIdentityContext Identity { get; init; } = new(null, null, null, null);
     public MultiAlteringBatchState State { get; init; }
     public AlteringSessionState[] Items { get; init; } = Array.Empty<AlteringSessionState>();
@@ -52,13 +53,67 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 File.ReadAllText(System.IO.Path.Combine(directory, "batch.json")), JsonOptions)
                 ?? throw new InvalidDataException("다중가공 배치 기록이 비어 있습니다.");
         }
-        catch (FileNotFoundException) { return Array.Empty<AlteringPlan>(); }
+        catch (FileNotFoundException)
+        {
+            // Never mistake an old unclosed batch for an empty roster. Only
+            // proven zero-registration v1 checkpoints may seed an upgrade.
+            return ReadLegacyZeroWorkSessions(directory).Select(PlanFrom).ToArray();
+        }
         catch (DirectoryNotFoundException) { return Array.Empty<AlteringPlan>(); }
         catch (JsonException ex) { throw new InvalidDataException("다중가공 배치 기록 손상 · 원본 보존", ex); }
         Validate(saved);
         if (saved.State == MultiAlteringBatchState.Closed) return Array.Empty<AlteringPlan>();
         return saved.Items.Select(s => new AlteringPlan(s.FacilityName, s.DisplayName,
             s.TargetQuantity, s.ProducedPerWork, false, s.RecipeOrdinal)).ToArray();
+    }
+
+    private static AlteringPlan PlanFrom(AlteringSessionState s)
+        => new(s.FacilityName, s.DisplayName, s.TargetQuantity, s.ProducedPerWork,
+            false, s.RecipeOrdinal);
+
+    // Conservative v1 upgrade: every selected item must have a stable-key
+    // checkpoint proving ZERO registrations. Old nonzero/incomplete/deleted
+    // item histories cannot prove an absent peer was not already finished.
+    // Never delete or replace an unsupported legacy checkpoint.
+    private static AlteringSessionState[] ReadLegacyZeroWorkSessions(string directory)
+    {
+        if (!Directory.Exists(directory)) return [];
+        if (Directory.EnumerateFiles(directory, "*.tmp").Any())
+            throw new InvalidOperationException(
+                "미확정 임시 세션 파일이 있어 구형 배치 이관 불가 · 기록 보존 · RecoveryRequired");
+        string dependencies = System.IO.Path.Combine(directory, "dependencies");
+        if (Directory.Exists(dependencies) &&
+            Directory.EnumerateFiles(dependencies, "*.json").Any())
+            throw new InvalidOperationException(
+                "진행 중인 구형 중간재료 기록이 있어 이관 불가 · 기록 보존 · RecoveryRequired");
+
+        var paths = Directory.EnumerateFiles(directory, "*.json")
+            .Where(p => !string.Equals(System.IO.Path.GetFileName(p),
+                "batch.json", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var saved = new List<AlteringSessionState>();
+        foreach (var path in paths)
+        {
+            if (!System.IO.Path.GetFileName(path).StartsWith("plan-", StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "구형 순번/알 수 없는 세션은 전체 계획을 증명할 수 없어 이관 불가 · 기록 보존 · RecoveryRequired");
+            var s = new AlteringSessionStore(path).Load()
+                ?? throw new InvalidDataException("구형 가공 세션 기록을 읽지 못했습니다.");
+            var p = PlanFrom(s); p.Validate();
+            if (!string.Equals(path, AlteringSessionStore.MultiPlanPath(directory, p),
+                    StringComparison.OrdinalIgnoreCase) ||
+                s.BatchId is not null || s.MultiState != MultiAlteringItemState.NotStarted ||
+                s.CompletedAt is not null || s.QueuedWorks != 0 || s.PendingRegistration ||
+                s.PendingBeforeMatchingCount != 0 || s.InitialExistingWorks != 0 ||
+                s.CreditedInternalConsumptionQuantity != 0 ||
+                s.LastObservedOutputQuantity != s.BaselineQuantity ||
+                s.Stage.Contains("완료", StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "구형 가공 세션에 등록/수령/소비 또는 상태 불확실성이 있어 이관 불가 · 기록 보존 · RecoveryRequired");
+            saved.Add(s);
+        }
+        if (saved.Select(Key).Distinct(StringComparer.Ordinal).Count() != saved.Count)
+            throw new InvalidDataException("구형 가공 세션 품목 고유키 중복 · 기록 보존");
+        return saved.ToArray();
     }
 
     internal async Task OpenAsync(IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
@@ -103,33 +158,43 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             }
         }
 
-        var legacyPaths = Directory.EnumerateFiles(_directory, "*.json")
-            .Where(p => p != _path).ToArray();
-        foreach (string path in legacyPaths)
-        {
-            if (System.IO.Path.GetFileName(path).StartsWith("plan-", StringComparison.Ordinal) ||
-                AlteringSessionStore.IsLegacyMultiPath(path))
-                _ = new AlteringSessionStore(path).Load(); // Validate v1; never delete it.
-        }
-        if (legacyPaths.Length > 0 || Directory.EnumerateFiles(_directory, "*.tmp").Any() ||
-            Directory.Exists(System.IO.Path.Combine(_directory, "dependencies")) &&
-            Directory.EnumerateFiles(System.IO.Path.Combine(_directory, "dependencies"), "*.json").Any())
-            throw new InvalidOperationException(
-                "기존 다중가공 이어하기 기록은 읽었지만 배치 전체 완료 이력을 확정할 수 없습니다. " +
-                "구형 기록/미확정 임시 파일 보존 · RecoveryRequired · 신규 등록 없이 안전 정지");
-
-        string batchId = Guid.NewGuid().ToString("N");
+        var legacy = ReadLegacyZeroWorkSessions(_directory);
         var works = await data.WorksAsync(ct);
+        string batchId = Guid.NewGuid().ToString("N");
         var items = new List<AlteringSessionState>();
-        foreach (var plan in plans)
+        if (legacy.Length > 0)
         {
-            long baseline = await data.ItemCountAsync(plan.OutputName, ct);
-            int existing = works.Count(x => x.FacilityName == plan.FacilityName &&
-                (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
-            items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with { BatchId = batchId });
+            if (legacy.Length != plans.Count || plans.Any(p => !legacy.Any(s => s.MatchesPlan(p))) ||
+                legacy.Any(s => new CliIdentityContext(
+                    s.CharacterId, s.CharacterName, s.AccountCode, s.RealmName) != identity) ||
+                works.Any(w => plans.Any(p => p.FacilityName == w.FacilityName)))
+                throw new InvalidOperationException(
+                    "구형 배치 계획/캐릭터 또는 실제 시설 대기열 불일치 · 기록 보존 · RecoveryRequired");
+
+            foreach (var plan in plans)
+            {
+                var old = legacy.Single(s => s.MatchesPlan(plan));
+                long current = await data.ItemCountAsync(plan.OutputName, ct);
+                if (current != old.BaselineQuantity)
+                    throw new InvalidOperationException(
+                        "구형 배치 보유 수량 변화 감지 · 완료/소비 여부 불확실 · 기록 보존 · RecoveryRequired");
+                items.Add(old with { BatchId = batchId,
+                    Stage = "구형 무등록 기록 검증 후 이관" });
+            }
+        }
+        else
+        {
+            foreach (var plan in plans)
+            {
+                long baseline = await data.ItemCountAsync(plan.OutputName, ct);
+                int existing = works.Count(x => x.FacilityName == plan.FacilityName &&
+                    (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
+                items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with { BatchId = batchId });
+            }
         }
         ct.ThrowIfCancellationRequested();
-        Commit(new MultiAlteringBatch { BatchId = batchId, Identity = identity, Items = items.ToArray() });
+        Commit(new MultiAlteringBatch { BatchId = batchId, Identity = identity,
+            MigratedFromLegacy = legacy.Length > 0, Items = items.ToArray() });
     }
 
     internal static string Key(AlteringPlan p) => $"{p.FacilityName}\u001f{p.DisplayName}\u001f{p.RecipeOrdinal}";
@@ -237,6 +302,22 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         if (Directory.Exists(dependencies))
             foreach (string path in Directory.EnumerateFiles(dependencies))
             { _fault?.Invoke("cleanup"); File.Delete(path); }
+        if (Batch.MigratedFromLegacy)
+        {
+            // Preserve original v1 files as archived evidence, never discard.
+            // Retrying this after a crash is safe; already moved files are absent.
+            string archive = System.IO.Path.Combine(_directory, "legacy-archive", Batch.BatchId);
+            foreach (var p in Directory.EnumerateFiles(_directory, "plan-*.json"))
+            {
+                var old = new AlteringSessionStore(p).Load()
+                    ?? throw new InvalidDataException("구형 세션 보관 실패");
+                if (!Batch.Items.Any(s => s.MatchesPlan(PlanFrom(old))))
+                    throw new InvalidOperationException("배치 외부 구형 세션 발견 · 보관 중단");
+                Directory.CreateDirectory(archive);
+                _fault?.Invoke("archive");
+                File.Move(p, System.IO.Path.Combine(archive, System.IO.Path.GetFileName(p)));
+            }
+        }
         if (File.Exists(_path + ".tmp")) File.Delete(_path + ".tmp");
     }
 
