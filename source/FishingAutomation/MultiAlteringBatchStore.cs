@@ -55,9 +55,23 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         }
         catch (FileNotFoundException)
         {
-            // Never mistake an old unclosed batch for an empty roster. Only
-            // proven zero-registration v1 checkpoints may seed an upgrade.
-            return ReadLegacyZeroWorkSessions(directory).Select(PlanFrom).ToArray();
+            // The pre-N02 format never persisted the full batch roster.
+            // A completed peer's plan file may have been deleted, so even
+            // valid remaining zero-work files cannot authorize AUTO-selection.
+            // The user must explicitly select the old, still-pending plans;
+            // OpenAsync will then strictly verify zero registrations, identity,
+            // baseline quantities and no live facility works before migration.
+            if (Directory.Exists(directory) &&
+                (Directory.EnumerateFiles(directory, "*.json").Any() ||
+                 Directory.EnumerateFiles(directory, "*.tmp").Any() ||
+                 Directory.Exists(System.IO.Path.Combine(directory, "dependencies")) &&
+                 Directory.EnumerateFiles(System.IO.Path.Combine(directory, "dependencies"), "*.json").Any()))
+                throw new InvalidOperationException(
+                    "구형 다중가공 기록 발견 · 과거 전체 품목 목록을 증명할 수 없어 자동 목록 복원/단일가공 전환 차단. " +
+                    "기존 기록은 보존됩니다. 사용자가 미완료 품목을 다중가공 목록에 직접 선택한 뒤 " +
+                    "등록 0회·대기열 0건·기준 수량 불변을 검증하는 안전 이관만 허용합니다. " +
+                    "진행 이력이 있는 구형 기록은 RecoveryRequired · 자동 재등록 금지");
+            return Array.Empty<AlteringPlan>();
         }
         catch (DirectoryNotFoundException) { return Array.Empty<AlteringPlan>(); }
         catch (JsonException ex) { throw new InvalidDataException("다중가공 배치 기록 손상 · 원본 보존", ex); }
