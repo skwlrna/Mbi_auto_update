@@ -1205,12 +1205,19 @@ try
 }
 catch (InvalidOperationException ex)
 {
-    residualRejected = ex.Message.Contains("작업이 남아 있어 중간재료가 시설을 소유하지 않습니다");
+    // M4 now rejects a partial receive earlier, before the dependency
+    // scheduler's post-collection lane observation. Both fail closed, but the
+    // earlier receipt guard must not rewrite the manager ledger as success.
+    residualRejected =
+        ex.Message.Contains("시설 전체 대기열 0건") ||
+        ex.Message.Contains("작업이 남아 있어 중간재료가 시설을 소유하지 않습니다");
 }
 Check(residualRejected &&
       residualLane.QueueDirectiveFor("금속 가공 시설") ==
           AlteringFacilityEntryDirective.FreshMoveRequired &&
-      residualLane.Snapshot("금속 가공 시설").LiveWorks == 1 &&
+      (await residualWorld.WorksAsync(default)).Count(x =>
+          x.FacilityName == "금속 가공 시설") == 1 &&
+      residualLane.Snapshot("금속 가공 시설").LiveWorks >= 1 &&
       residualWorld.QueueDirectives.Count == 0,
     "H4: residual facility work after boundary receipt prevents onsite confirmation and intermediate registration");
 
