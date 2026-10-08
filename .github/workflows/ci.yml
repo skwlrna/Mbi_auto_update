@@ -239,6 +239,23 @@ jobs:
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
              $medicineSelect -notmatch '검색 입력을 차단'){throw 'medicine remote-screen veto missing'}
+          # H1: explicit coordinator directives must survive through every
+          # recipe route, including the first-click retry; Automatic remains strict.
+          if($alteringPlan -notmatch 'class AlteringFacilityEntryPolicy' -or
+             $alteringPlan -notmatch 'directive == AlteringFacilityEntryDirective.Automatic' -or
+             $alteringPlan -notmatch 'moveButtonVisible'){throw 'H1 centralized recipe move-visual policy missing'}
+          if($fixedSelect -notmatch 'AlteringFacilityEntryDirective directive' -or
+             $fixedSelect -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
+             $fixedSelect -notmatch 'directive, HasFacilityMoveButtonVisual\(retryGate\)' -or
+             $medicineSelect -notmatch 'AlteringFacilityEntryDirective directive' -or
+             $medicineSelect -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
+             $selectRecipe -notmatch 'TrySelectFixedRecipeAsync\(plan, directive, ct\)' -or
+             $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync\(plan, directive, ct\)' -or
+             $selectRecipe -notmatch 'AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton' -or
+             $queue -notmatch 'SelectRecipeAsync\(plan, directive, ct\)') {throw 'H1 manager directive not preserved through fixed/medicine/cached/retry recipe paths'}
+          if($fixedSelect -match 'if\s*\(HasFacilityMoveButtonVisual\(' -or
+             $medicineSelect -match 'if\s*\(HasFacilityMoveButtonVisual\(' -or
+             $selectRecipe -match 'if\s*\(HasFacilityMoveButtonVisual\('){throw 'H1 raw move-button veto bypassed manager directive'}
           $facilityLayout = Get-Content source/FishingAutomation/AlteringFacilityLayout.cs -Raw
           if($facilityLayout -notmatch 'MoveButtonVisualArea = new\(15, 205, 155, 65\)' -or
              $facilityLayout -notmatch 'MoveButtonPoint = new\(85, 235\)' -or
