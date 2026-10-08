@@ -266,7 +266,7 @@ $receiptReturn = Method-Block $alter 'private async Task<bool> WaitForReceiptFac
 Match-Required $receiptReturn '일반 필드 3회 확인' 'field-return recovery needs three stable observations'
 Match-Required $receiptReturn 'CanRecoverFieldAfterCompletion' 'field-return recovery uses explicit safety policy'
 Match-Required $receiptReturn 'await EnterFacilityAsync\(plan, ct\)' 'field-return recovery performs one bounded facility re-entry'
-Match-Required $receiptReturn 'IsProvenReceiptAfterReopen' 'reopened facility requires actual same-recipe queue decrease'
+Match-Required $receiptReturn 'IsProvenReceiptAfterReopen' 'reopened facility requires actual facility-wide queue decrease'
 Match-Required $receiptReturn '재수령 Space 금지' 'field-return path explicitly forbids a second receipt Space'
 Match-Required $receiptReturn '추가 Space 0회' 'successful recovery records zero additional Space inputs'
 Match-Forbidden $receiptReturn 'TapFresh\(0x39|QueueAsync\(|CollectAsync\(|CollectAfterTravelAsync\(' 'field-return recovery cannot send Space, queue, or collect again'
@@ -276,6 +276,23 @@ Match-Required $receiptPolicy 'IsCliReceiptConfirmed\(start, end\)' 'post-reopen
 Match-Required $alterTests '14:23 receipt regression' '14:23 live failure remains an executable regression case'
 Match-Required $alterTests 'unknown CLI state blocks field re-entry' 'unknown CLI state cannot authorize field recovery'
 Match-Required $alterTests 'reopened facility cannot falsely confirm unchanged' 'unchanged queue cannot falsely confirm receipt'
+
+# M4: "모두 받기" is scoped to an entire facility, not the current recipe.
+# Mixed-slot receipts are blocked before input unless all jobs are complete;
+# the post-click managed proof requires a fully drained facility queue.
+Match-Required $receiptPolicy 'CanCollectManagedFacility' 'M4 manager can only receive a fully completed facility batch'
+Match-Required $receiptPolicy 'facilityWorks.All\(x => x.IsCompleted\)' 'M4 all seven slots must be done before receive-all'
+Match-Required $receiptPolicy 'IsManagedFacilityReceiptConfirmed' 'M4 managed receive requires whole-facility empty queue'
+Match-Required $receiptPolicy 'before > 0 && after == 0' 'M4 rejects partial decreases as mixed-batch receipt success'
+Match-Required $alterPlan 'CanCollectManagedFacility\(works, plan.FacilityName\)' 'M4 manager checks full facility before any receive input'
+Match-Required $alterPlan 'IsManagedFacilityReceiptConfirmed' 'M4 manager checks full facility after receive input'
+Match-Required $alter 'receiptWorkCountBefore = await TryFacilityWorkCountAsync\(plan, ct\)' 'M4 screen captures facility-wide pre-Space count'
+Match-Forbidden $alter 'TryMatchingWorkCountAsync' 'M4 screen cannot confuse a chosen recipe with the whole receiving facility'
+Match-Required $receiptReturn 'TryFacilityWorkCountAsync\(plan, ct\)' 'M4 field-return receipt proof uses facility-wide CLI'
+Match-Required $alterTests 'M4: manager verifies blue receive-all removed both selected and other recipe' 'M4 mixed recipe receive-all succeeds only when fully cleared'
+Match-Required $alterTests 'M4: partial mixed facility batch is rejected before moving' 'M4 partial batch never authorizes blue receive or movement'
+Match-Required $alterTests 'M4: selected item disappearing while another completed recipe remains fails closed' 'M4 partial drain stops without a second receive'
+
 
 # 4b) 16:43 real-world regression: transient move-button disappearance cannot prove arrival.
 $facilityTravel = Method-Block $alter 'private async Task TravelToFacilityAsync' '\r?\n    // Free navigation only' 'facility travel arrival'
