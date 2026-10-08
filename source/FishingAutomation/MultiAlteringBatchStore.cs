@@ -150,9 +150,10 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         foreach (var plan in plans) plan.Validate();
         if (plans.Count == 0 || plans.Select(Key).Distinct().Count() != plans.Count)
             throw new InvalidDataException("다중가공 계획이 비었거나 품목 고유키가 중복됩니다.");
-        if (string.IsNullOrWhiteSpace(identity.CharacterId) &&
-            (string.IsNullOrWhiteSpace(identity.CharacterName) || string.IsNullOrWhiteSpace(identity.RealmName)))
-            throw new InvalidOperationException("다중가공 캐릭터 식별 정보가 부족해 새 작업/이어하기를 구분할 수 없습니다.");
+        if (!identity.HasDurableMultiIdentity)
+            throw new InvalidOperationException(
+                "다중가공 캐릭터 식별 정보가 부족해 새 작업/이어하기를 구분할 수 없습니다. " +
+                "고유 ID 또는 캐릭터 이름+서버/계정 확인 필요 · 기록 보존");
 
         _fault?.Invoke("read");
         MultiAlteringBatch? saved = null;
