@@ -24,6 +24,20 @@ internal static class AlteringFacilityTravelConfirmPolicy
            !moveButtonVisible &&
            autoTraveling == false;
 
+    // F01: a manager-directed Fresh move can leave a visible "move" button
+    // even on-site. Only a POSITIVELY OBSERVED travel transition (not the
+    // button's absence or merely a click) can replace that visual veto.
+    // The caller also checks popup clearance and stable frames / final CLI.
+    internal static bool IsManagedFreshArrivalObservation(
+        bool facilityVisible,
+        bool? autoTraveling,
+        bool moveClickSent,
+        bool transitionObserved)
+        => facilityVisible &&
+           autoTraveling == false &&
+           moveClickSent &&
+           transitionObserved;
+
     internal static bool HasStableOnsiteEvidence(
         int stableFrames,
         TimeSpan stableDuration)
