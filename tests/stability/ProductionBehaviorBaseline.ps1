@@ -174,7 +174,7 @@ $queueFlow = Method-Block $alter 'public async Task QueueAsync' '\r?\n    privat
 Match-Required $queueFlow 'TryReuseOnsiteFacilityAsync' 'only proven same-facility reuse may skip a fresh move'
 Match-Required $queueFlow 'TravelToFacilityAsync\(plan, ct, forceMoveClick: true\)' 'fresh facility entry forces one move before recipe selection'
 Match-Required $queueFlow '새 시설 첫 등록' 'fresh facility move-first order is explicit in diagnostics'
-Match-Required $queueFlow 'await SelectRecipeAsync\(plan, ct\)' 'recipe selection remains after facility travel'
+Match-Required $queueFlow 'await SelectRecipeAsync\(plan, directive, ct\)' 'recipe selection remains after facility travel with manager directive'
 Match-Required $facilityTravel '설비 이동 1회 필수 경로' 'forced first-entry travel ignores move-detector false negatives for ordering'
 Match-Required $facilityTravel '버튼 검출 결과로 품목 선택 순서를 바꾸지 않음' 'move detector cannot authorize recipe-before-move'
 Match-Required $facilityTravel '품목 선택 전 실행' 'one-shot move input is explicitly before recipe selection'
