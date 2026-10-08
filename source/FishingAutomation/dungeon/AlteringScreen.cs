@@ -8,6 +8,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private readonly ProductionStageMachine _stage = new("가공");
     private readonly string _debugDir;
     private readonly MabinogiMobileCli? _cli;
+    // Screen-local Automatic single-altering cache; never manager authority.
     private string? _confirmedOnsiteFacility;
     private string? _cachedRecipeKey;
     private Point _cachedRecipeCenter;
@@ -76,7 +77,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
 
         bool trustedOnsiteFacility =
-            string.Equals(_confirmedOnsiteFacility, plan.FacilityName, StringComparison.Ordinal);
+            AlteringScreenOnsiteCachePolicy.MayTrustForReceipt(
+                directive, _confirmedOnsiteFacility, plan.FacilityName);
         if (AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
                 directive,
                 trustedOnsiteFacility,
@@ -910,6 +912,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (plan.AllowPaidButton)
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
+        // Explicit manager directive supersedes any lower Automatic cache.
+        if (directive != AlteringFacilityEntryDirective.Automatic)
+            _confirmedOnsiteFacility = null;
+
         bool reusedOnsite = false;
         if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
         {
@@ -923,7 +929,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "중간관리자가 같은 시설 현장 재사용을 지시했지만 시설창 복귀 상태를 확인하지 못했습니다. " +
                     "하위 가공 모듈이 임의로 설비 이동을 다시 판단하지 않습니다.");
 
-            _confirmedOnsiteFacility = plan.FacilityName;
+            _confirmedOnsiteFacility =
+                AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+                    directive, plan.FacilityName);
             reusedOnsite = true;
             _stage.Move(
                 ProductionStage.OpenHub,
@@ -941,7 +949,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 "품목 선택보다 설비 이동 1회 우선");
             await TravelToFacilityAsync(plan, ct, forceMoveClick: true);
             await EnterFacilityAsync(plan, ct);
-            _confirmedOnsiteFacility = plan.FacilityName;
+            _confirmedOnsiteFacility =
+                AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+                    directive, plan.FacilityName);
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 지시 이행 · {plan.ScreenTitle} 설비 도착 · " +
                 $"이제 {plan.DisplayName} 선택");
@@ -1573,7 +1583,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 facilityFrames = cleanReturn ? facilityFrames + 1 : 0;
                 if (facilityFrames >= 2)
                 {
-                    _confirmedOnsiteFacility = plan.FacilityName;
+                    _confirmedOnsiteFacility =
+                        AlteringScreenOnsiteCachePolicy.AfterVerifiedReceiptReturn(
+                            managedReceipt, plan.FacilityName);
                     _stage.Move(ProductionStage.VerifyInventory, $"{plan.DisplayName} 수령 후 시설 복귀");
                     Log?.Invoke(
                         $"[자동 가공] 가공 완료 확인창 닫기 완료 · {plan.ScreenTitle} 창 복귀 2프레임 · " +
@@ -1977,6 +1989,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringFacilityEntryDirective directive,
         CancellationToken ct)
     {
+        // L1: never retain a single-mode observation through managed receipt.
+        if (directive != AlteringFacilityEntryDirective.Automatic)
+            _confirmedOnsiteFacility = null;
+
         await EnterFacilityAsync(plan, ct);
 
         if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
@@ -1992,7 +2008,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "중간관리자 수령 현장 재사용 지시와 실제 시설/팝업/이동 상태가 불일치하여 " +
                     "자체 설비 이동 없이 안전 정지합니다.");
 
-            _confirmedOnsiteFacility = plan.FacilityName;
+            _confirmedOnsiteFacility =
+                AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+                    directive, plan.FacilityName);
             Log?.Invoke(
                 $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} 같은 현장 재사용 · " +
                 "설비 이동 0회 · 이동 버튼 OCR/색상은 위치 재판정에 사용하지 않음");
@@ -2004,7 +2022,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"[자동 가공] 중간관리자 수령 지시 · {plan.ScreenTitle} 새 시설 이동 1회 선행");
             await TravelToFacilityAsync(plan, ct, forceMoveClick: true, receiptMode: true);
             await EnterFacilityAsync(plan, ct);
-            _confirmedOnsiteFacility = plan.FacilityName;
+            _confirmedOnsiteFacility =
+                AlteringScreenOnsiteCachePolicy.AfterVerifiedFacilityEntry(
+                    directive, plan.FacilityName);
         }
         else
         {
