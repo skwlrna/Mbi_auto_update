@@ -13,6 +13,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private string? _cachedRecipeKey;
     private Point _cachedRecipeCenter;
     private bool _hasCachedRecipeCenter;
+    // Per-F9 verification cache. Only successfully registered fixed recipes
+    // qualify; manager-directed same-facility repeats never call OCR again.
+    private readonly HashSet<string> _verifiedFacilityTitles = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _verifiedFixedRecipes = new(StringComparer.Ordinal);
+    private string? _repeatOcrFreeFacilityTitle;
+    private bool _repeatOcrFreeRecipe;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
@@ -43,8 +49,46 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return found.Count == 1 ? found[0] : null;
     }
 
+    // A previously confirmed facility uses its FIXED header position, never OCR.
+    // This is a visual location check, not a guess based on a stale OCR result.
     private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
-        => _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
+    {
+        if (string.Equals(_repeatOcrFreeFacilityTitle, title, StringComparison.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            DetectionResult? fixedHit = HasFixedFacilityHeaderVisual(frame)
+                ? new DetectionResult(true, new Rectangle(14, 42, 155, 45), 1.0, title)
+                : null;
+            return Task.FromResult(fixedHit);
+        }
+        return _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
+    }
+
+    // The actual 800x1000 facility capture has the large fixed title at
+    // x=20,y=50 and a separate fixed 'facility Lv.' subtitle at x=20,y=155.
+    // Neither is a dynamic OCR coordinate. Require BOTH independent anchors:
+    // a single unrelated title or bright currency cannot prove this screen.
+    private static bool HasFixedFacilityHeaderVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        static int WhiteGlyphs(Bitmap bitmap, Rectangle roi)
+        {
+            int count = 0;
+            for (int y = roi.Top; y < roi.Bottom; y += 2)
+            for (int x = roi.Left; x < roi.Right; x += 2)
+            {
+                Color p = bitmap.GetPixel(x, y);
+                if (p.R >= 150 && p.G >= 150 && p.B >= 150 &&
+                    Math.Max(p.R, Math.Max(p.G, p.B)) -
+                    Math.Min(p.R, Math.Min(p.G, p.B)) <= 45)
+                    count++;
+            }
+            return count;
+        }
+        return WhiteGlyphs(frame, new Rectangle(14, 42, 155, 46)) >= 18 &&
+               WhiteGlyphs(frame, new Rectangle(15, 144, 230, 48)) >= 20;
+    }
 
     private async Task<bool> HasCollectPromptAsync(
         Bitmap frame,
@@ -69,11 +113,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         bool exactMoveLabelVisible = false;
         if (visualMoveButton)
         {
-            exactMoveLabelVisible = await FindAsync(
-                frame,
-                AlteringFacilityLayout.MoveButtonVisualArea,
-                "설비로 이동",
-                ct) is not null;
+            // The manager-confirmed repeated facility never re-reads a label.
+            // The fixed visual move control remains a non-OCR safety veto.
+            exactMoveLabelVisible = string.Equals(
+                _repeatOcrFreeFacilityTitle, plan.ScreenTitle, StringComparison.Ordinal) ||
+                await FindAsync(
+                    frame, AlteringFacilityLayout.MoveButtonVisualArea,
+                    "설비로 이동", ct) is not null;
         }
 
         bool trustedOnsiteFacility =
@@ -322,6 +368,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<DetectionResult?> FindRecipeAsync(Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
+        if (_repeatOcrFreeRecipe)
+            return TryFindFreeProcessButtonVisual(frame, out _)
+                ? new DetectionResult(true, Popup, 1.0, plan.DisplayName)
+                : null;
         // CLI recipe names can include an ingredient qualifier such as
         // "철괴(철 광석)", while the in-game detail sheet shows only "철괴".
         // The specific recipe card is selected and re-confirmed immediately before
@@ -354,6 +404,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<bool> IsRecipeDetailStructureAsync(Bitmap frame, CancellationToken ct)
     {
+        // Once this exact fixed-position recipe has been successfully registered,
+        // repeat observations use only the existing fixed free-button geometry.
+        // No '필요한 재료', action label or recipe OCR calls are made.
+        if (_repeatOcrFreeRecipe)
+        {
+            ct.ThrowIfCancellationRequested();
+            return TryFindFreeProcessButtonVisual(frame, out _);
+        }
         // After a recipe card has already been selected, do not OCR the same recipe
         // name again. Only prove that the expected detail-sheet structure opened.
         bool materialsVisible = await FindAsync(frame, new(100, 690, 580, 200), "필요한 재료", ct) is not null;
@@ -934,6 +992,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // confirmed the recipe detail screen. The remote facility move-button ROI
         // belongs to the facility list screen and overlaps unrelated colours on the
         // detail popup, so it must never be used as a veto at this stage.
+        if (_repeatOcrFreeRecipe)
+        {
+            ct.ThrowIfCancellationRequested();
+            bool free = TryFindFreeProcessButtonVisual(frame, out _);
+            return (!free, free ? "반복 가공 무료 버튼 고정 위치 확인" : "고정 무료 버튼 없음");
+        }
         var paid = await FindAsync(frame, RecipeActionButton, "가공하러 가기", ct);
         return (paid is not null, paid is not null ? "가공하러 가기 OCR" : "없음");
     }
@@ -993,6 +1057,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             throw new InvalidOperationException("정령의 날개를 사용하는 가공 경로는 실행하지 않습니다.");
 
         await RequireManagedIdleAsync(plan, directive, "시설 진입/재사용 전", ct);
+
+        // Cache is enabled only after the FIRST successful manager-directed
+        // registration of this facility / exact fixed recipe in this run.
+        _repeatOcrFreeFacilityTitle =
+            directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+            _verifiedFacilityTitles.Contains(plan.ScreenTitle)
+                ? plan.ScreenTitle : null;
+        _repeatOcrFreeRecipe =
+            directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+            _verifiedFixedRecipes.Contains(RecipeCacheKey(plan));
+        if (_repeatOcrFreeFacilityTitle is not null)
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 1차 통과 · 같은 시설 반복 OCR 전체 생략");
 
         // Explicit manager directive supersedes any lower Automatic cache.
         if (directive != AlteringFacilityEntryDirective.Automatic)
@@ -1223,6 +1299,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             if (restartAfterRemoteRecovery)
                 continue;
 
+            // Only a successful first registration establishes this run's
+            // verified fixed-coordinate path for subsequent repeats.
+            if (directive != AlteringFacilityEntryDirective.Automatic)
+            {
+                _verifiedFacilityTitles.Add(plan.ScreenTitle);
+                if (AlteringRecipeLayout.IsFixedFacility(plan.FacilityName))
+                    _verifiedFixedRecipes.Add(RecipeCacheKey(plan));
+            }
             return;
         }
     }
@@ -1419,7 +1503,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // Capture first: the optional travel popup can appear while the facility
             // header remains behind it. Do not wait for CLI/OCR cycles before handling it.
             using var frame = Capture(ct);
-            bool facilityVisible =
+            // The fixed title/subtitle anchors take precedence over OCR after
+            // the known facility was entered and the move click was sent.
+            // This accepts the 03:08:57 live screenshot where OCR missed the
+            // leftmost glyphs despite the real facility UI being visible.
+            bool facilityVisible = HasFixedFacilityHeaderVisual(frame) ||
                 await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
 
             bool travelPopupVisual =
@@ -1600,7 +1688,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     bool finalPopupVisible =
                         moveClickSent &&
                         HasFacilityTravelConfirmationVisual(finalFrame);
-                    bool finalFacilityVisible =
+                    bool finalFacilityVisible = HasFixedFacilityHeaderVisual(finalFrame) ||
                         await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null;
                     bool finalMoveVisible = false;
                     if (finalFacilityVisible)
