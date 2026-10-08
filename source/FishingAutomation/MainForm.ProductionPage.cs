@@ -770,7 +770,15 @@ public sealed partial class MainForm
                 string multiDirectory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "MabiAuto", "multi-altering");
-                var pendingPlans = MultiAlteringBatchStore.ReadPendingPlans(multiDirectory);
+                // V3.1.55 realm-only runs saved a separate isolated manifest.
+                // Prefer its full roster so F10 can restore completed peers
+                // even when the pre-N02 main directory still has legacy files.
+                string oneCharacterDirectory = Path.Combine(multiDirectory, "limited-fresh-test");
+                var pendingPlans = File.Exists(Path.Combine(oneCharacterDirectory, "batch.json"))
+                    ? MultiAlteringBatchStore.ReadPendingPlans(oneCharacterDirectory)
+                    : Array.Empty<AlteringPlan>();
+                if (pendingPlans.Count == 0)
+                    pendingPlans = MultiAlteringBatchStore.ReadPendingPlans(multiDirectory);
                 if (pendingPlans.Count > 0)
                 {
                     if (_alteringQueue.Items.Count == 0)
