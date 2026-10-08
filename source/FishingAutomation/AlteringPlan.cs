@@ -932,7 +932,19 @@ internal sealed class AlteringAutomation
         int count = works.Count(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (count == 0) return false;
         int totalBefore = works.Count(x => x.FacilityName == plan.FacilityName);
-        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 {count}건 수령 시작");
+        // "모두 받기" drains every completed work in this FACILITY, not just
+        // the recipe displayed by plan. Never authorize a managed mixed-lane
+        // receipt while another slot is still in progress.
+        if (_facilityState is not null &&
+            !AlteringReceiptPolicy.CanCollectManagedFacility(works, plan.FacilityName))
+            throw new InvalidOperationException(
+                $"{plan.FacilityName} 다중가공 묶음 수령 차단 · " +
+                $"시설 전체 {totalBefore}건 중 완료 {count}건 · " +
+                "일부만 완료된 7칸 배치는 모두 받기/Space 입력 없이 대기해야 합니다.");
+
+        Log?.Invoke(
+            $"[자동 가공] {plan.ScreenTitle} 시설 전체 {totalBefore}건 · " +
+            $"완료 {count}건 · 모두 받기 수령 시작");
 
         if (_screen is IDirectCliAlteringScreen direct)
         {
@@ -971,11 +983,30 @@ internal sealed class AlteringAutomation
 
         if (firstCollected)
         {
-            await VerifyAsync(async token =>
-                (await _data.WorksAsync(token)).Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
-                "1차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 입력 없이 정지합니다.",
-                ct, TimeSpan.FromSeconds(1));
-            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 완료 작업 수령 확인 · 1차 모두 받기");
+            if (_facilityState is not null)
+            {
+                // M4: one blue input covers ALL recipes in the facility.
+                // A partial drop is not proof of a completed mixed batch.
+                await VerifyAsync(async token =>
+                    AlteringReceiptPolicy.IsManagedFacilityReceiptConfirmed(
+                        totalBefore,
+                        (await _data.WorksAsync(token))
+                            .Count(x => x.FacilityName == plan.FacilityName)),
+                    "다중가공 모두 받기 후 시설 전체 대기열 0건을 확인하지 못했습니다. " +
+                    "다른 품목이 남거나 CLI가 불확실하여 추가 수령 없이 정지합니다.",
+                    ct, TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                await VerifyAsync(async token =>
+                    (await _data.WorksAsync(token))
+                        .Count(x => x.FacilityName == plan.FacilityName) < totalBefore,
+                    "1차 모두 받기 후 완료 작업 수령을 확인하지 못했습니다. 반복 입력 없이 정지합니다.",
+                    ct, TimeSpan.FromSeconds(1));
+            }
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} 시설 전체 수령 확인 · " +
+                $"수령 전 {totalBefore}건 · 다중가공={_facilityState is not null} · 1차 모두 받기");
             return true;
         }
 
