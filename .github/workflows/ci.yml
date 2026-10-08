@@ -318,11 +318,16 @@ jobs:
           if ($queue -notmatch '새 시설 첫 등록' -or
               $queue -notmatch '품목 선택보다 설비 이동 1회 우선') { throw 'fresh facility move-first trace missing' }
           if ($queue -notmatch '설비 도착 · 이제 .* 선택') { throw 'post-arrival recipe selection trace missing' }
-          # F07: preserve BOTH original detail checks, plus the independent
-          # exact-identity gate inside the managed pre-registration callback.
-          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -ne 3 -or
+          # F07/N01: preserve BOTH original pre-registration detail checks,
+          # the independent managed two-frame exact-identity gate, AND a final
+          # new screenshot's detail/recipe/button/remote checks before ClickFresh.
+          if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -lt 4 -or
               $queue -notmatch 'VerifyTwoFreshObservationsAsync' -or
-              $queue -notmatch 'FindRecipeAsync\(fresh, plan, token\)') { throw 'queue must keep two remote/detail safety checks and the new managed exact identity gate' }
+              $queue -notmatch 'FindRecipeAsync\(fresh, plan, token\)' -or
+              $queue -notmatch 'FindRecipeAsync\(immediate, plan, ct\)' -or
+              $queue -notmatch 'TryFindFreeProcessButtonVisual\(immediate, out Point liveCenter\)' -or
+              $queue -notmatch 'IsStableFreshFreeActionTarget' -or
+              $queue -notmatch '_ui.ClickFresh\(liveCenter, ct\)') { throw 'N01/F07 original remote/detail checks plus last fresh recipe and free button gate missing' }
           $remoteGuard = Get-Content source/FishingAutomation/AlteringRemoteProcessGuard.cs -Raw
           if ($remoteGuard -notmatch '!firstRemote \|\| !secondRemote' -or
               $queue -notmatch '작업 등록 직전 원격 상태 후보 1/2' -or
