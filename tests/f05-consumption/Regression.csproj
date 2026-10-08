@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>F05ConsumptionJournalRegression</AssemblyName><UseAppHost>false</UseAppHost><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringConsumptionLedger.cs" Link="MultiAlteringConsumptionLedger.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringFacilityLayout.cs" Link="AlteringFacilityLayout.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringRecipeLayout.cs" Link="AlteringRecipeLayout.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringQueries.cs" Link="AlteringQueries.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringDetailPolicy.cs" Link="AlteringDetailPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringReceiptPolicy.cs" Link="AlteringReceiptPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringRemoteProcessGuard.cs" Link="AlteringRemoteProcessGuard.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringFixedRecipeRetryPolicy.cs" Link="AlteringFixedRecipeRetryPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs" Link="AlteringFacilityTravelConfirmPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringBatchStore.cs" Link="MultiAlteringBatchStore.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringSession.cs" Link="AlteringSession.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringStatus.cs" Link="AlteringStatus.cs" />
+    <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
+    <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/LivingSkillGatheringCatalog.cs" Link="LivingSkillGatheringCatalog.cs" />
+    <Compile Include="../../source/FishingAutomation/GatheringQueries.cs" Link="GatheringQueries.cs" />
+    <Compile Include="../../source/FishingAutomation/GatheringSafetyPolicy.cs" Link="GatheringSafetyPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiGatheringCoordinator.cs" Link="MultiGatheringCoordinator.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringCoordinator.cs" Link="MultiAlteringCoordinator.cs" />
+    <Compile Include="../../source/FishingAutomation/FacilityLaneState.cs" Link="FacilityLaneState.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringDependencyScheduler.cs" Link="MultiAlteringDependencyScheduler.cs" />
+    <Compile Include="../../source/FishingAutomation/RecursiveAlteringSupplyResolver.cs" Link="RecursiveAlteringSupplyResolver.cs" />
+    <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
+    <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />
+  </ItemGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj" />
+  </ItemGroup>
+</Project>
