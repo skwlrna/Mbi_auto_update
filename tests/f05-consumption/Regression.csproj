@@ -2,6 +2,7 @@
   <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>F05ConsumptionJournalRegression</AssemblyName><UseAppHost>false</UseAppHost><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
     <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringRecipeIdentityPolicy.cs" Link="AlteringRecipeIdentityPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringConsumptionLedger.cs" Link="MultiAlteringConsumptionLedger.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringFacilityLayout.cs" Link="AlteringFacilityLayout.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringRecipeLayout.cs" Link="AlteringRecipeLayout.cs" />
