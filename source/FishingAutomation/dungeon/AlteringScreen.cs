@@ -1325,6 +1325,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         int moveFrames = 0;
         bool shouldClickMove = forceMoveClick;
+        bool preClickRemoteMoveButtonConfirmed = false;
 
         if (forceMoveClick)
         {
@@ -1338,6 +1339,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             bool moveVisible =
                 await HasFacilityMoveButtonPositiveEvidenceAsync(confirmed, ct);
+            preClickRemoteMoveButtonConfirmed = moveVisible;
             Log?.Invoke(
                 $"[자동 가공] {plan.ScreenTitle} · 설비 이동 1회 필수 경로 · " +
                 $"버튼검출={(moveVisible ? "확인" : "미검출")} · " +
@@ -1562,10 +1564,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             bool managedFreshArrival =
                 directive == AlteringFacilityEntryDirective.FreshMoveRequired && moveClickSent;
+            bool instantArrival = managedFreshArrival && !receiptMode &&
+                AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+                    moveClickSent, preClickRemoteMoveButtonConfirmed,
+                    facilityVisible, HasOnsiteCloseButtonVisual(frame), moveVisible,
+                    activity?.IsAutoTraveling,
+                    HasFacilityTravelConfirmationVisual(frame) ||
+                    HasBottomConfirmationModal(frame));
             bool onsiteObserved = managedFreshArrival
                 ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
                     facilityVisible, activity?.IsAutoTraveling,
-                    moveClickSent, confirmedMoveTransition)
+                    moveClickSent, confirmedMoveTransition || instantArrival)
                 : AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
                     facilityVisible, moveVisible, activity?.IsAutoTraveling);
             if (onsiteObserved)
@@ -1619,10 +1628,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
                         }
                     }
+                    bool finalInstantArrival = managedFreshArrival && !receiptMode &&
+                        AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
+                            moveClickSent, preClickRemoteMoveButtonConfirmed,
+                            finalFacilityVisible, HasOnsiteCloseButtonVisual(finalFrame),
+                            finalMoveVisible, finalActivity?.IsAutoTraveling,
+                            finalPopupVisible || HasBottomConfirmationModal(finalFrame));
                     bool finalArrivalObservation = managedFreshArrival
                         ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
                             finalFacilityVisible, finalActivity?.IsAutoTraveling,
-                            moveClickSent, confirmedMoveTransition)
+                            moveClickSent, confirmedMoveTransition || finalInstantArrival)
                         : AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
                             finalFacilityVisible, finalMoveVisible,
                             finalActivity?.IsAutoTraveling);
@@ -1637,7 +1652,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         Log?.Invoke(
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
                             $"가공창 유지 + {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
-                            $"(관리 Fresh={managedFreshArrival}, 실제 이동전환={confirmedMoveTransition}, 이동버튼={finalMoveVisible}) " +
+                            $"(관리 Fresh={managedFreshArrival}, 실제 이동전환={confirmedMoveTransition}, " +
+                            $"즉시 도착 이중확인={finalInstantArrival}, 이동버튼={finalMoveVisible}) " +
                             "+ 1.2초 후행 재확인 · CLI AutoTraveling=false · 이동확인창 없음");
                         return;
                     }
@@ -1662,7 +1678,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"[자동 가공] 설비 이동 대기 · 이동감지={sawTravel} · " +
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
                     $"이동버튼확정={moveVisible} · 수령상태분리={receiptMode && moveClickSent} · " +
-                    $"F01 검증전환={confirmedMoveTransition} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
+                    $"F01 검증전환={confirmedMoveTransition} · 근거리즉시도착={instantArrival} · " +
+                    $"원격버튼사전확인={preClickRemoteMoveButtonConfirmed} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
                     $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
         }
 

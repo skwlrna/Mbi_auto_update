@@ -182,8 +182,22 @@ try
 
     var travel = ScreenCalls("TravelToFacilityAsync", 5);
     Check(Has(travel, "IsManagedFreshArrivalObservation") &&
-          Has(travel, "HasVerifiedManagedMoveTransition"),
-        "F01 compiled managed Fresh travel derives confirmed transition before stable arrival proof");
+          Has(travel, "HasVerifiedManagedMoveTransition") &&
+          Has(travel, "HasVerifiedManagedInstantArrival") &&
+          Has(travel, "HasOnsiteCloseButtonVisual") &&
+          Has(travel, "HasFacilityMoveButtonPositiveEvidenceAsync"),
+        "F01 real managed Fresh travel tests dual-anchor instant arrival before stable and final proofs");
+    Check(CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
+            true, true, true, true, false, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
+            true, false, true, true, false, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
+            true, true, true, true, true, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
+            true, true, true, true, false, null, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
+            true, true, true, true, false, false, true),
+        "L2 compiled real policy refuses missing pre-click button, remote UI, unknown CLI or modal");
     Check(!CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 0) &&
           !CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 1) &&
           !CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", false, true, 2) &&

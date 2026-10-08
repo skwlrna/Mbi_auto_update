@@ -143,72 +143,13 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         return saved.ToArray();
     }
 
-    // A weak CLI profile does not identify a character across restarts.
-    // This path is isolated from the normal N02 ledger and is deliberately
-    // NEW-ONLY. It cannot resume even its own unacknowledged prior run.
-    internal async Task OpenNewLimitedTestAsync(
+    // Backward-compatible entry point for the isolated V3.1.55 ledger.
+    // In single-character mode the SAME durable manifest may now resume,
+    // but a new/changed plan must never overwrite a pending batch.
+    internal Task OpenNewLimitedTestAsync(
         IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
         IAlteringData data, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        foreach (var plan in plans) plan.Validate();
-        if (plans.Count == 0 || plans.Select(Key).Distinct().Count() != plans.Count)
-            throw new InvalidDataException("다중가공 테스트 계획이 비었거나 품목 키가 중복됩니다.");
-        if (identity.HasDurableMultiIdentity ||
-            string.IsNullOrWhiteSpace(identity.RealmName))
-            throw new InvalidOperationException(
-                "제한적 새 테스트는 서버명만 확인된 CLI에서만 허용됩니다.");
-
-        // No old manifest may be silently overwritten or interpreted as a
-        // resumable session. Only a previously acknowledged Closed test can
-        // be replaced by the user's next explicit new-test confirmation.
-        MultiAlteringBatch? previous = null;
-        try
-        {
-            previous = JsonSerializer.Deserialize<MultiAlteringBatch>(
-                File.ReadAllText(_path), JsonOptions)
-                ?? throw new InvalidDataException("제한적 테스트 기록이 비어 있습니다.");
-        }
-        catch (FileNotFoundException) { }
-        catch (JsonException ex) { throw new InvalidDataException(
-            "제한적 테스트 기록 손상 · 이전 기록 보존 · 신규 등록 차단", ex); }
-        if (previous is not null)
-        {
-            Validate(previous);
-            if (previous.State != MultiAlteringBatchState.Closed)
-                throw new InvalidOperationException(
-                    "기존 제한적 테스트 배치가 미완료입니다 · 캐릭터 식별 불가능하므로 F10/재시작 자동 이어하기 및 새 등록 차단 · 기록 보존");
-        }
-
-        if (Directory.EnumerateFiles(_directory, "*.tmp").Any() ||
-            Directory.EnumerateFiles(_directory, "plan-*.json").Any() ||
-            Directory.Exists(System.IO.Path.Combine(_directory, "dependencies")) &&
-            Directory.EnumerateFiles(System.IO.Path.Combine(_directory, "dependencies"), "*.json").Any())
-            throw new InvalidOperationException(
-                "제한적 테스트 이전 미확정 임시/하위 기록이 남아 있어 새 등록 차단 · 기록 보존");
-
-        var works = await data.WorksAsync(ct);
-        if (works.Count != 0)
-            throw new InvalidOperationException(
-                "제한적 새 테스트는 모든 시설의 CLI 대기 작업이 0건일 때만 가능합니다 · 기존 대기열 보존 · 등록 없음");
-
-        string id = Guid.NewGuid().ToString("N");
-        var sessions = new List<AlteringSessionState>();
-        foreach (var plan in plans)
-        {
-            long baseline = await data.ItemCountAsync(plan.OutputName, ct);
-            sessions.Add(AlteringSessionState.Create(plan, identity, baseline, 0) with { BatchId = id });
-        }
-        // Recheck immediately before committing: a queue appearing during
-        // inventory reads invalidates all captured fresh-run baselines.
-        if ((await data.WorksAsync(ct)).Count != 0)
-            throw new InvalidOperationException(
-                "제한적 테스트 준비 도중 대기열이 변했습니다 · 신규 등록 차단");
-
-        ct.ThrowIfCancellationRequested();
-        Commit(new MultiAlteringBatch { BatchId = id, Identity = identity,
-            Items = sessions.ToArray() });
-    }
+        => OpenAsync(plans, identity, data, ct, allowSingleCharacter: true);
 
     internal static void EnsureNoActiveVerifiedBatch(string directory)
     {
@@ -229,16 +170,21 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     }
 
     internal async Task OpenAsync(IReadOnlyList<AlteringPlan> plans, CliIdentityContext identity,
-        IAlteringData data, CancellationToken ct)
+        IAlteringData data, CancellationToken ct, bool allowSingleCharacter = false)
     {
         ct.ThrowIfCancellationRequested();
         foreach (var plan in plans) plan.Validate();
         if (plans.Count == 0 || plans.Select(Key).Distinct().Count() != plans.Count)
             throw new InvalidDataException("다중가공 계획이 비었거나 품목 고유키가 중복됩니다.");
-        if (!identity.HasDurableMultiIdentity)
+        // In the explicitly configured ONE-character environment a stable
+        // realm-only CLI identity is sufficient to re-open the isolated
+        // local N02 manifest. This is not cross-character authentication:
+        // a user changing characters must NOT reuse this ledger.
+        if (!identity.HasDurableMultiIdentity &&
+            (!allowSingleCharacter || string.IsNullOrWhiteSpace(identity.RealmName)))
             throw new InvalidOperationException(
                 "다중가공 캐릭터 식별 정보가 부족해 새 작업/이어하기를 구분할 수 없습니다. " +
-                "고유 ID 또는 캐릭터 이름+서버/계정 확인 필요 · 기록 보존");
+                "고유 ID 또는 1캐릭터 모드의 안정된 서버 정보 필요 · 기록 보존");
 
         _fault?.Invoke("read");
         MultiAlteringBatch? saved = null;
@@ -312,6 +258,24 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 if (saved.Items.Any(x => x.MultiState == MultiAlteringItemState.RecoveryRequired))
                     throw new InvalidOperationException(
                         $"다중가공 배치 {saved.BatchId} 수령 확정 중 중단 · RecoveryRequired · 기록 보존 · 신규 등록 없이 안전 정지");
+                if (allowSingleCharacter)
+                {
+                    // An unjournaled pre-existing job at the selected facility
+                    // cannot be attributed to this one-character checkpoint.
+                    var live = await data.WorksAsync(ct);
+                    foreach (string facility in plans.Select(x => x.FacilityName).Distinct())
+                    {
+                        var recorded = saved.Items.Where(x => x.FacilityName == facility).ToArray();
+                        var visible = live.Where(x => x.FacilityName == facility).ToArray();
+                        if (visible.Length > recorded.Sum(x => x.QueuedWorks) ||
+                            visible.Any(w => !recorded.Any(x =>
+                                x.DisplayName == w.DisplayName ||
+                                PlanFrom(x).OutputName == w.DisplayName)))
+                            throw new InvalidOperationException(
+                                "1캐릭터 이어하기: 선택 시설 대기열이 저장된 등록 기록과 다릅니다 · " +
+                                "타 작업 수령/재등록 차단 · 배치 기록 보존");
+                    }
+                }
                 IsResuming = true;
                 _batch = saved;
                 return;
@@ -320,6 +284,13 @@ internal sealed class MultiAlteringBatchStore : IDisposable
 
         var legacy = ReadLegacyZeroWorkSessions(_directory);
         var works = await data.WorksAsync(ct);
+        // The 1-character unbound-identity mode owns only the SELECTED
+        // facilities. Unrelated facilities are not touched or collected.
+        if (allowSingleCharacter && works.Any(w =>
+                plans.Any(p => p.FacilityName == w.FacilityName)))
+            throw new InvalidOperationException(
+                "1캐릭터 신규 가공: 선택한 시설에 기존 대기 작업이 있습니다 · " +
+                "관계없는 시설 대기열은 허용 · 선택 시설 등록/수령 차단 · 기록 보존");
         string batchId = Guid.NewGuid().ToString("N");
         var items = new List<AlteringSessionState>();
         if (legacy.Length > 0)
@@ -352,6 +323,14 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with { BatchId = batchId });
             }
         }
+        // A work queued while the baselines were being fetched invalidates
+        // a fresh one-character batch, even if it belongs to another recipe
+        // within the same selected facility.
+        if (allowSingleCharacter && (await data.WorksAsync(ct)).Any(w =>
+                plans.Any(p => p.FacilityName == w.FacilityName)))
+            throw new InvalidOperationException(
+                "1캐릭터 신규 가공 준비 도중 선택 시설 대기열이 변했습니다 · " +
+                "기록을 새로 만들지 않고 정지합니다");
         ct.ThrowIfCancellationRequested();
         Commit(new MultiAlteringBatch { BatchId = batchId, Identity = identity,
             MigratedFromLegacy = legacy.Length > 0, Items = items.ToArray() });

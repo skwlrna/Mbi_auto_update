@@ -65,20 +65,13 @@ public sealed partial class MainForm
             _log.Write("[다중가공] 캐릭터 문맥 저장 · " + identity.Description);
             if (limitedFreshTest)
             {
-                var answer = MessageBox.Show(this,
-                    "현재 CLI는 캐릭터 고유 ID/이름을 제공하지 않고 서버 정보만 확인됩니다.\n\n" +
-                    "새로운 다중가공 테스트는 시작할 수 있지만 기존 완료/미완료 작업은 자동 이어받지 않습니다. " +
-                    "구형 작업 기록과 별도로 새 수량을 등록하므로, 이미 생산된 품목이 있다면 중복 가공할 수 있습니다.\n\n" +
-                    "전체 시설 대기열 0건 및 미완료 정식 배치 없음이 확인되어야 진행합니다. " +
-                    "F10 또는 재시작 후 제한적 테스트 자동 이어하기는 차단됩니다.\n\n" +
-                    "기존 기록은 보존됩니다. 새로운 테스트 작업을 시작하시겠습니까?",
-                    "제한적 새 다중가공 테스트 (이어하기 불가)",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button2);
-                if (answer != DialogResult.Yes)
-                    throw new OperationCanceledException("제한적 새 테스트 사용자 취소", token);
-                _log.Write("[다중가공] 제한적 새 테스트 사용자 승인 · 기존 배치 이어하기/덮어쓰기 금지");
-                _alteringPage.CharacterStatus = "제한적 새 테스트";
+                // The user operates ONE fixed character. The CLI exposes
+                // RealmName only, so use the existing isolated durable ledger
+                // rather than repeatedly treating the same character as new.
+                _alteringPage.CharacterStatus = "1캐릭터 모드";
+                _log.Write("[다중가공] 1캐릭터 모드 · 서버 정보만 확인 · " +
+                    "기존 제한적 배치 장부에서 동일 계획 F10 이어하기 허용 · " +
+                    "다른 캐릭터로 전환 시 이 장부 재사용 금지");
             }
             else _alteringPage.CharacterStatus = "확인됨";
 
@@ -100,13 +93,19 @@ public sealed partial class MainForm
                 await Task.Run(() =>
                     MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(mainSessionDir), token);
             }
+            if (!limitedFreshTest)
+            {
+                // If CLI begins exposing a strong ID again, do NOT open a new
+                // regular ledger while an older realm-only run is still active.
+                // The only authorized continuation remains the isolated roster.
+                await Task.Run(() =>
+                    MultiAlteringBatchStore.EnsureNoActiveVerifiedBatch(
+                        Path.Combine(mainSessionDir, "limited-fresh-test")), token);
+            }
             batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
-            if (limitedFreshTest)
-                await Task.Run(() => batchStore.OpenNewLimitedTestAsync(
-                    plans, identity.Baseline, rawAlteringData, token), token);
-            else
-                await Task.Run(() => batchStore.OpenAsync(
-                    plans, identity.Baseline, rawAlteringData, token), token);
+            await Task.Run(() => batchStore.OpenAsync(
+                plans, identity.Baseline, rawAlteringData, token,
+                allowSingleCharacter: limitedFreshTest), token);
             _log.Write($"[다중가공] 배치 식별 · {batchStore.BatchId} · 완료 기록 {batchStore.CompletedPlans(plans).Count}/{plans.Count}");
             if (batchStore.IsTerminal)
             {
@@ -404,9 +403,10 @@ public sealed partial class MainForm
         }
         catch (OperationCanceledException)
         {
-            _log.Write(limitedFreshTest
-                ? "[다중가공] 제한적 테스트 정지 · 기록 보존 · 캐릭터 식별 불가로 재시작 자동 이어하기 차단"
-                : "[다중가공] 정지 · 신규 등록/이동 중단 · 시설별 배치 이어하기 기록 유지");
+            _log.Write("[다중가공] 정지 · 신규 등록/이동 중단 · " +
+                (limitedFreshTest
+                    ? "1캐릭터 배치 장부 보존 · 동일 계획 검증 후 F10 이어하기 가능"
+                    : "시설별 배치 이어하기 기록 유지"));
             SetStatus("다중가공 정지", Color.DarkOrange);
         }
         catch (Exception ex)
