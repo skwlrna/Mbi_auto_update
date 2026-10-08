@@ -89,6 +89,14 @@ public sealed partial class MainForm
             Directory.CreateDirectory(sessionDir);
 
             var laneState = new FacilityLaneState(currentWorks);
+            // M3: reloading sessions and existing CLI works never restores
+            // physical onsite proof. This fresh in-memory manager owns all
+            // subsequent location decisions for this F9 multi-altering run.
+            _log.Write(
+                "[다중가공] 시작/이어하기 위치 정책 · " +
+                "저장된 작업/이전 실행의 현장확정은 복원하지 않음 · " +
+                "초기 위치 미확정은 원격 확정이 아님 · " +
+                "첫 시설은 Fresh 이동 1회, 이후 현장 CLI 확인 시 같은 시설 Reuse");
             var dependencyScheduler = new MultiAlteringDependencyScheduler(
                 rawAlteringData,
                 screen,
