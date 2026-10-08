@@ -384,6 +384,26 @@ Match-Required $facilityTravel '이동 확인창 닫힘 확인' 'travel popup cl
 Match-Required $facilityTravel '추가 설비 이동 클릭 없이 정지' 'failed transition never re-clicks the facility move control'
 Match-Required $alterTests '19:21 regression' '19:21 missed center-popup root cause remains executable regression coverage'
 
+# N04 (fresh F9): the manager retains every order and each new run receives
+# its own isolated durable ledger. Historical F05 is never discarded or loaded.
+$startAlter = Read-Source 'source/FishingAutomation/MainForm.Altering.cs'
+$startMulti = Read-Source 'source/FishingAutomation/MainForm.MultiAltering.cs'
+$batchStore = Read-Source 'source/FishingAutomation/MultiAlteringBatchStore.cs'
+$productionPage = Read-Source 'source/FishingAutomation/MainForm.ProductionPage.cs'
+$f9Entry = Method-Block $startAlter 'private async Task StartAlteringAsync' '\r?\n        _starting = true;' 'F9 altering entry'
+Match-Required $f9Entry 'await StartMultiAlteringAsync\(orders\)' 'all user F9 altering orders flow through multi supervisor'
+Match-Required $startMulti 'new MultiAlteringCoordinator\(' 'supervisor owns the whole new multi batch'
+Match-Required $startMulti 'new MultiAlteringBatchStore\(mainSessionDir\)' 'supervisor holds root mutex across every fresh run'
+Match-Required $startMulti 'fresh-runs' 'fresh F9 stores durable records in a unique namespace'
+Match-Required $startMulti 'OpenFreshAsync' 'F9 uses explicitly fresh-only N02/F05 opening path'
+Match-Forbidden $startMulti 'OpenNewLimitedTestAsync|batchStore.OpenAsync' 'F9 never opens past resumable or limited-test manifests'
+Match-Required $batchStore 'internal async Task OpenFreshAsync' 'fresh-only store gate exists'
+Match-Required $batchStore '선택 시설에 이전 대기/완료 작업이 있습니다' 'fresh gate refuses existing jobs in selected facilities'
+Match-Required $batchStore 'await OpenAsync\(plans, identity, data, ct, allowSingleCharacter: true\)' 'fresh gate retains full N02/F05 journaling'
+Match-Forbidden $productionPage 'ReadPendingPlans\(' 'new F9 UI never automatically selects a historical roster'
+Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 ignores but preserves old unresolved F05 journal' 'F05 old-record isolation is executable regression'
+Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 rejects selected facility completed or active works' 'fresh selected-lane safety is executable regression'
+
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
 $fieldExit = Method-Block $alter 'public async Task ExitToFieldAsync' '\r?\n    public async Task RecoverStallAsync' 'processing-to-field exit'
 Match-Required $fieldExit '일반 필드 2프레임 확인' 'processing UI exit still requires stable field confirmation'
