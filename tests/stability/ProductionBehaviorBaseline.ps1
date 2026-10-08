@@ -405,6 +405,9 @@ Match-Forbidden $productionPage 'ReadPendingPlans\(' 'new F9 UI never automatica
 Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 ignores but preserves old unresolved F05 journal' 'F05 old-record isolation is executable regression'
 Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/previous F9 one registered then restart orders a NEW full target' 'fresh 100 target excludes old 1 job after restart'
 Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/existing running work remains untouched while six free slots are registered' 'F9 registers into vacant slots even when older work is running'
+Match-Required (Read-Source 'tests/n02-resume/Program.cs') 'K/fresh F9 coordinator fills initial vacancies around old running or completed work' 'manager itself fills existing six vacancies'
+Match-Required $startMulti 'fillInitialVacancies: true' 'fresh F9 opts in to preserving older occupied slots'
+Match-Required (Read-Source 'source/FishingAutomation/MultiAlteringCoordinator.cs') 'startupVacancies' 'coordinator initial vacancy fill is scoped to first pass'
 Match-Forbidden $startMulti 'MultiAlteringFreshStartCleanup|이전 작업 정리 완료' 'F9 does not pre-clean or wait out old works'
 
 # 5) Gathering handoff to processing keeps the proven no-Space UI unwind.
