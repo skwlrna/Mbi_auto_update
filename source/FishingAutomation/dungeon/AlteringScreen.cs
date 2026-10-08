@@ -1500,27 +1500,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             .Count(x => x.FacilityName == plan.FacilityName);
     }
 
-    private async Task<int?> TryMatchingWorkCountAsync(
-        AlteringPlan plan,
-        CancellationToken ct)
-    {
-        if (_cli is null)
-            return null;
-
-        var response = await _cli.GetAlteringWorksAsync(ct);
-        if (!response.Success)
-        {
-            if (CliAutomationGuards.IsTransientLoadingRejection(response))
-                return null;
-            _ = AlteringQueries.ParseWorks(response);
-        }
-
-        return AlteringQueries.ParseWorks(response)
-            .Count(x =>
-                x.FacilityName == plan.FacilityName &&
-                (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
-    }
-
     private async Task<bool?> TryAutoTravelingAsync(CancellationToken ct)
     {
         if (_cli is null)
@@ -1664,11 +1643,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             // Returning to a facility proves ONLY navigation. A result popup
             // disappearing does not prove an item was received. Fail closed if
-            // same-recipe queue has not actually decreased.
+            // whole-facility queue has not actually decreased.
             int? receiptWorkCountAfter = null;
             for (int retry = 0; retry < 4; retry++)
             {
-                receiptWorkCountAfter = await TryMatchingWorkCountAsync(plan, ct);
+                receiptWorkCountAfter = await TryFacilityWorkCountAsync(plan, ct);
                 if (AlteringReceiptPolicy.IsProvenReceiptAfterReopen(
                         receiptWorkCountBefore, receiptWorkCountAfter))
                     break;
@@ -1679,9 +1658,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     receiptWorkCountBefore, receiptWorkCountAfter))
             {
                 Log?.Invoke($"[자동 가공] 일반 필드 복구 후 수령 미확정 · {plan.DisplayName} · " +
-                            $"동일 품목 작업 {receiptWorkCountBefore}->{(receiptWorkCountAfter?.ToString() ?? "조회불가")} · 재수령 입력 없음");
+                            $"시설 전체 작업 {receiptWorkCountBefore}->{(receiptWorkCountAfter?.ToString() ?? "조회불가")} · 재수령 입력 없음");
                 throw new InvalidOperationException(
-                    $"{plan.DisplayName} 완료 화면에서 필드로 복귀했지만 동일 품목 작업 감소를 확인하지 못했습니다. " +
+                    $"{plan.DisplayName} 완료 화면에서 필드로 복귀했지만 시설 전체 작업 감소를 확인하지 못했습니다. " +
                     "중복 수령 방지를 위해 추가 입력 없이 정지합니다.");
             }
 
@@ -1826,7 +1805,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             await Task.Delay(200, ct);
 
             int? liveMatchingCount = receiptWorkCountBefore is int
-                ? await TryMatchingWorkCountAsync(plan, ct)
+                ? await TryFacilityWorkCountAsync(plan, ct)
                 : null;
 
             using var frame = Capture(ct);
@@ -1843,7 +1822,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 {
                     _confirmedOnsiteFacility = plan.FacilityName;
                     Log?.Invoke(
-                        $"[자동 가공] 첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · " +
+                        $"[자동 가공] 첫 수령 Space 후 CLI 시설 전체 작업 감소로 수령 확정 · " +
                         $"{receiptBefore}->{receiptNow} · 시설창 복귀 확인");
                     return true;
                 }
@@ -1881,7 +1860,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (await CloseCompletionResultAndWaitForFacilityAsync(
                         plan,
                         ct,
-                        $"첫 수령 Space 후 CLI 동일 품목 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}",
+                        $"첫 수령 Space 후 CLI 시설 전체 작업 감소로 수령 확정 · {receiptBefore}->{receiptNow}",
                         cliReceiptConfirmed: true,
                         receiptWorkCountBefore: receiptBefore))
                     return true;
@@ -1918,13 +1897,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     continue;
                 }
 
-                int? workCountBefore = receiptWorkCountBefore ?? await TryMatchingWorkCountAsync(plan, ct);
+                int? workCountBefore = receiptWorkCountBefore ?? await TryFacilityWorkCountAsync(plan, ct);
                 _stage.Move(ProductionStage.Complete, $"{plan.DisplayName} 수령 완료 화면");
                 if (await CloseCompletionResultAndWaitForFacilityAsync(
                         plan,
                         ct,
                         "가공 완료 결과창 확인 · 이동 팝업/자동이동 아님 · " +
-                        $"첫 수령 전 동일 품목 작업수={(workCountBefore?.ToString() ?? "확인불가")}",
+                        $"첫 수령 전 시설 전체 작업수={(workCountBefore?.ToString() ?? "확인불가")}",
                         receiptWorkCountBefore: workCountBefore))
                     return true;
 
@@ -1999,14 +1978,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(failed, "현장 가공대 도착 후 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
         }
 
-        int? receiptWorkCountBefore = await TryMatchingWorkCountAsync(plan, ct);
+        int? receiptWorkCountBefore = await TryFacilityWorkCountAsync(plan, ct);
 
         // The receive button can become visible slightly before the game starts
         // accepting Space. Give the UI one short stabilization window, then prove
         // the exact receive state again before the single receive input.
         Log?.Invoke(
             $"[자동 가공] 파란 수령 버튼 입력 전 400ms 안정화 · {plan.ScreenTitle} · " +
-            $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+            $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         await Task.Delay(400, ct);
 
         if (!await WaitForCollectPromptAsync(plan, attempts: 2, delayMs: 100, ct, directive))
@@ -2019,7 +1998,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
         Log?.Invoke(
             $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 수령 현장 확정 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
-            $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+            $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
@@ -2047,12 +2026,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             return false;
         }
 
-        int? receiptWorkCountBefore = await TryMatchingWorkCountAsync(plan, ct);
+        int? receiptWorkCountBefore = await TryFacilityWorkCountAsync(plan, ct);
 
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 2차 수령");
         Log?.Invoke(
             $"[자동 가공] 가공대 도착 확인 · {plan.ScreenTitle} + CLI 완료 작업 + 파란 수령 버튼 · 2차 Space · " +
-            $"수령 전 동일 품목 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+            $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         _ui.TapFresh(0x39, ct);
         await Task.Delay(700, ct);
 
