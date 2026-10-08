@@ -1033,10 +1033,31 @@ jobs:
 
           $resolverGather = [regex]::Match($resolver, 'var multiGather = await BuildMultiGatheringPlanAsync[\s\S]*?await coordinator\.RunAsync\(multiGather, ct\);').Value
           if([string]::IsNullOrWhiteSpace($resolverGather)){throw 'recursive multi-gather transition block missing'}
-          $exitIndex = $resolverGather.IndexOf('await fieldExit.ExitToFieldAsync(ct)')
+          $exitIndex = $resolverGather.IndexOf('await ExitToFieldAndNotifyManagerAsync(')
           $gatherIndex = $resolverGather.IndexOf('await coordinator.RunAsync(multiGather, ct)')
           if($exitIndex -lt 0 -or $gatherIndex -lt 0 -or $exitIndex -gt $gatherIndex){throw 'recursive multi-gather must exit altering UI before opening life skill'}
           if($resolverGather -notmatch '다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인'){throw 'recursive multi-gather field-exit trace missing'}
+          # H5: all three supply branches share one confirmed field-exit
+          # notification to the lane manager; failed navigation is treated
+          # as an unknown location, not as permission to reuse onsite.
+          $managerExit = [regex]::Match(
+              $resolver,
+              'private async Task ExitToFieldAndNotifyManagerAsync[\s\S]*?(?=\r?\n    public async Task ResolveAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($managerExit) -or
+              $managerExit -notmatch 'await fieldExit.ExitToFieldAsync\(ct\)' -or
+              $managerExit -notmatch '_laneState\?\.InvalidateOnsite' -or
+              $managerExit -notmatch '실제 필드 복귀 확인' -or
+              $managerExit -notmatch '필드 이탈 진행 중 위치 미확정' -or
+              [regex]::Matches($resolver, 'await ExitToFieldAndNotifyManagerAsync\(').Count -ne 3 -or
+              $multiAlterMain -notmatch 'dependencyScheduler: dependencyScheduler,\s*laneState: laneState' -or
+              $resolver -notmatch 'FacilityLaneState\? laneState = null' -or
+              $alterTests -notmatch 'H5: after an intermediate onsite confirmation, a subsequent grouped field exit' -or
+              $alterTests -notmatch 'H5: whole-plan preflight announces confirmed field exit' -or
+              $alterTests -notmatch 'H5: hidden raw shortage discovered after intermediate processing' -or
+              $alterTests -notmatch 'H5: uncertain or failed field exit invalidates stale onsite' -or
+              $alterTests -notmatch 'H5: resolver preflight without actual field departure') {
+              throw 'H5 actual field exit must invalidate manager onsite before every subsequent gather'
+          }
           if($multiGather -notmatch 'new GatheringAutomation' -or
              $multiGather -notmatch 'await automation\.RunAsync\(plan, ct\)'){throw 'multi-gather must delegate execution to verified single-gather automation'}
           if($multiGather -match 'TapFresh|ClickFresh|DragFresh|0x39'){throw 'multi-gather coordinator must not own direct input or Space'}
