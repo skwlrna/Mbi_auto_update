@@ -106,7 +106,13 @@ internal sealed class CliIdentityGuard
                 if (previous is not null && previous.ConflictsWith(identity))
                     throw new InvalidOperationException(
                         "다중가공 CLI 캐릭터 식별 결과가 재조회 중 바뀌었습니다 · 기록 보존 · 입력 차단");
-                previous = identity;
+                // Retain every non-null field seen so far. A weak middle
+                // response must not hide a change between two strong frames.
+                previous = previous is null ? identity : new CliIdentityContext(
+                    previous.CharacterId ?? identity.CharacterId,
+                    previous.CharacterName ?? identity.CharacterName,
+                    previous.AccountCode ?? identity.AccountCode,
+                    previous.RealmName ?? identity.RealmName);
                 if (identity.HasDurableMultiIdentity)
                 {
                     if (identity == confirmedCandidate)
