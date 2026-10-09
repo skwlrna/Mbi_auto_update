@@ -124,6 +124,30 @@ try
             t.FullName == "FishingAutomation.IAlteringCoordinatorReceiptScreen"),
         "real application screen implements both manager-directed interfaces");
 
+    // V3.1.70: inspect the real compiled bulk life-skill screen. The stable
+    // row search must independently verify OCR + icon on TWO captures and
+    // only then let StartLifeSkillHundredAsync click the second OCR center.
+    // No separate third OCR run and never a guessed/fixed "굵은 나무" row.
+    Type bulkLifeScreen = production.GetType(
+        "DungeonVisionBot.InventoryBulkGatheringScreen", throwOnError: true)!;
+    var bulkStart = Calls(Method(bulkLifeScreen, "StartLifeSkillHundredAsync", 2));
+    var bulkFindStable = Calls(Method(bulkLifeScreen, "FindStableLifeSkillRowAsync", 2));
+    Check(Has(bulkStart, "FindStableLifeSkillRowAsync") &&
+          Has(bulkStart, "ClickFresh") &&
+          !Has(bulkStart, "FindLifeSkillLabelAsync") &&
+          !Has(bulkStart, "IsSameLifeSkillRow") &&
+          !Has(bulkStart, "HasRowIconVisual"),
+        "V3.1.70 actual bulk Start trusts two verified OCR/icon captures and has no third pass");
+    Check(Count(bulkFindStable, "FindLifeSkillLabelAsync") == 2 &&
+          Count(bulkFindStable, "HasRowIconVisual") >= 2 &&
+          Has(bulkFindStable, "IsStableFirstRow"),
+        "V3.1.70 actual bulk finder requires exact text, matched icon and stable OCR row in both frames");
+    var bulkStartCalls = bulkStart.ToList();
+    Check(bulkStartCalls.FindIndex(x => x.EndsWith(".FindStableLifeSkillRowAsync")) <
+          bulkStartCalls.FindLastIndex(x => x.EndsWith(".ClickFresh")) &&
+          bulkStartCalls.FindIndex(x => x.EndsWith(".FindStableLifeSkillRowAsync")) >= 0,
+        "V3.1.70 real compiled second OCR row verification precedes dynamic ClickFresh");
+
     var selection = ScreenCalls("SelectRecipeAsync", 3);
     Check(Has(selection, "TrySelectFixedRecipeAsync") &&
           Has(selection, "TrySelectMedicineRecipeBySearchAsync") &&
