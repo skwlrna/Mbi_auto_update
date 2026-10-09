@@ -75,6 +75,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         if (frame.Width != 800 || frame.Height != 1000)
             return false;
+        // A six-card hub can also contain bright text at the same top-left
+        // coordinates; never let it impersonate a single facility view.
+        if (HasFixedProcessingHubVisual(frame)) return false;
         static int WhiteGlyphs(Bitmap bitmap, Rectangle roi)
         {
             int count = 0;
