@@ -1592,8 +1592,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         int moveFrames = 0;
         bool shouldClickMove = forceMoveClick;
-        bool preClickRemoteMoveButtonConfirmed = false;
-
         if (forceMoveClick)
         {
             // V3.1.47 live log 20:19: the newly opened wood facility was remote,
@@ -1607,13 +1605,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
                 Fail(confirmed, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
 
-            bool moveVisible =
-                await HasFacilityMoveButtonPositiveEvidenceAsync(confirmed, ct);
-            preClickRemoteMoveButtonConfirmed = moveVisible;
+            // V3.1.65: K/facility always has a move control. Its OCR/teal
+            // detector is unreliable; use the fixed pixel baseline taken
+            // immediately BEFORE clicking, never the detector as a prerequisite.
             Log?.Invoke(
                 $"[자동 가공] {plan.ScreenTitle} · 설비 이동 1회 필수 경로 · " +
-                $"버튼검출={(moveVisible ? "확인" : "미검출")} · " +
-                "버튼 검출 결과로 품목 선택 순서를 바꾸지 않음");
+                "클릭 전 버튼 OCR 인식 생략 · 고정 영역 픽셀 비교로 클릭 후 소멸 확인");
         }
         else
         {
@@ -1655,17 +1652,26 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             }
         }
 
+        // Capture identical fixed ROI before any move click, including when
+        // the remote button OCR incorrectly says it is absent (15:29 failure).
+        // No position/size is changed: canonical region (15,205,155,65).
+        if (shouldClickMove)
+            await RequireManagedIdleAsync(plan, directive, "설비 이동 클릭 직전", ct);
+        using var moveBaseline = shouldClickMove ? Capture(ct) : null;
         bool moveClickSent = false;
+        DateTime moveClickAt = DateTime.MinValue;
+        bool moveRetried = false;
+        int identicalMoveFrames = 0;
         if (shouldClickMove)
         {
             _stage.Move(ProductionStage.Travel, $"{plan.ScreenTitle} 설비로 이동");
             Log?.Invoke(
                 $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
                 $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
-                "입력 1회 고정 · 재클릭 금지 · 품목 선택 전 실행");
-            await RequireManagedIdleAsync(plan, directive, "설비 이동 클릭 직전", ct);
+                "첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능 · 품목 선택 전 실행");
             _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
             moveClickSent = true;
+            moveClickAt = DateTime.UtcNow;
         }
 
         bool sawDeparture = false;
@@ -1836,20 +1842,75 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 }
             }
 
+            double moveRegionChange = moveBaseline is null ? 0.0 :
+                ProductionUiRuntime.MeasureVisualChangeRatio(
+                    moveBaseline, frame, AlteringFacilityLayout.MoveButtonVisualArea,
+                    sampleStep: 3, channelDelta: 24);
             bool managedFreshArrival =
                 directive == AlteringFacilityEntryDirective.FreshMoveRequired && moveClickSent;
-            // Reuse V3.1.56 dual-anchor verification for both a first registration
-            // and the receipt's one-shot Fresh move. Only the receipt-specific
-            // move label classification differs; arrival still demands X,
-            // missing remote move button, idle CLI and clean modal state.
-            bool instantArrival = AlteringFacilityTravelConfirmPolicy.CanUseManagedInstantArrival(
-                    managedFreshArrival, receiptMode) &&
-                AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
-                    moveClickSent, preClickRemoteMoveButtonConfirmed,
-                    facilityVisible, HasOnsiteCloseButtonVisual(frame), moveVisible,
-                    activity?.IsAutoTraveling,
-                    HasFacilityTravelConfirmationVisual(frame) ||
-                    HasBottomConfirmationModal(frame));
+            bool popupVisible =
+                HasFacilityTravelConfirmationVisual(frame) || HasBottomConfirmationModal(frame);
+            // No PRE-click label/color recognition required. Only observed
+            // post-click change in the exact same fixed button rectangle.
+            bool instantArrival = managedFreshArrival &&
+                AlteringFacilityTravelConfirmPolicy.HasVerifiedFixedMovePixelDisappearance(
+                    moveClickSent, moveRegionChange, facilityVisible,
+                    HasOnsiteCloseButtonVisual(frame), moveVisible,
+                    activity?.IsAutoTraveling, popupVisible);
+
+            // If the SAME button-area pixels stay unchanged for >=3 seconds,
+            // the click likely did not register. One controlled retry ONLY;
+            // no re-click for any observed movement, popup or uncertain CLI.
+            if (moveBaseline is not null && moveClickSent)
+            {
+                if (moveRegionChange <= AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio &&
+                    activity?.IsAutoTraveling == false && facilityVisible && !popupVisible &&
+                    !sawDeparture && !sawTravel)
+                    identicalMoveFrames++;
+                else
+                    identicalMoveFrames = 0;
+
+                TimeSpan elapsedSinceMove = DateTime.UtcNow - moveClickAt;
+                bool retryCandidate =
+                    AlteringFacilityTravelConfirmPolicy.ShouldRetryUnchangedFixedMove(
+                        forceMoveClick, moveRetried, sawDeparture || sawTravel,
+                        moveRegionChange, identicalMoveFrames, elapsedSinceMove,
+                        facilityVisible, activity?.IsAutoTraveling, popupVisible);
+                if (retryCandidate)
+                {
+                    // Fresh proof immediately before the optional 2nd click.
+                    await RequireManagedIdleAsync(plan, directive,
+                        "변화 없는 설비 이동 재클릭 직전", ct);
+                    using var retryFrame = Capture(ct);
+                    double retryChange = ProductionUiRuntime.MeasureVisualChangeRatio(
+                        moveBaseline, retryFrame, AlteringFacilityLayout.MoveButtonVisualArea,
+                        sampleStep: 3, channelDelta: 24);
+                    if (retryChange <= AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio &&
+                        (HasFixedFacilityHeaderVisual(retryFrame) ||
+                         await FindFacilityHeaderAsync(retryFrame, plan.ScreenTitle, ct) is not null) &&
+                        !HasFacilityTravelConfirmationVisual(retryFrame) &&
+                        !HasBottomConfirmationModal(retryFrame) &&
+                        await TryAutoTravelingAsync(ct) == false)
+                    {
+                        _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+                        moveRetried = true;
+                        moveClickAt = DateTime.UtcNow;
+                        identicalMoveFrames = 0;
+                        onsiteStableFrames = 0;
+                        onsiteCandidateSince = null;
+                        Log?.Invoke(
+                            $"[자동 가공] {plan.ScreenTitle} · 버튼 영역 픽셀 동일 " +
+                            $"({retryChange:P1}) 3초 유지 · 같은 고정좌표 재클릭 1/1");
+                        continue;
+                    }
+                }
+                if (moveRetried && identicalMoveFrames >=
+                        AlteringFacilityTravelConfirmPolicy.RequiredIdenticalMoveFrames &&
+                    elapsedSinceMove >= AlteringFacilityTravelConfirmPolicy.FirstMoveRetryGrace)
+                    Fail(frame,
+                        $"설비 이동 고정좌표 2회 클릭 후에도 버튼 영역 픽셀이 동일 " +
+                        $"({moveRegionChange:P1}) · 추가 클릭 없이 안전 정지");
+            }
             bool onsiteObserved = managedFreshArrival
                 ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
                     facilityVisible, activity?.IsAutoTraveling,
@@ -1907,10 +1968,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
                         }
                     }
-                    bool finalInstantArrival = AlteringFacilityTravelConfirmPolicy.CanUseManagedInstantArrival(
-                            managedFreshArrival, receiptMode) &&
-                        AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
-                            moveClickSent, preClickRemoteMoveButtonConfirmed,
+                    double finalMoveRegionChange = moveBaseline is null ? 0.0 :
+                        ProductionUiRuntime.MeasureVisualChangeRatio(
+                            moveBaseline, finalFrame, AlteringFacilityLayout.MoveButtonVisualArea,
+                            sampleStep: 3, channelDelta: 24);
+                    bool finalInstantArrival = managedFreshArrival &&
+                        AlteringFacilityTravelConfirmPolicy.HasVerifiedFixedMovePixelDisappearance(
+                            moveClickSent, finalMoveRegionChange,
                             finalFacilityVisible, HasOnsiteCloseButtonVisual(finalFrame),
                             finalMoveVisible, finalActivity?.IsAutoTraveling,
                             finalPopupVisible || HasBottomConfirmationModal(finalFrame));
@@ -1937,7 +2001,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
                             $"가공창 유지 + {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
                             $"(관리 Fresh={managedFreshArrival}, 실제 이동전환={confirmedMoveTransition}, " +
-                            $"즉시 도착 이중확인={finalInstantArrival}, 이동버튼={finalMoveVisible}) " +
+                            $"픽셀버튼소멸={finalInstantArrival}, 픽셀변화={finalMoveRegionChange:P1}, " +
+                            $"재클릭사용={moveRetried}, 이동버튼={finalMoveVisible}) " +
                             "+ 1.2초 후행 재확인 · CLI AutoTraveling=false · 이동확인창 없음");
                         return;
                     }
@@ -1962,15 +2027,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"[자동 가공] 설비 이동 대기 · 이동감지={sawTravel} · " +
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
                     $"이동버튼확정={moveVisible} · 수령상태분리={receiptMode && moveClickSent} · " +
-                    $"F01 검증전환={confirmedMoveTransition} · 근거리즉시도착={instantArrival} · " +
-                    $"원격버튼사전확인={preClickRemoteMoveButtonConfirmed} · 현장닫기X={HasOnsiteCloseButtonVisual(frame)} · " +
+                    $"F01 검증전환={confirmedMoveTransition} · 픽셀버튼소멸={instantArrival} · " +
+                    $"픽셀변화={moveRegionChange:P1} · 픽셀동일연속={identicalMoveFrames} · " +
+                    $"재클릭사용={moveRetried} · 현장닫기X={HasOnsiteCloseButtonVisual(frame)} · " +
                     $"파란수령버튼={HasCollectButtonVisual(frame)} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
                     $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
         }
 
         throw new InvalidOperationException(
             "설비로 이동 입력 후 확인창/자동이동/현장 전환을 제한 시간 안에 확인하지 못해 " +
-            "추가 설비 이동 클릭 없이 정지합니다.");
+            "추가 설비 이동 재클릭 없이 정지합니다.");
     }
 
     // Free navigation only, for opening an ingredient's obtain-method route.
