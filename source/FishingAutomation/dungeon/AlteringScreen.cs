@@ -1838,7 +1838,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             bool managedFreshArrival =
                 directive == AlteringFacilityEntryDirective.FreshMoveRequired && moveClickSent;
-            bool instantArrival = managedFreshArrival && !receiptMode &&
+            // Reuse V3.1.56 dual-anchor verification for both a first registration
+            // and the receipt's one-shot Fresh move. Only the receipt-specific
+            // move label classification differs; arrival still demands X,
+            // missing remote move button, idle CLI and clean modal state.
+            bool instantArrival = AlteringFacilityTravelConfirmPolicy.CanUseManagedInstantArrival(
+                    managedFreshArrival, receiptMode) &&
                 AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
                     moveClickSent, preClickRemoteMoveButtonConfirmed,
                     facilityVisible, HasOnsiteCloseButtonVisual(frame), moveVisible,
@@ -1902,7 +1907,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 await HasFacilityMoveButtonPositiveEvidenceAsync(finalFrame, ct);
                         }
                     }
-                    bool finalInstantArrival = managedFreshArrival && !receiptMode &&
+                    bool finalInstantArrival = AlteringFacilityTravelConfirmPolicy.CanUseManagedInstantArrival(
+                            managedFreshArrival, receiptMode) &&
                         AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
                             moveClickSent, preClickRemoteMoveButtonConfirmed,
                             finalFacilityVisible, HasOnsiteCloseButtonVisual(finalFrame),
@@ -1957,7 +1963,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
                     $"이동버튼확정={moveVisible} · 수령상태분리={receiptMode && moveClickSent} · " +
                     $"F01 검증전환={confirmedMoveTransition} · 근거리즉시도착={instantArrival} · " +
-                    $"원격버튼사전확인={preClickRemoteMoveButtonConfirmed} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
+                    $"원격버튼사전확인={preClickRemoteMoveButtonConfirmed} · 현장닫기X={HasOnsiteCloseButtonVisual(frame)} · " +
+                    $"파란수령버튼={HasCollectButtonVisual(frame)} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
                     $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
         }
 

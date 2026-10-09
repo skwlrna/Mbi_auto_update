@@ -52,6 +52,19 @@ internal static class AlteringFacilityTravelConfirmPolicy
            moveClickSent &&
            transitionObserved;
 
+    // V3.1.56 dual-anchor instant-arrival proof applies equally to managed
+    // fresh registration and manager-directed receipt travel. V3.1.63
+    // accidentally excluded receiptMode, so fast travel never reached stable
+    // onsite verification and timed out even with a confirmed missing move
+    // button. Receipt still uses its stricter facility-wide CLI and blue
+    // collect-button checks AFTER arrival.
+    internal static bool CanUseManagedInstantArrival(
+        bool managedFreshArrival, bool receiptMode)
+    {
+        _ = receiptMode; // Receipt changes button classification, not arrival eligibility.
+        return managedFreshArrival;
+    }
+
     // A very short move (e.g. player already in front of the wood bench)
     // may finish before the first post-click capture. Require TWO separate
     // visual anchors: a POSITIVELY observed remote move button before the
