@@ -667,8 +667,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
                     if (directive != AlteringFacilityEntryDirective.Automatic &&
-                        (HasBottomConfirmationModal(frame) ||
-                         await IsFacilityTravelDialogAsync(frame, ct)))
+                        HasManagedKEntryBlockingModal(frame))
                         Fail(frame, "가공 허브 시설 선택 전 확인/이동 팝업 감지 · 입력 차단");
                     await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
                     // Hub cards use confirmed 800x1000 fixed title rectangles.
@@ -705,8 +704,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     // A different bottom confirmation or travel overlay must never
                     // be mistaken for an actionable K menu entry.
                     if (directive != AlteringFacilityEntryDirective.Automatic &&
-                        (HasBottomConfirmationModal(frame) ||
-                         await IsFacilityTravelDialogAsync(frame, ct)))
+                        HasManagedKEntryBlockingModal(frame))
                         Fail(frame, "K 메뉴 가공 항목 클릭 전 확인/이동 팝업 감지 · 입력 차단");
                     Log?.Invoke("[자동 가공] K 메뉴 가공 항목 감지 · K 중복 입력 생략");
                     await RequireManagedIdleAsync(plan, directive, "K 메뉴 가공 선택 직전", ct);
@@ -752,9 +750,32 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
                 // Never press K over an unknown green/travel modal in a managed run.
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
-                    (HasBottomConfirmationModal(frame) ||
-                     await IsFacilityTravelDialogAsync(frame, ct)))
+                    HasManagedKEntryBlockingModal(frame))
                     Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
+                if (directive != AlteringFacilityEntryDirective.Automatic)
+                {
+                    // A first unknown frame does not authorize K. Require two
+                    // independent ordinary-field HUD observations. Modal shape
+                    // and the existing CLI idle guard remain hard vetoes.
+                    bool firstField = HasManagedKEntryFieldHudVisual(frame);
+                    await Task.Delay(180, ct);
+                    using var freshField = Capture(ct);
+                    bool secondField = HasManagedKEntryFieldHudVisual(freshField);
+                    bool actualModal = HasManagedKEntryBlockingModal(freshField);
+                    Log?.Invoke(
+                        $"[자동 가공] F9 K 진입 재판정 · 필드 HUD={firstField}/{secondField} · " +
+                        $"패널+확인버튼 팝업={actualModal} · " +
+                        $"기존 초록색 픽셀 판정={HasBottomConfirmationModal(frame)}(진단 전용)");
+                    if (actualModal)
+                        Fail(freshField, "관리 가공 K 직전 실제 확인창 패널+버튼 감지 · 입력 차단");
+                    if (!firstField || !secondField)
+                        Fail(freshField, "관리 가공 K 직전 일반 필드 HUD 2프레임 미확인 · 입력 없이 정지");
+                    // If a facility/hub appeared during settling, re-enter
+                    // its normal branch instead of toggling K over it.
+                    if (HasFixedProcessingHubVisual(freshField) ||
+                        HasFixedFacilityHeaderVisual(freshField))
+                        continue;
+                }
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
                 Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
@@ -772,8 +793,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (!await IsProcessingHubAsync(menu, ct))
                 {
                     if (directive != AlteringFacilityEntryDirective.Automatic &&
-                        (HasBottomConfirmationModal(menu) ||
-                         await IsFacilityTravelDialogAsync(menu, ct)))
+                        HasManagedKEntryBlockingModal(menu))
                         Fail(menu, "K 메뉴 가공 항목 선택 전 확인/이동 팝업 감지 · 입력 차단");
                     await RequireManagedIdleAsync(plan, directive, "가공 메뉴 진입 클릭 직전", ct);
                     if (!await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
@@ -1557,6 +1577,44 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 green++;
         }
         return samples > 0 && green * 100 >= samples * 58;
+    }
+
+    // V3.1.71: manager F9 K-menu only. The 06:15 field screenshot is
+    // green foliage across the old bottom confirmation ROI. Colour by itself
+    // is NOT modal evidence. Require a real dark slate panel AND a broad
+    // rectangular green confirm button, as in the 19:35 real modal screenshot.
+    private static bool HasManagedKEntryBlockingModal(Bitmap frame)
+        => HasManagedFacilityTravelConfirmationVisual(frame);
+
+    // Positive ordinary-world evidence for the managed unknown->K route.
+    // On the real 800x1000 field the top-right circular minimap has a gold
+    // rim and the bottom-left K life-skill button has a bright teal disc.
+    // Do NOT use green field vegetation or the center Space compass.
+    private static bool HasManagedKEntryFieldHudVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+
+        int minimapGold = 0;
+        for (int y = 104; y <= 215; y += 4)
+        for (int x = 663; x <= 783; x += 4)
+        {
+            Color p = frame.GetPixel(x, y);
+            if (p.R >= 135 && p.G >= 105 &&
+                p.R >= p.B + 42 && p.G >= p.B + 25)
+                minimapGold++;
+        }
+
+        int kButtonTeal = 0;
+        for (int y = 874; y <= 934; y += 3)
+        for (int x = 18; x <= 70; x += 3)
+        {
+            Color p = frame.GetPixel(x, y);
+            if (p.G >= 105 && p.G >= p.R + 20 &&
+                p.G >= p.B + 8)
+                kButtonTeal++;
+        }
+        return minimapGold >= 20 && kButtonTeal >= 10;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
