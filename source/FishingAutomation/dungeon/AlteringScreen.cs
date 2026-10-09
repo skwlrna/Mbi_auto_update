@@ -667,7 +667,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
                     if (directive != AlteringFacilityEntryDirective.Automatic &&
-                        HasManagedKEntryBlockingModal(frame))
+                        (HasBottomConfirmationModal(frame) ||
+                         await IsFacilityTravelDialogAsync(frame, ct)))
                         Fail(frame, "가공 허브 시설 선택 전 확인/이동 팝업 감지 · 입력 차단");
                     await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
                     // Hub cards use confirmed 800x1000 fixed title rectangles.
