@@ -189,6 +189,27 @@ try
           Has(travel, "HasOnsiteCloseButtonVisual") &&
           Has(travel, "HasFacilityMoveButtonPositiveEvidenceAsync"),
         "F01 real managed Fresh travel tests dual-anchor instant arrival before stable and final proofs");
+    // V3.1.64: V3.1.56 instant-arrival proof must run on managed
+    // receipt travel as well as first registration. The 13:41 failure had
+    // pre-click remote proof, no post-click remote button, and idle CLI, but
+    // receiptMode=true disabled the candidate before pixel evidence was read.
+    Check(CallBoolean(travelPolicy, "CanUseManagedInstantArrival", true, true) &&
+          CallBoolean(travelPolicy, "CanUseManagedInstantArrival", true, false) &&
+          !CallBoolean(travelPolicy, "CanUseManagedInstantArrival", false, true) &&
+          !CallBoolean(travelPolicy, "CanUseManagedInstantArrival", false, false),
+        "V3.1.64 V3.1.56 instant arrival is eligible for both managed receipt and registration");
+    Check(Has(travel, "CanUseManagedInstantArrival") &&
+          Has(travel, "HasVerifiedManagedInstantArrival") &&
+          Has(travel, "HasStableOnsiteEvidence"),
+        "V3.1.64 compiled receipt/registration travel uses V3.1.56 dual anchors and stable frames");
+    Check(CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation",
+            true, false, true,
+            CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
+                true, true, true, true, false, false, false)) &&
+          !CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation",
+            true, null, true, true),
+        "V3.1.64 fast arrival requires fresh non-travel CLI; unresolved status blocks receipt");
+
     Check(CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
             true, true, true, true, false, false, false) &&
           !CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
