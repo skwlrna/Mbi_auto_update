@@ -383,20 +383,22 @@ try
           !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, true, false, false, null),
         "F04 rejects unrelated green, facility, travel popup, moving or unknown CLI");
-    // The live 07:00 screenshot has a reward layout even though Korean OCR
-    // may miss the white completion heading. True reward + CLI whole receipt
-    // is permitted; no receipt or unrelated green button remains forbidden.
+    // The live 07:00 result uses cyan cards, but 18:13 genuine completed
+    // rewards are neutral gray with no cyan cards and title OCR also misses.
+    // Allow manager-only completed whole-lane CLI receipt + green + idle even
+    // with both color layout and OCR false. Unproven queues / active travel
+    // still block, and legacy single-altering predicates are not changed.
     Check(CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, false, true, true, false, false, false) &&
           !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, false, true, false, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
+          CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, false, false, true, false, false, false) &&
           !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, false, true, true, false, true, false) &&
           !CallBoolean(receiptPolicy, "CanCloseManagedCompletionResult",
               true, false, true, true, false, false, null),
-        "F04 7-arg compiled manager policy authorizes visual+zero CLI only; blocks generic green/travel/unknown");
+        "F04 7-arg manager accepts actual gray rewards after 7->0 with no OCR; blocks no-receipt green/travel/unknown");
 
     var returning = ScreenCalls("WaitForReceiptFacilityReturnAsync", 4);
     Check(Has(returning, "CanConfirmReceiptFacilityReturn") &&
