@@ -26,7 +26,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
     private static readonly Rectangle Popup = new(270, 585, 360, 45);
     private static readonly Rectangle CollectButton = new(0, 260, 170, 110);
-    private static readonly Rectangle CollectVisualButton = new(10, 270, 110, 85);
+    // Live V3.1.65 800x1000 frame: the blue \"모두 받기\" pill is
+    // at x~23..107, y~258..285, not below y=270. Use the true fixed
+    // button region, still ending before the first 100%-work circle.
+    private static readonly Rectangle CollectVisualButton = new(15, 245, 100, 60);
     private static readonly Rectangle FacilityTravelDialog = new(80, 260, 640, 700);
     private static readonly Rectangle FacilityTravelConfirmVisual = new(120, 340, 560, 620);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
@@ -2663,29 +2666,43 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             _confirmedOnsiteFacility = plan.FacilityName;
         }
 
-        // All receipts still require two stable blue-button + completed-work
-        // observations, 400ms settling and one last recheck before Space.
-        if (!await WaitForCollectPromptAsync(plan, attempts: 24, delayMs: 250, ct, directive))
+        int? receiptWorkCountBefore;
+        if (directive == AlteringFacilityEntryDirective.Automatic)
         {
-            using var failed = Capture(ct);
-            Fail(failed, "현장 가공대 도착 후 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
+            // Keep the proven V3.1.50 two-frame + 400ms path for legacy single-altering.
+            if (!await WaitForCollectPromptAsync(plan, attempts: 24, delayMs: 250, ct, directive))
+            {
+                using var failed = Capture(ct);
+                Fail(failed, "현장 가공대 도착 후 완료 작업 + 파란 수령 버튼을 제한 시간 안에 확인하지 못했습니다.");
+            }
+            receiptWorkCountBefore = await TryFacilityWorkCountAsync(plan, ct);
+            Log?.Invoke(
+                $"[자동 가공] 파란 수령 버튼 입력 전 400ms 안정화 · {plan.ScreenTitle} · " +
+                $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+            await Task.Delay(400, ct);
+            if (!await WaitForCollectPromptAsync(plan, attempts: 2, delayMs: 100, ct, directive))
+            {
+                using var failed = Capture(ct);
+                Fail(failed, "단일가공 400ms 안정화 후 수령 가능 상태 불확실 · Space 없이 정지");
+            }
         }
-
-        int? receiptWorkCountBefore = await TryFacilityWorkCountAsync(plan, ct);
-
-        // The receive button can become visible slightly before the game starts
-        // accepting Space. Give the UI one short stabilization window, then prove
-        // the exact receive state again before the single receive input.
-        Log?.Invoke(
-            $"[자동 가공] 파란 수령 버튼 입력 전 400ms 안정화 · {plan.ScreenTitle} · " +
-            $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
-        await Task.Delay(400, ct);
-
-        if (!await WaitForCollectPromptAsync(plan, attempts: 2, delayMs: 100, ct, directive))
+        else
         {
-            using var failed = Capture(ct);
-            Fail(failed,
-                "파란 수령 버튼 입력 직전 400ms 안정화 후 수령 가능 상태를 다시 확인하지 못했습니다. Space 입력 없이 정지합니다.");
+            // Manager already proved the whole lane complete BEFORE travel,
+            // and TravelToFacilityAsync verified stable onsite arrival.
+            // No duplicate 2-frame / 400ms / 2-frame scans: one fresh
+            // whole-facility + blue-pill + idle/modal gate is sufficient before
+            // the durable boundary, then F02's final post-boundary gate stays.
+            receiptWorkCountBefore = await TryFacilityWorkCountAsync(plan, ct);
+            using var blueReady = Capture(ct);
+            if (receiptWorkCountBefore is not > 0 ||
+                !await HasCollectPromptAsync(blueReady, plan, directive, ct))
+                Fail(blueReady,
+                    "관리 수령 직전 최신 시설 전체 완료/파란 수령 버튼/CLI 대기 검사 실패 · Space 없이 정지");
+            Log?.Invoke(
+                $"[자동 가공] 관리 수령 진입 · {plan.ScreenTitle} · " +
+                $"시설 전체 {receiptWorkCountBefore}건 완료 + 파란 버튼 단일 최신 확인 · " +
+                "기존 2회/400ms/2회 중복 검사 생략");
         }
 
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
@@ -2719,12 +2736,96 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         _ui.TapFresh(0x39, ct);
         await Task.Delay(450, ct);
 
-        if (!await ConfirmCompletionResultAsync(
-                plan, ct, receiptWorkCountBefore: receiptWorkCountBefore, resultAttempts: 24,
-                managedReceipt: directive != AlteringFacilityEntryDirective.Automatic))
+        bool confirmedReceipt = await ConfirmCompletionResultAsync(
+            plan, ct, receiptWorkCountBefore: receiptWorkCountBefore, resultAttempts: 24,
+            managedReceipt: directive != AlteringFacilityEntryDirective.Automatic);
+        bool receiptRetryUsed = false;
+        if (!confirmedReceipt && directive != AlteringFacilityEntryDirective.Automatic)
+        {
+            // The first Space may be ignored by the game. Wait for all
+            // result/CLI evidence first: no repeat merely because a result
+            // popup was missed. Compare TWO live CLI reads with the original
+            // facility count, then require the real onsite blue UI again.
+            int? firstPostCount = await TryFacilityWorkCountAsync(plan, ct);
+            await Task.Delay(350, ct);
+            int? secondPostCount = await TryFacilityWorkCountAsync(plan, ct);
+            using var retryCandidate = Capture(ct);
+            bool bluePromptReady =
+                await HasCollectPromptAsync(retryCandidate, plan, directive, ct);
+            bool freshFacility =
+                await FindFacilityHeaderAsync(retryCandidate, plan.ScreenTitle, ct) is not null;
+            bool freshBlue = HasCollectButtonVisual(retryCandidate);
+            bool freshOnsiteX = HasOnsiteCloseButtonVisual(retryCandidate);
+            bool anyModal = HasBottomConfirmationModal(retryCandidate) ||
+                            HasFacilityTravelConfirmationVisual(retryCandidate);
+            bool? freshTravel = await TryAutoTravelingAsync(ct);
+            bool authorizedRetry = firstPostCount == secondPostCount &&
+                AlteringReceiptPolicy.CanRetryManagedBlueReceipt(
+                    managedReceipt: true, beforeCount: receiptWorkCountBefore,
+                    afterCount: secondPostCount,
+                    allFacilityWorksComplete: bluePromptReady,
+                    blueButtonVisible: freshBlue,
+                    facilityVisible: freshFacility,
+                    onsiteCloseVisible: freshOnsiteX,
+                    anyModalVisible: anyModal,
+                    autoTraveling: freshTravel,
+                    alreadyRetried: receiptRetryUsed);
+
+            Log?.Invoke(
+                $"[자동 가공] 첫 모두 받기 Space 후 결과 미확인 · " +
+                $"CLI 작업수={receiptWorkCountBefore?.ToString() ?? "불명"}→" +
+                $"{firstPostCount?.ToString() ?? "불명"}→{secondPostCount?.ToString() ?? "불명"} · " +
+                $"전체완료+파란버튼={bluePromptReady} · 파란픽셀={freshBlue} · " +
+                $"현장={freshFacility}/{freshOnsiteX} · 팝업={anyModal} · " +
+                $"CLI이동={freshTravel?.ToString() ?? "불명"} · 재수령허가={authorizedRetry}");
+
+            if (authorizedRetry)
+            {
+                // F02/N02: the durable RecoveryRequired marker already exists.
+                // Immediately before the SECOND and LAST receive Space, use
+                // another new screenshot and CLI. Any count decrease (including
+                // partial receipt) or popup blocks the retry without side effects.
+                await RequireManagedIdleAsync(plan, directive,
+                    "모두 받기 재시도 Space 직전 활동 검사", ct);
+                using var justBeforeRetry = Capture(ct);
+                int? lastCount = await TryFacilityWorkCountAsync(plan, ct);
+                bool stillReady =
+                    await HasCollectPromptAsync(justBeforeRetry, plan, directive, ct);
+                bool retryModal = HasBottomConfirmationModal(justBeforeRetry) ||
+                                  HasFacilityTravelConfirmationVisual(justBeforeRetry);
+                bool stillAuthorized = AlteringReceiptPolicy.CanRetryManagedBlueReceipt(
+                    managedReceipt: true, beforeCount: receiptWorkCountBefore,
+                    afterCount: lastCount,
+                    allFacilityWorksComplete: stillReady,
+                    blueButtonVisible: HasCollectButtonVisual(justBeforeRetry),
+                    facilityVisible: await FindFacilityHeaderAsync(
+                        justBeforeRetry, plan.ScreenTitle, ct) is not null,
+                    onsiteCloseVisible: HasOnsiteCloseButtonVisual(justBeforeRetry),
+                    anyModalVisible: retryModal,
+                    autoTraveling: await TryAutoTravelingAsync(ct),
+                    alreadyRetried: receiptRetryUsed);
+                if (!stillAuthorized)
+                    Fail(justBeforeRetry,
+                        "모두 받기 추가 1회 입력 직전 CLI/현장/버튼 상태 변경 · " +
+                        "RecoveryRequired 유지 · Space 재시도 차단");
+
+                receiptRetryUsed = true;
+                ct.ThrowIfCancellationRequested();
+                _ui.TapFresh(0x39, ct); // The only possible second receive input.
+                Log?.Invoke("[자동 가공] CLI 작업건 동일 + 파란 모두 받기 확인 · Space 재시도 1/1");
+                await Task.Delay(450, ct);
+                confirmedReceipt = await ConfirmCompletionResultAsync(
+                    plan, ct, receiptWorkCountBefore: receiptWorkCountBefore,
+                    resultAttempts: 24, managedReceipt: true);
+            }
+        }
+
+        if (!confirmedReceipt)
         {
             using var failed = Capture(ct);
-            Fail(failed, "현장 수령 Space 후 가공 완료 결과창을 안전하게 확인하지 못했습니다.");
+            Fail(failed,
+                $"현장 모두 받기 수령 확인 실패 · 재시도={receiptRetryUsed} · " +
+                "CLI 작업 감소/정상 완료창 확정 불가 · 추가 수령 없이 RecoveryRequired 안전 정지");
         }
 
         return true;
