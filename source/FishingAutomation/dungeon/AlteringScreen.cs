@@ -592,6 +592,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // explicit bottom entry; another Esc/K would toggle the wrong UI.
                 if (await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null)
                 {
+                    // A different bottom confirmation or travel overlay must never
+                    // be mistaken for an actionable K menu entry.
+                    if (directive != AlteringFacilityEntryDirective.Automatic &&
+                        (HasBottomConfirmationModal(frame) ||
+                         await IsFacilityTravelDialogAsync(frame, ct)))
+                        Fail(frame, "K 메뉴 가공 항목 클릭 전 확인/이동 팝업 감지 · 입력 차단");
                     Log?.Invoke("[자동 가공] K 메뉴 가공 항목 감지 · K 중복 입력 생략");
                     await RequireManagedIdleAsync(plan, directive, "K 메뉴 가공 선택 직전", ct);
                     if (await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
