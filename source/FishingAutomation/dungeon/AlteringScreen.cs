@@ -545,10 +545,26 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             timeoutMs,
             ct);
 
+    // Fixed title/level pixels prove the facility layout, not its identity.
+    // Never carry the previous facility's OCR-free visual authority into a
+    // different requested facility. Same-facility repeats retain the cache.
+    private void InvalidateForeignFacilityProof(string requestedTitle)
+    {
+        bool staleRepeat = _repeatOcrFreeFacilityTitle is not null &&
+            !string.Equals(_repeatOcrFreeFacilityTitle, requestedTitle, StringComparison.Ordinal);
+        bool staleTravel = _postTravelProvenFacilityTitle is not null &&
+            !string.Equals(_postTravelProvenFacilityTitle, requestedTitle, StringComparison.Ordinal);
+        if (staleRepeat) _repeatOcrFreeFacilityTitle = null;
+        if (staleTravel) _postTravelProvenFacilityTitle = null;
+        if (staleRepeat || staleTravel)
+            Log?.Invoke($"[자동 가공] 시설 변경 · {requestedTitle} 진입 전 이전 시설 인식 캐시 해제");
+    }
+
     private async Task EnterFacilityAsync(
         AlteringPlan plan, CancellationToken ct,
         AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
     {
+        InvalidateForeignFacilityProof(plan.ScreenTitle);
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
@@ -572,6 +588,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     continue;
                 }
 
+                // A K menu may overlay the previous facility title. Prefer its
+                // explicit bottom entry; another Esc/K would toggle the wrong UI.
+                if (await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null)
+                {
+                    Log?.Invoke("[자동 가공] K 메뉴 가공 항목 감지 · K 중복 입력 생략");
+                    await RequireManagedIdleAsync(plan, directive, "K 메뉴 가공 선택 직전", ct);
+                    if (await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
+                        await WaitForFacilityHeaderAsync("가공", 900, ct);
+                    else
+                        Log?.Invoke("[자동 가공] K 메뉴 가공 항목 재확인 실패 · 클릭 없이 재판정");
+                    continue;
+                }
+
                 string? otherFacility = null;
                 foreach (string name in AlteringPlan.Facilities.Select(x => x.Replace(" 시설", "")))
                 {
@@ -585,7 +614,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 if (otherFacility is not null)
                 {
-                    Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 가공 허브로 돌아갑니다 · Esc");
+                    // Require a NEW frame before sending Esc on a foreign title.
+                    await Task.Delay(130, ct);
+                    using (var confirmedOther = Capture(ct))
+                    {
+                        if (await FindFacilityHeaderAsync(confirmedOther, otherFacility, ct) is null)
+                        {
+                            Log?.Invoke($"[자동 가공] 이전 시설 {otherFacility} 단일 프레임 인식 · Esc 생략");
+                            continue;
+                        }
+                    }
+                    Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 2프레임 확인 · 가공 허브로 돌아갑니다 · Esc");
                     await RequireManagedIdleAsync(plan, directive, "시설 상세/다른창 Esc 직전", ct);
                     _ui.TapFresh(0x01, ct);
                     await WaitForFacilityHeaderAsync("가공", 900, ct);
@@ -633,6 +672,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
+                Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
             }
 
             await WaitForProcessingNavigationReadyAsync(plan, 1000, ct);
