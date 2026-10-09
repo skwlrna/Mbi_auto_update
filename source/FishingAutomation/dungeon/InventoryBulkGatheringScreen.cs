@@ -217,56 +217,21 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                     $"{source.Category} 고정좌표 클릭 후 {source.TargetName} 행을 OCR+아이콘 구조로 확인하지 못했습니다.");
             }
 
-            DetectionResult? clickRow = null;
-            Bitmap? lastConfirmFrame = null;
-            try
-            {
-                // Reconfirm immediately before input, but do not require the OCR
-                // rectangles to physically overlap. The 15:47 live capture showed
-                // the correct "쓸 만한 나무" row while OCR-box jitter caused a false
-                // stop. Exact label + same row (Y ±24) + left icon stay mandatory.
-                for (int pass = 1; pass <= 3; pass++)
-                {
-                    lastConfirmFrame?.Dispose();
-                    lastConfirmFrame = Capture(ct);
-                    var rowRoi = Rectangle.Intersect(
-                        new Rectangle(150, Math.Max(90, row.Value.Bounds.Top - 55), 630, 120),
-                        new Rectangle(Point.Empty, lastConfirmFrame.Size));
-                    var exact = await FindLifeSkillLabelAsync(
-                        lastConfirmFrame,
-                        rowRoi,
-                        source.TargetName,
-                        ct);
-
-                    if (exact is not null &&
-                        GatheringNavigationPolicy.IsSameLifeSkillRow(
-                            row.Value.Bounds,
-                            exact.Value.Bounds) &&
-                        HasRowIconVisual(lastConfirmFrame, exact.Value.Bounds))
-                    {
-                        clickRow = exact;
-                        Log?.Invoke(
-                            $"[대량 채집] 클릭 직전 행 확인 · {source.TargetName} · " +
-                            $"exact OCR + 같은 행 Y±24 + 왼쪽 아이콘 · {pass}/3");
-                        break;
-                    }
-
-                    if (pass < 3)
-                        await Task.Delay(120, ct);
-                }
-
-                if (clickRow is null)
-                    throw Fail(lastConfirmFrame!,
-                        $"{source.TargetName} 행의 exact OCR/같은 행 Y좌표/아이콘 3회 확인에 실패해 클릭하지 않습니다.");
-
-                _ui.ClickFresh(new Point(
-                        Math.Clamp(clickRow.Value.Center.X, 180, 740),
-                        clickRow.Value.Center.Y), ct);
-            }
-            finally
-            {
-                lastConfirmFrame?.Dispose();
-            }
+            // V3.1.70: FindStableLifeSkillRowAsync already performed TWO independent
+            // exact-text + matching-icon observations, with OCR box geometry
+            // stability (overlap/center) across fresh screen captures.
+            // The live 21:12 error found "굵은 나무" twice, then rejected the
+            // unchanged row during an unnecessary third 3-attempt OCR pass.
+            // Click the SECOND verified OCR row immediately, not a fixed Y
+            // coordinate and not an icon-only guess. If either frame fails,
+            // FindStableLifeSkillRowAsync returns null and no click is sent.
+            Log?.Invoke(
+                $"[대량 채집] 두 화면 인증 완료 · {source.Category}/{source.TargetName} · " +
+                $"exact OCR+동일행+아이콘 · 2/2 · 동적 OCR 좌표 클릭 " +
+                $"({Math.Clamp(row.Value.Center.X, 180, 740)},{row.Value.Center.Y})");
+            _ui.ClickFresh(new Point(
+                Math.Clamp(row.Value.Center.X, 180, 740),
+                row.Value.Center.Y), ct);
         }
         await Task.Delay(650, ct);
 

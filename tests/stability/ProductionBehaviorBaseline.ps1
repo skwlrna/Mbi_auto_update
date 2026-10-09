@@ -304,16 +304,26 @@ Match-Required $gatherTests '13:14 regression' '13:14 live failure remains an ex
 Match-Required $gatherTests 'visible Stop UI must not authorize the next material' 'visible Stop handoff rejection remains tested'
 Match-Required $gatherTests 'next material starts when CLI Stop lingers' 'stale CLI-only Stop handoff remains tested'
 
-# 3b) 15:47 real-world regression: exact life-skill label OCR can jitter without changing rows.
-Match-Required $navPolicy 'IsSameLifeSkillRow' 'life-skill final click has a dedicated same-row geometry policy'
-Match-Required $navPolicy 'Math\.Abs\(expectedCenterY - freshCenterY\) <= 24' 'life-skill same-row policy uses bounded vertical tolerance'
+# 3b) V3.1.70 intentional new baseline: 21:12 second OCR+icon frame is
+# already independently verified; clicking then is safer than re-running a
+# third narrow-ROI OCR that can falsely reject an unchanged row.
+# Keep the V3.1.42 same-row Y tolerance policy + its executable 15:47 test,
+# but require the ACTIVE bulk life-skill route to use the STRONGER two-frame
+# overlapping OCR geometry and icons BEFORE clicking a dynamically found row.
+Match-Required $navPolicy 'IsSameLifeSkillRow' 'life-skill legacy same-row geometry policy remains available'
+Match-Required $navPolicy 'Math\.Abs\(expectedCenterY - freshCenterY\) <= 24' 'life-skill legacy same-row Y tolerance unchanged'
 $lifeSkillStart = Method-Block $bulk 'private async Task StartLifeSkillHundredAsync' '\r?\n    private async Task<DetectionResult\?> FindStableLifeSkillRowAsync' 'life-skill start flow'
-Match-Required $lifeSkillStart 'for \(int pass = 1; pass <= 3; pass\+\+\)' 'life-skill final OCR confirmation has a bounded three-frame retry'
-Match-Required $lifeSkillStart 'GatheringNavigationPolicy\.IsSameLifeSkillRow' 'life-skill final click uses row-Y identity instead of rectangle overlap'
-Match-Required $lifeSkillStart 'HasRowIconVisual' 'life-skill final click still requires the left row icon'
-Match-Required $lifeSkillStart 'exact OCR \+ 같은 행 Y±24 \+ 왼쪽 아이콘' 'life-skill final click logs all three safety signals'
-Match-Forbidden $lifeSkillStart 'Bounds\.IntersectsWith\(row\.Value\.Bounds\)' 'life-skill final click no longer requires OCR rectangles to overlap'
-Match-Required $gatherTests '15:47 life-skill row regression' '15:47 OCR-box jitter remains an executable regression case'
+$lifeSkillStable = Method-Block $bulk 'private async Task<DetectionResult\?> FindStableLifeSkillRowAsync' '\r?\n    private async Task<DetectionResult\?> FindLifeSkillLabelAsync' 'two-frame stable row OCR'
+Match-Required $lifeSkillStart 'FindStableLifeSkillRowAsync\(source, ct\)' 'life-skill dynamic row is always verified across two screens'
+Match-Required $lifeSkillStart 'Math\.Clamp\(row\.Value\.Center\.X, 180, 740\)' 'life-skill clicks the SECOND verified OCR X'
+Match-Required $lifeSkillStart 'row\.Value\.Center\.Y' 'life-skill clicks the SECOND verified OCR Y'
+Match-Forbidden $lifeSkillStart 'for \(int pass = 1; pass <= 3; pass\+\+\)|lastConfirmFrame|clickRow\.Value|rowRoi' 'life-skill removes only third narrow-ROI OCR recheck'
+Match-Forbidden $lifeSkillStart 'Bounds\.IntersectsWith\(row\.Value\.Bounds\)' 'life-skill click never requires a third overlapping OCR box'
+Match-Required $lifeSkillStable 'GatheringNavigationPolicy\.IsStableFirstRow' 'life-skill two independent OCR boxes must be geometrically stable'
+Match-Required $lifeSkillStable 'return second;' 'life-skill returns the SECOND verified OCR result'
+Require ([regex]::Matches($lifeSkillStable, 'FindLifeSkillLabelAsync\(').Count -eq 2) 'life-skill has exactly two exact OCR reads'
+Require ([regex]::Matches($lifeSkillStable, 'HasRowIconVisual\(').Count -ge 2) 'life-skill icon must be visible in both frames'
+Match-Required $gatherTests '15:47 life-skill row regression' '15:47 OCR-box jitter regression still executable'
 
 # 4) 14:23 real-world regression: completion may return to field, but recovery is navigation-only.
 $receiptReturn = Method-Block $alter 'private async Task<bool> WaitForReceiptFacilityReturnAsync' '\r?\n    private async Task<bool> CloseCompletionResultAndWaitForFacilityAsync' 'receipt field-return recovery'
