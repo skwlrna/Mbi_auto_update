@@ -1719,21 +1719,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // F03/F04: a generic green confirmation shape cannot
-                    // authorize managed Space. Require move-specific wording
-                    // and a CURRENT idle activity reading before any input.
-                    if (!wordingMatched)
-                        Fail(frame,
-                            "관리 시설 이동 확인창 문구 불명확 · 일반 초록창에 Space 입력 금지");
+                    // V3.1.68 (managed F9 only): restore V3.1.47's immediately
+                    // post-move-click visual confirmation. Real 19:35 travel
+                    // dialogs can have correct green/Cancel/Space UI but Korean
+                    // OCR fails. OCR is diagnostic here, NOT the Space gate.
+                    // Never accept a green popup outside this proven move click.
                     await RequireManagedIdleAsync(
                         plan, directive, "시설 이동 확인 팝업 Space 직전", ct);
                     using var freshDialog = Capture(ct);
-                    if (!HasFacilityTravelConfirmationVisual(freshDialog) ||
-                        !await IsFacilityTravelDialogAsync(freshDialog, ct))
-                        Fail(freshDialog,
-                            "관리 시설 이동 확인창이 입력 직전 변경됨 · Space 차단");
+                    // Preserve a second independent idle/activity confirmation
+                    // and a fresh non-travel CLI status before either Space.
                     await RequireManagedIdleAsync(
                         plan, directive, "시설 이동 팝업 최종 CLI 허가", ct);
+                    bool? freshAutoTravel = await TryAutoTravelingAsync(ct);
+                    if (!AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+                            moveClickSent,
+                            HasFacilityTravelConfirmationVisual(freshDialog),
+                            travelConfirmationSpaces, sawDeparture, freshAutoTravel))
+                        Fail(freshDialog,
+                            "관리 시설 이동 팝업 입력 직전 화면/설비이동 클릭/CLI 비이동 재확인 실패 · Space 차단");
                 }
                 _ui.TapFresh(0x39, ct); // Space = confirm optional facility travel
                 travelConfirmationSpaces++;
