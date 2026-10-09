@@ -269,8 +269,10 @@ try
           Has(travel, "IsFacilityTravelDialogAsync") &&
           Has(travel, "CanConfirmManagedTravelPopupAfterMoveClick") &&
           Has(travel, "TryAutoTravelingAsync") &&
-          Has(travel, "HasFacilityTravelConfirmationVisual"),
-        "V3.1.68 compiled F9 travel uses post-click popup pixels, advisory OCR and fresh idle CLI before Space");
+          Has(travel, "HasFacilityTravelConfirmationVisual") &&
+          Has(travel, "HasManagedFacilityTravelConfirmationVisual") &&
+          Count(travel, "TryAutoTravelingAsync") >= 3,
+        "V3.1.69 compiled F9 travel uses distinct managed modal and checks CLI again after Space before retry");
     Check(CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
             true, true, 0, false, false) &&
           !CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
@@ -608,6 +610,40 @@ try
         using var missing = BlackFrame();
         Check(!PixelGate("HasFacilityTravelConfirmationVisual", missing),
             "V3.1.68 no travel modal means no manager Space");
+    }
+
+    // V3.1.69 reproduces 19:35's wide green button + slate modal,
+    // versus 20:03's riding STOP/skill HUD after Space. These are distinct.
+    using (var realModal = BlackFrame())
+    using (var travelHud = BlackFrame())
+    using (var plainGreen = BlackFrame())
+    {
+        Paint(realModal, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Paint(realModal, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasManagedFacilityTravelConfirmationVisual", realModal),
+            "V3.1.69 manager travel detector accepts slate-panel + wide right confirm on 800x1000");
+
+        // Actual riding screenshot: bottom centered STOP circle plus green
+        // skill circle on the right, neither a travel dialog.
+        Paint(travelHud, new Rectangle(355, 830, 90, 83),
+            Color.FromArgb(15, 205, 93));
+        Paint(travelHud, new Rectangle(555, 844, 58, 61),
+            Color.FromArgb(13, 190, 86));
+        Check(PixelGate("HasFacilityTravelConfirmationVisual", travelHud) &&
+              !PixelGate("HasManagedFacilityTravelConfirmationVisual", travelHud),
+            "V3.1.69 20:03 after-Space green STOP + skill HUD is NOT a managed travel popup");
+
+        Paint(plainGreen, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(!PixelGate("HasManagedFacilityTravelConfirmationVisual", plainGreen),
+            "V3.1.69 generic wide green confirmation without slate travel panel is blocked");
+        using var missingConfirm = BlackFrame();
+        Paint(missingConfirm, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Check(!PixelGate("HasManagedFacilityTravelConfirmationVisual", missingConfirm),
+            "V3.1.69 slate dialog without positive green confirm stays blocked");
     }
 
     using (var receive = BlackFrame())
