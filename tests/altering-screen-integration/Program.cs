@@ -266,8 +266,24 @@ try
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
     Check(Has(travel, "RequireManagedIdleAsync") &&
-          Has(travel, "IsFacilityTravelDialogAsync"),
-        "F03/F04 optional travel popup uses positive wording plus managed idle before Space");
+          Has(travel, "IsFacilityTravelDialogAsync") &&
+          Has(travel, "CanConfirmManagedTravelPopupAfterMoveClick") &&
+          Has(travel, "TryAutoTravelingAsync") &&
+          Has(travel, "HasFacilityTravelConfirmationVisual"),
+        "V3.1.68 compiled F9 travel uses post-click popup pixels, advisory OCR and fresh idle CLI before Space");
+    Check(CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+            true, true, 0, false, false) &&
+          !CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+            false, true, 0, false, false) &&
+          !CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+            true, false, 0, false, false) &&
+          !CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+            true, true, 0, false, null) &&
+          !CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+            true, true, 0, false, true) &&
+          !CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+            true, true, 2, false, false),
+        "V3.1.68 real compiled manager visual-only travel authorization stays click-bound and idle");
     var prompt = ScreenCalls("HasCollectPromptAsync", 4);
     Check(Has(prompt, "ShouldBlockReceiptForMoveButton") &&
           Has(prompt, "HasBottomConfirmationModal") &&
@@ -577,6 +593,21 @@ try
             beforeMove, afterMove, new Rectangle(15, 205, 155, 65), 3, 24 })!;
         Check(flicker <= .012,
             "V3.1.65 minor pixel flicker is not false button disappearance");
+    }
+
+    // Reproduces the 19:35 actual travel popup's fixed green Space button.
+    // OCR is intentionally unavailable in this screen-pixel test.
+    using (var moveDialog = BlackFrame())
+    {
+        Paint(moveDialog, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasFacilityTravelConfirmationVisual", moveDialog) &&
+              CallBoolean(travelPolicy, "CanConfirmManagedTravelPopupAfterMoveClick",
+                  true, true, 0, false, false),
+            "V3.1.68 19:35 green travel confirmation is visible and manager-policy-authorized");
+        using var missing = BlackFrame();
+        Check(!PixelGate("HasFacilityTravelConfirmationVisual", missing),
+            "V3.1.68 no travel modal means no manager Space");
     }
 
     using (var receive = BlackFrame())

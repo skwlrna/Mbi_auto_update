@@ -382,6 +382,29 @@ Check(!AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
 
 Check(AlteringFacilityTravelConfirmPolicy.MaxTravelConfirmationSpaces == 2,
     "travel confirmation Space retry is strictly bounded");
+// V3.1.68 real 19:35 (800x1000): post-(85,235) travel popup is visually
+// confirmed, but Korean "던버튼으로 이동할까요?" OCR returns no match.
+// Manager must accept ONLY the move-correlated popup with known idle CLI.
+Check(AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        moveClickSent: true, travelPopupVisual: true, confirmationSpaceCount: 0,
+        departureAlreadySeen: false, autoTraveling: false) &&
+      AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        true, true, 1, false, false),
+    "V3.1.68 manager accepts original V3.1.47 post-click visual popup even when OCR misses");
+Check(!AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        false, true, 0, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        true, false, 0, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        true, true, 2, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        true, true, 0, true, false) &&
+      !AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        true, true, 0, false, true) &&
+      !AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
+        true, true, 0, false, null),
+    "V3.1.68 manager refuses generic green, no click, exhausted retry, departure, active or unknown CLI");
+
 Check(AlteringFacilityTravelConfirmPolicy.IsOnsiteObservation(
         facilityVisible: true,
         moveButtonVisible: false,
