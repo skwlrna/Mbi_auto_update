@@ -70,6 +70,28 @@ internal static class AlteringReceiptPolicy
     internal static bool IsCliReceiptConfirmed(int before, int after)
         => before >= 0 && after >= 0 && after < before;
 
+    // V3.1.66: a failed confirmation after the FIRST receive Space is not
+    // authorization for a blind second Space. The entire facility work count
+    // must be EXACTLY unchanged and still all complete, with the actual blue
+    // receive control on a fresh, onsite, idle, modal-free frame. A partial
+    // decrease, empty lane, unknown CLI or completion popup is never retried.
+    internal static bool CanRetryManagedBlueReceipt(
+        bool managedReceipt,
+        int? beforeCount,
+        int? afterCount,
+        bool allFacilityWorksComplete,
+        bool blueButtonVisible,
+        bool facilityVisible,
+        bool onsiteCloseVisible,
+        bool anyModalVisible,
+        bool? autoTraveling,
+        bool alreadyRetried)
+        => managedReceipt && !alreadyRetried &&
+           beforeCount is > 0 && afterCount == beforeCount &&
+           allFacilityWorksComplete && blueButtonVisible &&
+           facilityVisible && onsiteCloseVisible &&
+           !anyModalVisible && autoTraveling == false;
+
     // A facility title or a lowered CLI work count is not physical location
     // evidence if a result/travel dialog remains, or movement is unresolved.
     // Caller must observe this condition in two consecutive fresh frames.
