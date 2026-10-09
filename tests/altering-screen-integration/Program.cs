@@ -513,6 +513,53 @@ try
             "reward pixel shortcut never operates on an unknown client size");
     }
 
+    // V3.1.63: synthetic 800x1000 regression for the actual 13:20
+    // six-card hub screenshot. The bottom '가공' tab is ALSO present in this
+    // view, so it must never be mistaken for the preceding K navigation menu.
+    using (var hub = BlackFrame())
+    {
+        Paint(hub, new Rectangle(0, 0, 800, 1000), Color.FromArgb(75, 66, 55));
+        Paint(hub, new Rectangle(342, 926, 61, 35), Color.White);
+        Check(!PixelGate("HasFixedProcessingHubVisual", hub),
+            "V3.1.63 persistent bottom K tab alone is not a processing hub");
+
+        Paint(hub, new Rectangle(65, 52, 48, 22), Color.White);
+        for (int row = 0; row < 2; row++)
+        for (int column = 0; column < 3; column++)
+        {
+            int x = 40 + column * 242, y = 140 + row * 345;
+            Paint(hub, new Rectangle(x, y, 236, 290), Color.FromArgb(24, 23, 29));
+        }
+        Check(!PixelGate("HasFixedProcessingHubVisual", hub),
+            "V3.1.63 dark card shapes without independent titles cannot prove hub");
+
+        for (int column = 0; column < 3; column++)
+            Paint(hub, new Rectangle(119 + column * 242, 252, 94, 20), Color.White);
+        Check(!PixelGate("HasFixedProcessingHubVisual", hub),
+            "V3.1.63 header plus first card row alone cannot prove full six-card hub");
+
+        for (int column = 0; column < 3; column++)
+            Paint(hub, new Rectangle(119 + column * 242, 597, 94, 20), Color.White);
+        Check(PixelGate("HasFixedProcessingHubVisual", hub),
+            "V3.1.63 real-style six-card hub wins over persistent '가공' bottom tab");
+        Check(!PixelGate("HasFixedFacilityHeaderVisual", hub),
+            "V3.1.63 six-card hub is not the selected single-facility screen");
+
+        object hubProbe = RuntimeHelpers.GetUninitializedObject(screen);
+        var hubTask = (Task<bool>)Method(screen, "IsProcessingHubAsync", 2)
+            .Invoke(hubProbe, new object[] { hub, CancellationToken.None })!;
+        Check(await hubTask,
+            "V3.1.63 real hub screen state resolves visually without OCR runtime");
+        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "IsProcessingHubAsync"),
+            "V3.1.63 real facility entry checks hub before K-menu selection");
+        Check(Has(ScreenCalls("WaitForProcessingNavigationReadyAsync", 3), "IsProcessingHubAsync"),
+            "V3.1.63 navigation-ready uses six-card hub proof");
+
+        using var wrongSize = new Bitmap(799, 1000);
+        Check(!PixelGate("HasFixedProcessingHubVisual", wrongSize),
+            "V3.1.63 fixed hub shortcut rejects unknown client dimensions");
+    }
+
     // V3.1.62: metal -> wood must discard the old OCR-free title/arrival
     // authority; otherwise a generic fixed title/level shape could be
     // mistaken for the old facility and trigger a second Esc after K.
