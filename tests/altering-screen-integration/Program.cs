@@ -294,6 +294,20 @@ try
         "V3.1.71 compiled F9 K has modal-shape veto + fresh second field HUD + CLI idle guard");
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
+    var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
+    Check(Has(enter, "TrySelectManagedProcessingTabAsync") &&
+          Has(enter, "WaitForManagedProcessingNavigationReadyAsync") &&
+          Has(managedTab, "HasManagedProcessingBottomTabVisual") &&
+          Has(managedTab, "RequireManagedIdleAsync") &&
+          Has(managedTab, "HasManagedKEntryBlockingModal") &&
+          Has(managedTab, "ClickFresh"),
+        "V3.1.72 compiled F9 uses positive K navigation pixels, two frames and CLI-idle-gated click");
+    Check(!Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
+                   "FindFacilityHeaderAsync") &&
+          !Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
+                   "FindAsync"),
+        "V3.1.72 managed menu wait never loops Korean OCR");
+
     Check(Has(travel, "RequireManagedIdleAsync") &&
           Has(travel, "IsFacilityTravelDialogAsync") &&
           Has(travel, "CanConfirmManagedTravelPopupAfterMoveClick") &&
@@ -712,6 +726,63 @@ try
             Color.FromArgb(0, 185, 90));
         Check(PixelGate("HasManagedKEntryBlockingModal", grassyField),
             "V3.1.71 actual popup takes precedence over field minimap and K icon");
+    }
+
+    // V3.1.72: F9 manager-only K navigation pixels. The 13:20 actual
+    // six-card processing screenshot contains 3 independent low-saturation
+    // caption regions across the bottom K tabs. OCR of the static "가공"
+    // caption is avoided ONLY when this nav structure is stable twice.
+    using (var kBar = BlackFrame())
+    using (var world = BlackFrame())
+    using (var hub = BlackFrame())
+    {
+        Paint(kBar, new Rectangle(231, 955, 60, 21), Color.FromArgb(165, 165, 165));
+        Paint(kBar, new Rectangle(427, 955, 50, 21), Color.FromArgb(165, 165, 165));
+        Paint(kBar, new Rectangle(509, 955, 57, 21), Color.FromArgb(165, 165, 165));
+        Check(PixelGate("HasManagedProcessingBottomTabVisual", kBar),
+            "V3.1.72 K bottom nav uses three independent neutral labels without OCR");
+
+        Paint(world, new Rectangle(0, 100, 800, 800),
+            Color.FromArgb(96, 179, 59));
+        Paint(world, new Rectangle(680, 116, 104, 13),
+            Color.FromArgb(215, 174, 56));
+        Paint(world, new Rectangle(21, 880, 48, 46),
+            Color.FromArgb(0, 190, 145));
+        Check(!PixelGate("HasManagedProcessingBottomTabVisual", world) &&
+              PixelGate("HasManagedKEntryFieldHudVisual", world),
+            "V3.1.72 06:15 field vegetation+minimap+K button cannot impersonate K bottom tab");
+
+        Paint(hub, new Rectangle(0, 0, 800, 1000),
+            Color.FromArgb(75, 66, 55));
+        Paint(hub, new Rectangle(65, 52, 48, 22), Color.White);
+        for (int row = 0; row < 2; row++)
+        for (int column = 0; column < 3; column++)
+        {
+            Paint(hub, new Rectangle(40 + column * 242, 140 + row * 345,
+                236, 290), Color.FromArgb(24, 23, 29));
+        }
+        for (int column = 0; column < 3; column++)
+        {
+            Paint(hub, new Rectangle(119 + column * 242, 252, 94, 20), Color.White);
+            Paint(hub, new Rectangle(119 + column * 242, 597, 94, 20), Color.White);
+        }
+        Paint(hub, new Rectangle(231, 955, 60, 21), Color.FromArgb(165, 165, 165));
+        Paint(hub, new Rectangle(427, 955, 50, 21), Color.FromArgb(165, 165, 165));
+        Paint(hub, new Rectangle(509, 955, 57, 21), Color.FromArgb(165, 165, 165));
+        Check(PixelGate("HasFixedProcessingHubVisual", hub) &&
+              !PixelGate("HasManagedProcessingBottomTabVisual", hub),
+            "V3.1.72 real six-card hub must win over persistent bottom K bar");
+        using var modal = BlackFrame();
+        Paint(modal, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Paint(modal, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasManagedKEntryBlockingModal", modal) &&
+              !PixelGate("HasManagedProcessingBottomTabVisual", modal),
+            "V3.1.72 panel+confirm blocks tab even without OCR");
+        using var wrongSize = new Bitmap(799, 1000);
+        Check(!PixelGate("HasManagedProcessingBottomTabVisual", wrongSize),
+            "V3.1.72 unknown client size can never authorize a fixed K tab");
     }
 
     using (var receive = BlackFrame())

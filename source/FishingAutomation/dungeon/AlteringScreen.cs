@@ -549,6 +549,66 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         center = new Point((minX + maxX) / 2, (minY + maxY) / 2);
         return true;
     }
+    // V3.1.72: Only F9 managed K navigation uses the verified 800x1000
+    // production navigation bar. The genuine 13:20 hub screenshot has three
+    // independent bottom-nav labels (빠른 제작 / 가공 / 연금술); the 06:15 world
+    // screenshot instead has a dark chat strip and NO left/right nav labels.
+    // The actual six-card hub and individual facility are handled earlier.
+    // This is a positive visual gate, never an inference from CLI work counts.
+    private static bool HasManagedProcessingBottomTabVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000 ||
+            HasFixedProcessingHubVisual(frame) ||
+            HasFixedFacilityHeaderVisual(frame))
+            return false;
+
+        static int NeutralGlyphs(Bitmap image, Rectangle roi)
+        {
+            int count = 0;
+            for (int y = roi.Top; y < roi.Bottom; y += 2)
+            for (int x = roi.Left; x < roi.Right; x += 2)
+            {
+                Color p = image.GetPixel(x, y);
+                int max = Math.Max(p.R, Math.Max(p.G, p.B));
+                int min = Math.Min(p.R, Math.Min(p.G, p.B));
+                if (min >= 95 && max - min <= 45)
+                    count++;
+            }
+            return count;
+        }
+
+        // Side labels are required: the center "가공" text alone is also
+        // visible on the hub and may be erroneously read over a field HUD.
+        return NeutralGlyphs(frame, new Rectangle(222, 940, 91, 45)) >= 8 &&
+               NeutralGlyphs(frame, new Rectangle(410, 940, 82, 45)) >= 8 &&
+               NeutralGlyphs(frame, new Rectangle(496, 940, 85, 45)) >= 8;
+    }
+
+    private async Task<bool> TrySelectManagedProcessingTabAsync(
+        Bitmap first, AlteringPlan plan,
+        AlteringFacilityEntryDirective directive, CancellationToken ct)
+    {
+        if (directive == AlteringFacilityEntryDirective.Automatic ||
+            !HasManagedProcessingBottomTabVisual(first))
+            return false;
+        // A positive two-frame bar detection replaces THREE repeated OCR
+        // operations (menu scan + ClickLabel first/second) on normal F9 screens.
+        // The fixed "가공" tab anchor is from the real 800x1000 K-nav screenshot.
+        await Task.Delay(160, ct);
+        using var second = Capture(ct);
+        if (!HasManagedProcessingBottomTabVisual(second))
+            return false;
+        if (HasManagedKEntryBlockingModal(first) ||
+            HasManagedKEntryBlockingModal(second))
+            Fail(second, "F9 가공 탭 클릭 전 확인창 패널/버튼 감지 · 입력 차단");
+
+        await RequireManagedIdleAsync(plan, directive, "F9 가공 탭 고정 네비 클릭 직전", ct);
+        _ui.ClickFresh(new Point(360, 948), ct);
+        Log?.Invoke("[자동 가공] F9 CLI 유휴+네비 2프레임 확인 · 가공 탭 (360,948) · 반복 OCR 없이 1회 클릭");
+        await Task.Delay(550, ct);
+        return true;
+    }
+
     private async Task<bool> ClickLabelAsync(string text, Rectangle roi, string? header, CancellationToken ct, bool facilityTitle = false)
     {
         // Two observations; the second one alone supplies the input coordinates.
@@ -599,6 +659,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private Task<bool> WaitForProcessingHubAsync(int timeoutMs, CancellationToken ct)
         => WaitForScreenStateAsync(
             frame => IsProcessingHubAsync(frame, ct),
+            timeoutMs, ct);
+
+    // F9 only: menu-ready polling is visual-only; never re-run OCR for
+    // "가공" during the transient K-menu animation. The next step separately
+    // validates the correct facility title/target and CLI idle authority.
+    private Task<bool> WaitForManagedProcessingNavigationReadyAsync(
+        int timeoutMs, CancellationToken ct)
+        => WaitForScreenStateAsync(
+            frame => Task.FromResult(
+                HasFixedFacilityHeaderVisual(frame) ||
+                HasFixedProcessingHubVisual(frame) ||
+                HasManagedProcessingBottomTabVisual(frame)),
             timeoutMs, ct);
 
     private Task<bool> WaitForProcessingNavigationReadyAsync(
@@ -700,7 +772,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 // A K menu may overlay the previous facility title. Prefer its
                 // explicit bottom entry; another Esc/K would toggle the wrong UI.
-                if (await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null)
+                // CLI remains the authority for permitted input. On F9, a
+                // positively identified bottom-navigation bar is clicked using
+                // the two-frame geometry guard instead of repeatedly OCR'ing
+                // the static tab text. A real field HUD skips the menu OCR
+                // entirely and goes directly to the existing safe K path.
+                if (await TrySelectManagedProcessingTabAsync(frame, plan, directive, ct))
+                {
+                    await WaitForProcessingHubAsync(900, ct);
+                    continue;
+                }
+                if (!(directive != AlteringFacilityEntryDirective.Automatic &&
+                      HasManagedKEntryFieldHudVisual(frame)) &&
+                    await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null)
                 {
                     // A different bottom confirmation or travel overlay must never
                     // be mistaken for an actionable K menu entry.
@@ -782,7 +866,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
             }
 
-            await WaitForProcessingNavigationReadyAsync(plan, 1000, ct);
+            if (directive == AlteringFacilityEntryDirective.Automatic)
+                await WaitForProcessingNavigationReadyAsync(plan, 1000, ct);
+            else
+                await WaitForManagedProcessingNavigationReadyAsync(1000, ct);
             using (var menu = Capture(ct))
             {
                 if (await FindFacilityHeaderAsync(menu, plan.ScreenTitle, ct) is not null)
@@ -791,6 +878,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     return;
                 }
 
+                if (await TrySelectManagedProcessingTabAsync(menu, plan, directive, ct))
+                {
+                    await WaitForProcessingHubAsync(900, ct);
+                    continue;
+                }
                 if (!await IsProcessingHubAsync(menu, ct))
                 {
                     if (directive != AlteringFacilityEntryDirective.Automatic &&
