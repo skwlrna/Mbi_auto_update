@@ -449,6 +449,18 @@ jobs:
           $promptFlow = [regex]::Match($screen, 'private async Task<bool> HasCollectPromptAsync[\s\S]*?(?=\r?\n    private static bool HasCollectButtonVisual)').Value
           if ($promptFlow -notmatch 'HasFacilityMoveButtonVisual' -or
               $promptFlow -notmatch 'ShouldBlockReceiptForMoveButton') { throw 'state-aware visual remote facility receive veto missing' }
+          # V3.1.66: manager blue receipt is one fresh gate, not 2+400ms+2.
+          # Keep F02's durable boundary and independent final whole-lane check,
+          # and permit only one post-Space retry on exact unchanged CLI counts.
+          if ($collectFlow -notmatch '기존 2회/400ms/2회 중복 검사 생략' -or
+              $collectFlow -notmatch 'CanRetryManagedBlueReceipt' -or
+              $collectFlow -notmatch 'firstPostCount == secondPostCount' -or
+              $collectFlow -notmatch 'receiptRetryUsed = true' -or
+              $collectFlow -notmatch 'HasCollectPromptAsync\(finalFrame, plan, directive, ct\)' -or
+              $screen -notmatch 'CollectVisualButton = new\(15, 245, 100, 60\)' -or
+              $receiptPolicy -notmatch 'afterCount == beforeCount') {
+              throw 'V3.1.66 managed blue receipt single gate / exact-count one retry missing'
+          }
           # H2: facility movement during multi-altering receipt is decided by
           # the same lane manager as work registration, never by the screen.
           $receiptCoordinator = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
