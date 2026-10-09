@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.71"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.72"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.71</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3171-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.71"')) {
+          if ($p -notmatch '<Version>3\.1\.72</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3172-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.72"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -650,6 +650,31 @@ jobs:
           if ($recovery -match 'TravelToFacilityAsync\(' -or $recovery -match 'SelectRecipeAsync\(' -or $recovery -match 'QueueAsync\(') { throw 'stall recovery must not travel, select recipe, or register work' }
           if ($recovery -notmatch 'TapFresh\(0x01, ct\)' -or $recovery -match 'TapFresh\(0x39, ct\)') { throw 'stall popup recovery may cancel with Escape but must never confirm with Space' }
 
+          # V3.1.72: only F9 manager K-navigation uses two independent
+          # bottom-tab structure frames + CLI idle before its fixed click.
+          # Inconclusive screens still use the original bounded OCR fallback.
+          $managerK = [regex]::Match($screen,
+              'private async Task<bool> TrySelectManagedProcessingTabAsync[\s\S]*?(?=\r?\n    private async Task<bool> ClickLabelAsync)').Value
+          $managerEntry = [regex]::Match($screen,
+              'private async Task EnterFacilityAsync[\s\S]*?(?=\r?\n    private static string RecipeCacheKey)').Value
+          $visualWait = [regex]::Match($screen,
+              'private Task<bool> WaitForManagedProcessingNavigationReadyAsync[\s\S]*?(?=\r?\n    private Task<bool> WaitForProcessingNavigationReadyAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($managerK) -or
+              [string]::IsNullOrWhiteSpace($managerEntry) -or
+              [string]::IsNullOrWhiteSpace($visualWait) -or
+              $managerK -notmatch 'directive == AlteringFacilityEntryDirective.Automatic' -or
+              $managerK -notmatch 'HasManagedProcessingBottomTabVisual' -or
+              $managerK -notmatch 'HasManagedKEntryBlockingModal' -or
+              $managerK -notmatch 'RequireManagedIdleAsync' -or
+              $managerK -notmatch 'new Point\(360, 948\)' -or
+              $managerEntry -notmatch 'TrySelectManagedProcessingTabAsync' -or
+              $managerEntry -notmatch 'WaitForManagedProcessingNavigationReadyAsync' -or
+              $managerEntry -notmatch 'await ClickLabelAsync\("가공"' -or
+              $visualWait -match 'FindAsync\(|FindFacilityHeaderAsync\(' -or
+              $screen -notmatch 'HasManagedKEntryFieldHudVisual' -or
+              $screen -notmatch 'HasFixedProcessingHubVisual') {
+              throw 'F9 managed visual-first K menu requires CLI idle, modal veto, two frames, and OCR fallback'
+          }
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or
               $zeroWing -notmatch 'IAlteringCoordinatorQueueScreen' -or
