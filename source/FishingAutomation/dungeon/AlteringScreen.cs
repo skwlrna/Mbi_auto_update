@@ -1516,6 +1516,49 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return maxX - minX >= 110 && maxY - minY >= 22;
     }
 
+    // F9-only facility travel modal: the confirmed 800x1000 game screenshot
+    // shows a slate panel at x175..625/y754..973 and a WIDE green confirm
+    // button at x405..595/y889..944. The in-world riding STOP control is a
+    // small GREEN CIRCLE near x355..445/y830..915, with NO slate panel.
+    // Do NOT use the broad green-pixel travel detector for managed retries:
+    // otherwise a stopped/active HUD is misclassified as the old modal.
+    private static bool HasManagedFacilityTravelConfirmationVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+
+        static bool Slate(Color p) =>
+            p.R >= 17 && p.R <= 85 &&
+            p.G >= 18 && p.G <= 95 &&
+            p.B >= 23 && p.B <= 115 &&
+            p.B >= p.R && p.B >= p.G;
+
+        // Six independent fixed panel points outside the green/cancel controls.
+        // A normal world image, chat HUD, or bottom riding control has no
+        // continuous dark slate dialog spanning this region.
+        Point[] panelPoints =
+        {
+            new(213, 792), new(397, 792), new(587, 792),
+            new(215, 840), new(396, 840), new(585, 840)
+        };
+        if (panelPoints.Count(p => Slate(frame.GetPixel(p.X, p.Y))) < 5)
+            return false;
+
+        // Fixed horizontal confirm-button interior (avoid round corners).
+        // A circular riding STOP button cannot fill this right-hand strip.
+        int green = 0, samples = 0;
+        for (int y = 898; y <= 934; y += 4)
+        for (int x = 414; x <= 586; x += 4)
+        {
+            Color p = frame.GetPixel(x, y);
+            samples++;
+            if (p.G >= 95 && p.G >= p.R + 40 &&
+                p.G >= p.B + 15)
+                green++;
+        }
+        return samples > 0 && green * 100 >= samples * 58;
+    }
+
     private static bool HasBottomConfirmationModal(Bitmap frame)
     {
         // Screenshot evidence: the modal's confirm control is a broad saturated-green
@@ -1695,6 +1738,31 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             ct.ThrowIfCancellationRequested();
             await Task.Delay(attempt < 20 ? 200 : 500, ct);
 
+            // V3.1.69 F9: AFTER the first popup Space, test actual movement
+            // BEFORE doing any modal/green-HUD OCR or authorizing a retry.
+            // CLI unknown means wait without input, not a blind second Space.
+            if (directive != AlteringFacilityEntryDirective.Automatic &&
+                travelConfirmationSpaces > 0 && !sawDeparture)
+            {
+                bool? movingAfterConfirmation = await TryAutoTravelingAsync(ct);
+                if (movingAfterConfirmation == true)
+                {
+                    sawTravel = true;
+                    sawDeparture = true;
+                    confirmedMoveTransition = true;
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 이동 확인 Space 후 CLI 자동이동 확인 · " +
+                        "후속 Space 금지, 설비 도착 확인 대기");
+                }
+                else if (movingAfterConfirmation is null)
+                {
+                    Log?.Invoke(
+                        $"[자동 가공] {plan.ScreenTitle} · 이동 확인 후 CLI 불명 · " +
+                        "중복 Space 차단, 이동 상태 재조회");
+                    continue;
+                }
+            }
+
             // Capture first: the optional travel popup can appear while the facility
             // header remains behind it. Do not wait for CLI/OCR cycles before handling it.
             using var frame = Capture(ct);
@@ -1708,7 +1776,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool travelPopupVisual =
                 moveClickSent &&
                 !sawDeparture &&
-                HasFacilityTravelConfirmationVisual(frame);
+                (directive == AlteringFacilityEntryDirective.Automatic
+                    ? HasFacilityTravelConfirmationVisual(frame)
+                    : HasManagedFacilityTravelConfirmationVisual(frame));
 
             if (AlteringFacilityTravelConfirmPolicy.ShouldConfirmAfterMoveClick(
                     travelPopupVisual,
@@ -1734,7 +1804,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     bool? freshAutoTravel = await TryAutoTravelingAsync(ct);
                     if (!AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
                             moveClickSent,
-                            HasFacilityTravelConfirmationVisual(freshDialog),
+                            HasManagedFacilityTravelConfirmationVisual(freshDialog),
                             travelConfirmationSpaces, sawDeparture, freshAutoTravel))
                         Fail(freshDialog,
                             "관리 시설 이동 팝업 입력 직전 화면/설비이동 클릭/CLI 비이동 재확인 실패 · Space 차단");
@@ -1751,9 +1821,36 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 await Task.Delay(450, ct);
 
+                // The 20:03 V3.1.68 log shows that the first Space started
+                // auto-travel. Test CLI FIRST: the in-world green STOP circle
+                // is not a second travel popup and must never receive Space.
+                if (directive != AlteringFacilityEntryDirective.Automatic)
+                {
+                    bool? movingAfterSpace = await TryAutoTravelingAsync(ct);
+                    if (movingAfterSpace == true)
+                    {
+                        sawTravel = true;
+                        sawDeparture = true;
+                        confirmedMoveTransition = true;
+                        Log?.Invoke(
+                            $"[자동 가공] {plan.ScreenTitle} · Space {travelConfirmationSpaces} 후 " +
+                            "CLI 이동 중 확인 · 추가 Space 없이 현장 도착 대기");
+                        continue;
+                    }
+                    if (movingAfterSpace is null)
+                    {
+                        Log?.Invoke(
+                            $"[자동 가공] {plan.ScreenTitle} · Space 후 CLI 활동 조회 불명 · " +
+                            "팝업 재입력 없이 상태 재확인");
+                        continue;
+                    }
+                }
+
                 using var afterSpace = Capture(ct);
                 bool popupStillVisible =
-                    HasFacilityTravelConfirmationVisual(afterSpace);
+                    directive == AlteringFacilityEntryDirective.Automatic
+                        ? HasFacilityTravelConfirmationVisual(afterSpace)
+                        : HasManagedFacilityTravelConfirmationVisual(afterSpace);
 
                 if (!popupStillVisible)
                 {
