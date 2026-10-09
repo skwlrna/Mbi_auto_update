@@ -185,10 +185,12 @@ try
     var travel = ScreenCalls("TravelToFacilityAsync", 5);
     Check(Has(travel, "IsManagedFreshArrivalObservation") &&
           Has(travel, "HasVerifiedManagedMoveTransition") &&
-          Has(travel, "HasVerifiedManagedInstantArrival") &&
+          Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
+          Has(travel, "ShouldRetryUnchangedFixedMove") &&
+          Has(travel, "MeasureVisualChangeRatio") &&
           Has(travel, "HasOnsiteCloseButtonVisual") &&
           Has(travel, "HasFacilityMoveButtonPositiveEvidenceAsync"),
-        "F01 real managed Fresh travel tests dual-anchor instant arrival before stable and final proofs");
+        "V3.1.65 real Fresh travel compares post-click fixed pixels and checks safety gates");
     // V3.1.64: V3.1.56 instant-arrival proof must run on managed
     // receipt travel as well as first registration. The 13:41 failure had
     // pre-click remote proof, no post-click remote button, and idle CLI, but
@@ -198,10 +200,11 @@ try
           !CallBoolean(travelPolicy, "CanUseManagedInstantArrival", false, true) &&
           !CallBoolean(travelPolicy, "CanUseManagedInstantArrival", false, false),
         "V3.1.64 V3.1.56 instant arrival is eligible for both managed receipt and registration");
-    Check(Has(travel, "CanUseManagedInstantArrival") &&
-          Has(travel, "HasVerifiedManagedInstantArrival") &&
+    Check(Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
+          Has(travel, "ShouldRetryUnchangedFixedMove") &&
+          Count(travel, "ClickFresh") >= 2 &&
           Has(travel, "HasStableOnsiteEvidence"),
-        "V3.1.64 compiled receipt/registration travel uses V3.1.56 dual anchors and stable frames");
+        "V3.1.65 compiled receipt/registration travel proves pixel loss and bounded retry");
     Check(CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation",
             true, false, true,
             CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
@@ -210,6 +213,38 @@ try
             true, null, true, true),
         "V3.1.64 fast arrival requires fresh non-travel CLI; unresolved status blocks receipt");
 
+    // V3.1.65: OCR false before click does not matter. Pixels must differ
+    // after the fixed click; retry is permitted once if identical for 3s.
+    Check(CallBoolean(travelPolicy, "HasVerifiedFixedMovePixelDisappearance",
+            true, .45, true, true, false, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedFixedMovePixelDisappearance",
+            true, .00, true, true, false, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedFixedMovePixelDisappearance",
+            true, .45, true, true, true, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedFixedMovePixelDisappearance",
+            true, .45, true, true, false, null, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedFixedMovePixelDisappearance",
+            true, .45, true, true, false, false, true),
+        "V3.1.65 pixel disappearance requires real change and no popup or movement");
+    Check(CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
+            true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
+            true, false, false) &&
+          !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
+            true, true, false, 0.0, 4, TimeSpan.FromSeconds(4),
+            true, false, false) &&
+          !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
+            true, false, false, 0.5, 4, TimeSpan.FromSeconds(4),
+            true, false, false) &&
+          !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
+            true, false, false, 0.0, 4, TimeSpan.FromSeconds(1),
+            true, false, false) &&
+          !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
+            true, false, true, 0.0, 4, TimeSpan.FromSeconds(4),
+            true, false, false) &&
+          !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
+            true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
+            true, null, false),
+        "V3.1.65 unchanged pixels: only one retry, never if travel/unknown/modal");
     Check(CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
             true, true, true, true, false, false, false) &&
           !CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
@@ -471,6 +506,32 @@ try
         using var graphics = Graphics.FromImage(frame);
         using var brush = new SolidBrush(color);
         graphics.FillRectangle(brush, bounds);
+    }
+
+    // Use the real production pixel diff with the canonical 155x65 ROI.
+    Type uiRuntime = production.GetType("DungeonVisionBot.ProductionUiRuntime", true)!;
+    using (var beforeMove = BlackFrame())
+    using (var afterMove = BlackFrame())
+    {
+        Paint(beforeMove, new Rectangle(20, 214, 135, 43),
+            Color.FromArgb(0, 116, 134));
+        MethodInfo measure = Method(uiRuntime, "MeasureVisualChangeRatio", 5);
+        double vanishedRatio = (double)measure.Invoke(null, new object[] {
+            beforeMove, afterMove, new Rectangle(15, 205, 155, 65), 3, 24 })!;
+        Check(vanishedRatio > .12,
+            "V3.1.65 vanished fixed pill changes substantial pixel fraction");
+        double unchanged = (double)measure.Invoke(null, new object[] {
+            beforeMove, beforeMove, new Rectangle(15, 205, 155, 65), 3, 24 })!;
+        Check(unchanged == 0.0,
+            "V3.1.65 unchanged pill is NOT mistaken for disappearance");
+        Paint(afterMove, new Rectangle(20, 214, 135, 43),
+            Color.FromArgb(0, 116, 134));
+        Paint(afterMove, new Rectangle(20, 214, 12, 8),
+            Color.FromArgb(0, 120, 138));
+        double flicker = (double)measure.Invoke(null, new object[] {
+            beforeMove, afterMove, new Rectangle(15, 205, 155, 65), 3, 24 })!;
+        Check(flicker <= .012,
+            "V3.1.65 minor pixel flicker is not false button disappearance");
     }
 
     using (var empty = BlackFrame())

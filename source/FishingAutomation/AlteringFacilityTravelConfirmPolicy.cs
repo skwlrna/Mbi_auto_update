@@ -86,6 +86,51 @@ internal static class AlteringFacilityTravelConfirmPolicy
            !remoteMoveButtonVisible && autoTraveling == false &&
            !anyModalVisible;
 
+    // V3.1.65: after a fixed (85,235) move input, a full-area pixel
+    // transition proves that the left-side button UI disappeared, even when
+    // BOTH pre- and post-click OCR/teal-shape detectors miss that control.
+    // The caller also demands a stable facility, onsite X, idle CLI, no modal
+    // and its independent 1.2s post-arrival verification.
+    internal const double GoneMoveRegionMinRatio = 0.12;
+    internal const double UnchangedMoveRegionMaxRatio = 0.012;
+    internal const int RequiredIdenticalMoveFrames = 3;
+    internal static readonly TimeSpan FirstMoveRetryGrace = TimeSpan.FromSeconds(3);
+
+    internal static bool HasVerifiedFixedMovePixelDisappearance(
+        bool moveClickSent,
+        double fixedRegionChangeRatio,
+        bool facilityVisible,
+        bool onsiteCloseVisible,
+        bool remoteMoveButtonVisible,
+        bool? autoTraveling,
+        bool anyModalVisible)
+        => moveClickSent &&
+           fixedRegionChangeRatio >= GoneMoveRegionMinRatio &&
+           facilityVisible && onsiteCloseVisible &&
+           !remoteMoveButtonVisible &&
+           autoTraveling == false &&
+           !anyModalVisible;
+
+    // Only the manager-requested first facility travel can do a single
+    // bounded extra click, and ONLY if the post-click fixed ROI is unchanged.
+    // Never retry on a partial screen change, active/unknown travel, modal,
+    // uncertain facility, or after a prior repeat. No automatic looping.
+    internal static bool ShouldRetryUnchangedFixedMove(
+        bool forcedMove,
+        bool alreadyRetried,
+        bool sawDeparture,
+        double fixedRegionChangeRatio,
+        int identicalFrames,
+        TimeSpan elapsedSinceClick,
+        bool facilityVisible,
+        bool? autoTraveling,
+        bool anyModalVisible)
+        => forcedMove && !alreadyRetried && !sawDeparture &&
+           fixedRegionChangeRatio <= UnchangedMoveRegionMaxRatio &&
+           identicalFrames >= RequiredIdenticalMoveFrames &&
+           elapsedSinceClick >= FirstMoveRetryGrace &&
+           facilityVisible && autoTraveling == false && !anyModalVisible;
+
     internal static bool HasStableOnsiteEvidence(
         int stableFrames,
         TimeSpan stableDuration)

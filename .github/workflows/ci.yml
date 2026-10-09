@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.64"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.65"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.64</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3164-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.64"')) {
+          if ($p -notmatch '<Version>3\.1\.65</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3165-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.65"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -322,7 +322,9 @@ jobs:
              $screen -notmatch 'width >= 90 && height >= 18'){throw 'facility move teal-shape detector missing'}
           if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
              $screen -notmatch 'HasFacilityMoveButtonPositiveEvidenceAsync' -or
-             $screen -notmatch '입력 1회 고정 · 재클릭 금지 · 품목 선택 전 실행'){throw 'fixed one-shot move click/positive-evidence trace missing'}
+             $screen -notmatch '첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능 · 품목 선택 전 실행' -or
+             $screen -notmatch 'ShouldRetryUnchangedFixedMove' -or
+             $screen -notmatch 'MeasureVisualChangeRatio'){throw 'fixed move pixel confirmation and bounded retry missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync)').Value
           $remoteRecovery = [regex]::Match($screen, 'private async Task RecoverRemoteDetailToOnsiteAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
@@ -405,7 +407,7 @@ jobs:
               $travel -notmatch 'onsiteStableFrames' -or
               $travel -notmatch 'if \(forceMoveClick\)' -or
               $travel -notmatch '설비 이동 1회 필수 경로' -or
-              $travel -notmatch '버튼 검출 결과로 품목 선택 순서를 바꾸지 않음') { throw 'forced first-entry facility move gate missing' }
+              $travel -notmatch '클릭 전 버튼 OCR 인식 생략') { throw 'forced first-entry fixed move must not depend on pre-click OCR' }
           if ($travel -match '최초 진입 이동버튼 미검출') { throw 'fresh facility entry must not fall back to onsite proof before moving' }
           if ($travel -match 'if \(sawDeparture &&\s*facilityVisible') { throw 'departure evidence must not gate direct facility arrival' }
           if ($travel -notmatch 'HasStableOnsiteEvidence' -or
@@ -415,10 +417,12 @@ jobs:
           if ($screen -match 'ClickFacilityMoveWithRetryAsync' -or
               $travelConfirmPolicy -match 'MaxMoveClickAttempts|InitialMoveClickSettleDelay|MoveReactionProbeDelay') { throw 'misdiagnosed facility move re-click/timing logic returned' }
           if ($travel -notmatch 'ShouldConfirmAfterMoveClick' -or
-              $travel -notmatch '입력 1회 고정 · 재클릭 금지' -or
+              $travel -notmatch '첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능' -or
+              $travel -notmatch 'HasVerifiedFixedMovePixelDisappearance' -or
+              $travel -notmatch 'ShouldRetryUnchangedFixedMove' -or
               $travel -notmatch '이동 확인창 감지' -or
               $travel -notmatch '이동 확인창 닫힘 확인' -or
-              $travel -notmatch '추가 설비 이동 클릭 없이 정지') { throw 'one-shot move plus continuous travel-popup handling missing' }
+              $travel -notmatch '추가 설비 이동 재클릭 없이 정지') { throw 'one-shot move plus continuous travel-popup handling missing' }
           if ($screen -notmatch 'FacilityTravelDialog = new\(80, 260, 640, 700\)' -or
               $screen -notmatch 'FacilityTravelConfirmVisual = new\(120, 340, 560, 620\)' -or
               $screen -notmatch 'HasFacilityTravelConfirmationVisual') { throw 'center-screen travel popup detector missing' }
