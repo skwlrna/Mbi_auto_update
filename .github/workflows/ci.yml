@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.69"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.70"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.69</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3169-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.69"')) {
+          if ($p -notmatch '<Version>3\.1\.70</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3170-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.70"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -739,6 +739,26 @@ jobs:
             if($safetyPolicy -notmatch $hardGate){throw "gathering hard safety gate missing: $hardGate"}
           }
           $bulkScreen = Get-Content source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs -Raw
+          # V3.1.70: exact OCR+icon must succeed in both real dynamic row
+          # captures; click that SECOND OCR center with NO third OCR pass.
+          $bulkLifeStart = [regex]::Match($bulkScreen, 'private async Task StartLifeSkillHundredAsync[\s\S]*?(?=\r?\n    private static Point LifeSkillNearestClickPoint)').Value
+          $bulkStableRow = [regex]::Match($bulkScreen, 'private async Task<DetectionResult\?> FindStableLifeSkillRowAsync[\s\S]*?(?=\r?\n    private async Task<DetectionResult\?> FindLifeSkillLabelAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($bulkLifeStart) -or [string]::IsNullOrWhiteSpace($bulkStableRow)) {
+            throw 'two-frame life-skill dynamic row methods missing'
+          }
+          if ($bulkLifeStart -notmatch 'FindStableLifeSkillRowAsync\(source, ct\)' -or
+              $bulkLifeStart -notmatch 'Math\.Clamp\(row\.Value\.Center\.X, 180, 740\)' -or
+              $bulkLifeStart -notmatch 'row\.Value\.Center\.Y' -or
+              $bulkLifeStart -match 'for \(int pass = 1; pass <= 3; pass\+\+\)' -or
+              $bulkLifeStart -match 'clickRow\.Value|lastConfirmFrame|rowRoi') {
+            throw 'dynamic life-skill selection must click second OCR row, never third-pass / fixed row'
+          }
+          if ([regex]::Matches($bulkStableRow, 'FindLifeSkillLabelAsync\(').Count -ne 2 -or
+              $bulkStableRow -notmatch 'GatheringNavigationPolicy\.IsStableFirstRow' -or
+              [regex]::Matches($bulkStableRow, 'HasRowIconVisual\(').Count -lt 2 -or
+              $bulkStableRow -notmatch 'return second;') {
+            throw 'bulk gathering must verify exact OCR/icon on TWO fresh screen captures'
+          }
           if ($bulkScreen -notmatch 'GatheringSafetyPolicy\.IsSafeField' -or
               $bulkScreen -notmatch 'WaitForCombatEndAsync' -or
               $bulkScreen -notmatch '전투 중 · 입력 없이 종료 대기') { throw 'bulk life-skill combat wait is not wired' }
