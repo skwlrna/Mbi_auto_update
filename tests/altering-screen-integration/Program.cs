@@ -300,12 +300,23 @@ try
     // The gate must be on the actual async production path in strict order.
     // Merely calling the check somewhere else in the same method is insufficient.
     var f02CompiledCalls = collect.ToList();
-    int f02DurableBoundary = f02CompiledCalls.FindLastIndex(x => x.EndsWith(".Invoke", StringComparison.Ordinal));
-    int f02FinalGate = f02CompiledCalls.FindLastIndex(x => x.EndsWith(".HasCollectPromptAsync", StringComparison.Ordinal));
-    int f02ReceiveSpace = f02CompiledCalls.FindIndex(x => x.EndsWith(".TapFresh", StringComparison.Ordinal));
+    int f02ReceiveSpace = f02CompiledCalls.FindIndex(
+        x => x.EndsWith(".TapFresh", StringComparison.Ordinal));
+    // V3.1.66: retry adds a second post-Space prompt and Log.Invoke.
+    // Scope the original F02 ordering proof to calls BEFORE the FIRST Space,
+    // not the newly added, independently guarded second Space.
+    int f02FinalGate = f02ReceiveSpace > 0
+        ? f02CompiledCalls.FindLastIndex(f02ReceiveSpace - 1,
+            x => x.EndsWith(".HasCollectPromptAsync", StringComparison.Ordinal))
+        : -1;
+    int f02DurableBoundary = f02FinalGate > 0
+        ? f02CompiledCalls.FindLastIndex(f02FinalGate - 1,
+            x => x.EndsWith(".Invoke", StringComparison.Ordinal))
+        : -1;
     Check(f02DurableBoundary >= 0 && f02DurableBoundary < f02FinalGate &&
-          f02FinalGate < f02ReceiveSpace,
-        "F02 compiled input ordering: durable boundary -> fresh all-work prompt -> receive Space");
+          f02FinalGate < f02ReceiveSpace &&
+          Count(collect, "TapFresh") == 2,
+        "F02 compiled first-input ordering: durable boundary -> final whole-lane prompt -> first Space; one guarded retry");
     Check(Has(collect, "RequireManagedIdleAsync"),
         "F03 actual blue receive Space has fresh manager idle gate");
     // V3.1.66: compiled managed receipt keeps only a single pre-boundary
