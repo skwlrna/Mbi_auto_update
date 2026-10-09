@@ -407,7 +407,7 @@ jobs:
               $travel -notmatch 'onsiteStableFrames' -or
               $travel -notmatch 'if \(forceMoveClick\)' -or
               $travel -notmatch '설비 이동 1회 필수 경로' -or
-              $travel -notmatch '버튼 검출 결과로 품목 선택 순서를 바꾸지 않음') { throw 'forced first-entry facility move gate missing' }
+              $travel -notmatch '클릭 전 버튼 OCR 인식 생략') { throw 'forced first-entry fixed move must not depend on pre-click OCR' }
           if ($travel -match '최초 진입 이동버튼 미검출') { throw 'fresh facility entry must not fall back to onsite proof before moving' }
           if ($travel -match 'if \(sawDeparture &&\s*facilityVisible') { throw 'departure evidence must not gate direct facility arrival' }
           if ($travel -notmatch 'HasStableOnsiteEvidence' -or
