@@ -93,6 +93,67 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                WhiteGlyphs(frame, new Rectangle(15, 144, 230, 48)) >= 20;
     }
 
+
+    // The recorded 13:20 V3.1.62 failure shows the FULL six-card processing hub
+    // already open, while OCR still sees '가공' in the persistent bottom nav.
+    // Distinguish the real hub by its upper title AND two separate card rows;
+    // a bottom tab alone is NEVER sufficient evidence of a K-menu overlay.
+    private static bool HasFixedProcessingHubVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+
+        static int WhiteGlyphSamples(Bitmap bitmap, Rectangle area)
+        {
+            int count = 0;
+            for (int y = area.Top; y < area.Bottom; y += 2)
+            for (int x = area.Left; x < area.Right; x += 2)
+            {
+                Color p = bitmap.GetPixel(x, y);
+                int max = Math.Max(p.R, Math.Max(p.G, p.B));
+                int min = Math.Min(p.R, Math.Min(p.G, p.B));
+                if (min >= 160 && max - min <= 50) count++;
+            }
+            return count;
+        }
+
+        // Actual 800x1000 hub: title '가공' at upper-left, three dark
+        // facility cards per row and their large white titles at y~260/605.
+        if (WhiteGlyphSamples(frame, new Rectangle(56, 43, 74, 39)) < 9)
+            return false;
+
+        Rectangle[] cardTitleAreas =
+        {
+            new(92, 239, 146, 51), new(334, 239, 146, 51),
+            new(576, 239, 146, 51), new(92, 584, 146, 51),
+            new(334, 584, 146, 51), new(576, 584, 146, 51)
+        };
+        int topTitles = 0, bottomTitles = 0, darkCards = 0;
+        int[] cardCenterX = { 75, 315, 557 };
+        for (int index = 0; index < cardTitleAreas.Length; index++)
+        {
+            if (WhiteGlyphSamples(frame, cardTitleAreas[index]) >= 10)
+            {
+                if (index < 3) topTitles++;
+                else bottomTitles++;
+            }
+            int y = index < 3 ? 405 : 748;
+            Color bg = frame.GetPixel(cardCenterX[index % 3], y);
+            if (bg.R <= 70 && bg.G <= 70 && bg.B <= 75)
+                darkCards++;
+        }
+        // Multi-point layout evidence, not OCR or the always-visible K tab.
+        return topTitles >= 2 && bottomTitles >= 2 && darkCards >= 5;
+    }
+
+    private async Task<bool> IsProcessingHubAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (HasFixedProcessingHubVisual(frame)) return true;
+        // The single-facility screen also has a large top-left title and
+        // facility-level subtitle; don't treat it as the hub via fuzzy OCR.
+        if (HasFixedFacilityHeaderVisual(frame)) return false;
+        return await FindFacilityHeaderAsync(frame, "가공", ct) is not null;
+    }
+
     private async Task<bool> HasCollectPromptAsync(
         Bitmap frame,
         AlteringPlan plan,
@@ -529,6 +590,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             timeoutMs,
             ct);
 
+    private Task<bool> WaitForProcessingHubAsync(int timeoutMs, CancellationToken ct)
+        => WaitForScreenStateAsync(
+            frame => IsProcessingHubAsync(frame, ct),
+            timeoutMs, ct);
+
     private Task<bool> WaitForProcessingNavigationReadyAsync(
         AlteringPlan plan,
         int timeoutMs,
@@ -538,7 +604,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             {
                 if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
                     return true;
-                if (await FindFacilityHeaderAsync(frame, "가공", ct) is not null)
+                if (await IsProcessingHubAsync(frame, ct))
                     return true;
                 return await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null;
             },
@@ -588,6 +654,44 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     continue;
                 }
 
+                // A positively identified six-card hub has priority over the
+                // persistent '가공' bottom navigation label. Never send the K
+                // menu click in a hub; use the unchanged fixed facility point.
+                if (await IsProcessingHubAsync(frame, ct))
+                {
+                    Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
+                    if (directive != AlteringFacilityEntryDirective.Automatic &&
+                        (HasBottomConfirmationModal(frame) ||
+                         await IsFacilityTravelDialogAsync(frame, ct)))
+                        Fail(frame, "가공 허브 시설 선택 전 확인/이동 팝업 감지 · 입력 차단");
+                    await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
+                    // Hub cards use confirmed 800x1000 fixed title rectangles.
+                    // Once the '가공' hub itself is shown, select the known
+                    // facility by its fixed center, not by a fresh OCR hit.
+                    Rectangle titleArea = AlteringFacilityLayout.TitleArea(plan.ScreenTitle);
+                    Point titleCenter = new(titleArea.Left + titleArea.Width / 2,
+                        titleArea.Top + titleArea.Height / 2);
+                    _ui.ClickFresh(titleCenter, ct);
+                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 제목 고정좌표 클릭 ({titleCenter.X},{titleCenter.Y}) · 카드 OCR 없음");
+                    await Task.Delay(550, ct);
+
+                    // The chosen facility card was positively clicked in
+                    // the fixed hub. A fixed facility screen (title + level)
+                    // is sufficient; do not require another title OCR pass.
+                    if (await WaitForScreenStateAsync(async image =>
+                            HasFixedFacilityHeaderVisual(image) ||
+                            await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null,
+                            1200, ct))
+                    {
+                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
+                        return;
+                    }
+
+                    Log?.Invoke($"[자동 가공] 시설 전환 확인 대기 {attempt}/{maxAttempts} · 현재 화면을 다시 판정합니다.");
+                    await WaitForProcessingNavigationReadyAsync(plan, 900, ct);
+                    continue;
+                }
+
                 // A K menu may overlay the previous facility title. Prefer its
                 // explicit bottom entry; another Esc/K would toggle the wrong UI.
                 if (await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null)
@@ -601,7 +705,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Log?.Invoke("[자동 가공] K 메뉴 가공 항목 감지 · K 중복 입력 생략");
                     await RequireManagedIdleAsync(plan, directive, "K 메뉴 가공 선택 직전", ct);
                     if (await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
-                        await WaitForFacilityHeaderAsync("가공", 900, ct);
+                        await WaitForProcessingHubAsync(900, ct);
                     else
                         Log?.Invoke("[자동 가공] K 메뉴 가공 항목 재확인 실패 · 클릭 없이 재판정");
                     continue;
@@ -633,38 +737,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 2프레임 확인 · 가공 허브로 돌아갑니다 · Esc");
                     await RequireManagedIdleAsync(plan, directive, "시설 상세/다른창 Esc 직전", ct);
                     _ui.TapFresh(0x01, ct);
-                    await WaitForFacilityHeaderAsync("가공", 900, ct);
-                    continue;
-                }
-
-                if (await FindFacilityHeaderAsync(frame, "가공", ct) is not null)
-                {
-                    Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
-                    await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
-                    // Hub cards use confirmed 800x1000 fixed title rectangles.
-                    // Once the '가공' hub itself is shown, select the known
-                    // facility by its fixed center, not by a fresh OCR hit.
-                    Rectangle titleArea = AlteringFacilityLayout.TitleArea(plan.ScreenTitle);
-                    Point titleCenter = new(titleArea.Left + titleArea.Width / 2,
-                        titleArea.Top + titleArea.Height / 2);
-                    _ui.ClickFresh(titleCenter, ct);
-                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 제목 고정좌표 클릭 ({titleCenter.X},{titleCenter.Y}) · 카드 OCR 없음");
-                    await Task.Delay(550, ct);
-
-                    // The chosen facility card was positively clicked in
-                    // the fixed hub. A fixed facility screen (title + level)
-                    // is sufficient; do not require another title OCR pass.
-                    if (await WaitForScreenStateAsync(async image =>
-                            HasFixedFacilityHeaderVisual(image) ||
-                            await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null,
-                            1200, ct))
-                    {
-                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
-                        return;
-                    }
-
-                    Log?.Invoke($"[자동 가공] 시설 전환 확인 대기 {attempt}/{maxAttempts} · 현재 화면을 다시 판정합니다.");
-                    await WaitForProcessingNavigationReadyAsync(plan, 900, ct);
+                    await WaitForProcessingHubAsync(900, ct);
                     continue;
                 }
 
@@ -690,8 +763,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     return;
                 }
 
-                if (await FindFacilityHeaderAsync(menu, "가공", ct) is null)
+                if (!await IsProcessingHubAsync(menu, ct))
                 {
+                    if (directive != AlteringFacilityEntryDirective.Automatic &&
+                        (HasBottomConfirmationModal(menu) ||
+                         await IsFacilityTravelDialogAsync(menu, ct)))
+                        Fail(menu, "K 메뉴 가공 항목 선택 전 확인/이동 팝업 감지 · 입력 차단");
                     await RequireManagedIdleAsync(plan, directive, "가공 메뉴 진입 클릭 직전", ct);
                     if (!await ClickLabelAsync("가공", new(180, 880, 420, 120), null, ct))
                     {
@@ -699,7 +776,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         await Task.Delay(1200, ct);
                         continue;
                     }
-                    await WaitForFacilityHeaderAsync("가공", 900, ct);
+                    await WaitForProcessingHubAsync(900, ct);
                 }
             }
         }
