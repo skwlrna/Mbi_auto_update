@@ -513,6 +513,39 @@ try
             "reward pixel shortcut never operates on an unknown client size");
     }
 
+    // V3.1.62: metal -> wood must discard the old OCR-free title/arrival
+    // authority; otherwise a generic fixed title/level shape could be
+    // mistaken for the old facility and trigger a second Esc after K.
+    {
+        object cacheProbe = RuntimeHelpers.GetUninitializedObject(screen);
+        FieldInfo repeatTitle = screen.GetField("_repeatOcrFreeFacilityTitle", all)!;
+        FieldInfo travelTitle = screen.GetField("_postTravelProvenFacilityTitle", all)!;
+        repeatTitle.SetValue(cacheProbe, "금속 가공");
+        travelTitle.SetValue(cacheProbe, "금속 가공");
+        Method(screen, "InvalidateForeignFacilityProof", 1)
+            .Invoke(cacheProbe, new object[] { "목재 가공" });
+        Check(repeatTitle.GetValue(cacheProbe) is null &&
+              travelTitle.GetValue(cacheProbe) is null,
+            "V3.1.62 metal -> wood clears both stale fixed visual proofs");
+
+        repeatTitle.SetValue(cacheProbe, "목재 가공");
+        travelTitle.SetValue(cacheProbe, "목재 가공");
+        Method(screen, "InvalidateForeignFacilityProof", 1)
+            .Invoke(cacheProbe, new object[] { "목재 가공" });
+        Check((string?)repeatTitle.GetValue(cacheProbe) == "목재 가공" &&
+              (string?)travelTitle.GetValue(cacheProbe) == "목재 가공",
+            "V3.1.62 confirmed same-facility repeat keeps OCR-free fast path");
+
+        Method(screen, "InvalidateForeignFacilityProof", 1)
+            .Invoke(cacheProbe, new object[] { "금속 가공" });
+        Check(repeatTitle.GetValue(cacheProbe) is null &&
+              travelTitle.GetValue(cacheProbe) is null,
+            "V3.1.62 wood -> metal also drops stale visual proof");
+
+        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "InvalidateForeignFacilityProof"),
+            "real compiled facility entry clears foreign cache BEFORE title recognition");
+    }
+
     // V3.1.59: the original capture shows the facility title at (20,50),
     // with a second facility-level label at (20,155). Detect both independent
     // fixed anchors without running Korean OCR or accessing a game window.
