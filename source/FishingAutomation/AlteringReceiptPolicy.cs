@@ -123,10 +123,15 @@ internal static class AlteringReceiptPolicy
            !facilityVisible && !travelDialogVisible &&
            autoTraveling == false;
 
-    // Manager-only OCR-independent completion close. The visual reward layout
-    // is an alternative to result-title OCR, NEVER an alternative to a confirmed
-    // whole-facility receipt, modal/onsite separation or fresh idle CLI.
-    // Keep the original five-parameter predicate for legacy call/test coverage.
+    // V3.1.67 manager-only receipt-close fallback. After a FRESH, complete
+    // facility receipt (before > 0, after == 0), the result can show neutral
+    // gray reward icons rather than cyan cards. If both fixed-color anchors and
+    // Korean title OCR miss, allow the proven V3.1.50 green confirmation shape.
+    // This fallback NEVER applies without a whole-facility CLI receipt, and
+    // still requires no facility header, no travel popup and CLI traveling=false.
+    // The actual manager path separately requires fresh idle CLI before/after.
+    // Keep the legacy five-parameter predicate and all lower-level visual
+    // detectors unchanged. Only manager-controlled receipts use this overload.
     internal static bool CanCloseManagedCompletionResult(
         bool greenConfirmVisible,
         bool completedTitleVisible,
@@ -136,12 +141,9 @@ internal static class AlteringReceiptPolicy
         bool travelDialogVisible,
         bool? autoTraveling)
         => cliWholeFacilityReceiptConfirmed &&
-           CanCloseManagedCompletionResult(
-               greenConfirmVisible,
-               completedTitleVisible || fixedRewardLayoutVisible,
-               facilityVisible,
-               travelDialogVisible,
-               autoTraveling);
+           greenConfirmVisible &&
+           !facilityVisible && !travelDialogVisible &&
+           autoTraveling == false;
 
     internal static bool CanConfirmCompletion(
         bool greenConfirmVisible,
