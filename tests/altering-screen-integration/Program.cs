@@ -552,8 +552,11 @@ try
             "V3.1.63 real hub screen state resolves visually without OCR runtime");
         Check(Has(ScreenCalls("EnterFacilityAsync", 3), "IsProcessingHubAsync"),
             "V3.1.63 real facility entry checks hub before K-menu selection");
-        Check(Has(ScreenCalls("WaitForProcessingNavigationReadyAsync", 3), "IsProcessingHubAsync"),
-            "V3.1.63 navigation-ready uses six-card hub proof");
+        // The navigation predicate is compiled as a nested async lambda;
+        // its IsProcessingHubAsync call does NOT live in the outer method IL.
+        Check(Has(ScreenCalls("WaitForProcessingNavigationReadyAsync", 3), "WaitForScreenStateAsync") &&
+              Has(ScreenCalls("IsProcessingHubAsync", 2), "HasFixedProcessingHubVisual"),
+            "V3.1.63 navigation polling and real visual hub detector remain connected");
 
         using var wrongSize = new Bitmap(799, 1000);
         Check(!PixelGate("HasFixedProcessingHubVisual", wrongSize),
