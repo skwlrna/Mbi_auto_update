@@ -16,6 +16,23 @@ internal static class AlteringFacilityTravelConfirmPolicy
            confirmationSpaceCount >= 0 &&
            confirmationSpaceCount < MaxTravelConfirmationSpaces;
 
+    // V3.1.68: V3.1.47's post-click popup-visual rule, for managed F9 only.
+    // Korean OCR is diagnostic here: it can miss the real "던버튼으로 이동할까요?"
+    // dialog. Authorization still needs the precise preceding move input,
+    // a fresh visible travel-confirm control, a bounded confirmation count,
+    // no observed departure, and a known idle (nontravel) CLI state.
+    // Caller separately checks the full managed idle/activity policy twice.
+    internal static bool CanConfirmManagedTravelPopupAfterMoveClick(
+        bool moveClickSent,
+        bool travelPopupVisual,
+        int confirmationSpaceCount,
+        bool departureAlreadySeen,
+        bool? autoTraveling)
+        => moveClickSent &&
+           ShouldConfirmAfterMoveClick(
+               travelPopupVisual, confirmationSpaceCount, departureAlreadySeen) &&
+           autoTraveling == false;
+
     internal static bool IsOnsiteObservation(
         bool facilityVisible,
         bool moveButtonVisible,
