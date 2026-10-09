@@ -287,7 +287,9 @@ try
     // method. Inspect that compiled production body, not the thin old overload.
     var collect = ScreenCalls("CollectAsyncAtBoundary", 4);
     Check(Has(ScreenCalls("CollectAsync", 3), "CollectAsyncAtBoundary") &&
-          Count(collect, "WaitForCollectPromptAsync") >= 2 &&
+          Count(collect, "WaitForCollectPromptAsync") == 2 &&
+          Has(collect, "CanRetryManagedBlueReceipt") &&
+          Count(collect, "TapFresh") == 2 &&
           Has(collect, "TravelToFacilityAsync") &&
           Has(collect, "ConfirmCompletionResultAsync") &&
           Has(collect, "AfterVerifiedFacilityEntry") &&
@@ -298,14 +300,55 @@ try
     // The gate must be on the actual async production path in strict order.
     // Merely calling the check somewhere else in the same method is insufficient.
     var f02CompiledCalls = collect.ToList();
-    int f02DurableBoundary = f02CompiledCalls.FindLastIndex(x => x.EndsWith(".Invoke", StringComparison.Ordinal));
-    int f02FinalGate = f02CompiledCalls.FindLastIndex(x => x.EndsWith(".HasCollectPromptAsync", StringComparison.Ordinal));
-    int f02ReceiveSpace = f02CompiledCalls.FindIndex(x => x.EndsWith(".TapFresh", StringComparison.Ordinal));
+    int f02ReceiveSpace = f02CompiledCalls.FindIndex(
+        x => x.EndsWith(".TapFresh", StringComparison.Ordinal));
+    // V3.1.66: retry adds a second post-Space prompt and Log.Invoke.
+    // Scope the original F02 ordering proof to calls BEFORE the FIRST Space,
+    // not the newly added, independently guarded second Space.
+    int f02FinalGate = f02ReceiveSpace > 0
+        ? f02CompiledCalls.FindLastIndex(f02ReceiveSpace - 1,
+            x => x.EndsWith(".HasCollectPromptAsync", StringComparison.Ordinal))
+        : -1;
+    int f02DurableBoundary = f02FinalGate > 0
+        ? f02CompiledCalls.FindLastIndex(f02FinalGate - 1,
+            x => x.EndsWith(".Invoke", StringComparison.Ordinal))
+        : -1;
     Check(f02DurableBoundary >= 0 && f02DurableBoundary < f02FinalGate &&
-          f02FinalGate < f02ReceiveSpace,
-        "F02 compiled input ordering: durable boundary -> fresh all-work prompt -> receive Space");
+          f02FinalGate < f02ReceiveSpace &&
+          Count(collect, "TapFresh") == 2,
+        "F02 compiled first-input ordering: durable boundary -> final whole-lane prompt -> first Space; one guarded retry");
     Check(Has(collect, "RequireManagedIdleAsync"),
         "F03 actual blue receive Space has fresh manager idle gate");
+    // V3.1.66: compiled managed receipt keeps only a single pre-boundary
+    // blue+whole-lane check and F02's one final post-boundary recheck.
+    // The two legacy WaitForCollectPrompt calls are in Automatic-only branch.
+    Check(Has(collect, "CanRetryManagedBlueReceipt") &&
+          Count(collect, "ConfirmCompletionResultAsync") == 2 &&
+          Count(collect, "TapFresh") == 2 &&
+          Has(collect, "TryFacilityWorkCountAsync") &&
+          Has(collect, "HasCollectButtonVisual"),
+        "V3.1.66 compiled managed blue receipt retries at most once after unchanged CLI count");
+    Check(CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 0, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 6, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, null, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, false, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, false, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, true, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, false, null, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, false, false, true) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              false, 7, 7, true, true, true, true, false, false, false),
+        "V3.1.66 retry only for exact unchanged whole queue plus fresh blue onsite and idle");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
@@ -532,6 +575,17 @@ try
             beforeMove, afterMove, new Rectangle(15, 205, 155, 65), 3, 24 })!;
         Check(flicker <= .012,
             "V3.1.65 minor pixel flicker is not false button disappearance");
+    }
+
+    using (var receive = BlackFrame())
+    {
+        // Actual V3.1.65 failure screenshot: blue capsule at y~260, not y~330.
+        Paint(receive, new Rectangle(25, 258, 80, 28), Color.FromArgb(25, 108, 175));
+        Check(PixelGate("HasCollectButtonVisual", receive),
+            "V3.1.66 actual live 800x1000 blue collect button row is in recognition ROI");
+        using var missing = BlackFrame();
+        Check(!PixelGate("HasCollectButtonVisual", missing),
+            "V3.1.66 ROI stays negative when blue collect control absent");
     }
 
     using (var empty = BlackFrame())

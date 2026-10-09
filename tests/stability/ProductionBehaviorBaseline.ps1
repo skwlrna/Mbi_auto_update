@@ -105,6 +105,14 @@ Match-Required $alter 'WaitForCollectPromptAsync\(plan, attempts: 2, delayMs: 10
 Match-Required $alter '현장 수령 화면 재확인 완료' 'receipt Space is emitted only after the post-delay recheck'
 Match-Required $alter 'Space 1회' 'receipt input remains a single Space after stabilization'
 
+# V3.1.66: legacy single mode keeps V3.1.50 timing, managed multi-altering
+# no longer repeats that gate, and one unchanged-CLI retry is bounded.
+Match-Required $alter '기존 2회/400ms/2회 중복 검사 생략' 'managed blue receipt omits redundant scan'
+Match-Required $alter 'CollectVisualButton = new\(15, 245, 100, 60\)' 'real live blue capsule fixed pixel region'
+Match-Required $alter 'firstPostCount == secondPostCount' 'two unchanged CLI post-receipt samples'
+Match-Required $alter 'receiptRetryUsed = true' 'only one explicit managed receive input retry'
+Match-Required $alter 'CanRetryManagedBlueReceipt' 'retry requires exact unchanged whole lane and blue UI'
+Match-Required $alter 'HasCollectPromptAsync\(finalFrame, plan, directive, ct\)' 'durable F02 guard stays before irreversible receive'
 # 1d) V3.1.51 receipt state is separated from the legacy teal move-button detector.
 Match-Required $alter 'receiptMode = false' 'facility travel exposes an explicit receipt-only state mode'
 Match-Required $alter 'receiptMode: true' 'receipt callers opt into receipt-only travel state handling'
