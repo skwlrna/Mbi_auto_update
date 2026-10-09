@@ -287,6 +287,11 @@ try
           CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 2),
         "F01 compiled policy rejects uncorrelated OCR title misses, CLI-only loading and missing move input");
     var enter = ScreenCalls("EnterFacilityAsync", 3);
+    Check(Has(enter, "HasManagedKEntryBlockingModal") &&
+          Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "RequireManagedIdleAsync") &&
+          Has(enter, "Capture"),
+        "V3.1.71 compiled F9 K has modal-shape veto + fresh second field HUD + CLI idle guard");
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
     Check(Has(travel, "RequireManagedIdleAsync") &&
@@ -668,6 +673,45 @@ try
             Color.FromArgb(37, 44, 59));
         Check(!PixelGate("HasManagedFacilityTravelConfirmationVisual", missingConfirm),
             "V3.1.69 slate dialog without positive green confirm stays blocked");
+    }
+
+    // V3.1.71 manager F9 K menu: actual 06:15 field is green foliage
+    // with a gold upper-right minimap and teal bottom-left K skill HUD.
+    // The legacy generic green detector may see the foliage as a modal;
+    // new F9-K detector may NEVER do so without a slate panel+confirm.
+    using (var grassyField = BlackFrame())
+    using (var realKModal = BlackFrame())
+    using (var unknownTransition = BlackFrame())
+    {
+        Paint(grassyField, new Rectangle(300, 340, 480, 560),
+            Color.FromArgb(104, 184, 67));
+        Paint(grassyField, new Rectangle(680, 116, 104, 13),
+            Color.FromArgb(215, 174, 56));
+        Paint(grassyField, new Rectangle(21, 880, 48, 46),
+            Color.FromArgb(0, 190, 145));
+        Check(PixelGate("HasBottomConfirmationModal", grassyField) &&
+              !PixelGate("HasManagedKEntryBlockingModal", grassyField) &&
+              PixelGate("HasManagedKEntryFieldHudVisual", grassyField),
+            "V3.1.71 06:15 field foliage false green-popup is explicitly excluded from F9 K block");
+
+        Paint(realKModal, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Paint(realKModal, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasManagedKEntryBlockingModal", realKModal) &&
+              !PixelGate("HasManagedKEntryFieldHudVisual", realKModal),
+            "V3.1.71 19:35 authentic slate popup plus wide confirm blocks managed K");
+
+        Check(!PixelGate("HasManagedKEntryBlockingModal", unknownTransition) &&
+              !PixelGate("HasManagedKEntryFieldHudVisual", unknownTransition),
+            "V3.1.71 unknown/blank UI cannot authorize K without positive field HUD");
+        // Real modal over a still-visible field HUD must stay blocked.
+        Paint(grassyField, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Paint(grassyField, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasManagedKEntryBlockingModal", grassyField),
+            "V3.1.71 actual popup takes precedence over field minimap and K icon");
     }
 
     using (var receive = BlackFrame())
