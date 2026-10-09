@@ -93,18 +93,22 @@ Check(!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         false, true, false, false, false),
     "F04 unrecognized green/travel/facility/unknown CLI may not authorize Space");
 
-// 2026-10-09 real 07:00 screenshot: OCR can miss a genuine completed
-// result. Manager may substitute three reward-layout anchors ONLY after a
-// freshly proven 7->0 facility receipt and known non-travel CLI state.
+// 2026-10-09 07:00 cyan cards and 18:13 gray unframed rewards are both
+// legitimate completion screens. Managed fallback requires a fresh full-lane
+// CLI 7->0 receipt, green confirmation, no travel/facility and known idle;
+// OCR or cyan-only anchors must not be the deciding veto.
 Check(AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         true, false, true, true, false, false, false) &&
       AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         true, true, false, true, false, false, false),
     "F04 visual reward layout OR title OCR confirms genuine result after CLI empty lane");
+Check(AlteringReceiptPolicy.CanCloseManagedCompletionResult(
+        true, false, false, true, false, false, false),
+    "F04 18:13 gray rewards: manager accepts full 7->0 plus green/idle without title OCR or cyan anchors");
 Check(!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         true, false, true, false, false, false, false) &&
       !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
-        true, false, false, true, false, false, false) &&
+        true, false, false, false, false, false, false) &&
       !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         true, false, true, true, true, false, false) &&
       !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
@@ -117,7 +121,7 @@ Check(!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         false, false, true, true, false, false, false) &&
       !AlteringReceiptPolicy.CanCloseManagedCompletionResult(
         true, true, false, false, false, false, false),
-    "F04 visual fallback blocks no CLI receipt, absent layout, non-result green, travel or unknown activity");
+    "F04 manager fallback blocks no CLI receipt, missing green, facility, travel, or unknown activity");
 
 Check(AlteringReceiptPolicy.CanConfirmCompletion(true, false, false, false),
     "real altering completion result can authorize confirmation");
