@@ -287,7 +287,9 @@ try
     // method. Inspect that compiled production body, not the thin old overload.
     var collect = ScreenCalls("CollectAsyncAtBoundary", 4);
     Check(Has(ScreenCalls("CollectAsync", 3), "CollectAsyncAtBoundary") &&
-          Count(collect, "WaitForCollectPromptAsync") >= 2 &&
+          Count(collect, "WaitForCollectPromptAsync") == 2 &&
+          Has(collect, "CanRetryManagedBlueReceipt") &&
+          Count(collect, "TapFresh") == 2 &&
           Has(collect, "TravelToFacilityAsync") &&
           Has(collect, "ConfirmCompletionResultAsync") &&
           Has(collect, "AfterVerifiedFacilityEntry") &&
@@ -306,6 +308,36 @@ try
         "F02 compiled input ordering: durable boundary -> fresh all-work prompt -> receive Space");
     Check(Has(collect, "RequireManagedIdleAsync"),
         "F03 actual blue receive Space has fresh manager idle gate");
+    // V3.1.66: compiled managed receipt keeps only a single pre-boundary
+    // blue+whole-lane check and F02's one final post-boundary recheck.
+    // The two legacy WaitForCollectPrompt calls are in Automatic-only branch.
+    Check(Has(collect, "CanRetryManagedBlueReceipt") &&
+          Count(collect, "ConfirmCompletionResultAsync") == 2 &&
+          Count(collect, "TapFresh") == 2 &&
+          Has(collect, "TryFacilityWorkCountAsync") &&
+          Has(collect, "HasCollectButtonVisual"),
+        "V3.1.66 compiled managed blue receipt retries at most once after unchanged CLI count");
+    Check(CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 0, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 6, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, null, true, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, false, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, false, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, true, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, false, null, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              true, 7, 7, true, true, true, true, false, false, true) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
+              false, 7, 7, true, true, true, true, false, false, false),
+        "V3.1.66 retry only for exact unchanged whole queue plus fresh blue onsite and idle");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
@@ -532,6 +564,17 @@ try
             beforeMove, afterMove, new Rectangle(15, 205, 155, 65), 3, 24 })!;
         Check(flicker <= .012,
             "V3.1.65 minor pixel flicker is not false button disappearance");
+    }
+
+    using (var receive = BlackFrame())
+    {
+        // Actual V3.1.65 failure screenshot: blue capsule at y~260, not y~330.
+        Paint(receive, new Rectangle(25, 258, 80, 28), Color.FromArgb(25, 108, 175));
+        Check(PixelGate("HasCollectButtonVisual", receive),
+            "V3.1.66 actual live 800x1000 blue collect button row is in recognition ROI");
+        using var missing = BlackFrame();
+        Check(!PixelGate("HasCollectButtonVisual", missing),
+            "V3.1.66 ROI stays negative when blue collect control absent");
     }
 
     using (var empty = BlackFrame())
