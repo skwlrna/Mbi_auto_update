@@ -322,7 +322,9 @@ jobs:
              $screen -notmatch 'width >= 90 && height >= 18'){throw 'facility move teal-shape detector missing'}
           if($screen -notmatch '설비로 이동 고정좌표 클릭' -or
              $screen -notmatch 'HasFacilityMoveButtonPositiveEvidenceAsync' -or
-             $screen -notmatch '입력 1회 고정 · 재클릭 금지 · 품목 선택 전 실행'){throw 'fixed one-shot move click/positive-evidence trace missing'}
+             $screen -notmatch '첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능 · 품목 선택 전 실행' -or
+             $screen -notmatch 'ShouldRetryUnchangedFixedMove' -or
+             $screen -notmatch 'MeasureVisualChangeRatio'){throw 'fixed move pixel confirmation and bounded retry missing'}
           if ($screen -match 'ConfirmFacilityTravelAsync') { throw 'facility travel must not use the obsolete Space confirmation flow' }
           $queue = [regex]::Match($screen, 'public async Task QueueAsync[\s\S]*?(?=\r?\n    private async Task RecoverRemoteDetailToOnsiteAsync)').Value
           $remoteRecovery = [regex]::Match($screen, 'private async Task RecoverRemoteDetailToOnsiteAsync[\s\S]*?(?=\r?\n    private static bool HasBottomConfirmationModal)').Value
@@ -415,10 +417,12 @@ jobs:
           if ($screen -match 'ClickFacilityMoveWithRetryAsync' -or
               $travelConfirmPolicy -match 'MaxMoveClickAttempts|InitialMoveClickSettleDelay|MoveReactionProbeDelay') { throw 'misdiagnosed facility move re-click/timing logic returned' }
           if ($travel -notmatch 'ShouldConfirmAfterMoveClick' -or
-              $travel -notmatch '입력 1회 고정 · 재클릭 금지' -or
+              $travel -notmatch '첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능' -or
+              $travel -notmatch 'HasVerifiedFixedMovePixelDisappearance' -or
+              $travel -notmatch 'ShouldRetryUnchangedFixedMove' -or
               $travel -notmatch '이동 확인창 감지' -or
               $travel -notmatch '이동 확인창 닫힘 확인' -or
-              $travel -notmatch '추가 설비 이동 클릭 없이 정지') { throw 'one-shot move plus continuous travel-popup handling missing' }
+              $travel -notmatch '추가 설비 이동 재클릭 없이 정지') { throw 'one-shot move plus continuous travel-popup handling missing' }
           if ($screen -notmatch 'FacilityTravelDialog = new\(80, 260, 640, 700\)' -or
               $screen -notmatch 'FacilityTravelConfirmVisual = new\(120, 340, 560, 620\)' -or
               $screen -notmatch 'HasFacilityTravelConfirmationVisual') { throw 'center-screen travel popup detector missing' }
