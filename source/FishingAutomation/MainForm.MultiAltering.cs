@@ -166,31 +166,51 @@ public sealed partial class MainForm
                 dependencyScheduler: dependencyScheduler,
                 laneState: laneState);
 
-            visualAltering.Log += text => Ui(() => _log.Write(text));
-            visualGathering.Log += text => Ui(() => _log.Write(text));
-            screen.Log += text => Ui(() => _log.Write(text));
-            gatheringScreen.Log += text => Ui(() => _log.Write(text));
+            visualAltering.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                NoteMultiAlteringAction(text);
+            });
+            visualGathering.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                NoteMultiAlteringAction(text);
+            });
+            screen.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                NoteMultiAlteringAction(text);
+            });
+            gatheringScreen.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                NoteMultiAlteringAction(text);
+            });
             dependencyScheduler.Log += text => Ui(() =>
             {
                 _log.Write(text);
+                NoteMultiAlteringAction(text);
                 SetStatus(text.Replace("[중간재료 스케줄] ", ""), Blue);
                 RefreshProductionDashboard();
             });
             laneState.Log += text => Ui(() =>
             {
                 _log.Write(text);
+                NoteMultiAlteringAction(text);
                 SetStatus(text.Replace("[시설 소유권] ", ""), Blue);
                 RefreshProductionDashboard();
             });
             consumptionLedger.Log += text => Ui(() =>
             {
                 _log.Write(text);
+                NoteMultiAlteringAction(text);
                 SetStatus(text.Replace("[다중가공] ", ""), Blue);
                 RefreshProductionDashboard();
             });
             resolver.Log += text => Ui(() =>
             {
                 _log.Write(text);
+                NoteMultiAlteringAction(text);
                 SetStatus(text.Replace("[재료 해결] ", ""), Blue);
                 RefreshProductionDashboard();
             });
@@ -277,6 +297,7 @@ public sealed partial class MainForm
 
                 progress[key] = restoredConfirmed;
                 SeedAlteringStatus(plan, restoredConfirmed, restoredEta);
+                SeedMultiAlteringTelegramItem(plan, session.QueuedWorks, session.Stage);
                 _log.Write(
                     $"[다중가공] 새 목표 시작 상태 · {plan.DisplayName} " +
                     $"{restoredConfirmed:N0}/{plan.TargetQuantity:N0} · " +
@@ -286,6 +307,7 @@ public sealed partial class MainForm
                 automation.Log += text => Ui(() =>
                 {
                     _log.Write(text);
+                    NoteMultiAlteringAction(text);
                     SetStatus(text.Replace("[자동 가공] ", ""), Blue);
                     RefreshProductionDashboard();
                 });
@@ -350,6 +372,7 @@ public sealed partial class MainForm
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
+                NoteMultiAlteringAction(text);
                 SetStatus(text.Replace("[다중가공] ", ""), Blue);
                 RefreshProductionDashboard();
             });
@@ -387,18 +410,21 @@ public sealed partial class MainForm
             _productionCurrentQuantity = _productionTargetQuantity;
             _productionProgressSummary =
                 $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 혼합 배치 운용 완료";
+            NoteMultiAlteringAction("모든 다중가공 작업 완료 · 수령 및 확인 완료");
             _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 혼합 배치 병렬 운용");
             SetStatus("다중가공 완료", Green);
 
         }
         catch (OperationCanceledException)
         {
+            NoteMultiAlteringAction("F10 중지 요청 · 다중가공 실행 중단");
             _log.Write("[다중가공] F10 정지 · 등록/이동 중단 · " +
                 "이번 실행 기록 보존(자동 이어하기 없음) · 다음 F9는 새 작업");
             SetStatus("다중가공 정지", Color.DarkOrange);
         }
         catch (Exception ex)
         {
+            NoteMultiAlteringAction("다중가공 오류 · " + ex.Message);
             _runError = ex.Message;
             _logExpanded = true;
             ApplyLogVisibility();

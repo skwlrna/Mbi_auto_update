@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.76"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.77"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.76</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3176-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.76"')) {
+          if ($p -notmatch '<Version>3\.1\.77</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3177-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.77"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -689,12 +689,17 @@ jobs:
               $screen -notmatch 'HasFixedProcessingHubVisual' -or
               $managerEntry -notmatch 'CanAuthorizeManagedKEntry' -or
               $managerEntry -notmatch 'DetectManagedWorldHudTemplates' -or
+              $managerEntry -notmatch 'IsManagedKReentryWithinLimit' -or
+              $managerEntry -notmatch 'Stopwatch.StartNew\(\)' -or
+              $managerEntry -notmatch 'previousHud = currentHud' -or
+              $managerEntry -notmatch 'Task.Delay\(180, ct\)' -or
+              $screen -notmatch 'ManagedKReentryHudTimeout = TimeSpan.FromSeconds\(2\)' -or
               $managerEntry -match 'HasManagedKEntryFieldHudVisual' -or
               $screen -notmatch 'abyss/templates/outside_home_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_end_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_k_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_i_v75.png') {
-              throw 'V3.1.75 F9 K requires first-press CLI+modal guard and template-verified re-entry, no old colour veto'
+              throw 'V3.1.77 F9 K must recheck two consecutive 3/4 HUD frames for up to 2s with modal/menu/CLI safety'
           }
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or

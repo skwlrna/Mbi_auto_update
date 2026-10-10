@@ -17,6 +17,8 @@
     <Compile Include="../../source/FishingAutomation/MultiAlteringBatchStore.cs" Link="MultiAlteringBatchStore.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringSession.cs" Link="AlteringSession.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringStatus.cs" Link="AlteringStatus.cs" />
+    <Compile Include="../../source/FishingAutomation/TelegramCommandParser.cs" Link="TelegramCommandParser.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringTelegramStatus.cs" Link="MultiAlteringTelegramStatus.cs" />
     <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/LivingSkillGatheringCatalog.cs" Link="LivingSkillGatheringCatalog.cs" />
