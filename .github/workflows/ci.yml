@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.81"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.82"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.81</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3181-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.81"')) {
+          if ($p -notmatch '<Version>3\.1\.82</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3182-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.82"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -90,6 +90,27 @@ jobs:
               $tests -notmatch 'latest F9 only' -or
               $tests -notmatch 'foreign cancellation blocks registration') {
             throw 'F9 one-button latest resume and safe-state verification contract missing'
+          }
+
+      - name: V3.1.82 copper ore and single-character F9 resume safety
+        shell: pwsh
+        run: |
+          $catalog = Get-Content source/FishingAutomation/LivingSkillGatheringCatalog.cs -Raw
+          $policy = Get-Content source/FishingAutomation/MultiAlteringRecentResume.cs -Raw
+          $run = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $ui = Get-Content source/FishingAutomation/MainForm.MultiAlteringResume.cs -Raw
+          $tests = Get-Content tests/n02-resume/Program.cs -Raw
+          if (-not $catalog.Contains('["동 광석"] = Source("광석 캐기", "동 광맥")') -or
+              $catalog.Contains('["돌 광석"] = Source("광석 캐기", "동 광맥")') -or
+              $policy -notmatch 'bool allowSingleCharacter = false' -or
+              $policy -notmatch 'allowSingleCharacter \|\|' -or
+              $ui -notmatch 'confirmedSingleCharacter = true' -or
+              $ui -notmatch 'MessageBoxDefaultButton.Button2' -or
+              $run -notmatch 'confirmedSingleCharacterResume' -or
+              $run -notmatch 'allowSingleCharacter: singleCharacterMode && confirmedSingleCharacterResume' -or
+              $tests -notmatch 'one-character realm-only resume requires explicit authorization' -or
+              $tests -notmatch 'copper ore maps to copper vein') {
+            throw 'V3.1.82 ore correction or guarded one-character resume missing'
           }
 
       - name: Updater rollback regression tests
