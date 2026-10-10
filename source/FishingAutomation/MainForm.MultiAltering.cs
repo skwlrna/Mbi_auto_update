@@ -10,7 +10,8 @@ public sealed partial class MainForm
 
     private async Task StartMultiAlteringAsync(
         IReadOnlyList<AlteringPlan> plans, string? resumeDirectory = null,
-        string? expectedResumeBatchId = null)
+        string? expectedResumeBatchId = null,
+        bool confirmedSingleCharacterResume = false)
     {
         if (_multiAlteringRunning)
             return;
@@ -92,6 +93,9 @@ public sealed partial class MainForm
             string sessionDir;
             if (isResume)
             {
+                if (singleCharacterMode && !confirmedSingleCharacterResume)
+                    throw new InvalidOperationException(
+                        "1캐릭터 전용 이어하기는 사용자의 동일 캐릭터 확인이 필요합니다 · 자동 시작 차단");
                 var latest = await Task.Run(
                     () => MultiAlteringRecentResume.Latest(mainSessionDir), token);
                 if (latest is null || latest.BatchId != expectedResumeBatchId ||
@@ -104,12 +108,13 @@ public sealed partial class MainForm
                         "이어하기 최근 기록이 변경됐습니다 · 재검증 전 자동 시작 차단");
                 // Verification under the root lease, BEFORE any game-window input.
                 await MultiAlteringRecentResume.VerifyAsync(
-                    latest, identity.Baseline, rawAlteringData, token);
+                    latest, identity.Baseline, rawAlteringData, token,
+                    allowSingleCharacter: singleCharacterMode && confirmedSingleCharacterResume);
                 sessionDir = latest.Directory;
                 batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
                 await batchStore.OpenAsync(
                     plans, identity.Baseline, rawAlteringData, token,
-                    allowSingleCharacter: false);
+                    allowSingleCharacter: singleCharacterMode && confirmedSingleCharacterResume);
                 if (!batchStore.IsResuming || batchStore.BatchId != latest.BatchId)
                     throw new InvalidOperationException(
                         "이어하기 기존 배치 대신 새 배치를 생성하려 했습니다 · 안전 정지");
