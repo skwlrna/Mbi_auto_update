@@ -931,11 +931,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         bool verified = CanAuthorizeManagedKEntry(
                             firstEntry, previousHud.Matched, currentHud.Matched,
                             actualModal, unexpectedMenu);
-                        if (firstEntry || (verified &&
-                            started.Elapsed < TimeSpan.FromSeconds(2)))
+                        bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
+                        if (firstEntry || (verified && withinLimit))
                             break;
 
-                        if (started.Elapsed >= TimeSpan.FromSeconds(2))
+                        if (!withinLimit)
                             Fail(freshField,
                                 "관리 가공 K 재진입 HUD 이미지 3/4·2프레임 " +
                                 "2초 내 연속 확인 실패 · 입력 없이 정지");
@@ -1771,6 +1771,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         bool popupVisible, bool processingMenuVisible)
         => !popupVisible && !processingMenuVisible &&
            (firstEntry || (firstHudMatches >= 3 && secondHudMatches >= 3));
+
+    // Bounded visual stabilization after Esc; clock runs continuously from
+    // the first unknown-field frame and is never reset on weak HUD matches.
+    internal static readonly TimeSpan ManagedKReentryHudTimeout = TimeSpan.FromSeconds(2);
+
+    internal static bool IsManagedKReentryWithinLimit(TimeSpan elapsed)
+        => elapsed >= TimeSpan.Zero && elapsed < ManagedKReentryHudTimeout;
 
     // V3.1.75: F9 re-entry uses the SAME four 800x1000 grayscale, multi-scale
     // template assets/thresholds/ROIs as Abyss outside confirmation.
