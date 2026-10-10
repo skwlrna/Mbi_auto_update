@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.75"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.76"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.75</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3175-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.75"')) {
+          if ($p -notmatch '<Version>3\.1\.76</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3176-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.76"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -414,6 +414,17 @@ jobs:
               $travel -notmatch 'FinalOnsiteRecheckDelay' -or
               $travel -notmatch '설비 도착 후보 후행 재확인 실패' -or
               $travel -notmatch 'CLI AutoTraveling=false') { throw 'stable delayed facility arrival verification missing' }
+          # V3.1.76: managed F9 travel is bounded by elapsed time, not
+          # 120 polls; Automatic single-altering retains its old cap.
+          if ($travelConfirmPolicy -notmatch 'ManagedTravelTimeout = TimeSpan.FromMinutes\(5\)' -or
+              $travelConfirmPolicy -notmatch 'IsManagedTravelWithinLimit' -or
+              $travel -notmatch 'Stopwatch.StartNew\(\)' -or
+              $travel -notmatch 'managedTravelClock!.Elapsed' -or
+              $travel -notmatch 'IsManagedTravelWithinLimit' -or
+              $travel -notmatch 'attempt < 120' -or
+              $travel -notmatch '최대 .*분 경과') {
+              throw 'V3.1.76 managed facility travel must be monotonic five minutes, with original onsite and Automatic safeguards'
+          }
           if ($screen -match 'ClickFacilityMoveWithRetryAsync' -or
               $travelConfirmPolicy -match 'MaxMoveClickAttempts|InitialMoveClickSettleDelay|MoveReactionProbeDelay') { throw 'misdiagnosed facility move re-click/timing logic returned' }
           if ($travel -notmatch 'ShouldConfirmAfterMoveClick' -or
