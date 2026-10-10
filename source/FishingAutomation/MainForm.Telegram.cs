@@ -7,7 +7,12 @@ public sealed partial class MainForm
         switch (command)
         {
             case "/status":
-                return GetRemoteStatus();
+            case "상태":
+                string summary = GetRemoteStatus();
+                string detail = await GetMultiAlteringTelegramDetailsAsync();
+                return string.IsNullOrWhiteSpace(detail)
+                    ? summary
+                    : summary + "\n\n" + detail;
 
             case "/item":
                 return LootStats.GetTelegramReport();
