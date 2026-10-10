@@ -51,6 +51,14 @@ internal sealed class MultiAlteringWaitWatchdog
             .DefaultIfEmpty(long.MaxValue)
             .Min();
 
+        // Idle facilities have no active work to time. The owner ledger still
+        // rejects an unexplained queue shrink; an empty wait is not progress.
+        if (works.Count == 0)
+        {
+            _last.Remove(facility);
+            return;
+        }
+
         DateTimeOffset now = _now();
         if (!_last.TryGetValue(facility, out var previous) ||
             !string.Equals(shape, previous.Shape, StringComparison.Ordinal))
@@ -339,7 +347,10 @@ internal sealed class MultiAlteringCoordinator
                     var afterFacilityWorks = works
                         .Where(x => x.FacilityName == facility)
                         .ToArray();
-                    _laneState?.Observe(facility, afterFacilityWorks, allowShrink: true);
+                    // Guarded receipt callbacks must reconcile their own verified
+                    // shrink before control returns here. An unproven drop during
+                    // runBatch must not be silently accepted as a valid receipt.
+                    _laneState?.Observe(facility, afterFacilityWorks, allowShrink: false);
                     int afterCount = afterFacilityWorks.Length;
                     var registrationAfter = _laneState?.Snapshot(facility);
                     bool confirmedRegistration =
