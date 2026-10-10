@@ -184,7 +184,7 @@ public sealed class TelegramNotifier : IDisposable
         string raw = text?.Trim() ?? "";
         if (raw.Equals("상태", StringComparison.Ordinal))
             return "/status";
-        if (!raw.StartsWith('/', StringComparison.Ordinal))
+        if (!raw.StartsWith('/'))
             return null;
         string command = raw.Split(' ', 2)[0].Split('@', 2)[0].ToLowerInvariant();
         return command is "/status" or "/stop" or "/restart" or
