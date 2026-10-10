@@ -303,6 +303,10 @@ internal sealed class MultiAlteringCoordinator
 
                     var plan = plansByFacility[facility][index];
                     int beforeCount = facilityWorks.Length;
+                    // Snapshot the facility-specific durable registration evidence.
+                    // CLI work counts have no stable work IDs: a guarded receipt
+                    // followed by registration can still look like 1 -> 1.
+                    var registrationBefore = _laneState?.Snapshot(facility);
 
                     // Keep the existing proven one-slot engine and receipt
                     // guards. Prepare materials just once, before the FIRST
@@ -337,12 +341,26 @@ internal sealed class MultiAlteringCoordinator
                         .ToArray();
                     _laneState?.Observe(facility, afterFacilityWorks, allowShrink: true);
                     int afterCount = afterFacilityWorks.Length;
+                    var registrationAfter = _laneState?.Snapshot(facility);
+                    bool confirmedRegistration =
+                        registrationBefore is not null &&
+                        registrationAfter is not null &&
+                        (registrationAfter.MainRegisteredWorks > registrationBefore.MainRegisteredWorks ||
+                         registrationAfter.IntermediateRegisteredWorks > registrationBefore.IntermediateRegisteredWorks);
 
-                    if (planCompleted || afterCount != beforeCount)
+                    if (planCompleted || confirmedRegistration || afterCount != beforeCount)
                     {
-                        // Count changes or confirmed completion prove a manager
-                        // action, not merely another idle poll.
+                        // Only verified manager progress refreshes this facility:
+                        // CLI-confirmed NoteRegistration, a guarded queue change
+                        // (including verified receipt), or durable plan completion.
+                        // Never reset just because RunBatch returned or time passed.
                         idleWatchdog.ConfirmManagerProgress(facility);
+                        if (confirmedRegistration && afterCount == beforeCount && !planCompleted)
+                            Log?.Invoke(
+                                $"[다중가공] {facility.Replace(" 시설", "")} 정체 감시 초기화 · " +
+                                $"CLI 확인 신규 등록 · 시설 작업수 {beforeCount}->{afterCount} 동일 · " +
+                                $"메인등록 {registrationBefore!.MainRegisteredWorks}->{registrationAfter!.MainRegisteredWorks} · " +
+                                $"중간재료등록 {registrationBefore.IntermediateRegisteredWorks}->{registrationAfter.IntermediateRegisteredWorks}");
                         idleSelections = 0;
                     }
                     else
