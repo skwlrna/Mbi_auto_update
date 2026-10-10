@@ -1,4 +1,5 @@
 using FishingAutomation;
+using System.Diagnostics;
 
 namespace DungeonVisionBot;
 
@@ -83,7 +84,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             token => _data.ItemCountAsync(plan.DisplayName, token),
             token => StartLifeSkillHundredAsync(source, token),
             (before, targetTotal, token) => WaitForLifeSkillHundredStopOrTargetAsync(
-                plan.DisplayName, before, targetTotal, TimeSpan.FromMinutes(30), token));
+                plan.DisplayName, before, targetTotal, token));
         automation.Log += text => Log?.Invoke(text);
 
         try
@@ -725,18 +726,17 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         string displayName,
         long before,
         long targetTotal,
-        TimeSpan absoluteTimeout,
         CancellationToken ct)
     {
-        DateTime startedAt = DateTime.UtcNow;
-        DateTime deadline = startedAt + absoluteTimeout;
-        DateTime lastProgressAt = startedAt;
+        // Monotonic elapsed time; only actual gains renew the progress window.
+        var watch = Stopwatch.StartNew();
+        TimeSpan lastProgressElapsed = TimeSpan.Zero;
         long last = before;
         bool sawActive = false;
         bool sawGain = false;
         int stableIdle = 0;
 
-        while (DateTime.UtcNow < deadline)
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
             var activity = await _data.ActivityAsync(ct);
@@ -747,17 +747,17 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             long current = await _data.ItemCountAsync(displayName, ct);
             long gain = current - before;
 
-            if (current < before)
+            if (current < before || current < last)
                 throw new InvalidOperationException(
                     $"{displayName} 생활 스킬 100회 중 재고가 감소해 정지합니다.");
 
-            if (current != last)
+            if (current > last)
             {
                 Log?.Invoke(
                     $"[대량 채집] {displayName} 100회 수량 변화 · {before}→{current} · +{gain}");
                 last = current;
-                lastProgressAt = DateTime.UtcNow;
-                sawGain = gain > 0;
+                lastProgressElapsed = watch.Elapsed;
+                sawGain = true;
             }
 
             bool active = IsOwnedLifeSkillActivity(activity);
@@ -769,7 +769,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             // inventory gain ever appears.
             if (!sawActive &&
                 !sawGain &&
-                DateTime.UtcNow - startedAt >= TimeSpan.FromSeconds(90))
+                watch.Elapsed >= TimeSpan.FromSeconds(90))
                 throw new InvalidOperationException(
                     $"{displayName} 가까운 위치 전환 후 90초 동안 생활 스킬 이동/채집 상태나 재고 증가를 확인하지 못했습니다.");
 
@@ -803,8 +803,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 stableIdle++;
                 if ((sawActive && stableIdle >= 3) ||
                     (!sawActive &&
-                     DateTime.UtcNow - startedAt >= TimeSpan.FromSeconds(20) &&
-                     DateTime.UtcNow - lastProgressAt >= TimeSpan.FromSeconds(12)))
+                     watch.Elapsed >= TimeSpan.FromSeconds(20) &&
+                     watch.Elapsed - lastProgressElapsed >= TimeSpan.FromSeconds(12)))
                 {
                     _stage.Move(ProductionStage.VerifyInventory, $"{displayName} 100회 자연 종료 · +{gain}");
                     return false;
@@ -815,22 +815,25 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 stableIdle = 0;
             }
 
-            // Do not fail merely because a 100-action cycle is slow. The live
-            // V3.0.32 log was still gaining logs at the old 10-minute boundary.
-            // Only a long no-progress period while the action remains active is a
-            // real stall; the absolute timeout is a final safety bound.
-            if (sawGain &&
-                DateTime.UtcNow - lastProgressAt >= TimeSpan.FromMinutes(5))
+            // Verified gains may continue beyond 30m; a 5m stall still stops.
+            // A separate 6h hard ceiling never resets with progress.
+            var limit = LifeSkillGatheringTimeoutPolicy.Evaluate(
+                watch.Elapsed, lastProgressElapsed, sawGain);
+            if (limit == LifeSkillGatheringTimeoutStatus.Stalled)
                 throw new InvalidOperationException(
                     $"{displayName} 생활 스킬 채집 수량이 5분 이상 증가하지 않아 정지합니다. " +
                     $"현재 {current}, 이번 주기 +{gain}.");
+            if (limit == LifeSkillGatheringTimeoutStatus.NoProgress)
+                throw new InvalidOperationException(
+                    $"{displayName} 생활 스킬 채집 시작 후 30분 동안 수량 증가를 확인하지 못했습니다. " +
+                    $"수량 {before}→{current}.");
+            if (limit == LifeSkillGatheringTimeoutStatus.HardLimit)
+                throw new InvalidOperationException(
+                    $"{displayName} 생활 스킬 채집이 6시간 최종 안전 한도를 넘었습니다. " +
+                    $"수량 {before}→{current}.");
 
             await Task.Delay(1000, ct);
         }
-
-        long finalCount = await _data.ItemCountAsync(displayName, ct);
-        throw new InvalidOperationException(
-            $"{displayName} 생활 스킬 채집이 30분 안전 한도를 넘었습니다. 수량 {before}→{finalCount}.");
     }
 
     private static bool IsOwnedLifeSkillActivity(GatheringActivity activity)
