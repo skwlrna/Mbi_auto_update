@@ -16,6 +16,7 @@
     <Compile Include="../../source/FishingAutomation/GatheringNavigationPolicy.cs" Link="GatheringNavigationPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringCliData.cs" Link="GatheringCliData.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs" Link="LifeSkillBulkGatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/LifeSkillGatheringTimeoutPolicy.cs" Link="LifeSkillGatheringTimeoutPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillProfilePolicy.cs" Link="LifeSkillProfilePolicy.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillStopPolicy.cs" Link="LifeSkillStopPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillListLayout.cs" Link="LifeSkillListLayout.cs" />
