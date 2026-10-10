@@ -910,8 +910,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         Log?.Invoke("[자동 가공] K 직전 가공 메뉴가 새로 표시됨 · 중복 K 생략, 메뉴 재판정");
                         continue;
                     }
-                    if (!firstEntry &&
-                        (firstHud.Matched < 3 || secondHud.Matched < 3))
+                    if (!CanAuthorizeManagedKEntry(
+                            firstEntry, firstHud.Matched, secondHud.Matched,
+                            actualModal, unexpectedMenu))
                         Fail(freshField,
                             "관리 가공 K 재진입 HUD 이미지 3/4·2프레임 미확인 · 입력 없이 정지");
                 }
@@ -1734,6 +1735,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // rectangular green confirm button, as in the 19:35 real modal screenshot.
     private static bool HasManagedKEntryBlockingModal(Bitmap frame)
         => HasManagedFacilityTravelConfirmationVisual(frame);
+
+    // K is safe only in an idle, modal-free and non-menu world context.
+    // CLI idle is checked separately IMMEDIATELY before the real input.
+    internal static bool CanAuthorizeManagedKEntry(
+        bool firstEntry, int firstHudMatches, int secondHudMatches,
+        bool popupVisible, bool processingMenuVisible)
+        => !popupVisible && !processingMenuVisible &&
+           (firstEntry || (firstHudMatches >= 3 && secondHudMatches >= 3));
 
     // V3.1.75: F9 re-entry uses the SAME four 800x1000 grayscale, multi-scale
     // template assets/thresholds/ROIs as Abyss outside confirmation.
