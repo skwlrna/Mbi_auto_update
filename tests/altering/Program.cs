@@ -4,6 +4,16 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.1.76: F9 long-distance facility travel expires by elapsed time,
+ // not 120 UI/CLI poll iterations. No extension on loading or confirmation.
+Check(AlteringFacilityTravelConfirmPolicy.ManagedTravelTimeout == TimeSpan.FromMinutes(5) &&
+      AlteringFacilityTravelConfirmPolicy.IsManagedTravelWithinLimit(TimeSpan.Zero) &&
+      AlteringFacilityTravelConfirmPolicy.IsManagedTravelWithinLimit(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59)) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedTravelWithinLimit(TimeSpan.FromMinutes(5)) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedTravelWithinLimit(TimeSpan.FromMinutes(6)) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedTravelWithinLimit(TimeSpan.FromSeconds(-1)),
+    "V3.1.76 F9 managed travel allows <5 elapsed minutes and times out at >=5");
+
 Check(AlteringText.UniqueOcrAlias("강철괴", new[]{"강철괴", "합금강괴"}) == "강철과", "specific OCR alias is catalog checked");
 Check(AlteringText.UniqueOcrAlias("강철괴", new[]{"강철괴", "강철과"}) is null && AlteringText.UniqueOcrAlias("목재+", new[]{"목재+"}) is null, "ambiguous and unsupported OCR aliases blocked");
 Check(AlteringDetailPolicy.IsConfirmed(true, false, false, false),
