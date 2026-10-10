@@ -103,8 +103,8 @@ internal static class MultiAlteringRecentResume
         var plans = actual.Items.Select(s => new AlteringPlan(
             s.FacilityName, s.DisplayName, s.TargetQuantity,
             s.ProducedPerWork, false, s.RecipeOrdinal)).ToArray();
-        if (plans.Select(p => (p.FacilityName, p.OutputName))
-            .Distinct().Count() != plans.Length)
+        if (plans.Select(p => p.OutputName)
+            .Distinct(StringComparer.Ordinal).Count() != plans.Length)
             throw new InvalidOperationException(
                 "같은 시설의 동일 출력품이 여러 제법에 있어 저장된 작업 소유권을 분리할 수 없습니다.");
 
@@ -130,6 +130,10 @@ internal static class MultiAlteringRecentResume
                 throw new InvalidOperationException(
                     $"{plan.DisplayName}: 저장 이후 완성품 재고가 감소했거나 소비 기록과 불일치합니다 · 자동 복원 차단");
             long earned = current - session.BaselineQuantity;
+            if (earned > checked((long)session.QueuedWorks * plan.ProducedPerWork) ||
+                earned % plan.ProducedPerWork != 0)
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName}: 등록 기록으로 증명할 수 없는 완성품 증가 · 자동 이어하기 차단");
             long confirmed = Math.Clamp(earned, 0, plan.TargetQuantity);
             int completedEquivalent = (int)Math.Min(session.QueuedWorks,
                 earned / plan.ProducedPerWork);
