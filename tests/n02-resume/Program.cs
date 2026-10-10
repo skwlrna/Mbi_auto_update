@@ -887,6 +887,58 @@ static class Program
                 candidate, Identity, world, default), "RecoveryRequired");
             Check(world.Registered.Count == 0, "Pending click replayed an input");
         });
+        await Test("V3.1.82 copper ore maps to copper vein and not misspelled stone ore", async () =>
+        {
+            Check(LivingSkillGatheringCatalog.TryResolveBulk("동 광석", out var copper) &&
+                copper.Category == "광석 캐기" && copper.TargetName == "동 광맥",
+                "Copper ore was not mapped to the existing copper vein source");
+            Check(!LivingSkillGatheringCatalog.TryResolveBulk("돌 광석", out _),
+                "Misspelled stone ore alias must not silently select copper vein");
+            await Task.CompletedTask;
+        });
+        await Test("V3.1.82 one-character realm-only resume requires explicit authorization", async () =>
+        {
+            using var temp = new Temp();
+            var realm = new CliIdentityContext(null, null, null, "단일서버");
+            var anotherRealm = new CliIdentityContext(null, null, null, "다른서버");
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            string run = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            using (var batch = new MultiAlteringBatchStore(run))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, realm, world, default);
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                { QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress });
+                await world.QueueAsync(Wood, () => { }, default);
+            }
+            var recent = MultiAlteringRecentResume.Latest(temp.Path)!;
+            string before = File.ReadAllText(Path.Combine(run, "batch.json"));
+            int registered = world.Registered.Count;
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                recent, realm, world, default), "사용자 확인");
+            var checkedLines = await MultiAlteringRecentResume.VerifyAsync(
+                recent, realm, world, default, allowSingleCharacter: true);
+            Check(checkedLines.Count == 1 && checkedLines[0].LiveWorks == 1 &&
+                  checkedLines[0].AdditionalOutput == 90 && checkedLines[0].Confirmed == 0,
+                "Explicit single-character resume did not preserve registered work");
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                recent, anotherRealm, world, default, allowSingleCharacter: true),
+                "캐릭터");
+            Check(File.ReadAllText(Path.Combine(run, "batch.json")) == before &&
+                  world.Registered.Count == registered,
+                "Read-only realm-only verification altered game or manifest");
+            using var reopened = new MultiAlteringBatchStore(run);
+            await reopened.OpenAsync(new[] { Wood }, realm, world, default,
+                allowSingleCharacter: true);
+            Check(reopened.IsResuming && reopened.BatchId == recent.BatchId,
+                "Authorized realm-only resume incorrectly created a fresh batch");
+            world.Works.Clear();
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                recent, realm, world, default, allowSingleCharacter: true),
+                "게임 대기열");
+            Check(world.Registered.Count == registered,
+                "Mismatch in single-character mode led to duplicate registration");
+        });
         Console.WriteLine($"N02: {passed} deterministic tests passed; temporary files; fake game only.");
     }
 
