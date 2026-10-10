@@ -6,15 +6,15 @@ int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
 // Next-release Telegram status: only the exact Korean read-only alias is
 // accepted. Unsafe controls must remain explicit slash commands.
-Check(TelegramNotifier.ParseRemoteCommand("상태") == "/status" &&
-      TelegramNotifier.ParseRemoteCommand(" 상태 ") == "/status" &&
-      TelegramNotifier.ParseRemoteCommand("/status") == "/status" &&
-      TelegramNotifier.ParseRemoteCommand("/status@MabiAutoBot") == "/status" &&
-      TelegramNotifier.ParseRemoteCommand("/stop") == "/stop" &&
-      TelegramNotifier.ParseRemoteCommand("중지") is null &&
-      TelegramNotifier.ParseRemoteCommand("상태확인") is null &&
-      TelegramNotifier.ParseRemoteCommand("/상태") is null &&
-      TelegramNotifier.ParseRemoteCommand("상태 지금") is null,
+Check(TelegramCommandParser.Parse("상태") == "/status" &&
+      TelegramCommandParser.Parse(" 상태 ") == "/status" &&
+      TelegramCommandParser.Parse("/status") == "/status" &&
+      TelegramCommandParser.Parse("/status@MabiAutoBot") == "/status" &&
+      TelegramCommandParser.Parse("/stop") == "/stop" &&
+      TelegramCommandParser.Parse("중지") is null &&
+      TelegramCommandParser.Parse("상태확인") is null &&
+      TelegramCommandParser.Parse("/상태") is null &&
+      TelegramCommandParser.Parse("상태 지금") is null,
     "Telegram Korean 상태 is EXACT read-only /status alias; control commands remain slash-only");
 
 var telegramNow = DateTimeOffset.Now;
