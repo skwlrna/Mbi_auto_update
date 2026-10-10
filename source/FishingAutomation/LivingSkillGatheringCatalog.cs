@@ -47,7 +47,7 @@ internal static class LivingSkillGatheringCatalog
             ["철 광석"] = Source("광석 캐기", "철 광맥"),
             ["얼음"] = Source("광석 캐기", "얼음"),
             ["석탄"] = Source("광석 캐기", "석탄 광맥"),
-            ["돌 광석"] = Source("광석 캐기", "동 광맥"),
+            ["동 광석"] = Source("광석 캐기", "동 광맥"),
             ["백동 광석"] = Source("광석 캐기", "백동 광맥"),
             ["은 광석"] = Source("광석 캐기", "은 광맥"),
             ["운철 광석"] = Source("광석 캐기", "운철 광맥"),
