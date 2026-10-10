@@ -55,8 +55,6 @@ Match-Required $multiAlter 'facilityWorks\.All\(x => x\.IsCompleted\)' 'multi-al
 Match-Required $multiAlter 'prepared\.Add\(Key\(plan\)\)' 'active recipe preparation is performed once'
 Match-Required $multiAlter 'await preparePlan\(plan, ct\)' 'per-recipe materials are prepared before registration'
 Match-Required $multiAlter 'for \(int index = 0; index < facilityPlans.Length; index\+\+\)' 'first unfinished recipe is chosen in user order'
-Match-Required $startMulti 'preparePlan: PreparePlanMaterialsAsync' 'F9 routes material preparation through sequential manager'
-Match-Forbidden $startMulti 'materialPreflight.Count > 0' 'F9 no longer performs upfront all-item preflight'
 Match-Required $multiAlter 'runBatch\(plan, 1, ct\)' 'same-facility work remains one-slot under sequential selected recipe'
 Match-Required $multiAlter '같은 시설 여러 품목은 앞 품목 완료 후 다음 품목' 'sequential facility recipe behavior remains explicit'
 Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slot completion never causes a facility move'
@@ -424,6 +422,8 @@ Match-Required $alterTests '19:21 regression' '19:21 missed center-popup root ca
 # its own isolated durable ledger. Historical F05 is never discarded or loaded.
 $startAlter = Read-Source 'source/FishingAutomation/MainForm.Altering.cs'
 $startMulti = Read-Source 'source/FishingAutomation/MainForm.MultiAltering.cs'
+Match-Required $startMulti 'preparePlan: PreparePlanMaterialsAsync' 'F9 routes material preparation through sequential manager'
+Match-Forbidden $startMulti 'materialPreflight.Count > 0' 'F9 no longer performs upfront all-item preflight'
 $batchStore = Read-Source 'source/FishingAutomation/MultiAlteringBatchStore.cs'
 $productionPage = Read-Source 'source/FishingAutomation/MainForm.ProductionPage.cs'
 $f9Entry = Method-Block $startAlter 'private async Task StartAlteringAsync' '\r?\n        _starting = true;' 'F9 altering entry'
