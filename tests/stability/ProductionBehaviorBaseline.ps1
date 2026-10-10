@@ -111,7 +111,7 @@ Match-Required $alter '기존 2회/400ms/2회 중복 검사 생략' 'managed blu
 Match-Required $alter 'CollectVisualButton = new\(15, 245, 100, 60\)' 'real live blue capsule fixed pixel region'
 Match-Required $alter 'firstPostCount == secondPostCount' 'two unchanged CLI post-receipt samples'
 Match-Required $alter 'receiptRetryUsed = true' 'only one explicit managed receive input retry'
-Match-Required $alter 'CanRetryManagedBlueReceipt' 'retry requires exact unchanged whole lane and blue UI'
+Match-Required $alter 'CanRetryManagedFacilityReceipt' 'F9 retry requires exact unchanged whole lane without blue pixels'
 Match-Required $alter 'HasCollectPromptAsync\(finalFrame, plan, directive, ct\)' 'durable F02 guard stays before irreversible receive'
 # 1d) V3.1.51 receipt state is separated from the legacy teal move-button detector.
 Match-Required $alter 'receiptMode = false' 'facility travel exposes an explicit receipt-only state mode'
@@ -135,7 +135,7 @@ Match-Required $realScreenTests 'TrySelectFixedRecipeAsync' 'L2 tests actual fix
 Match-Required $realScreenTests 'TrySelectMedicineRecipeBySearchAsync' 'L2 tests actual medicine route'
 Match-Required $realScreenTests 'WaitForReceiptFacilityReturnAsync' 'L2 tests actual receipt facility return route'
 Match-Required $realScreenTests 'HasFacilityMoveButtonVisual' 'L2 tests actual teal move detector'
-Match-Required $realScreenTests 'HasCollectButtonVisual' 'L2 tests actual blue receive detector'
+Match-Required $realScreenTests 'HasCollectButtonVisual' 'L2 single-altering tests actual blue receive detector'
 Match-Required $realScreenTests 'HasBottomConfirmationModal' 'L2 tests actual completion modal detector'
 Match-Required $ciWorkflow 'dotnet run --project tests/altering-screen-integration/Regression.csproj' 'L2 executes in Windows CI, not build-only'
 Match-Forbidden $realScreenTests 'new FakeWorld' 'L2 does not rely on fake directive-only screen'
