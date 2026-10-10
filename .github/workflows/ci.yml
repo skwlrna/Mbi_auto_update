@@ -60,13 +60,36 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.80"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.81"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.80</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3180-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.80"')) {
+          if ($p -notmatch '<Version>3\.1\.81</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3181-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.81"')) {
             throw 'release workflow eligibility version mismatch'
+          }
+
+      - name: F9 latest-run resume integration contract
+        shell: pwsh
+        run: |
+          $page = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          $resume = Get-Content source/FishingAutomation/MainForm.MultiAlteringResume.cs -Raw
+          $policy = Get-Content source/FishingAutomation/MultiAlteringRecentResume.cs -Raw
+          $runner = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $tests = Get-Content tests/n02-resume/Program.cs -Raw
+          if ($page -notmatch 'owner.ShowRecentMultiAlteringAsync' -or
+              $page -notmatch 'altering \? 3 : 2' -or
+              $page -notmatch 'if \(_resume is not null\) _resume.Enabled = !busy' -or
+              $resume -notmatch 'MultiAlteringRecentResume.HideLatest' -or
+              $resume -notmatch 'MultiAlteringRecentResume.VerifyAsync' -or
+              $policy -notmatch 'ReadManifestSnapshot' -or
+              $policy -notmatch 'PendingRegistration' -or
+              $policy -notmatch 'expectedLive' -or
+              $runner -notmatch 'batchStore.OpenAsync' -or
+              $runner -notmatch 'batchStore.OpenFreshAsync' -or
+              $tests -notmatch 'latest F9 only' -or
+              $tests -notmatch 'foreign cancellation blocks registration') {
+            throw 'F9 one-button latest resume and safe-state verification contract missing'
           }
 
       - name: Updater rollback regression tests
