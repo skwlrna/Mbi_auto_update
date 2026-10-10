@@ -109,6 +109,16 @@ Match-Required $alter 'Space 1회' 'receipt input remains a single Space after s
 # no longer repeats that gate, and one unchanged-CLI retry is bounded.
 Match-Required $alter '기존 2회/400ms/2회 중복 검사 생략' 'managed blue receipt omits redundant scan'
 Match-Required $alter 'CollectVisualButton = new\(15, 245, 100, 60\)' 'real live blue capsule fixed pixel region'
+# V3.1.75: first F9 K starts in the field; subsequent K uses Abyss templates.
+Match-Required $alter 'private bool _managedKInputIssued' 'only later F9 K requires reentry HUD proof'
+Match-Required $alter 'CanAuthorizeManagedKEntry' 'F9 initial K vs reentry authorization is testable'
+Match-Required $alter 'DetectManagedWorldHudTemplates' 'F9 reentry uses four actual Abyss HUD templates'
+Match-Required $alter 'abyss/templates/outside_home_v75.png' 'reuse Abyss outside Home template'
+Match-Required $alter 'abyss/templates/outside_end_v75.png' 'reuse Abyss outside End template'
+Match-Required $alter 'abyss/templates/outside_k_v75.png' 'reuse Abyss outside K template'
+Match-Required $alter 'abyss/templates/outside_i_v75.png' 'reuse Abyss outside I template'
+Match-Required $alter '현재 화면=일반/전환 중' 'bounded unknown-screen recovery retained'
+Match-Required $alter 'RequireManagedIdleAsync\(plan, directive, "가공 메뉴 K 직전", ct\)' 'F9 CLI idle remains final gate immediately before K'
 Match-Required $alter 'firstPostCount == secondPostCount' 'two unchanged CLI post-receipt samples'
 Match-Required $alter 'receiptRetryUsed = true' 'only one explicit managed receive input retry'
 Match-Required $alter 'CanRetryManagedFacilityReceipt' 'F9 retry requires exact unchanged whole lane without blue pixels'
