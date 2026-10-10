@@ -6,12 +6,16 @@ public sealed partial class MainForm
 {
     private bool _multiAlteringRunning;
     private CancellationTokenSource? _multiAlteringCts;
+    private bool _resumeUiBusy;
 
-    private async Task StartMultiAlteringAsync(IReadOnlyList<AlteringPlan> plans)
+    private async Task StartMultiAlteringAsync(
+        IReadOnlyList<AlteringPlan> plans, string? resumeDirectory = null,
+        string? expectedResumeBatchId = null)
     {
         if (_multiAlteringRunning)
             return;
 
+        bool isResume = resumeDirectory is not null;
         bool completed = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
@@ -35,7 +39,7 @@ public sealed partial class MainForm
         ResetAlteringStatus(plans);
         SetStatus($"다중가공 병렬 배치 준비 · {plans.Count}종", Blue);
         _log.Write(
-            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 독립 병렬 운용 · " +
+            $"[다중가공] {(isResume ? "최근 작업 이어하기" : "시작(F9)")} · 작업 {plans.Count}종 · 시설별 최대 7칸 독립 병렬 운용 · " +
             "같은 시설은 품목 완주 후 다음 품목 · 한 칸 완료마다 이동하지 않음");
 
         try
@@ -63,10 +67,12 @@ public sealed partial class MainForm
                 _cli, token, allowLimitedFreshTest: true);
             singleCharacterMode = !identity.Baseline.HasDurableMultiIdentity;
             _log.Write("[다중가공] 캐릭터 문맥 저장 · " + identity.Description);
-            _alteringPage.CharacterStatus = singleCharacterMode
-                ? "1캐릭터 · 신규 작업" : "신규 작업";
-            _log.Write("[다중가공] F9 신규 실행 · 중간관리자가 선택 목록/시설별 대기열/7칸 " +
-                "혼합 배치를 전부 지휘 · F10/재시작 시 과거 배치 자동 이어하기 없음");
+            _alteringPage.CharacterStatus = isResume ? "이전 작업 재개 확인" :
+                singleCharacterMode ? "1캐릭터 · 신규 작업" : "신규 작업";
+            _log.Write(isResume
+                ? "[다중가공] 이전 배치 이어하기 · 목표/완료 기록 유지 · 게임 상태 재검증 후에만 등록"
+                : "[다중가공] F9 신규 실행 · 중간관리자가 선택 목록/시설별 대기열/7칸 " +
+                  "혼합 배치를 전부 지휘 · 기존 F10 기록 자동 이어하기 없음");
             if (singleCharacterMode)
                 _log.Write("[다중가공] 단일 캐릭터 전용 · CLI 서버명만 검증 · " +
                     "다른 캐릭터로 전환하지 않음");
@@ -81,20 +87,47 @@ public sealed partial class MainForm
             verifiedBatchLease = await Task.Run(
                 () => new MultiAlteringBatchStore(mainSessionDir), token);
 
-            // Create a new unique N02/F05 ledger for EVERY explicit F9.
-            // Do not open or mutate any old limited-fresh-test or main
-            // batch.json, including previously unresolved F05 checkpoints.
-            string sessionDir = Path.Combine(mainSessionDir, "fresh-runs",
-                "f9-" + Guid.NewGuid().ToString("N"));
-            batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
-            await Task.Run(() => batchStore.OpenFreshAsync(
-                plans, identity.Baseline, rawAlteringData, token), token);
-            // Observe occupied slots without changing old game works.
-            // The coordinator fills free slots under this F9's new goal.
+            // F9 still creates a unique fresh run. Explicit resume reopens only
+            // the selected, latest manifest; neither path can redirect to the other.
+            string sessionDir;
+            if (isResume)
+            {
+                var latest = await Task.Run(
+                    () => MultiAlteringRecentResume.Latest(mainSessionDir), token);
+                if (latest is null || latest.BatchId != expectedResumeBatchId ||
+                    !string.Equals(Path.GetFullPath(latest.Directory),
+                        Path.GetFullPath(resumeDirectory!), StringComparison.OrdinalIgnoreCase) ||
+                    !MultiAlteringBatchStore.ReadPendingPlans(latest.Directory)
+                        .Select(MultiAlteringBatchStore.Key)
+                        .SequenceEqual(plans.Select(MultiAlteringBatchStore.Key)))
+                    throw new InvalidOperationException(
+                        "이어하기 최근 기록이 변경됐습니다 · 재검증 전 자동 시작 차단");
+                // Verification under the root lease, BEFORE any game-window input.
+                await MultiAlteringRecentResume.VerifyAsync(
+                    latest, identity.Baseline, rawAlteringData, token);
+                sessionDir = latest.Directory;
+                batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
+                await batchStore.OpenAsync(
+                    plans, identity.Baseline, rawAlteringData, token,
+                    allowSingleCharacter: false);
+                if (!batchStore.IsResuming || batchStore.BatchId != latest.BatchId)
+                    throw new InvalidOperationException(
+                        "이어하기 기존 배치 대신 새 배치를 생성하려 했습니다 · 안전 정지");
+                _log.Write($"[다중가공] 검증된 최근 배치 이어하기 · {batchStore.BatchId} · 기록 보존");
+            }
+            else
+            {
+                sessionDir = Path.Combine(mainSessionDir, "fresh-runs",
+                    "f9-" + Guid.NewGuid().ToString("N"));
+                batchStore = await Task.Run(() => new MultiAlteringBatchStore(sessionDir), token);
+                await Task.Run(() => batchStore.OpenFreshAsync(
+                    plans, identity.Baseline, rawAlteringData, token), token);
+                _log.Write("[다중가공] 이번 F9 새 목표 0부터 시작 · 기존 게임 작업은 그대로 · 빈 슬롯부터 등록");
+                _log.Write("[다중가공] 독립 신규 장부 생성 · " + sessionDir +
+                    " · 과거 F05 미확정 기록 변경 없음");
+            }
+            // A new CLI observation rebuilds physical slot state for this run.
             currentWorks = await rawAlteringData.WorksAsync(token);
-            _log.Write("[다중가공] 이번 F9 새 목표 0부터 시작 · 기존 게임 작업은 그대로 · 빈 슬롯부터 등록");
-            _log.Write("[다중가공] 독립 신규 장부 생성 · " + sessionDir +
-                " · 과거 F05 미확정 기록 변경 없음");
             _log.Write($"[다중가공] 배치 식별 · {batchStore.BatchId} · 완료 기록 {batchStore.CompletedPlans(plans).Count}/{plans.Count}");
             if (batchStore.IsTerminal)
             {
@@ -283,7 +316,7 @@ public sealed partial class MainForm
                 SeedAlteringStatus(plan, restoredConfirmed, restoredEta);
                 SeedMultiAlteringTelegramItem(plan, session.QueuedWorks, session.Stage);
                 _log.Write(
-                    $"[다중가공] 새 목표 시작 상태 · {plan.DisplayName} " +
+                    $"[다중가공] {(isResume ? "이어하기 복원 상태" : "새 목표 시작 상태")} · {plan.DisplayName} " +
                     $"{restoredConfirmed:N0}/{plan.TargetQuantity:N0} · " +
                     $"등록 {session.QueuedWorks}/{plan.RequiredWorks} · " +
                     $"ETA={(restoredEta?.ToString() ?? "계산 중")}초");
@@ -312,7 +345,7 @@ public sealed partial class MainForm
 
             _productionCurrentQuantity = progress.Values.Sum();
             _productionProgressSummary =
-                $"중간관리자 신규 배치 시작 · {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
+                $"중간관리자 {(isResume ? "이전 배치 재개" : "신규 배치 시작")} · {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
                 $"시설별 품목 순차 7칸 배치";
             UpdateStats();
             RefreshProductionDashboard();
@@ -421,7 +454,7 @@ public sealed partial class MainForm
         {
             NoteMultiAlteringAction("F10 중지 요청 · 다중가공 실행 중단");
             _log.Write("[다중가공] F10 정지 · 등록/이동 중단 · " +
-                "이번 실행 기록 보존(자동 이어하기 없음) · 다음 F9는 새 작업");
+                "최근 배치 기록 보존 · F9 새 작업/별도 이어하기 버튼 분리");
             SetStatus("다중가공 정지", Color.DarkOrange);
         }
         catch (Exception ex)
