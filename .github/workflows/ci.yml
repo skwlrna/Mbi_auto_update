@@ -894,8 +894,14 @@ jobs:
               $alterTests -notmatch 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane') {
               throw 'M2 long batch-wait watchdog missing per-facility safety and regression coverage'
           }
-          if($multiAlter -notmatch '같은 시설 여러 품목은 라운드로빈 혼합' -or
-             $multiAlter -notmatch 'runBatch\(plan, 1, ct\)') { throw 'same-facility round-robin slot mixing missing' }
+          if($multiAlter -notmatch '같은 시설 여러 품목은 앞 품목 완료 후 다음 품목' -or
+             $multiAlter -notmatch 'runBatch\(plan, 1, ct\)' -or
+             $multiAlter -notmatch 'await preparePlan\(plan, ct\)' -or
+             $multiAlter -notmatch 'prepared.Add\(Key\(plan\)\)' -or
+             $alterTests -notmatch 'same-facility recipe B starts only after recipe A is completely received' -or
+             $alterTests -notmatch 'F9 material preparation runs once per active recipe in facility order') {
+              throw 'F9 sequential same-facility processing or per-item material preparation missing'
+          }
           $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
           $status = Get-Content source/FishingAutomation/AlteringStatus.cs -Raw
           if($session -notmatch 'MultiPlanPath' -or
