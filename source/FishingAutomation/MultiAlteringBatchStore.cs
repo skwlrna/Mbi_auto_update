@@ -57,6 +57,25 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
 
+    // Read-only snapshot for the explicit resume chooser. Never replaces a
+    // missing or damaged manifest with a new batch.
+    internal static MultiAlteringBatch ReadManifestSnapshot(string directory)
+    {
+        MultiAlteringBatch batch;
+        try
+        {
+            batch = JsonSerializer.Deserialize<MultiAlteringBatch>(
+                File.ReadAllText(System.IO.Path.Combine(directory, "batch.json")), JsonOptions)
+                ?? throw new InvalidDataException("다중가공 배치 기록이 비어 있습니다.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("다중가공 배치 기록 손상 · 원본 보존", ex);
+        }
+        Validate(batch);
+        return batch;
+    }
+
     internal static IReadOnlyList<AlteringPlan> ReadPendingPlans(string directory)
     {
         MultiAlteringBatch? saved;
