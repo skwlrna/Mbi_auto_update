@@ -111,8 +111,10 @@ Match-Required $alter '기존 2회/400ms/2회 중복 검사 생략' 'managed blu
 Match-Required $alter 'CollectVisualButton = new\(15, 245, 100, 60\)' 'real live blue capsule fixed pixel region'
 Match-Required $alter 'firstPostCount == secondPostCount' 'two unchanged CLI post-receipt samples'
 Match-Required $alter 'receiptRetryUsed = true' 'only one explicit managed receive input retry'
-Match-Required $alter 'CanRetryManagedBlueReceipt' 'retry requires exact unchanged whole lane and blue UI'
+Match-Required $alter 'CanRetryManagedFacilityReceipt' 'managed retry requires exact unchanged whole lane without blue pixel gate'
 Match-Required $alter 'HasCollectPromptAsync\(finalFrame, plan, directive, ct\)' 'durable F02 guard stays before irreversible receive'
+Match-Required $alter '파란버튼 픽셀검사 생략' 'managed receipt skips blue-pixel gate after CLI and onsite proof'
+Match-Required $receiptPolicy 'CanRetryManagedFacilityReceipt' 'managed retry policy remains bounded and colour independent'
 # 1d) V3.1.51 receipt state is separated from the legacy teal move-button detector.
 Match-Required $alter 'receiptMode = false' 'facility travel exposes an explicit receipt-only state mode'
 Match-Required $alter 'receiptMode: true' 'receipt callers opt into receipt-only travel state handling'
