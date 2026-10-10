@@ -147,7 +147,7 @@ public sealed class TelegramNotifier : IDisposable
                     string chatId = chat.TryGetProperty("id", out var chatNode) ? chatNode.ToString() : "";
                     if (!chatId.Equals(s.ChatId.Trim(), StringComparison.Ordinal)) continue;
                     string text = message.TryGetProperty("text", out var textNode) ? textNode.GetString() ?? "" : "";
-                    string? command = ParseRemoteCommand(text);
+                    string? command = TelegramCommandParser.Parse(text);
                     if (command is null) continue;
 
                     string reply;
@@ -175,20 +175,6 @@ public sealed class TelegramNotifier : IDisposable
                 await DelaySafe(3000, ct);
             }
         }
-    }
-
-    // Korean plain text is an explicit read-only alias. Keep all control
-    // actions slash-only; do not treat arbitrary Korean chat as a command.
-    internal static string? ParseRemoteCommand(string? text)
-    {
-        string raw = text?.Trim() ?? "";
-        if (raw.Equals("상태", StringComparison.Ordinal))
-            return "/status";
-        if (!raw.StartsWith('/'))
-            return null;
-        string command = raw.Split(' ', 2)[0].Split('@', 2)[0].ToLowerInvariant();
-        return command is "/status" or "/stop" or "/restart" or
-            "/help" or "/item" or "/itemreset" ? command : null;
     }
 
     private static bool IsConfigured(NotificationSettings s) =>
