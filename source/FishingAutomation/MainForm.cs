@@ -222,7 +222,7 @@ public sealed partial class MainForm : Form
         _ => "abyss_dungeon_hallucination_anchorage"
     };
     private bool DungeonRunning => _dungeonTask is { IsCompleted: false };
-    private bool AnyRunning => _starting || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
+    private bool AnyRunning => _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
 
     private void UpdateAbyssSelectorVisibility()
     {
