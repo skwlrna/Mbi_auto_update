@@ -1798,6 +1798,88 @@ catch (InvalidOperationException)
 Check(m2NoiseRejected,
     "M2 wait: an increasing or noisy countdown cannot conceal a truly stalled facility");
 
+// Regression from live V3.1.77 2026-10-10 22:48:03:
+// A guarded 1 -> 0 receipt and confirmed 0 -> 1 registration can replace
+// a queue without changing its final count or InProgress/300s CLI shape.
+// That registration MUST refresh this facility's old 120-second stopwatch.
+async Task<(bool Stopped, int Registrations)> M2SameCountReplacementAsync(bool confirmedRegistration)
+{
+    const string facility = "가죽 가공 시설";
+    var job = new AlteringPlan(facility, "가죽+", 3, 3, false);
+    DateTimeOffset now = new(2026, 10, 10, 22, 45, 0, TimeSpan.FromHours(9));
+    var works = new List<AlteringWork>
+    {
+        new(job.OutputName, facility, "InProgress", false, 300)
+    };
+    var lane = new FacilityLaneState(works);
+    var coordinator = new MultiAlteringCoordinator(
+        lane,
+        now: () => now,
+        idleThreshold: TimeSpan.FromSeconds(120),
+        fillInitialVacancies: true);
+    int runCalls = 0;
+    try
+    {
+        await coordinator.RunAsync(
+            new[] { job },
+            (plan, budget, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                runCalls++;
+                if (runCalls == 1)
+                {
+                    Check(budget == 1, "M2 same-count refresh keeps one-slot engine");
+                    now = now.AddSeconds(126);
+                    if (confirmedRegistration)
+                    {
+                        // The protected batch has received the previous work
+                        // and CLI-confirmed one newly registered work. Only the
+                        // ledger evidence, not a same-size queue, proves this.
+                        works.Clear();
+                        lane.Observe(facility, works, allowShrink: true);
+                        lane.NoteRegistration(plan, FacilityLaneOwner.Main, 1);
+                        works.Add(new(job.OutputName, facility, "InProgress", false, 300));
+                    }
+                    return Task.FromResult(false);
+                }
+                // First pass must eventually yield to the manager's watchdog.
+                // After that delay, a completed batch can finish normally.
+                return Task.FromResult(works.All(x => x.IsCompleted));
+            },
+            token =>
+            {
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult<IReadOnlyList<AlteringWork>>(works.ToArray());
+            },
+            (duration, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                now += duration;
+                for (int i = 0; i < works.Count; i++)
+                    works[i] = works[i] with
+                    {
+                        State = "Completed",
+                        IsCompleted = true,
+                        RemainingSeconds = 0
+                    };
+                return Task.CompletedTask;
+            },
+            default);
+        return (false, lane.Snapshot(facility).MainRegisteredWorks);
+    }
+    catch (InvalidOperationException ex) when (
+        ex.Message.Contains("다중가공 시설별 정체 감지"))
+    {
+        return (true, lane.Snapshot(facility).MainRegisteredWorks);
+    }
+}
+var m2ConfirmedReplay = await M2SameCountReplacementAsync(true);
+Check(!m2ConfirmedReplay.Stopped && m2ConfirmedReplay.Registrations == 1,
+    "M2 live 22:48 same-count 1->0->1 confirmed registration resets stale 126s watchdog");
+var m2UnprovenReplay = await M2SameCountReplacementAsync(false);
+Check(m2UnprovenReplay.Stopped && m2UnprovenReplay.Registrations == 0,
+    "M2 same-count without CLI-confirmed registration still stops after 120s");
+
 DateTimeOffset m2ScheduleClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
 var m2BlockedWorks = new List<AlteringWork>
 {
