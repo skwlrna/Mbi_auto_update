@@ -35,7 +35,7 @@ public sealed partial class MainForm
         ResetAlteringStatus(plans);
         SetStatus($"다중가공 병렬 배치 준비 · {plans.Count}종", Blue);
         _log.Write(
-            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 혼합 병렬 운용 · " +
+            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 독립 병렬 운용 · " +
             "같은 시설은 품목 완주 후 다음 품목 · 한 칸 완료마다 이동하지 않음");
 
         try
