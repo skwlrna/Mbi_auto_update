@@ -795,6 +795,98 @@ static class Program
             using var temp = new Temp(); using var first = new MultiAlteringBatchStore(temp.Path);
             await Reject(() => { using var second = new MultiAlteringBatchStore(temp.Path); return Task.CompletedTask; }, "IOException");
         });
+        await Test("V3.1.81: latest F9 only; verify current queue; repeated resume keeps one record", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            string run = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            string id;
+            using (var batch = new MultiAlteringBatchStore(run))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                id = batch.BatchId;
+                Check(MultiAlteringRecentResume.Latest(temp.Path)?.BatchId == id,
+                    "Latest run not discovered from durable batch data");
+                var initial = await MultiAlteringRecentResume.VerifyAsync(
+                    MultiAlteringRecentResume.Latest(temp.Path)!, Identity, world, default);
+                Check(initial.Count == 1 && initial[0].Confirmed == 0 &&
+                    initial[0].AdditionalOutput == 100, "New recent run read-only preflight is incorrect");
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                {
+                    QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress
+                });
+                await world.QueueAsync(Wood, () => { }, default);
+            }
+            var candidate = MultiAlteringRecentResume.Latest(temp.Path)!;
+            Check(candidate.BatchId == id && Directory.GetDirectories(
+                    Path.Combine(temp.Path, "fresh-runs")).Length == 1,
+                "Single F9 became more than one recent saved run");
+            var verified = await MultiAlteringRecentResume.VerifyAsync(
+                candidate, Identity, world, default);
+            Check(verified[0].LiveWorks == 1 &&
+                verified[0].AdditionalOutput == 90 && verified[0].Confirmed == 0,
+                "Restored queue was duplicated or discounted");
+            var verifiedAgain = await MultiAlteringRecentResume.VerifyAsync(
+                candidate, Identity, world, default);
+            Check(verifiedAgain[0].AdditionalOutput == verified[0].AdditionalOutput,
+                "Repeated resume validation changed the goal");
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                candidate, Identity with { CharacterId = "other" }, world, default),
+                "캐릭터");
+            Check(File.Exists(Path.Combine(run, "batch.json")) &&
+                Directory.GetDirectories(Path.Combine(temp.Path, "fresh-runs")).Length == 1,
+                "Failed resume damaged or duplicated a saved batch");
+        });
+        await Test("V3.1.81: foreign cancellation blocks registration; reset hides but preserves data", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            string run = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            string id;
+            using (var batch = new MultiAlteringBatchStore(run))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                id = batch.BatchId;
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                { QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress });
+                await world.QueueAsync(Wood, () => { }, default);
+            }
+            var candidate = MultiAlteringRecentResume.Latest(temp.Path)!;
+            world.Works.Clear();
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                candidate, Identity, world, default), "게임 대기열");
+            Check(MultiAlteringRecentResume.Latest(temp.Path)?.BatchId == id,
+                "Failed verification silently discarded record");
+            using (var rootLock = new MultiAlteringBatchStore(temp.Path))
+                MultiAlteringRecentResume.HideLatest(temp.Path, id);
+            Check(MultiAlteringRecentResume.Latest(temp.Path) is null &&
+                File.Exists(Path.Combine(run, "batch.json")),
+                "Reset should hide recent target, never delete evidence or game data");
+            await Reject(() =>
+            {
+                MultiAlteringRecentResume.HideLatest(temp.Path, "wrong-id");
+                return Task.CompletedTask;
+            }, "변경");
+        });
+        await Test("V3.1.81: pending registration cannot resume after F10", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            string run = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            using (var batch = new MultiAlteringBatchStore(run))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                    { PendingRegistration = true, PendingBeforeMatchingCount = 0 });
+            }
+            var candidate = MultiAlteringRecentResume.Latest(temp.Path)!;
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                candidate, Identity, world, default), "RecoveryRequired");
+            Check(world.Registered.Count == 0, "Pending click replayed an input");
+        });
         Console.WriteLine($"N02: {passed} deterministic tests passed; temporary files; fake game only.");
     }
 
