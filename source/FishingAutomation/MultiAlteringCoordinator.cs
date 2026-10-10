@@ -3,9 +3,9 @@ namespace FishingAutomation;
 /// <summary>
 /// Batch scheduler for multi-altering. Each facility is an independent seven-slot
 /// lane. Different facilities run in parallel, while plans that share one facility
-/// are round-robin mixed into the same seven-slot batch. A facility is revisited only
-/// after its whole current lane has completed, so one completed slot never causes an
-/// extra trip.
+/// are completed in user order, one recipe at a time, using up to seven slots.
+/// The whole current lane must complete before receipt; independent facilities
+/// remain parallel. Existing pre-F9 works are not cancelled.
 /// </summary>
 // A coordinator-scoped watchdog survives RunBatchAsync boundaries. Each
 // facility is tracked independently, so healthy progress elsewhere cannot
@@ -123,7 +123,8 @@ internal sealed class MultiAlteringCoordinator
         Func<AlteringPlan, int, CancellationToken, Task<bool>> runBatch,
         Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
         Func<TimeSpan, CancellationToken, Task> delay,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<AlteringPlan, CancellationToken, Task>? preparePlan = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -158,11 +159,8 @@ internal sealed class MultiAlteringCoordinator
             facility => facility,
             facility => plans.Where(x => x.FacilityName == facility).ToArray(),
             StringComparer.Ordinal);
-        var nextPlanIndex = orderedFacilities.ToDictionary(
-            facility => facility,
-            _ => 0,
-            StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
+        var prepared = new HashSet<(string Facility, string Display, int Ordinal)>();
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
@@ -189,14 +187,12 @@ internal sealed class MultiAlteringCoordinator
 
         int FindNextPendingIndex(string facility)
         {
+            // Stick to the FIRST unfinished recipe. Receipt plus durable
+            // completion is mandatory before the next recipe is selected.
             var facilityPlans = plansByFacility[facility];
-            int start = nextPlanIndex[facility] % facilityPlans.Length;
-            for (int offset = 0; offset < facilityPlans.Length; offset++)
-            {
-                int index = (start + offset) % facilityPlans.Length;
+            for (int index = 0; index < facilityPlans.Length; index++)
                 if (!completed.Contains(Key(facilityPlans[index])))
                     return index;
-            }
             return -1;
         }
 
@@ -204,10 +200,10 @@ internal sealed class MultiAlteringCoordinator
             => plansByFacility[facility].Count(x => !completed.Contains(Key(x)));
 
         Log?.Invoke(
-            $"[다중가공] 혼합 병렬 배치 계획 확정 · {plans.Count}종 / {orderedFacilities.Length}시설 · " +
+            $"[다중가공] 시설별 품목 순차 배치 계획 확정 · {plans.Count}종 / {orderedFacilities.Length}시설 · " +
             string.Join(" → ", plans.Select(x => $"{x.DisplayName} {x.TargetQuantity}개")));
         Log?.Invoke(
-            "[다중가공] 운용 방식 · 시설별 최대 7칸 · 같은 시설 여러 품목은 라운드로빈 혼합 · " +
+            "[다중가공] 운용 방식 · 시설별 최대 7칸 · 같은 시설 여러 품목은 앞 품목 완료 후 다음 품목 · " +
             "한 칸 완료마다 이동하지 않음 · 현재 배치 전체 완료 후 묶음 수령/재충전");
 
         while (completed.Count < plans.Count)
@@ -265,10 +261,10 @@ internal sealed class MultiAlteringCoordinator
                 else if (facilityWorks.Length > 0)
                     Log?.Invoke(
                         $"[다중가공] {facility.Replace(" 시설", "")} 배치 완료 · " +
-                        $"{facilityWorks.Length}건 모아서 수령 후 혼합 재충전");
+                        $"{facilityWorks.Length}건 모아서 수령 후 같은 품목 재충전");
                 else
                     Log?.Invoke(
-                        $"[다중가공] {facility.Replace(" 시설", "")} 빈 대기열 · 혼합 배치 등록 시작");
+                        $"[다중가공] {facility.Replace(" 시설", "")} 빈 대기열 · 현재 품목 배치 등록 시작");
 
                 int idleSelections = 0;
 
@@ -277,7 +273,7 @@ internal sealed class MultiAlteringCoordinator
                     ct.ThrowIfCancellationRequested();
                     // A facility-wide receipt can complete another main item
                     // inside this turn or a recursive dependency. Rehydrate before
-                    // selecting the next round-robin slot, not just at startup.
+                    // selecting the active recipe, not just at startup.
                     RestoreCompleted();
                     if (PendingCount(facility) == 0) break;
                     works = await readWorks(ct);
@@ -308,13 +304,22 @@ internal sealed class MultiAlteringCoordinator
                     var plan = plansByFacility[facility][index];
                     int beforeCount = facilityWorks.Length;
 
-                    // One registration per turn is deliberate. Repeated turns fill
-                    // the seven-slot lane A/B/A/B... without changing the proven
-                    // single-plan registration/receipt implementation.
+                    // Keep the existing proven one-slot engine and receipt
+                    // guards. Prepare materials just once, before the FIRST
+                    // registration of each selected recipe.
                     _laneState?.AssertAccess(facility, _laneOwner);
+                    if (!prepared.Contains(Key(plan)))
+                    {
+                        if (preparePlan is not null)
+                        {
+                            Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} · {plan.DisplayName} 새 품목 재료 점검");
+                            await preparePlan(plan, ct);
+                        }
+                        // A failed/cancelled preparation never authorizes a click.
+                        prepared.Add(Key(plan));
+                    }
                     bool planCompleted = await runBatch(plan, 1, ct);
                     acted = true;
-                    nextPlanIndex[facility] = (index + 1) % plansByFacility[facility].Length;
 
                     if (planCompleted)
                     {
@@ -346,7 +351,7 @@ internal sealed class MultiAlteringCoordinator
                         if (idleSelections >= Math.Max(1, pendingBefore))
                         {
                             Log?.Invoke(
-                                $"[다중가공] {facility.Replace(" 시설", "")} 혼합 배치 추가 등록 없음 · " +
+                                $"[다중가공] {facility.Replace(" 시설", "")} 단일 품목 추가 등록 없음 · " +
                                 "남은 품목은 이미 전량 등록되었거나 현재 슬롯 상태를 기다리는 중");
                             break;
                         }
