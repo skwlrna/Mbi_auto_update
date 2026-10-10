@@ -81,7 +81,8 @@ internal static class MultiAlteringRecentResume
 
     internal static async Task<IReadOnlyList<MultiAlteringResumeLine>> VerifyAsync(
         MultiAlteringRecentRun selected, CliIdentityContext identity,
-        IAlteringData data, CancellationToken ct)
+        IAlteringData data, CancellationToken ct,
+        bool allowSingleCharacter = false)
     {
         ct.ThrowIfCancellationRequested();
         // Re-read the manifest each time. No cached modal snapshot can authorize
@@ -92,9 +93,17 @@ internal static class MultiAlteringRecentResume
             actual.Identity != identity)
             throw new InvalidOperationException(
                 "이어하기 배치 상태 또는 캐릭터 정보가 변경됐습니다 · 등록 차단");
-        if (!identity.HasDurableMultiIdentity)
+        // Explicit one-character mode accepts an EXACT match to the saved,
+        // repeatedly sampled realm-only identity. A realm name is NOT a
+        // character identifier: the UI must obtain explicit user confirmation
+        // and all queue, receipt, inventory and journal guards remain active.
+        if (!identity.HasDurableMultiIdentity &&
+            (!allowSingleCharacter || string.IsNullOrWhiteSpace(identity.RealmName) ||
+             !string.IsNullOrWhiteSpace(identity.CharacterId) ||
+             !string.IsNullOrWhiteSpace(identity.CharacterName) ||
+             !string.IsNullOrWhiteSpace(identity.AccountCode)))
             throw new InvalidOperationException(
-                "이어하기에는 캐릭터 고유 식별 정보가 필요합니다. 서버명만 일치하는 1캐릭터 모드에서 다른 캐릭터의 기록을 적용할 수 없어 자동 재개를 차단합니다.");
+                "서버명만 확인된 1캐릭터 이어하기는 사용자 확인이 필요합니다 · 기존 작업 기록 보존 · 입력 차단");
         if (actual.PreparedConsumption is not null ||
             actual.Items.Any(s => s.MultiState == MultiAlteringItemState.RecoveryRequired ||
                 s.PendingRegistration || s.PendingConsumptionTransactionId is not null))
