@@ -305,10 +305,25 @@ try
           CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, true, 0) &&
           CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 2),
         "F01 compiled policy rejects uncorrelated OCR title misses, CLI-only loading and missing move input");
+    // V3.1.77 live 21:09:58 regression: immediate 2/4 then 3/4 after
+    // Esc must NOT fail immediately. A subsequent 3/4 within two seconds
+    // may authorize one K, always after fresh CLI idle and no modal/menu.
+    Check(CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.Zero) &&
+          CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromMilliseconds(1999)) &&
+          !CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromSeconds(2)) &&
+          !CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromSeconds(-1)) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 2, 3, false, false) &&
+          CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, true),
+        "V3.1.77 F9 K re-entry 2/4->3/4 waits, 3/4->3/4 passes within 2s only without modal/menu");
+
     var enter = ScreenCalls("EnterFacilityAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
           Has(enter, "CanAuthorizeManagedKEntry") &&
+          Has(enter, "IsManagedKReentryWithinLimit") &&
+          Has(enter, "StartNew") &&
           !Has(enter, "HasManagedKEntryFieldHudVisual") &&
           Has(enter, "RequireManagedIdleAsync") &&
           Has(enter, "Capture"),
