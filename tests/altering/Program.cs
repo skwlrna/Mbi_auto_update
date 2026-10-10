@@ -1798,6 +1798,88 @@ catch (InvalidOperationException)
 Check(m2NoiseRejected,
     "M2 wait: an increasing or noisy countdown cannot conceal a truly stalled facility");
 
+// Regression from live V3.1.77 2026-10-10 22:48:03:
+// A guarded 1 -> 0 receipt and confirmed 0 -> 1 registration can replace
+// a queue without changing its final count or InProgress/300s CLI shape.
+// That registration MUST refresh this facility's old 120-second stopwatch.
+async Task<(bool Stopped, int Registrations)> M2SameCountReplacementAsync(bool confirmedRegistration)
+{
+    const string facility = "가죽 가공 시설";
+    var job = new AlteringPlan(facility, "가죽+", 3, 3, false);
+    DateTimeOffset now = new(2026, 10, 10, 22, 45, 0, TimeSpan.FromHours(9));
+    var works = new List<AlteringWork>
+    {
+        new(job.OutputName, facility, "InProgress", false, 300)
+    };
+    var lane = new FacilityLaneState(works);
+    var coordinator = new MultiAlteringCoordinator(
+        lane,
+        now: () => now,
+        idleThreshold: TimeSpan.FromSeconds(120),
+        fillInitialVacancies: true);
+    int runCalls = 0;
+    try
+    {
+        await coordinator.RunAsync(
+            new[] { job },
+            (plan, budget, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                runCalls++;
+                if (runCalls == 1)
+                {
+                    Check(budget == 1, "M2 same-count refresh keeps one-slot engine");
+                    now = now.AddSeconds(126);
+                    if (confirmedRegistration)
+                    {
+                        // The protected batch has received the previous work
+                        // and CLI-confirmed one newly registered work. Only the
+                        // ledger evidence, not a same-size queue, proves this.
+                        works.Clear();
+                        lane.Observe(facility, works, allowShrink: true);
+                        lane.NoteRegistration(plan, FacilityLaneOwner.Main, 1);
+                        works.Add(new(job.OutputName, facility, "InProgress", false, 300));
+                    }
+                    return Task.FromResult(false);
+                }
+                // First pass must eventually yield to the manager's watchdog.
+                // After that delay, a completed batch can finish normally.
+                return Task.FromResult(works.All(x => x.IsCompleted));
+            },
+            token =>
+            {
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult<IReadOnlyList<AlteringWork>>(works.ToArray());
+            },
+            (duration, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                now += duration;
+                for (int i = 0; i < works.Count; i++)
+                    works[i] = works[i] with
+                    {
+                        State = "Completed",
+                        IsCompleted = true,
+                        RemainingSeconds = 0
+                    };
+                return Task.CompletedTask;
+            },
+            default);
+        return (false, lane.Snapshot(facility).MainRegisteredWorks);
+    }
+    catch (InvalidOperationException ex) when (
+        ex.Message.Contains("다중가공 시설별 정체 감지"))
+    {
+        return (true, lane.Snapshot(facility).MainRegisteredWorks);
+    }
+}
+var m2ConfirmedReplay = await M2SameCountReplacementAsync(true);
+Check(!m2ConfirmedReplay.Stopped && m2ConfirmedReplay.Registrations == 1,
+    "M2 live 22:48 same-count 1->0->1 confirmed registration resets stale 126s watchdog");
+var m2UnprovenReplay = await M2SameCountReplacementAsync(false);
+Check(m2UnprovenReplay.Stopped && m2UnprovenReplay.Registrations == 0,
+    "M2 same-count without CLI-confirmed registration still stops after 120s");
+
 DateTimeOffset m2ScheduleClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
 var m2BlockedWorks = new List<AlteringWork>
 {
@@ -1924,6 +2006,8 @@ var mixedPlans = new[]
 };
 var mixedWorks = new List<AlteringWork>();
 var mixedCalls = new List<string>();
+var preparedItems = new List<string>();
+bool preparedWoodPlusBeforeWoodDone = false;
 var mixedRegistered = mixedPlans.ToDictionary(x => x.DisplayName, _ => 0, StringComparer.Ordinal);
 int mixedDelayCalls = 0;
 int callsAtPartialCompletion = -1;
@@ -1934,7 +2018,7 @@ await multiAltering.RunAsync(
     (job, slotBudget, token) =>
     {
         token.ThrowIfCancellationRequested();
-        Check(slotBudget == 1, "multi-altering coordinator yields one registration slot per mixed turn");
+        Check(slotBudget == 1, "multi-altering coordinator yields one registration slot per active recipe");
         mixedCalls.Add(job.DisplayName);
 
         var lane = mixedWorks.Where(x => x.FacilityName == job.FacilityName).ToArray();
@@ -2007,22 +2091,40 @@ await multiAltering.RunAsync(
 
         return Task.CompletedTask;
     },
-    default);
+    default,
+    preparePlan: (job, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        preparedItems.Add(job.DisplayName);
+        if (job.DisplayName == "목재+" &&
+            (mixedRegistered["목재"] != 4 ||
+             mixedWorks.Any(x => x.FacilityName == "목재 가공 시설" &&
+                                 x.DisplayName == "목재")))
+            preparedWoodPlusBeforeWoodDone = true;
+        return Task.CompletedTask;
+    });
 
-Check(mixedCalls.Take(7).SequenceEqual(
-        new[] { "목재", "목재+", "목재", "목재+", "목재", "목재+", "목재" }),
-    "same-facility plans are round-robin mixed across the seven-slot lane");
+Check(mixedCalls.IndexOf("목재+") > mixedCalls.IndexOf("강철괴") &&
+      mixedCalls.Take(mixedCalls.IndexOf("목재+")).Where(x => x != "강철괴").All(x => x == "목재") &&
+      !preparedWoodPlusBeforeWoodDone,
+    "same-facility recipe B starts only after recipe A is completely received");
+Check(preparedItems.Count == 3 &&
+      preparedItems.Count(x => x == "목재") == 1 &&
+      preparedItems.Count(x => x == "목재+") == 1 &&
+      preparedItems.Count(x => x == "강철괴") == 1 &&
+      preparedItems.IndexOf("목재") < preparedItems.IndexOf("목재+"),
+    "F9 material preparation runs once per active recipe in facility order");
 Check(mixedRegistered["목재"] == 4 &&
       mixedRegistered["목재+"] == 3 &&
       mixedRegistered["강철괴"] == 7,
     "mixed scheduler registers each plan only to its required work count");
 Check(mixedLaneState.Snapshot("목재 가공 시설").MainRegisteredWorks == 7 &&
       mixedLaneState.Snapshot("금속 가공 시설").MainRegisteredWorks == 7,
-    "main facility ownership ledger matches confirmed round-robin registrations");
+    "main facility ownership ledger matches confirmed sequential registrations");
 Check(callsAtPartialCompletion == callsBeforeWholeBatchCompletion,
-    "one completed slot never causes a facility revisit before the whole mixed batch completes");
+    "one completed slot never causes a facility revisit before the whole batch completes");
 Check(mixedCalls.Take(14).Count(x => x == "강철괴") == 7,
-    "independent facility is fully seeded in parallel before waiting");
+    "independent facility stays parallel while other facility finishes its recipe");
 
 try
 {

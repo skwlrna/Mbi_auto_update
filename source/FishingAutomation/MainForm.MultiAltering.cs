@@ -31,12 +31,12 @@ public sealed partial class MainForm
         _productionTargetQuantity = checked(plans.Sum(x => x.TargetQuantity));
         _productionCurrentQuantity = 0;
         _productionFacilityName = "시설별 병렬 배치";
-        _productionProgressSummary = $"다중가공 준비 · {plans.Count}종 · 시설별 혼합 7칸 배치";
+        _productionProgressSummary = $"다중가공 준비 · {plans.Count}종 · 시설별 품목 순차 7칸 배치";
         ResetAlteringStatus(plans);
         SetStatus($"다중가공 병렬 배치 준비 · {plans.Count}종", Blue);
         _log.Write(
-            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 혼합 병렬 운용 · " +
-            "같은 시설 품목 라운드로빈 · 한 칸 완료마다 이동하지 않음");
+            $"[다중가공] 시작(F9) · 작업 {plans.Count}종 · 시설별 최대 7칸 독립 병렬 운용 · " +
+            "같은 시설은 품목 완주 후 다음 품목 · 한 칸 완료마다 이동하지 않음");
 
         try
         {
@@ -217,11 +217,6 @@ public sealed partial class MainForm
 
             var automations = new Dictionary<(string Facility, string Display, int Ordinal), AlteringAutomation>();
             var progress = new Dictionary<(string Facility, string Display, int Ordinal), long>();
-            var materialPreflight = new List<MultiAlteringSupplyPreflight>();
-            bool hasResumableSessionForPreflight = false;
-            bool hasSelectedFacilityWorksForPreflight = currentWorks.Any(work =>
-                plans.Any(plan => plan.FacilityName == work.FacilityName));
-
             for (int index = 0; index < plans.Count; index++)
             {
                 token.ThrowIfCancellationRequested();
@@ -231,21 +226,10 @@ public sealed partial class MainForm
                     selected[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
                     throw new InvalidOperationException(
                         $"{plan.DisplayName} 시작 직전 제법 조회 결과가 선택 내용과 달라졌습니다. 목록을 새로고침하세요.");
-                var selectedRecipe = selected[plan.RecipeOrdinal - 1];
-
                 var store = batchStore.PlanStore(plan);
                 var session = store.Load() ?? throw new InvalidDataException("배치 품목 기록 소실 · 안전 정지");
                 bool itemCompleted = session.MultiState == MultiAlteringItemState.Completed;
-                hasResumableSessionForPreflight |= batchStore.IsResuming;
                 _log.Write($"[다중가공] 중간관리자 신규 작업 · {plan.DisplayName} · 등록 {session.QueuedWorks}/{session.RequiredWorks} · 상태={session.MultiState}");
-
-                if (!itemCompleted && selectedRecipe.MissingIngredients.Count > 0)
-                {
-                    materialPreflight.Add(new MultiAlteringSupplyPreflight(
-                        plan,
-                        selectedRecipe,
-                        plan.RequiredWorks));
-                }
 
                 var automation = new AlteringAutomation(
                     rawAlteringData,
@@ -329,39 +313,56 @@ public sealed partial class MainForm
             _productionCurrentQuantity = progress.Values.Sum();
             _productionProgressSummary =
                 $"중간관리자 신규 배치 시작 · {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
-                $"시설별 혼합 7칸 배치";
+                $"시설별 품목 순차 7칸 배치";
             UpdateStats();
             RefreshProductionDashboard();
 
-            if (materialPreflight.Count > 0)
+            // Materials are prepared only when the next recipe becomes active.
+            // CLI reports known shortages only: still recheck on registration.
+            async Task PreparePlanMaterialsAsync(AlteringPlan plan, CancellationToken ct)
             {
-                bool canRunMaterialPreflight = MultiAlteringMaterialPreflightPolicy.CanRun(
-                    hasResumableSessionForPreflight,
-                    hasSelectedFacilityWorksForPreflight);
+                var freshRecipes = await rawAlteringData.RecipesAsync(ct);
+                var matching = freshRecipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
+                if (matching.Length < plan.RecipeOrdinal ||
+                    matching[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName} 재료 점검 직전 제법이 변경되었습니다. 목록을 새로고침하세요.");
 
-                if (canRunMaterialPreflight)
+                var recipe = matching[plan.RecipeOrdinal - 1];
+                var liveWorks = await rawAlteringData.WorksAsync(ct);
+                bool occupied = liveWorks.Any(x => x.FacilityName == plan.FacilityName);
+                if (recipe.MissingIngredients.Count == 0)
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공] {plan.DisplayName} 시작 재료 점검 · CLI 확정 부족분 없음 · 등록 중 재검증 유지"));
+                    return;
+                }
+
+                if (!MultiAlteringMaterialPreflightPolicy.CanRun(
+                    batchStore?.IsResuming ?? true, occupied))
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공] {plan.DisplayName} 선행채집 생략 · " +
+                        (occupied ? "해당 시설 기존/진행 작업 존재" : "이어하기 상태") +
+                        " · 기존 재귀 재료 해결 유지"));
+                    return;
+                }
+
+                Ui(() =>
                 {
                     _productionProgressSummary =
-                        $"다중가공 전체 품목 확정 부족분 통합 채집 · {materialPreflight.Count}종 점검";
+                        $"다중가공 {plan.DisplayName} 재료 준비 · 현재 확정 부족분 채집";
+                    NoteMultiAlteringAction($"[다중가공] {plan.DisplayName} 시작 전 재료 준비");
+                    _log.Write($"[다중가공] {plan.DisplayName} 품목별 선행 채집 시작 · " +
+                               "다른 선택 품목의 재료는 지금 채집하지 않음");
                     UpdateStats();
                     RefreshProductionDashboard();
-                    _log.Write(
-                        $"[다중가공] 전체 품목 통합 재료 계획 시작 · " +
-                        $"CLI가 현재 부족으로 확정한 {materialPreflight.Count}종만 선행 계산 · " +
-                        "현재 충분해서 숨겨진 재료는 실행 중 재검증");
-                    await Task.Run(() => resolver.PreGatherKnownShortagesAsync(materialPreflight, token), token);
-                    _log.Write(
-                        "[다중가공] 전체 품목 통합 재료 계획 완료 · 실제 등록 직전 재료 검증은 기존 로직 유지");
-                }
-                else
-                {
-                    string reason = hasResumableSessionForPreflight
-                        ? "이어하기 세션 존재"
-                        : "선택 시설에 기존 작업 존재";
-                    _log.Write(
-                        $"[다중가공] 전체 품목 통합 선행채집 생략 · {reason} · " +
-                        "기존 재귀 재료 해결로 실제 부족분만 처리");
-                }
+                });
+                await resolver.PreGatherKnownShortagesAsync(
+                    new[] { new MultiAlteringSupplyPreflight(plan, recipe, plan.RequiredWorks) },
+                    ct);
+                Ui(() => _log.Write(
+                    $"[다중가공] {plan.DisplayName} 품목별 선행 채집 완료 · 등록 중 부족 재검증 유지"));
             }
 
             var coordinator = new MultiAlteringCoordinator(
@@ -403,15 +404,16 @@ public sealed partial class MainForm
                 },
                 rawAlteringData.WorksAsync,
                 Task.Delay,
-                token), token);
+                token,
+                preparePlan: PreparePlanMaterialsAsync), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
             _productionCurrentQuantity = _productionTargetQuantity;
             _productionProgressSummary =
-                $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 혼합 배치 운용 완료";
+                $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 품목 순차 배치 운용 완료";
             NoteMultiAlteringAction("모든 다중가공 작업 완료 · 수령 및 확인 완료");
-            _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 혼합 배치 병렬 운용");
+            _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 품목 순차 배치 운용");
             SetStatus("다중가공 완료", Green);
 
         }

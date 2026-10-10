@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.77"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.78"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.77</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3177-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.77"')) {
+          if ($p -notmatch '<Version>3\.1\.78</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3178-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.78"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -887,6 +887,11 @@ jobs:
               $multiAlter -notmatch 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' -or
               $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed\)' -or
               $multiAlter -notmatch 'idleWatchdog.ConfirmManagerProgress\(facility\)' -or
+              $multiAlter -notmatch 'registrationBefore = _laneState\?\.Snapshot\(facility\)' -or
+              $multiAlter -notmatch 'registrationAfter = _laneState\?\.Snapshot\(facility\)' -or
+              $multiAlter -notmatch 'planCompleted \|\| confirmedRegistration \|\| afterCount != beforeCount' -or
+              $alterTests -notmatch 'M2 live 22:48 same-count 1->0->1 confirmed registration resets stale 126s watchdog' -or
+              $alterTests -notmatch 'M2 same-count without CLI-confirmed registration still stops after 120s' -or
               $multiAlter -notmatch '_laneState\?\.InvalidateOnsite' -or
               $alterTests -notmatch 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' -or
               $alterTests -notmatch 'M2 wait: genuine countdown decreases refresh' -or
@@ -894,8 +899,14 @@ jobs:
               $alterTests -notmatch 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane') {
               throw 'M2 long batch-wait watchdog missing per-facility safety and regression coverage'
           }
-          if($multiAlter -notmatch '같은 시설 여러 품목은 라운드로빈 혼합' -or
-             $multiAlter -notmatch 'runBatch\(plan, 1, ct\)') { throw 'same-facility round-robin slot mixing missing' }
+          if($multiAlter -notmatch '같은 시설 여러 품목은 앞 품목 완료 후 다음 품목' -or
+             $multiAlter -notmatch 'runBatch\(plan, 1, ct\)' -or
+             $multiAlter -notmatch 'await preparePlan\(plan, ct\)' -or
+             $multiAlter -notmatch 'prepared.Add\(Key\(plan\)\)' -or
+             $alterTests -notmatch 'same-facility recipe B starts only after recipe A is completely received' -or
+             $alterTests -notmatch 'F9 material preparation runs once per active recipe in facility order') {
+              throw 'F9 sequential same-facility processing or per-item material preparation missing'
+          }
           $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
           $status = Get-Content source/FishingAutomation/AlteringStatus.cs -Raw
           if($session -notmatch 'MultiPlanPath' -or
@@ -905,7 +916,7 @@ jobs:
              $status -notmatch '남은시간\(예상\)') { throw 'full-plan altering ETA status missing' }
           if($multiAlterMain -notmatch 'RunBatchAsync\(' -or
              $multiAlterMain -notmatch 'slotBudget' -or
-             $multiAlterMain -notmatch '시설별 최대 7칸 혼합 병렬 운용' -or
+             $multiAlterMain -notmatch '시설별 최대 7칸 독립 병렬 운용' -or
              $multiAlterMain -match 'StartAlteringAsync\(plan, batchChild: true\)') { throw 'multi-altering runtime must use batch-yield engine instead of full sequential child runs' }
           if($multiAlterMain -notmatch 'new MultiAlteringDependencyScheduler' -or
              $multiAlterMain -notmatch 'dependencyScheduler: dependencyScheduler') { throw 'multi-altering intermediate dependency scheduler wiring missing' }
@@ -1030,11 +1041,12 @@ jobs:
              $resolver -notmatch '다중 채집 전 가공 UI 종료') { throw 'recursive multi-gather planning/wiring missing' }
           if($resolver -notmatch 'MultiAlteringMaterialPreflightPolicy' -or
              $resolver -notmatch 'PreGatherKnownShortagesAsync' -or
-             $resolver -notmatch '전체 품목 통합 채집 준비' -or
+             $multiAlterMain -notmatch 'PreparePlanMaterialsAsync' -or
              $multiAlterMain -notmatch 'MultiAlteringMaterialPreflightPolicy\.CanRun' -or
-             $multiAlterMain -notmatch 'hasResumableSessionForPreflight' -or
-             $multiAlterMain -notmatch 'hasSelectedFacilityWorksForPreflight' -or
-             $multiAlterMain -notmatch 'PreGatherKnownShortagesAsync') { throw 'safe whole-plan known-shortage preflight wiring missing' }
+             $multiAlterMain -notmatch 'new MultiAlteringSupplyPreflight\(plan, recipe, plan.RequiredWorks\)' -or
+             $multiAlterMain -notmatch 'preparePlan: PreparePlanMaterialsAsync' -or
+             $multiAlterMain -notmatch 'PreGatherKnownShortagesAsync' -or
+             $multiAlterMain -match 'materialPreflight.Count > 0') { throw 'safe per-item known-shortage preflight wiring missing' }
           if($resolver -notmatch '철괴\(철 광석\)' -or
              $resolver -notmatch '철괴\(광석\) 제외') { throw 'recursive iron ingot must prefer iron-ore recipe and exclude legacy ore route' }
           if($multiGather -notmatch 'new GatheringAutomation' -or

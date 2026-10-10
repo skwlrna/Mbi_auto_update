@@ -679,14 +679,14 @@ static class Program
             using var next = new MultiAlteringBatchStore(temp.Path); await Open(next, world, new[] { Wood }); await Finish(Wood, next, world);
             Check(next.BatchId != oldId && world.Registered.Count == 10 && world.Counts[Wood.OutputName] == 200, "Normal equal new batch blocked");
         });
-        await Test("L/mixed seven slots, round robin, whole-facility receipt and reuse", async () =>
+        await Test("L/sequential recipes, seven slots, whole-facility receipt and reuse", async () =>
         {
             using var temp = new Temp();
             var a = Steel with { TargetQuantity = 40 }; var b = new AlteringPlan(Steel.FacilityName, "철괴", 70, 10, false);
             var plans = new[] { a, b }; var world = new World(plans) { ImmediateCompletion = false, InjectPartial = true };
             using var batch = new MultiAlteringBatchStore(temp.Path); await Open(batch, world, plans);
             await new Harness(batch, plans, world).Run();
-            Check(world.Registered.Take(7).SequenceEqual(new[] { a.DisplayName, b.DisplayName, a.DisplayName, b.DisplayName, a.DisplayName, b.DisplayName, a.DisplayName }), "Round robin changed");
+            Check(world.Registered.Take(4).All(x => x == a.DisplayName) && world.Registered.Skip(4).Take(7).All(x => x == b.DisplayName), "Sequential recipe registration changed");
             Check(world.MaxQueue == 7 && world.PartialSeen && world.Receipts == 2 && world.PartialReceipts == 0, "Seven-slot/receipt policy changed");
             Check(world.Registered.Count(x => x == a.DisplayName) == 4 && world.Registered.Count(x => x == b.DisplayName) == 7, "Completed item registered again");
             Check(world.QueueDirectives.Count(x => x == AlteringFacilityEntryDirective.FreshMoveRequired) == 1 &&
