@@ -52,8 +52,13 @@ Match-Required $multiGather 'new GatheringAutomation\(' 'multi-gather delegates 
 Match-Required $multiGather '시작 직전 재고' 'multi-gather rechecks inventory immediately before each material'
 Match-Forbidden $multiGather 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput|0x39' 'multi-gather owns no direct input or Space'
 Match-Required $multiAlter 'facilityWorks\.All\(x => x\.IsCompleted\)' 'multi-altering waits for whole facility batch completion'
-Match-Required $multiAlter 'runBatch\(plan, 1, ct\)' 'same-facility work remains one-slot round-robin'
-Match-Required $multiAlter '같은 시설 여러 품목은 라운드로빈 혼합' 'round-robin mixed-facility behavior remains explicit'
+Match-Required $multiAlter 'prepared\.Add\(Key\(plan\)\)' 'active recipe preparation is performed once'
+Match-Required $multiAlter 'await preparePlan\(plan, ct\)' 'per-recipe materials are prepared before registration'
+Match-Required $multiAlter 'for \(int index = 0; index < facilityPlans.Length; index\+\+\)' 'first unfinished recipe is chosen in user order'
+Match-Required $startMulti 'preparePlan: PreparePlanMaterialsAsync' 'F9 routes material preparation through sequential manager'
+Match-Forbidden $startMulti 'materialPreflight.Count > 0' 'F9 no longer performs upfront all-item preflight'
+Match-Required $multiAlter 'runBatch\(plan, 1, ct\)' 'same-facility work remains one-slot under sequential selected recipe'
+Match-Required $multiAlter '같은 시설 여러 품목은 앞 품목 완료 후 다음 품목' 'sequential facility recipe behavior remains explicit'
 Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slot completion never causes a facility move'
 # M2 long wait: coordinator must track each facility's actual CLI progress
 # across slot-wise RunBatch returns, not reset the watch with every loop.
