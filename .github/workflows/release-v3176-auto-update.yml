@@ -46,7 +46,7 @@ jobs:
           if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($remote)){throw 'main unavailable'}
           if((($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main moved since CI; abort'}
           $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if($u -notmatch 'CurrentVersion = "V3\.1\.75"'){
+          if($u -notmatch 'CurrentVersion = "V3\.1\.76"'){
             "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
             Write-Host 'Not V3.1.76 any more; skip'
             exit 0
