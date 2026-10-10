@@ -1739,6 +1739,113 @@ await skipCoordinator.RunAsync(
 Check(skipWorld.GatherStarts == 0,
     "multi-gather rechecks inventory immediately before each material and skips an already-satisfied target");
 
+// F9 V3.1.80: an untouched or already-empty facility has no work to stall.
+// It must not time out during a 30+ minute material-gathering phase elsewhere.
+// When real work later appears, it receives a fresh, independent watchdog.
+DateTimeOffset f9EmptyClock = new(2026, 10, 11, 0, 0, 0, TimeSpan.Zero);
+var f9EmptyWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => f9EmptyClock);
+const string f9EmptyFacility = "금속 가공 시설";
+f9EmptyWatch.Observe(f9EmptyFacility, Array.Empty<AlteringWork>());
+f9EmptyClock = f9EmptyClock.AddMinutes(31);
+f9EmptyWatch.Observe(f9EmptyFacility, Array.Empty<AlteringWork>());
+var f9LaterJob = new AlteringWork(
+    "철괴", f9EmptyFacility, "InProgress", false, 300);
+f9EmptyWatch.Observe(f9EmptyFacility, new[] { f9LaterJob });
+f9EmptyClock = f9EmptyClock.AddSeconds(119);
+f9EmptyWatch.Observe(f9EmptyFacility, new[] { f9LaterJob });
+Check(true,
+    "F9 empty facility stays idle for over 30 minutes without false 120-second stall");
+
+f9EmptyClock = f9EmptyClock.AddSeconds(1);
+f9EmptyWatch.Observe(f9EmptyFacility, Array.Empty<AlteringWork>());
+f9EmptyClock = f9EmptyClock.AddMinutes(31);
+f9EmptyWatch.Observe(f9EmptyFacility, Array.Empty<AlteringWork>());
+f9EmptyWatch.Observe(f9EmptyFacility, new[] { f9LaterJob });
+Check(true,
+    "F9 empty facility resets stale countdown history before later registration");
+
+// F9 V3.1.80: the manager may never treat an unexplained shrink from a
+// one-slot registration run as a guarded receipt.
+const string f9ShrinkFacility = "목재 가공 시설";
+var f9ShrinkPlan = new AlteringPlan(f9ShrinkFacility, "목재", 3, 1, false);
+var f9ShrinkWorks = new List<AlteringWork>
+{
+    new("목재", f9ShrinkFacility, "InProgress", false, 90)
+};
+var f9ShrinkLane = new FacilityLaneState(f9ShrinkWorks);
+var f9ShrinkCoordinator = new MultiAlteringCoordinator(
+    f9ShrinkLane, fillInitialVacancies: true);
+int f9ShrinkAttempts = 0;
+bool f9UnverifiedShrinkRejected = false;
+try
+{
+    await f9ShrinkCoordinator.RunAsync(
+        new[] { f9ShrinkPlan },
+        (plan, slotBudget, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            f9ShrinkAttempts++;
+            Check(slotBudget == 1, "F9 shrink: coordinator grants only one registration");
+            f9ShrinkWorks.Clear(); // external cancellation or a stale CLI snapshot
+            return Task.FromResult(false); // no confirmed receipt callback
+        },
+        token =>
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<AlteringWork>>(f9ShrinkWorks.ToArray());
+        },
+        (duration, token) => Task.CompletedTask,
+        default);
+}
+catch (InvalidOperationException ex)
+{
+    f9UnverifiedShrinkRejected =
+        ex.Message.Contains("대기열이 자동화 수령 구간이 아닌데 감소했습니다");
+}
+Check(f9UnverifiedShrinkRejected && f9ShrinkAttempts == 1,
+    "F9 unexpected queue shrink after runBatch fails closed without another registration");
+
+var f9LeaseWorks = new AlteringWork[]
+{
+    new("목재", f9ShrinkFacility, "InProgress", false, 90)
+};
+var f9AcquireGuard = new FacilityLaneState(f9LeaseWorks);
+bool f9AcquireShrinkRejected = false;
+try
+{
+    f9AcquireGuard.AcquireIntermediate(
+        f9ShrinkFacility, Array.Empty<AlteringWork>());
+}
+catch (InvalidOperationException ex)
+{
+    f9AcquireShrinkRejected =
+        ex.Message.Contains("대기열이 자동화 수령 구간이 아닌데 감소했습니다");
+}
+Check(f9AcquireShrinkRejected &&
+      !f9AcquireGuard.Snapshot(f9ShrinkFacility).IntermediateLease,
+    "F9 intermediate lease cannot silently accept an unverified queue shrink");
+
+var f9ReleaseGuard = new FacilityLaneState(Array.Empty<AlteringWork>());
+f9ReleaseGuard.AcquireIntermediate(f9ShrinkFacility, Array.Empty<AlteringWork>());
+f9ReleaseGuard.NoteRegistration(
+    f9ShrinkPlan, FacilityLaneOwner.Intermediate, 1);
+f9ReleaseGuard.Observe(f9ShrinkFacility, f9LeaseWorks, allowShrink: false);
+bool f9ReleaseShrinkRejected = false;
+try
+{
+    f9ReleaseGuard.ReleaseIntermediate(
+        f9ShrinkFacility, Array.Empty<AlteringWork>());
+}
+catch (InvalidOperationException ex)
+{
+    f9ReleaseShrinkRejected =
+        ex.Message.Contains("대기열이 자동화 수령 구간이 아닌데 감소했습니다");
+}
+Check(f9ReleaseShrinkRejected &&
+      f9ReleaseGuard.Snapshot(f9ShrinkFacility).IntermediateLease,
+    "F9 intermediate lease cannot release on an unverified queue shrink");
+
 // M2 follow-up: the coordinator (not per-slot RunCoreAsync) observes idle
 // queues across batch-yield cycles, with a separate timer per facility.
 DateTimeOffset m2WatchClock = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
