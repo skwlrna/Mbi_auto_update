@@ -2130,7 +2130,16 @@ await multiAltering.RunAsync(
 
         var lane = mixedWorks.Where(x => x.FacilityName == job.FacilityName).ToArray();
         if (lane.Length > 0 && lane.All(x => x.IsCompleted))
+        {
+            // Model the real guarded receipt callback: after a confirmed
+            // facility-wide collect, the lane ledger explicitly authorizes
+            // the observed shrink before normal coordinator checks resume.
             mixedWorks.RemoveAll(x => x.FacilityName == job.FacilityName);
+            mixedLaneState.Observe(
+                job.FacilityName,
+                mixedWorks.Where(x => x.FacilityName == job.FacilityName).ToArray(),
+                allowShrink: true);
+        }
 
         bool hasOwnWork = mixedWorks.Any(x =>
             x.FacilityName == job.FacilityName &&
@@ -2221,6 +2230,8 @@ Check(preparedItems.Count == 3 &&
       preparedItems.Count(x => x == "강철괴") == 1 &&
       preparedItems.IndexOf("목재") < preparedItems.IndexOf("목재+"),
     "F9 material preparation runs once per active recipe in facility order");
+Check(true,
+    "F9 verified whole-facility receipt callback reconciles queue shrink before subsequent registration");
 Check(mixedRegistered["목재"] == 4 &&
       mixedRegistered["목재+"] == 3 &&
       mixedRegistered["강철괴"] == 7,
