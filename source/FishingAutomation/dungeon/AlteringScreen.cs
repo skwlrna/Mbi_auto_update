@@ -166,17 +166,29 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringFacilityEntryDirective directive,
         CancellationToken ct)
     {
-        if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is null)
-            return false;
-
-        if (directive != AlteringFacilityEntryDirective.Automatic)
+        bool managed = directive != AlteringFacilityEntryDirective.Automatic;
+        bool facilityVisible =
+            await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+        if (!facilityVisible)
         {
-            // A coordinator-directed receipt must be at the expected facility
-            // with no dialog and a positively observed non-travelling CLI state.
-            // Button text/colour alone is not a reliable offsite signal.
-            if (HasBottomConfirmationModal(frame) ||
-                await TryAutoTravelingAsync(ct) != false)
+            if (managed)
+                Log?.Invoke($"[자동 가공][수령 검사] {plan.ScreenTitle} · 시설창=False · Space 차단");
+            return false;
+        }
+
+        if (managed)
+        {
+            // Manager-directed receipts require a real facility screen, no
+            // popup, and positive CLI non-travelling state. Never infer
+            // physical onsite from CLI completion alone.
+            bool modal = HasBottomConfirmationModal(frame);
+            bool? travelling = await TryAutoTravelingAsync(ct);
+            if (modal || travelling != false)
+            {
+                Log?.Invoke($"[자동 가공][수령 검사] {plan.ScreenTitle} · " +
+                    $"시설창=True · 팝업={modal} · CLI이동={travelling?.ToString() ?? "불명"} · Space 차단");
                 return false;
+            }
         }
 
         bool visualMoveButton = HasFacilityMoveButtonVisual(frame);
@@ -203,28 +215,53 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             return false;
 
         if (_cli is null)
+        {
+            if (managed)
+                Log?.Invoke($"[자동 가공][수령 검사] {plan.ScreenTitle} · CLI 없음 · Space 차단");
             return false;
+        }
 
         var worksResponse = await _cli.GetAlteringWorksAsync(ct);
         if (!worksResponse.Success)
         {
             if (CliAutomationGuards.IsTransientLoadingRejection(worksResponse))
+            {
+                if (managed)
+                    Log?.Invoke($"[자동 가공][수령 검사] {plan.ScreenTitle} · CLI 로딩/조회 실패 · Space 차단");
                 return false;
+            }
             _ = AlteringQueries.ParseWorks(worksResponse); // preserve existing hard failure diagnostics
         }
 
         var currentWorks = AlteringQueries.ParseWorks(worksResponse);
-        // F02: a blue "모두 받기" drains the entire facility, not only the
-        // selected item. The coordinator's earlier all-completed snapshot may
-        // have gone stale while travelling or running OCR. Every managed
-        // prompt observation must independently prove that ALL facility jobs
-        // are completed; a mixed completed/running queue authorizes zero Space.
+        // F02: "모두 받기" drains the entire facility, not only the
+        // selected item. A manager-directed receipt must independently prove
+        // that ALL facility jobs are complete on a fresh CLI read before Space.
+        // A mixed running/completed lane authorizes zero Space.
         bool eligible = directive == AlteringFacilityEntryDirective.Automatic
             ? currentWorks.Any(x => x.FacilityName == plan.FacilityName && x.IsCompleted)
             : AlteringReceiptPolicy.CanCollectManagedFacility(
                 currentWorks, plan.FacilityName);
         if (!eligible)
+        {
+            if (managed)
+                Log?.Invoke($"[자동 가공][수령 검사] {plan.ScreenTitle} · " +
+                    $"시설작업={currentWorks.Count(x => x.FacilityName == plan.FacilityName)}건 · " +
+                    "CLI 전체완료=False · Space 차단");
             return false;
+        }
+
+        if (managed)
+        {
+            // V3.1.74: after verified facility entry, no popup/travel,
+            // fresh whole-facility CLI completion and the final idle gate,
+            // do not reject legitimate receipt for missing BLUE pixels.
+            // Automatic (single-altering) still uses the legacy blue gate.
+            Log?.Invoke($"[자동 가공][수령 검사] {plan.ScreenTitle} · " +
+                $"시설창=True · 시설작업={currentWorks.Count(x => x.FacilityName == plan.FacilityName)}건 · " +
+                "CLI 전체완료=True · CLI 비이동=True · 팝업=False · 파란버튼 픽셀검사 생략");
+            return true;
+        }
 
         return HasCollectButtonVisual(frame);
     }
@@ -2944,25 +2981,28 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         {
             // Manager already proved the whole lane complete BEFORE travel,
             // and TravelToFacilityAsync verified stable onsite arrival.
-            // No duplicate 2-frame / 400ms / 2-frame scans: one fresh
-            // whole-facility + blue-pill + idle/modal gate is sufficient before
-            // the durable boundary, then F02's final post-boundary gate stays.
+            // One fresh whole-facility CLI + verified onsite window/modal/
+            // non-travel gate; do not require the blue button pixel pattern.
+            // The independent F02 post-boundary check remains mandatory.
             receiptWorkCountBefore = await TryFacilityWorkCountAsync(plan, ct);
-            using var blueReady = Capture(ct);
+            using var receiptReady = Capture(ct);
             if (receiptWorkCountBefore is not > 0 ||
-                !await HasCollectPromptAsync(blueReady, plan, directive, ct))
-                Fail(blueReady,
-                    "관리 수령 직전 최신 시설 전체 완료/파란 수령 버튼/CLI 대기 검사 실패 · Space 없이 정지");
+                !await HasCollectPromptAsync(receiptReady, plan, directive, ct))
+                Fail(receiptReady,
+                    "관리 수령 직전 최신 시설 전체 완료/시설창/팝업/CLI 비이동 검사 실패 · Space 없이 정지");
             Log?.Invoke(
                 $"[자동 가공] 관리 수령 진입 · {plan.ScreenTitle} · " +
-                $"시설 전체 {receiptWorkCountBefore}건 완료 + 파란 버튼 단일 최신 확인 · " +
+                $"시설 전체 {receiptWorkCountBefore}건 완료 · 파란버튼 픽셀검사 생략 · " +
                 "기존 2회/400ms/2회 중복 검사 생략");
         }
 
         _stage.Move(ProductionStage.Process, $"{plan.DisplayName} 완료 작업 수령");
         Log?.Invoke(
-            $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 수령 현장 확정 + CLI 완료 작업 + 파란 수령 버튼 · Space 1회 · " +
-            $"수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
+            $"[자동 가공] 현장 수령 화면 재확인 완료 · {plan.ScreenTitle} + 수령 현장 확정 + CLI 완료 작업 + " +
+            (directive == AlteringFacilityEntryDirective.Automatic
+                ? "파란 수령 버튼 확인"
+                : "파란버튼 픽셀검사 생략") +
+            $" · Space 1회 · 수령 전 시설 전체 작업수={(receiptWorkCountBefore?.ToString() ?? "확인불가")}");
         // All visual/CLI checks have passed. Persist RecoveryRequired right
         // before the irreversible receive key, not before navigation/OCR.
         // A failure before this callback leaves the last known safe checkpoint.
@@ -2971,7 +3011,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (directive != AlteringFacilityEntryDirective.Automatic)
         {
             // The durable receipt marker may require file IO. Revalidate the
-            // actual facility queue and blue UI on a NEW frame afterwards,
+            // actual facility queue and onsite UI on a NEW frame afterwards,
             // immediately before the irreversible Space. A late running/new
             // work slot must not be partially collected. Because the marker
             // was already persisted, any failure remains RecoveryRequired:
@@ -2999,26 +3039,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // The first Space may be ignored by the game. Wait for all
             // result/CLI evidence first: no repeat merely because a result
             // popup was missed. Compare TWO live CLI reads with the original
-            // facility count, then require the real onsite blue UI again.
+            // facility count, then independently re-prove the onsite facility,
+            // no modal, completed lane and non-travelling CLI.
             int? firstPostCount = await TryFacilityWorkCountAsync(plan, ct);
             await Task.Delay(350, ct);
             int? secondPostCount = await TryFacilityWorkCountAsync(plan, ct);
             using var retryCandidate = Capture(ct);
-            bool bluePromptReady =
+            bool managedReceiptReady =
                 await HasCollectPromptAsync(retryCandidate, plan, directive, ct);
             bool freshFacility =
                 await FindFacilityHeaderAsync(retryCandidate, plan.ScreenTitle, ct) is not null;
-            bool freshBlue = HasCollectButtonVisual(retryCandidate);
             bool freshOnsiteX = HasOnsiteCloseButtonVisual(retryCandidate);
             bool anyModal = HasBottomConfirmationModal(retryCandidate) ||
                             HasFacilityTravelConfirmationVisual(retryCandidate);
             bool? freshTravel = await TryAutoTravelingAsync(ct);
             bool authorizedRetry = firstPostCount == secondPostCount &&
-                AlteringReceiptPolicy.CanRetryManagedBlueReceipt(
+                AlteringReceiptPolicy.CanRetryManagedFacilityReceipt(
                     managedReceipt: true, beforeCount: receiptWorkCountBefore,
                     afterCount: secondPostCount,
-                    allFacilityWorksComplete: bluePromptReady,
-                    blueButtonVisible: freshBlue,
+                    allFacilityWorksComplete: managedReceiptReady,
                     facilityVisible: freshFacility,
                     onsiteCloseVisible: freshOnsiteX,
                     anyModalVisible: anyModal,
@@ -3029,7 +3068,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"[자동 가공] 첫 모두 받기 Space 후 결과 미확인 · " +
                 $"CLI 작업수={receiptWorkCountBefore?.ToString() ?? "불명"}→" +
                 $"{firstPostCount?.ToString() ?? "불명"}→{secondPostCount?.ToString() ?? "불명"} · " +
-                $"전체완료+파란버튼={bluePromptReady} · 파란픽셀={freshBlue} · " +
+                $"시설+전체완료={managedReceiptReady} · 파란버튼검사=생략 · " +
                 $"현장={freshFacility}/{freshOnsiteX} · 팝업={anyModal} · " +
                 $"CLI이동={freshTravel?.ToString() ?? "불명"} · 재수령허가={authorizedRetry}");
 
@@ -3047,11 +3086,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     await HasCollectPromptAsync(justBeforeRetry, plan, directive, ct);
                 bool retryModal = HasBottomConfirmationModal(justBeforeRetry) ||
                                   HasFacilityTravelConfirmationVisual(justBeforeRetry);
-                bool stillAuthorized = AlteringReceiptPolicy.CanRetryManagedBlueReceipt(
+                bool stillAuthorized = AlteringReceiptPolicy.CanRetryManagedFacilityReceipt(
                     managedReceipt: true, beforeCount: receiptWorkCountBefore,
                     afterCount: lastCount,
                     allFacilityWorksComplete: stillReady,
-                    blueButtonVisible: HasCollectButtonVisual(justBeforeRetry),
                     facilityVisible: await FindFacilityHeaderAsync(
                         justBeforeRetry, plan.ScreenTitle, ct) is not null,
                     onsiteCloseVisible: HasOnsiteCloseButtonVisual(justBeforeRetry),
@@ -3066,7 +3104,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 receiptRetryUsed = true;
                 ct.ThrowIfCancellationRequested();
                 _ui.TapFresh(0x39, ct); // The only possible second receive input.
-                Log?.Invoke("[자동 가공] CLI 작업건 동일 + 파란 모두 받기 확인 · Space 재시도 1/1");
+                Log?.Invoke("[자동 가공] CLI 작업건 동일 + 시설/전체완료/현장/팝업 검증 · 파란버튼검사 생략 · Space 재시도 1/1");
                 await Task.Delay(450, ct);
                 confirmedReceipt = await ConfirmCompletionResultAsync(
                     plan, ct, receiptWorkCountBefore: receiptWorkCountBefore,
