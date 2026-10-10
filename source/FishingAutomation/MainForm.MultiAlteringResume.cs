@@ -73,6 +73,24 @@ public sealed partial class MainForm
                 CancellationToken.None);
             var identity = await CliIdentityGuard.CaptureForMultiAlteringAsync(
                 _cli, CancellationToken.None, allowLimitedFreshTest: true);
+            bool confirmedSingleCharacter = false;
+            if (!identity.Baseline.HasDurableMultiIdentity)
+            {
+                if (string.IsNullOrWhiteSpace(identity.Baseline.RealmName))
+                    throw new InvalidOperationException("1캐릭터 이어하기 서버 확인 실패 · 기록 보존");
+                var consent = MessageBox.Show(this,
+                    "현재 서버: " + identity.Baseline.RealmName + Environment.NewLine +
+                    "대량가공을 이 서버의 같은 캐릭터 하나로만 사용하셨습니까?" +
+                    Environment.NewLine + "서버명으로 다른 캐릭터는 구별하지 못합니다." +
+                    Environment.NewLine + "다른 캐릭터라면 [아니요]를 선택하세요." +
+                    Environment.NewLine + "가공 대기열과 수량 검증은 그대로 적용합니다.",
+                    "1캐릭터 전용 이어하기 확인",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (consent != DialogResult.Yes) return;
+                confirmedSingleCharacter = true;
+                _log.Write("[다중가공] 서버명 전용 이어하기 · 사용자가 동일 캐릭터 사용 확인");
+            }
             var data = new AlteringCliData(_cli);
             IReadOnlyList<MultiAlteringResumeLine> lines;
             using (var lease = new MultiAlteringBatchStore(root))
@@ -80,7 +98,8 @@ public sealed partial class MainForm
                 if (MultiAlteringRecentResume.Latest(root)?.BatchId != recent.BatchId)
                     throw new InvalidOperationException("최근 이어하기 대상이 변경됐습니다.");
                 lines = await MultiAlteringRecentResume.VerifyAsync(
-                    recent, identity.Baseline, data, CancellationToken.None);
+                    recent, identity.Baseline, data, CancellationToken.None,
+                    allowSingleCharacter: confirmedSingleCharacter);
             }
 
             string report = string.Join(Environment.NewLine, lines.Select(line =>
@@ -101,7 +120,8 @@ public sealed partial class MainForm
 
             _log.Write("[다중가공] 이어하기 수동 확인 · 최근 배치 " + recent.BatchId);
             _resumeUiBusy = false; // StartMultiAlteringAsync sets the running guard synchronously.
-            await StartMultiAlteringAsync(recent.Plans, recent.Directory, recent.BatchId);
+            await StartMultiAlteringAsync(
+                recent.Plans, recent.Directory, recent.BatchId, confirmedSingleCharacter);
         }
         catch (Exception ex)
         {
