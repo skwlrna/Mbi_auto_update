@@ -1036,11 +1036,12 @@ jobs:
              $resolver -notmatch '다중 채집 전 가공 UI 종료') { throw 'recursive multi-gather planning/wiring missing' }
           if($resolver -notmatch 'MultiAlteringMaterialPreflightPolicy' -or
              $resolver -notmatch 'PreGatherKnownShortagesAsync' -or
-             $resolver -notmatch '전체 품목 통합 채집 준비' -or
+             $multiAlterMain -notmatch 'PreparePlanMaterialsAsync' -or
              $multiAlterMain -notmatch 'MultiAlteringMaterialPreflightPolicy\.CanRun' -or
-             $multiAlterMain -notmatch 'hasResumableSessionForPreflight' -or
-             $multiAlterMain -notmatch 'hasSelectedFacilityWorksForPreflight' -or
-             $multiAlterMain -notmatch 'PreGatherKnownShortagesAsync') { throw 'safe whole-plan known-shortage preflight wiring missing' }
+             $multiAlterMain -notmatch 'new MultiAlteringSupplyPreflight\(plan, recipe, plan.RequiredWorks\)' -or
+             $multiAlterMain -notmatch 'preparePlan: PreparePlanMaterialsAsync' -or
+             $multiAlterMain -notmatch 'PreGatherKnownShortagesAsync' -or
+             $multiAlterMain -match 'materialPreflight.Count > 0') { throw 'safe per-item known-shortage preflight wiring missing' }
           if($resolver -notmatch '철괴\(철 광석\)' -or
              $resolver -notmatch '철괴\(광석\) 제외') { throw 'recursive iron ingot must prefer iron-ore recipe and exclude legacy ore route' }
           if($multiGather -notmatch 'new GatheringAutomation' -or
