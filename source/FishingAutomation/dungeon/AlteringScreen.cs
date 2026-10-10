@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FishingAutomation;
 
 namespace DungeonVisionBot;
@@ -1973,7 +1974,26 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         int loadingDepartureStreak = 0;
         bool confirmedMoveTransition = false;
 
-        for (int attempt = 0; attempt < 120; attempt++)
+        // V3.1.76: start the timer after the first confirmed move click.
+        // The old 120 polls (~54 seconds of delays plus CLI/OCR time) could
+        // stop a legitimately moving character before reaching a far facility.
+        // Time is monotonic, never reset by CLI errors, retry, or popup Space.
+        // Preserve the legacy 120-poll bound ONLY for Automatic single-altering.
+        var managedTravelClock = directive != AlteringFacilityEntryDirective.Automatic
+            ? Stopwatch.StartNew()
+            : null;
+        if (managedTravelClock is not null)
+            Log?.Invoke(
+                $"[자동 가공] {plan.ScreenTitle} · F9 설비 이동 제한 " +
+                $"{AlteringFacilityTravelConfirmPolicy.ManagedTravelTimeout.TotalMinutes:0}분 " +
+                "· 실제 경과 시간 기준 · 자동이동 중 추가 클릭/Space 금지");
+
+        for (int attempt = 0;
+             directive == AlteringFacilityEntryDirective.Automatic
+                 ? attempt < 120
+                 : AlteringFacilityTravelConfirmPolicy.IsManagedTravelWithinLimit(
+                     managedTravelClock!.Elapsed);
+             attempt++)
         {
             ct.ThrowIfCancellationRequested();
             await Task.Delay(attempt < 20 ? 200 : 500, ct);
@@ -2378,6 +2398,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
         }
 
+        if (managedTravelClock is not null)
+            throw new InvalidOperationException(
+                $"설비 이동 시작 후 최대 {AlteringFacilityTravelConfirmPolicy.ManagedTravelTimeout.TotalMinutes:0}분 경과 " +
+                $"(실제 {managedTravelClock.Elapsed.TotalSeconds:F0}초) · " +
+                "자동이동/현장 도착을 안전하게 확정하지 못해 추가 이동 클릭/Space 없이 정지합니다.");
         throw new InvalidOperationException(
             "설비로 이동 입력 후 확인창/자동이동/현장 전환을 제한 시간 안에 확인하지 못해 " +
             "추가 설비 이동 재클릭 없이 정지합니다.");
