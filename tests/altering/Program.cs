@@ -44,7 +44,7 @@ Check(partialTelegram.Contains("목재+: 0/100개") &&
       partialTelegram.Contains("완료 3 · 진행 4") &&
       partialTelegram.Contains("일부 완료, 시설 전체 완료 전 수령 보류") &&
       partialTelegram.Contains("2분 15초") &&
-      partialTelegram.Contains("19", StringComparison.Ordinal) == false || partialTelegram.Contains("병렬 대기"),
+      partialTelegram.Contains("병렬 대기"),
     "Telegram status reports pending completed slots and next completion even when confirmed output is 0");
 var allReady = partiallyReady.Select(w => w with
 {
