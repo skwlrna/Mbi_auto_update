@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.79"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.80"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.79</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3179-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.79"')) {
+          if ($p -notmatch '<Version>3\.1\.80</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3180-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.80"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -980,10 +980,24 @@ jobs:
           if($laneOwnership -notmatch 'IntermediateOwners' -or $laneOwnership -notmatch 'IntermediateDepth') { throw 'nested facility lease stack missing' }
           if($dependencyScheduler -notmatch 'completedSession = store.Load' -or $dependencyScheduler -notmatch 'completedSession.MatchesIdentity') { throw 'satisfied dependency session cleanup missing' }
           if($alteringPlan -notmatch '_onConfirmedReceipt' -or $multiAlterMain -notmatch 'onConfirmedReceipt:' -or $dependencyScheduler -notmatch 'onConfirmedReceipt:') { throw 'confirmed altering receipt must reconcile facility ownership before nested material work' }
+          # F9 V3.1.80: the normal coordinator is NEVER a receipt boundary.
+          # Only the guarded callback may reconcile shrinking queues.
           if($multiAlter -notmatch 'FacilityLaneState' -or
              $multiAlter -notmatch 'AssertAccess' -or
-             $multiAlter -notmatch 'allowShrink: false' -or
-             $multiAlter -notmatch 'allowShrink: true') { throw 'multi coordinator facility ownership observation missing' }
+             $multiAlter -notmatch 'afterFacilityWorks, allowShrink: false' -or
+             $multiAlter -match 'allowShrink: true') { throw 'unverified F9 coordinator queue shrink is not rejected' }
+          $strictLeaseObservation = [regex]::Matches(
+              $laneOwnership, 'Observe\(facilityName, liveWorks, allowShrink: false\)').Count
+          if($strictLeaseObservation -ne 2 -or
+             $laneOwnership -match 'Observe\(facilityName, liveWorks, allowShrink: true\)' -or
+             $watchCore -notmatch 'if \(works.Count == 0\)' -or
+             $watchCore -notmatch '_last.Remove\(facility\)' -or
+             $alterTests -notmatch 'F9 empty facility stays idle for over 30 minutes' -or
+             $alterTests -notmatch 'F9 unexpected queue shrink after runBatch fails closed' -or
+             $alterTests -notmatch 'F9 intermediate lease cannot silently accept an unverified queue shrink' -or
+             $alterTests -notmatch 'F9 intermediate lease cannot release on an unverified queue shrink') {
+              throw 'F9 idle-facility and verified-receipt regression guards missing'
+          }
           if($multiAlterMain -notmatch 'new FacilityLaneState\(currentWorks\)' -or
              $multiAlterMain -notmatch 'laneState: laneState' -or
              $multiAlterMain -notmatch 'ConfirmedRegistrationsThisRun' -or
