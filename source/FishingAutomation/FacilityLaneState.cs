@@ -288,7 +288,9 @@ internal sealed class FacilityLaneState
                 $"{facilityName} 소유권 해제 순서 불일치: 현재 {currentOwner} / 요청 {key}. " +
                 "자식 중간재료가 소유 중에는 부모 소유권을 해제하지 않습니다.");
 
-        Observe(facilityName, liveWorks, allowShrink: true);
+        // A finished child must already have an authorized, fully verified
+        // receipt before surrendering this lease. Never infer one here.
+        Observe(facilityName, liveWorks, allowShrink: false);
         if (lane.LastObservedWorks != 0)
             throw new InvalidOperationException(
                 $"{facilityName} 중간재료 작업 {lane.LastObservedWorks}건이 남아 있어 시설 소유권을 해제하지 않습니다.");
