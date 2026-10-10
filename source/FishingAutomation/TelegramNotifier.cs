@@ -147,15 +147,13 @@ public sealed class TelegramNotifier : IDisposable
                     string chatId = chat.TryGetProperty("id", out var chatNode) ? chatNode.ToString() : "";
                     if (!chatId.Equals(s.ChatId.Trim(), StringComparison.Ordinal)) continue;
                     string text = message.TryGetProperty("text", out var textNode) ? textNode.GetString() ?? "" : "";
-                    if (string.IsNullOrWhiteSpace(text) || !text.StartsWith('/')) continue;
-
-                    string command = text.Split(' ', 2)[0].Split('@', 2)[0].ToLowerInvariant();
-                    if (command is not ("/status" or "/stop" or "/restart" or "/help" or "/item" or "/itemreset")) continue;
+                    string? command = ParseRemoteCommand(text);
+                    if (command is null) continue;
 
                     string reply;
                     if (command == "/help")
                     {
-                        reply = "MABI AUTO 원격 명령\n/status - 현재 상태\n/item - 전리품 획득 현황\n/itemreset - 전리품 누적 초기화\n/stop - 매크로 정지\n/restart - 현재 선택 모드 재시작";
+                        reply = "MABI AUTO 원격 명령\n상태 또는 /status - 현재 상세 현황\n/item - 전리품 획득 현황\n/itemreset - 전리품 누적 초기화\n/stop - 매크로 정지\n/restart - 현재 선택 모드 재시작";
                     }
                     else if (_remoteHandler is not null)
                     {
@@ -177,6 +175,20 @@ public sealed class TelegramNotifier : IDisposable
                 await DelaySafe(3000, ct);
             }
         }
+    }
+
+    // Korean plain text is an explicit read-only alias. Keep all control
+    // actions slash-only; do not treat arbitrary Korean chat as a command.
+    internal static string? ParseRemoteCommand(string? text)
+    {
+        string raw = text?.Trim() ?? "";
+        if (raw.Equals("상태", StringComparison.Ordinal))
+            return "/status";
+        if (!raw.StartsWith('/', StringComparison.Ordinal))
+            return null;
+        string command = raw.Split(' ', 2)[0].Split('@', 2)[0].ToLowerInvariant();
+        return command is "/status" or "/stop" or "/restart" or
+            "/help" or "/item" or "/itemreset" ? command : null;
     }
 
     private static bool IsConfigured(NotificationSettings s) =>
