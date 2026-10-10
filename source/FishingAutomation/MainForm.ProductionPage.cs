@@ -124,6 +124,7 @@ public sealed partial class MainForm
         private int _percent;
         private float _layoutScale = 1;
         private readonly Button _start, _stop, _reload;
+        private readonly Button? _resume;
         private readonly ListBox _alteringQueue = new();
         private Button? _addQueue, _removeQueue, _clearQueue;
         private object[] _choices = Array.Empty<object>();
@@ -258,11 +259,22 @@ public sealed partial class MainForm
             statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
             body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
-            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 정지" };
-            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            // Keep the original page and controls. Altering alone gains ONE
+            // bottom-row action; gathering keeps its original two buttons.
+            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = altering ? 3 : 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 이어하기 정지" };
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 40 : 70));
+            if (altering) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
             _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.AccessibleName = AccessibleName + " 시작";
             _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
-            actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); root.Controls.Add(actions, 0, 2);
+            actions.Controls.Add(_start, 0, 0);
+            if (altering)
+            {
+                _resume = PageButton("↻   이어하기", () => _ = owner.ShowRecentMultiAlteringAsync());
+                _resume.AccessibleName = "최근 대량가공 이어하기";
+                actions.Controls.Add(_resume, 1, 0);
+            }
+            actions.Controls.Add(_stop, altering ? 2 : 1, 0); root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
 
             foreach (var control in Descendants(root).Prepend(root)) control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
@@ -275,7 +287,8 @@ public sealed partial class MainForm
             if (_clearQueue is not null) Typography(_clearQueue, 13);
             foreach (var tab in _facilityTabButtons.Values) Typography(tab, 17);
             foreach (var label in new[] { _state, _condition, _elapsed, _collection, _character, _cli }) Typography(label, 17);
-            Typography(_progressText, 18); Typography(_percentage, 18); Typography(_start, 22); Typography(_stop, 22);
+            Typography(_progressText, 18); Typography(_percentage, 18); Typography(_start, altering ? 19 : 22); Typography(_stop, altering ? 19 : 22);
+            if (_resume is not null) Typography(_resume, 19);
 
             var metrics = Descendants(root).Prepend(root).Select(c => new PageMetric(c, c.Font.FontFamily.Name, c.Font.Size, c.Font.Style, c.Padding, c.Margin)).ToArray();
             var rows = metrics.SelectMany(m => m.Control is TableLayoutPanel t ? t.RowStyles.Cast<RowStyle>().Where(x => x.SizeType == SizeType.Absolute).Select(x => (Style: x, Size: x.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
@@ -837,7 +850,9 @@ public sealed partial class MainForm
             _start.Text = hasBatch
                 ? $"▶   다중가공 {_alteringQueue.Items.Count}종 시작 (F9)"
                 : "▶   " + AccessibleName + " 시작 (F9)";
-            _start.Enabled = !busy && !_loading && (available || hasBatch); _stop.Enabled = running;
+            _start.Enabled = !busy && !_loading && (available || hasBatch);
+            if (_resume is not null) _resume.Enabled = !busy && !_loading;
+            _stop.Enabled = running;
             bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
             bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
