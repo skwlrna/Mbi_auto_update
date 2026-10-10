@@ -21,6 +21,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private string? _postTravelProvenFacilityTitle;
     private bool _repeatOcrFreeRecipe;
     private string? _selectedFixedRecipeKey;
+    // Per-F9 AlteringScreen: first K is explicitly started in the ordinary field.
+    // After that first real K input, any later unknown->K navigation must
+    // positively match Abyss HUD templates on two fresh frames.
+    private bool _managedKInputIssued;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
     private static readonly Rectangle Cards = new(20, 350, 760, 550);
@@ -813,8 +817,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     await WaitForProcessingHubAsync(900, ct);
                     continue;
                 }
-                if (!(directive != AlteringFacilityEntryDirective.Automatic &&
-                      HasManagedKEntryFieldHudVisual(frame)) &&
+                // Managed F9 must never interpret unrelated world OCR "가공"
+                // as a K navigation menu before the first K. On a later
+                // re-entry, permit the existing OCR fallback ONLY when the
+                // real processing bottom bar is positively observed.
+                bool mayUseMenuOcr = directive == AlteringFacilityEntryDirective.Automatic ||
+                    (_managedKInputIssued && HasManagedProcessingBottomTabVisual(frame));
+                if (mayUseMenuOcr &&
                     await FindAsync(frame, new(180, 880, 420, 120), "가공", ct) is not null)
                 {
                     // A different bottom confirmation or travel overlay must never
@@ -870,32 +879,47 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // A first unknown frame does not authorize K. Require two
-                    // independent ordinary-field HUD observations. Modal shape
-                    // and the existing CLI idle guard remain hard vetoes.
-                    bool firstField = HasManagedKEntryFieldHudVisual(frame);
+                    // F9 is explicitly started in the ordinary field. Initial
+                    // K does not require fragile minimap-gold / K-teal pixels.
+                    // Re-entry AFTER a K has actually been sent uses the same
+                    // Home/End/K/I template matcher as Abyss (3/4, 2 frames).
+                    bool firstEntry = !_managedKInputIssued;
+                    var firstHud = firstEntry
+                        ? (Matched: 0, Scores: "최초 시작 · 화면색상 검사 생략")
+                        : DetectManagedWorldHudTemplates(frame);
                     await Task.Delay(180, ct);
                     using var freshField = Capture(ct);
-                    bool secondField = HasManagedKEntryFieldHudVisual(freshField);
+                    var secondHud = firstEntry
+                        ? (Matched: 0, Scores: "최초 시작 · 화면색상 검사 생략")
+                        : DetectManagedWorldHudTemplates(freshField);
                     bool actualModal = HasManagedKEntryBlockingModal(freshField);
+                    bool unexpectedMenu = HasFixedProcessingHubVisual(freshField) ||
+                                          HasManagedProcessingBottomTabVisual(freshField);
                     Log?.Invoke(
-                        $"[자동 가공] F9 K 진입 재판정 · 필드 HUD={firstField}/{secondField} · " +
-                        $"패널+확인버튼 팝업={actualModal} · " +
-                        $"기존 초록색 픽셀 판정={HasBottomConfirmationModal(frame)}(진단 전용)");
+                        $"[자동 가공] F9 K 진입 재판정 · " +
+                        $"경로={(firstEntry ? "최초 필드 시작" : "중간 재진입")} · " +
+                        $"HUD={firstHud.Matched}/4 → {secondHud.Matched}/4 · " +
+                        $"첫={firstHud.Scores} · 둘째={secondHud.Scores} · " +
+                        $"팝업={actualModal} · 가공메뉴={unexpectedMenu}");
                     if (actualModal)
                         Fail(freshField, "관리 가공 K 직전 실제 확인창 패널+버튼 감지 · 입력 차단");
-                    if (!firstField || !secondField)
-                        Fail(freshField, "관리 가공 K 직전 일반 필드 HUD 2프레임 미확인 · 입력 없이 정지");
-                    // 2026-10-10 16:43 live regression: both field HUD frames can
-                    // be positive while fixed facility/header pixels match foliage
-                    // or other world UI. The earlier facility/hub branches have
-                    // already checked the current screen. After TWO confirmed
-                    // ordinary-world frames and no true modal, do not let a
-                    // secondary title/brightness heuristic silently suppress K.
-                    // The CLI idle guard below remains mandatory before K.
+                    // If the UI changed while waiting, re-evaluate it in the
+                    // existing bounded EnterFacility loop; never send K blindly.
+                    if (unexpectedMenu)
+                    {
+                        Log?.Invoke("[자동 가공] K 직전 가공 메뉴가 새로 표시됨 · 중복 K 생략, 메뉴 재판정");
+                        continue;
+                    }
+                    if (!CanAuthorizeManagedKEntry(
+                            firstEntry, firstHud.Matched, secondHud.Matched,
+                            actualModal, unexpectedMenu))
+                        Fail(freshField,
+                            "관리 가공 K 재진입 HUD 이미지 3/4·2프레임 미확인 · 입력 없이 정지");
                 }
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
+                if (directive != AlteringFacilityEntryDirective.Automatic)
+                    _managedKInputIssued = true;
                 Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
             }
 
@@ -1711,6 +1735,38 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // rectangular green confirm button, as in the 19:35 real modal screenshot.
     private static bool HasManagedKEntryBlockingModal(Bitmap frame)
         => HasManagedFacilityTravelConfirmationVisual(frame);
+
+    // K is safe only in an idle, modal-free and non-menu world context.
+    // CLI idle is checked separately IMMEDIATELY before the real input.
+    internal static bool CanAuthorizeManagedKEntry(
+        bool firstEntry, int firstHudMatches, int secondHudMatches,
+        bool popupVisible, bool processingMenuVisible)
+        => !popupVisible && !processingMenuVisible &&
+           (firstEntry || (firstHudMatches >= 3 && secondHudMatches >= 3));
+
+    // V3.1.75: F9 re-entry uses the SAME four 800x1000 grayscale, multi-scale
+    // template assets/thresholds/ROIs as Abyss outside confirmation.
+    // These HUD icons also appear INSIDE Abyss, so they are never proof by
+    // themselves: caller must first rule out processing menus/popup and
+    // independently verify the CLI idle state. At least 3/4 on TWO frames.
+    private (int Matched, string Scores) DetectManagedWorldHudTemplates(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return (0, "크기 불일치");
+
+        var home = _ui.FindTemplate(frame, new Rectangle(590, 20, 150, 130),
+            "abyss/templates/outside_home_v75.png", 0.76);
+        var end = _ui.FindTemplate(frame, new Rectangle(630, 20, 150, 130),
+            "abyss/templates/outside_end_v75.png", 0.70);
+        var k = _ui.FindTemplate(frame, new Rectangle(0, 820, 180, 180),
+            "abyss/templates/outside_k_v75.png", 0.72);
+        var i = _ui.FindTemplate(frame, new Rectangle(620, 800, 180, 200),
+            "abyss/templates/outside_i_v75.png", 0.72);
+        int matched = (home.Found ? 1 : 0) + (end.Found ? 1 : 0) +
+                      (k.Found ? 1 : 0) + (i.Found ? 1 : 0);
+        return (matched,
+            $"Home={home.Score:0.000}, End={end.Score:0.000}, K={k.Score:0.000}, I={i.Score:0.000}");
+    }
 
     // Positive ordinary-world evidence for the managed unknown->K route.
     // On the real 800x1000 field the top-right circular minimap has a gold
