@@ -141,6 +141,10 @@ internal static class MultiAlteringRecentResume
             int live = facility.Count(x =>
                 x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName);
             int expectedLive = session.QueuedWorks - completedEquivalent;
+            if (session.QueuedWorks == session.RequiredWorks && live == 0 &&
+                session.MultiState != MultiAlteringItemState.Completed)
+                throw new InvalidOperationException(
+                    $"{plan.DisplayName}: 전량 등록 작업은 사라졌지만 완료 수령 확정 기록이 없습니다 · 중복 수령/등록 차단");
             if (live != expectedLive)
                 throw new InvalidOperationException(
                     $"{plan.DisplayName}: 저장 등록 {session.QueuedWorks}건 · 확인된 완성 작업 {completedEquivalent}건 · " +
