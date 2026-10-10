@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.74"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.75"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.74</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3174-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.74"')) {
+          if ($p -notmatch '<Version>3\.1\.75</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3175-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.75"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -675,8 +675,15 @@ jobs:
               $managerEntry -notmatch 'await ClickLabelAsync\("가공"' -or
               $visualWait -match 'FindAsync\(|FindFacilityHeaderAsync\(' -or
               $screen -notmatch 'HasManagedKEntryFieldHudVisual' -or
-              $screen -notmatch 'HasFixedProcessingHubVisual') {
-              throw 'F9 managed visual-first K menu requires CLI idle, modal veto, two frames, and OCR fallback'
+              $screen -notmatch 'HasFixedProcessingHubVisual' -or
+              $managerEntry -notmatch 'CanAuthorizeManagedKEntry' -or
+              $managerEntry -notmatch 'DetectManagedWorldHudTemplates' -or
+              $managerEntry -match 'HasManagedKEntryFieldHudVisual' -or
+              $screen -notmatch 'abyss/templates/outside_home_v75.png' -or
+              $screen -notmatch 'abyss/templates/outside_end_v75.png' -or
+              $screen -notmatch 'abyss/templates/outside_k_v75.png' -or
+              $screen -notmatch 'abyss/templates/outside_i_v75.png') {
+              throw 'V3.1.75 F9 K requires first-press CLI+modal guard and template-verified re-entry, no old colour veto'
           }
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or
