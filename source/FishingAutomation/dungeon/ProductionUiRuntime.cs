@@ -219,6 +219,22 @@ internal sealed class ProductionUiRuntime : IDisposable
         return current.Value;
     }
 
+    // Share the exact multi-scale grayscale matcher used by Abyss outside
+    // HUD targets. F9 only calls it for post-start K menu re-entry, never
+    // for the very first explicitly field-started F9 input.
+    internal DetectionResult FindTemplate(
+        Bitmap frame, Rectangle roi, string templatePath,
+        double threshold, double minScale = 0.85,
+        double maxScale = 1.15, double step = 0.05)
+    {
+        roi = Rectangle.Intersect(roi, new Rectangle(Point.Empty, frame.Size));
+        if (roi.Width <= 0 || roi.Height <= 0)
+            return DetectionResult.NotFound;
+        return _templates.FindMultiScale(
+            frame, roi, templatePath, threshold,
+            minScale, maxScale, step);
+    }
+
     internal DetectionResult FindBrightTemplate(
         Bitmap frame,
         Rectangle roi,
