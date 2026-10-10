@@ -288,23 +288,50 @@ try
         "F01 compiled policy rejects uncorrelated OCR title misses, CLI-only loading and missing move input");
     var enter = ScreenCalls("EnterFacilityAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
-          Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "DetectManagedWorldHudTemplates") &&
+          Has(enter, "CanAuthorizeManagedKEntry") &&
+          !Has(enter, "HasManagedKEntryFieldHudVisual") &&
           Has(enter, "RequireManagedIdleAsync") &&
           Has(enter, "Capture"),
-        "V3.1.71 compiled F9 K has modal-shape veto + fresh second field HUD + CLI idle guard");
+        "V3.1.75 compiled F9 K has no minimap-gold pixel veto; template re-entry and fresh CLI idle guard");
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
-    // V3.1.73: the 16:43 real field showed two positive HUD frames but
-    // attempted K three times without a single K-send log. The old post-HUD
-    // header/hub pixel shortcut used 'continue' before TapFresh. Check the
-    // actual compiled async method no longer calls that late veto at all.
+    // V3.1.75: the 18:30 live world capture (V3.1.74) had no old
+    // minimap-gold match and stopped before K. The production Enter method
+    // MUST use 3/4 grayscale Abyss HUD templates only AFTER the first K.
+    // Two fresh frames, a real popup veto and CLI idle remain required.
     Check(!Has(enter, "HasFixedFacilityHeaderVisual") &&
-          !Has(enter, "HasFixedProcessingHubVisual") &&
           Has(enter, "TapFresh") &&
-          Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "DetectManagedWorldHudTemplates") &&
+          Has(enter, "CanAuthorizeManagedKEntry") &&
+          !Has(enter, "HasManagedKEntryFieldHudVisual") &&
           Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "RequireManagedIdleAsync"),
-        "V3.1.73 compiled F9 confirmed world HUD is not silently vetoed by false facility/hub pixels before K");
+        "V3.1.75 first F9 field K bypasses old gold/teal test; later K uses 3/4 Abyss HUD and modal/CLI safety");
+    var matchAbyssHud = ScreenCalls("DetectManagedWorldHudTemplates", 1);
+    Check(Count(matchAbyssHud, "FindTemplate") == 4 &&
+          !Has(matchAbyssHud, "HasManagedKEntryFieldHudVisual") &&
+          Has(ScreenCalls("CanAuthorizeManagedKEntry", 5), "get_Item1") == false,
+        "V3.1.75 compiled F9 re-entry checks four fixed Abyss HUD templates, not old minimap colour");
+    Check(CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            true, 0, 0, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            true, 0, 0, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            true, 0, 0, false, true) &&
+          CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 3, 3, false, false) &&
+          CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 4, 3, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 2, 4, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 4, 2, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 4, 4, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 4, 4, false, true),
+        "V3.1.75 F9 K first pass skips gold/teal but re-entry requires 3/4 in both fresh frames and no popup/menu");
     var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
     Check(Has(enter, "TrySelectManagedProcessingTabAsync") &&
           Has(enter, "WaitForManagedProcessingNavigationReadyAsync") &&
@@ -706,6 +733,7 @@ try
             "V3.1.69 slate dialog without positive green confirm stays blocked");
     }
 
+    // Legacy synthetic gold/teal detector diagnostic, no longer used by F9 K input.
     // V3.1.71 manager F9 K menu: actual 06:15 field is green foliage
     // with a gold upper-right minimap and teal bottom-left K skill HUD.
     // The legacy generic green detector may see the foliage as a modal;
