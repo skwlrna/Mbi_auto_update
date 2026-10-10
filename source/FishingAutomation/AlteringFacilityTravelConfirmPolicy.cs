@@ -2,6 +2,14 @@ namespace FishingAutomation;
 
 internal static class AlteringFacilityTravelConfirmPolicy
 {
+    // F9 manager facility moves can be long-distance auto-pathfinding.
+    // Evaluate monotonic elapsed time, not number of CLI/UI polls.
+    // Automatic single-altering retains its historical bounded 120 polls.
+    internal static readonly TimeSpan ManagedTravelTimeout = TimeSpan.FromMinutes(5);
+
+    internal static bool IsManagedTravelWithinLimit(TimeSpan elapsed)
+        => elapsed >= TimeSpan.Zero && elapsed < ManagedTravelTimeout;
+
     internal const int RequiredOnsiteStableFrames = 7;
     internal const int MaxTravelConfirmationSpaces = 2;
     internal static readonly TimeSpan RequiredOnsiteStableDuration = TimeSpan.FromSeconds(3);

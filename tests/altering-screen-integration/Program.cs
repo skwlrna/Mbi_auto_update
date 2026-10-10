@@ -206,7 +206,26 @@ try
           queue.ToList().FindIndex(s => s.EndsWith(".RecoverRemoteDetailToOnsiteAsync")),
         "real queue checks manager conflict BEFORE Automatic-only remote-detail recovery");
 
+    // V3.1.76 real compiled F9 travel stays in an elapsed-time-bounded
+    // loop. Automatic single-altering still uses the legacy 120-poll cap.
+    Check(AlteringFacilityTravelConfirmPolicyMarker(),
+        "V3.1.76 F9 managed travel timeout is five minutes");
+    bool AlteringFacilityTravelConfirmPolicyMarker()
+    {
+        TimeSpan timeout = (TimeSpan)(travelPolicy.GetField(
+            "ManagedTravelTimeout", all)?.GetValue(null)
+            ?? throw new InvalidOperationException("Missing five-minute travel timeout"));
+        return timeout == TimeSpan.FromMinutes(5) &&
+            CallBoolean(travelPolicy, "IsManagedTravelWithinLimit", TimeSpan.Zero) &&
+            CallBoolean(travelPolicy, "IsManagedTravelWithinLimit", TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59)) &&
+            !CallBoolean(travelPolicy, "IsManagedTravelWithinLimit", TimeSpan.FromMinutes(5));
+    }
+
     var travel = ScreenCalls("TravelToFacilityAsync", 5);
+    Check(Has(travel, "IsManagedTravelWithinLimit") &&
+          Has(travel, "StartNew") &&
+          Has(travel, "HasStableOnsiteEvidence"),
+        "V3.1.76 actual travel async IL uses monotonic clock + fixed five-minute manager deadline and retains onsite proof");
     Check(Has(travel, "IsManagedFreshArrivalObservation") &&
           Has(travel, "HasVerifiedManagedMoveTransition") &&
           Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
