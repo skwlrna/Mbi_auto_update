@@ -167,6 +167,38 @@ await bulk.RunAsync(new GatheringPlan("통나무", 340), default);
 Check(bulkStarts == 1 && bulkWaits == 1 && seenTargetTotal == 340 && bulkOwned == 450,
     "life-skill bulk gathering stops the active 100-action cycle when requested material target is reached");
 
+// The 23:49 live error continued gaining inventory at the old 30m boundary.
+Check(LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromMinutes(31),
+    TimeSpan.FromMinutes(30), true) == LifeSkillGatheringTimeoutStatus.None,
+    "gathering continues beyond 30m when inventory just increased");
+Check(LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromHours(2),
+    TimeSpan.FromHours(2) - TimeSpan.FromMinutes(4), true) ==
+    LifeSkillGatheringTimeoutStatus.None,
+    "two-hour processing remains allowed with verified progress");
+Check(LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromMinutes(35) - TimeSpan.FromSeconds(1),
+    TimeSpan.FromMinutes(30), true) == LifeSkillGatheringTimeoutStatus.None &&
+    LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromMinutes(35),
+    TimeSpan.FromMinutes(30), true) == LifeSkillGatheringTimeoutStatus.Stalled,
+    "after any gain, exactly five minutes without progress triggers safe stop");
+Check(LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromMinutes(30) - TimeSpan.FromSeconds(1),
+    TimeSpan.Zero, false) == LifeSkillGatheringTimeoutStatus.None &&
+    LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromMinutes(30),
+    TimeSpan.Zero, false) == LifeSkillGatheringTimeoutStatus.NoProgress,
+    "never-progressed cycle retains the 30m no-gain bound");
+Check(LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromHours(6) - TimeSpan.FromSeconds(1),
+    TimeSpan.FromHours(6) - TimeSpan.FromSeconds(20), true) ==
+    LifeSkillGatheringTimeoutStatus.None &&
+    LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromHours(6),
+    TimeSpan.FromHours(6) - TimeSpan.FromSeconds(1), true) ==
+    LifeSkillGatheringTimeoutStatus.HardLimit,
+    "the hard six-hour ceiling still stops a cycle with fresh inventory gains");
+try
+{
+    LifeSkillGatheringTimeoutPolicy.Evaluate(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(11), true);
+    throw new Exception("future-dated progress accepted");
+}
+catch (ArgumentOutOfRangeException) { Check(true, "invalid progress timestamps are rejected"); }
+
 var plan=new GatheringPlan("철 광석",5);
 try { (plan with {SourceRecipe=new AlteringPlan("금속 가공 시설","철괴(철 광석)",1,3,true)}).Validate(); throw new Exception("paid source accepted"); }
 catch(InvalidDataException){Check(true,"source recipe cannot enable paid altering button");}
