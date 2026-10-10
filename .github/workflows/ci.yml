@@ -887,6 +887,11 @@ jobs:
               $multiAlter -notmatch 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' -or
               $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed\)' -or
               $multiAlter -notmatch 'idleWatchdog.ConfirmManagerProgress\(facility\)' -or
+              $multiAlter -notmatch 'registrationBefore = _laneState\?\.Snapshot\(facility\)' -or
+              $multiAlter -notmatch 'registrationAfter = _laneState\?\.Snapshot\(facility\)' -or
+              $multiAlter -notmatch 'planCompleted \|\| confirmedRegistration \|\| afterCount != beforeCount' -or
+              $alterTests -notmatch 'M2 live 22:48 same-count 1->0->1 confirmed registration resets stale 126s watchdog' -or
+              $alterTests -notmatch 'M2 same-count without CLI-confirmed registration still stops after 120s' -or
               $multiAlter -notmatch '_laneState\?\.InvalidateOnsite' -or
               $alterTests -notmatch 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' -or
               $alterTests -notmatch 'M2 wait: genuine countdown decreases refresh' -or
