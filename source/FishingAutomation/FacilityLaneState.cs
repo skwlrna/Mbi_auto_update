@@ -255,7 +255,9 @@ internal sealed class FacilityLaneState
             throw new InvalidOperationException(
                 $"{facilityName} 중간재료 {key} 소유권이 이미 활성화되어 있습니다.");
 
-        Observe(facilityName, liveWorks, allowShrink: true);
+        // Taking/releasing a facility lease is never proof of a receipt.
+        // The verified receipt callback must have reconciled any shrink first.
+        Observe(facilityName, liveWorks, allowShrink: false);
         if (lane.LastObservedWorks != 0)
             throw new InvalidOperationException(
                 $"{facilityName}에 {lane.LastObservedWorks}건의 작업이 남아 있어 중간재료가 시설을 소유할 수 없습니다.");
