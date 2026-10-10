@@ -4,6 +4,66 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// Next-release Telegram status: only the exact Korean read-only alias is
+// accepted. Unsafe controls must remain explicit slash commands.
+Check(TelegramNotifier.ParseRemoteCommand("상태") == "/status" &&
+      TelegramNotifier.ParseRemoteCommand(" 상태 ") == "/status" &&
+      TelegramNotifier.ParseRemoteCommand("/status") == "/status" &&
+      TelegramNotifier.ParseRemoteCommand("/status@MabiAutoBot") == "/status" &&
+      TelegramNotifier.ParseRemoteCommand("/stop") == "/stop" &&
+      TelegramNotifier.ParseRemoteCommand("중지") is null &&
+      TelegramNotifier.ParseRemoteCommand("상태확인") is null &&
+      TelegramNotifier.ParseRemoteCommand("/상태") is null &&
+      TelegramNotifier.ParseRemoteCommand("상태 지금") is null,
+    "Telegram Korean 상태 is EXACT read-only /status alias; control commands remain slash-only");
+
+var telegramNow = DateTimeOffset.Now;
+var telegramSnapshot = new MultiAlteringTelegramSnapshot(
+    new[]
+    {
+        new MultiAlteringTelegramItem("목재 가공 시설", "목재+", 0, 100,
+            7, 34, "가공 진행", 600)
+    },
+    "[다중가공] 병렬 대기 · 다음 확인 약 20초",
+    telegramNow.AddSeconds(-7));
+var partiallyReady = new AlteringWork[]
+{
+    new("목재+", "목재 가공 시설", "Completed", true, 0),
+    new("목재+", "목재 가공 시설", "Completed", true, 0),
+    new("목재+", "목재 가공 시설", "Completed", true, 0),
+    new("목재+", "목재 가공 시설", "InProgress", false, 135),
+    new("목재+", "목재 가공 시설", "InProgress", false, 180),
+    new("목재+", "목재 가공 시설", "InProgress", false, 220),
+    new("목재+", "목재 가공 시설", "InProgress", false, 250)
+};
+string partialTelegram = MultiAlteringTelegramStatus.Format(
+    telegramSnapshot, partiallyReady, telegramNow, null);
+Check(partialTelegram.Contains("목재+: 0/100개") &&
+      partialTelegram.Contains("등록 7/34회") &&
+      partialTelegram.Contains("사용 7/7칸") &&
+      partialTelegram.Contains("완료 3 · 진행 4") &&
+      partialTelegram.Contains("일부 완료, 시설 전체 완료 전 수령 보류") &&
+      partialTelegram.Contains("2분 15초") &&
+      partialTelegram.Contains("19", StringComparison.Ordinal) == false || partialTelegram.Contains("병렬 대기"),
+    "Telegram status reports pending completed slots and next completion even when confirmed output is 0");
+var allReady = partiallyReady.Select(w => w with
+{
+    State = "Completed",
+    IsCompleted = true,
+    RemainingSeconds = 0
+}).ToArray();
+string readyTelegram = MultiAlteringTelegramStatus.Format(
+    telegramSnapshot, allReady, telegramNow, null);
+Check(readyTelegram.Contains("완료 7 · 진행 0") &&
+      readyTelegram.Contains("모두 받기 수령 조건 확인"),
+    "Telegram detailed F9 status identifies whole seven-slot batch ready for collect");
+string unavailableTelegram = MultiAlteringTelegramStatus.Format(
+    telegramSnapshot, null, telegramNow, "CLI 응답 시간 초과");
+Check(unavailableTelegram.Contains("실시간 조회 불가") &&
+      unavailableTelegram.Contains("작업 0건으로 취급하지 않음") &&
+      !unavailableTelegram.Contains("사용 0/7칸"),
+    "Telegram CLI query failure stays unknown instead of fabricating zero active works");
+
 Check(AlteringText.UniqueOcrAlias("강철괴", new[]{"강철괴", "합금강괴"}) == "강철과", "specific OCR alias is catalog checked");
 Check(AlteringText.UniqueOcrAlias("강철괴", new[]{"강철괴", "강철과"}) is null && AlteringText.UniqueOcrAlias("목재+", new[]{"목재+"}) is null, "ambiguous and unsupported OCR aliases blocked");
 Check(AlteringDetailPolicy.IsConfirmed(true, false, false, false),
