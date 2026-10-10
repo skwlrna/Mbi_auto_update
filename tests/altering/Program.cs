@@ -1924,6 +1924,8 @@ var mixedPlans = new[]
 };
 var mixedWorks = new List<AlteringWork>();
 var mixedCalls = new List<string>();
+var preparedItems = new List<string>();
+bool preparedWoodPlusBeforeWoodDone = false;
 var mixedRegistered = mixedPlans.ToDictionary(x => x.DisplayName, _ => 0, StringComparer.Ordinal);
 int mixedDelayCalls = 0;
 int callsAtPartialCompletion = -1;
@@ -1934,7 +1936,7 @@ await multiAltering.RunAsync(
     (job, slotBudget, token) =>
     {
         token.ThrowIfCancellationRequested();
-        Check(slotBudget == 1, "multi-altering coordinator yields one registration slot per mixed turn");
+        Check(slotBudget == 1, "multi-altering coordinator yields one registration slot per active recipe");
         mixedCalls.Add(job.DisplayName);
 
         var lane = mixedWorks.Where(x => x.FacilityName == job.FacilityName).ToArray();
@@ -2007,22 +2009,40 @@ await multiAltering.RunAsync(
 
         return Task.CompletedTask;
     },
-    default);
+    default,
+    preparePlan: (job, token) =>
+    {
+        token.ThrowIfCancellationRequested();
+        preparedItems.Add(job.DisplayName);
+        if (job.DisplayName == "목재+" &&
+            (mixedRegistered["목재"] != 4 ||
+             mixedWorks.Any(x => x.FacilityName == "목재 가공 시설" &&
+                                 x.DisplayName == "목재")))
+            preparedWoodPlusBeforeWoodDone = true;
+        return Task.CompletedTask;
+    });
 
-Check(mixedCalls.Take(7).SequenceEqual(
-        new[] { "목재", "목재+", "목재", "목재+", "목재", "목재+", "목재" }),
-    "same-facility plans are round-robin mixed across the seven-slot lane");
+Check(mixedCalls.IndexOf("목재+") > mixedCalls.IndexOf("강철괴") &&
+      mixedCalls.Take(mixedCalls.IndexOf("목재+")).Where(x => x != "강철괴").All(x => x == "목재") &&
+      !preparedWoodPlusBeforeWoodDone,
+    "same-facility recipe B starts only after recipe A is completely received");
+Check(preparedItems.Count == 3 &&
+      preparedItems.Count(x => x == "목재") == 1 &&
+      preparedItems.Count(x => x == "목재+") == 1 &&
+      preparedItems.Count(x => x == "강철괴") == 1 &&
+      preparedItems.IndexOf("목재") < preparedItems.IndexOf("목재+"),
+    "F9 material preparation runs once per active recipe in facility order");
 Check(mixedRegistered["목재"] == 4 &&
       mixedRegistered["목재+"] == 3 &&
       mixedRegistered["강철괴"] == 7,
     "mixed scheduler registers each plan only to its required work count");
 Check(mixedLaneState.Snapshot("목재 가공 시설").MainRegisteredWorks == 7 &&
       mixedLaneState.Snapshot("금속 가공 시설").MainRegisteredWorks == 7,
-    "main facility ownership ledger matches confirmed round-robin registrations");
+    "main facility ownership ledger matches confirmed sequential registrations");
 Check(callsAtPartialCompletion == callsBeforeWholeBatchCompletion,
-    "one completed slot never causes a facility revisit before the whole mixed batch completes");
+    "one completed slot never causes a facility revisit before the whole batch completes");
 Check(mixedCalls.Take(14).Count(x => x == "강철괴") == 7,
-    "independent facility is fully seeded in parallel before waiting");
+    "independent facility stays parallel while other facility finishes its recipe");
 
 try
 {
