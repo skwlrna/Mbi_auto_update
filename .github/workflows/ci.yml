@@ -414,6 +414,7 @@ jobs:
               $travel -notmatch 'FinalOnsiteRecheckDelay' -or
               $travel -notmatch '설비 도착 후보 후행 재확인 실패' -or
               $travel -notmatch 'CLI AutoTraveling=false') { throw 'stable delayed facility arrival verification missing' }
+          $travelConfirmPolicy = Get-Content source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs -Raw
           # V3.1.76: managed F9 travel is bounded by elapsed time, not
           # 120 polls; Automatic single-altering retains its old cap.
           if ($travelConfirmPolicy -notmatch 'ManagedTravelTimeout = TimeSpan.FromMinutes\(5\)' -or
