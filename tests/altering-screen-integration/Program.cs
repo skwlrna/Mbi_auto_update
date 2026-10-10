@@ -294,6 +294,17 @@ try
         "V3.1.71 compiled F9 K has modal-shape veto + fresh second field HUD + CLI idle guard");
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
+    // V3.1.73: the 16:43 real field showed two positive HUD frames but
+    // attempted K three times without a single K-send log. The old post-HUD
+    // header/hub pixel shortcut used 'continue' before TapFresh. Check the
+    // actual compiled async method no longer calls that late veto at all.
+    Check(!Has(enter, "HasFixedFacilityHeaderVisual") &&
+          !Has(enter, "HasFixedProcessingHubVisual") &&
+          Has(enter, "TapFresh") &&
+          Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "HasManagedKEntryBlockingModal") &&
+          Has(enter, "RequireManagedIdleAsync"),
+        "V3.1.73 compiled F9 confirmed world HUD is not silently vetoed by false facility/hub pixels before K");
     var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
     Check(Has(enter, "TrySelectManagedProcessingTabAsync") &&
           Has(enter, "WaitForManagedProcessingNavigationReadyAsync") &&
@@ -707,6 +718,16 @@ try
               !PixelGate("HasManagedKEntryBlockingModal", grassyField) &&
               PixelGate("HasManagedKEntryFieldHudVisual", grassyField),
             "V3.1.71 06:15 field foliage false green-popup is explicitly excluded from F9 K block");
+
+        // The 16:43 field was positively recognized, but a separately
+        // sampled facility/header-like bright region can coexist in a
+        // foliage/world frame. It must not cancel the authorized K press.
+        Paint(grassyField, new Rectangle(14, 42, 155, 46), Color.White);
+        Paint(grassyField, new Rectangle(15, 144, 230, 48), Color.White);
+        Check(PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
+              PixelGate("HasManagedKEntryFieldHudVisual", grassyField) &&
+              !PixelGate("HasManagedKEntryBlockingModal", grassyField),
+            "V3.1.73 field HUD and misleading fixed facility header can coexist; no K pre-veto");
 
         Paint(realKModal, new Rectangle(175, 754, 450, 218),
             Color.FromArgb(37, 44, 59));
