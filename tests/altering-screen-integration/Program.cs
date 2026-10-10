@@ -345,7 +345,7 @@ try
           Has(prompt, "HasBottomConfirmationModal") &&
           Has(prompt, "TryAutoTravelingAsync") &&
           Has(prompt, "HasCollectButtonVisual"),
-        "real blue receive prompt uses directive, popup, idle CLI and visual button");
+        "actual receive predicate keeps popup/CLI checks and single-mode blue button detector");
     Check(!Has(prompt, "TravelToFacilityAsync"),
         "receive prompt cannot make an independent travel decision");
     // F02 must inspect the COMPILED screen, not only the coordinator's
@@ -353,20 +353,20 @@ try
     // facility jobs complete, and the bounded receipt implementation must
     // rerun it AFTER the persisted N02 receive boundary and BEFORE Space.
     Check(Has(prompt, "CanCollectManagedFacility"),
-        "F02 managed blue prompt checks all facility jobs, not any completed slot");
+        "F02 managed receive checks all facility jobs, not any completed slot");
 
     // N02 moves the actual managed-receipt async body into a boundary-aware
     // method. Inspect that compiled production body, not the thin old overload.
     var collect = ScreenCalls("CollectAsyncAtBoundary", 4);
     Check(Has(ScreenCalls("CollectAsync", 3), "CollectAsyncAtBoundary") &&
           Count(collect, "WaitForCollectPromptAsync") == 2 &&
-          Has(collect, "CanRetryManagedBlueReceipt") &&
+          Has(collect, "CanRetryManagedFacilityReceipt") &&
           Count(collect, "TapFresh") == 2 &&
           Has(collect, "TravelToFacilityAsync") &&
           Has(collect, "ConfirmCompletionResultAsync") &&
           Has(collect, "AfterVerifiedFacilityEntry") &&
           Has(collect, "Invoke") && Has(collect, "TapFresh"),
-        "real receipt keeps manager travel, blue recheck, completion proof and durable receive-input boundary");
+        "real receipt keeps manager travel, post-boundary whole-queue recheck, completion proof and durable receive-input boundary");
     Check(Has(collect, "HasCollectPromptAsync"),
         "F02 compiled receipt checks fresh entire lane again after durable boundary before Space");
     // The gate must be on the actual async production path in strict order.
@@ -394,33 +394,47 @@ try
     // V3.1.66: compiled managed receipt keeps only a single pre-boundary
     // blue+whole-lane check and F02's one final post-boundary recheck.
     // The two legacy WaitForCollectPrompt calls are in Automatic-only branch.
-    Check(Has(collect, "CanRetryManagedBlueReceipt") &&
+    Check(Has(collect, "CanRetryManagedFacilityReceipt") &&
           Count(collect, "ConfirmCompletionResultAsync") == 2 &&
           Count(collect, "TapFresh") == 2 &&
           Has(collect, "TryFacilityWorkCountAsync") &&
-          Has(collect, "HasCollectButtonVisual"),
-        "V3.1.66 compiled managed blue receipt retries at most once after unchanged CLI count");
-    Check(CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 7, true, true, true, true, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 0, true, true, true, true, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 6, true, true, true, true, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, null, true, true, true, true, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 7, false, true, true, true, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 7, true, false, true, true, false, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 7, true, true, true, true, true, false, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 7, true, true, true, true, false, null, false) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              true, 7, 7, true, true, true, true, false, false, true) &&
-          !CallBoolean(receiptPolicy, "CanRetryManagedBlueReceipt",
-              false, 7, 7, true, true, true, true, false, false, false),
-        "V3.1.66 retry only for exact unchanged whole queue plus fresh blue onsite and idle");
+          !Has(collect, "HasCollectButtonVisual"),
+        "V3.1.74 compiled managed receipt retries at most once after unchanged CLI count without blue pixel check");
+    // V3.1.74: the retry policy has NO blueButtonVisible parameter.
+    // Completed lane and stable onsite state can authorize one bounded retry,
+    // while partial receipts, missing onsite proof, popups, moving/unknown
+    // activity and a second retry remain blocked.
+    Check(CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 0, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 6, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, null, true, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, false, true, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, false, true, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, true, false, false, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, true, true, true, false, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, true, true, false, null, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, true, true, false, true, false) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              true, 7, 7, true, true, true, false, false, true) &&
+          !CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
+              false, 7, 7, true, true, true, false, false, false),
+        "V3.1.74 retry requires unchanged whole queue, same onsite facility, no modal, idle CLI, and at most one Space; no blue pixels");
+    // The manager branch is explicitly independent of the blue detector,
+    // which remains in the same predicate only for Automatic single mode.
+    Check(Has(prompt, "CanCollectManagedFacility") &&
+          Has(prompt, "HasCollectButtonVisual") &&
+          !Has(collect, "HasCollectButtonVisual"),
+        "V3.1.74 compiled managed receipt never directly samples blue pixels; Automatic mode retains legacy detector");
     var completion = ScreenCalls("ConfirmCompletionResultAsync", 5);
     Check(Has(completion, "CanConfirmCompletion") &&
           Has(completion, "CloseCompletionResultAndWaitForFacilityAsync"),
