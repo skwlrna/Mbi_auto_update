@@ -15,6 +15,7 @@
     <Compile Include="../../source/FishingAutomation/AlteringFixedRecipeRetryPolicy.cs" Link="AlteringFixedRecipeRetryPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringFacilityTravelConfirmPolicy.cs" Link="AlteringFacilityTravelConfirmPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringBatchStore.cs" Link="MultiAlteringBatchStore.cs" />
+    <Compile Include="../../source/FishingAutomation/MultiAlteringRecentResume.cs" Link="MultiAlteringRecentResume.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringSession.cs" Link="AlteringSession.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringStatus.cs" Link="AlteringStatus.cs" />
     <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
