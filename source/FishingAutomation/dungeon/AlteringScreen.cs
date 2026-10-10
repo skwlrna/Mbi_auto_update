@@ -880,42 +880,69 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // F9 is explicitly started in the ordinary field. Initial
-                    // K does not require fragile minimap-gold / K-teal pixels.
-                    // Re-entry AFTER a K has actually been sent uses the same
-                    // Home/End/K/I template matcher as Abyss (3/4, 2 frames).
+                    // First F9 entry has a known ordinary-field start. After a
+                    // real K was sent, reuse the Abyss Home/End/K/I templates,
+                    // but allow up to 2 seconds for the HUD to settle after
+                    // Esc (21:09:58 live screenshot: 2/4 -> 3/4 in 180ms).
+                    // Require TWO CONSECUTIVE >=3/4 observations, not merely
+                    // one good frame or a lowered threshold. A true modal or
+                    // newly opened processing menu always overrides the HUD.
                     bool firstEntry = !_managedKInputIssued;
-                    var firstHud = firstEntry
-                        ? (Matched: 0, Scores: "최초 시작 · 화면색상 검사 생략")
+                    var previousHud = firstEntry
+                        ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외")
                         : DetectManagedWorldHudTemplates(frame);
-                    await Task.Delay(180, ct);
-                    using var freshField = Capture(ct);
-                    var secondHud = firstEntry
-                        ? (Matched: 0, Scores: "최초 시작 · 화면색상 검사 생략")
-                        : DetectManagedWorldHudTemplates(freshField);
-                    bool actualModal = HasManagedKEntryBlockingModal(freshField);
-                    bool unexpectedMenu = HasFixedProcessingHubVisual(freshField) ||
-                                          HasManagedProcessingBottomTabVisual(freshField);
-                    Log?.Invoke(
-                        $"[자동 가공] F9 K 진입 재판정 · " +
-                        $"경로={(firstEntry ? "최초 필드 시작" : "중간 재진입")} · " +
-                        $"HUD={firstHud.Matched}/4 → {secondHud.Matched}/4 · " +
-                        $"첫={firstHud.Scores} · 둘째={secondHud.Scores} · " +
-                        $"팝업={actualModal} · 가공메뉴={unexpectedMenu}");
-                    if (actualModal)
-                        Fail(freshField, "관리 가공 K 직전 실제 확인창 패널+버튼 감지 · 입력 차단");
-                    // If the UI changed while waiting, re-evaluate it in the
-                    // existing bounded EnterFacility loop; never send K blindly.
-                    if (unexpectedMenu)
+                    var started = Stopwatch.StartNew();
+                    int samples = 1;
+                    bool menuAppeared = false;
+                    while (true)
                     {
-                        Log?.Invoke("[자동 가공] K 직전 가공 메뉴가 새로 표시됨 · 중복 K 생략, 메뉴 재판정");
-                        continue;
+                        await Task.Delay(180, ct);
+                        using var freshField = Capture(ct);
+                        var currentHud = firstEntry
+                            ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외")
+                            : DetectManagedWorldHudTemplates(freshField);
+                        samples++;
+                        bool actualModal = HasManagedKEntryBlockingModal(freshField);
+                        bool unexpectedMenu = HasFixedProcessingHubVisual(freshField) ||
+                                              HasManagedProcessingBottomTabVisual(freshField);
+                        Log?.Invoke(
+                            $"[자동 가공] F9 K 진입 재판정 · " +
+                            $"경로={(firstEntry ? "최초 필드 시작" : "중간 재진입")} · " +
+                            $"HUD={previousHud.Matched}/4 → {currentHud.Matched}/4 · " +
+                            $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
+                            $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
+                            $"재확인={samples}프레임/{started.Elapsed.TotalSeconds:F1}초");
+
+                        if (actualModal)
+                            Fail(freshField,
+                                "관리 가공 K 직전 실제 확인창 패널+버튼 감지 · 입력 차단");
+                        if (unexpectedMenu)
+                        {
+                            Log?.Invoke(
+                                "[자동 가공] K 직전 가공 메뉴가 새로 표시됨 · " +
+                                "중복 K 생략, 메뉴 재판정");
+                            menuAppeared = true;
+                            break;
+                        }
+
+                        // Initial K still requires the fresh modal/menu check,
+                        // but not a HUD score. For re-entry, both the previous
+                        // and the fresh frame must independently score >=3/4.
+                        bool verified = CanAuthorizeManagedKEntry(
+                            firstEntry, previousHud.Matched, currentHud.Matched,
+                            actualModal, unexpectedMenu);
+                        if (firstEntry || (verified &&
+                            started.Elapsed < TimeSpan.FromSeconds(2)))
+                            break;
+
+                        if (started.Elapsed >= TimeSpan.FromSeconds(2))
+                            Fail(freshField,
+                                "관리 가공 K 재진입 HUD 이미지 3/4·2프레임 " +
+                                "2초 내 연속 확인 실패 · 입력 없이 정지");
+                        previousHud = currentHud;
                     }
-                    if (!CanAuthorizeManagedKEntry(
-                            firstEntry, firstHud.Matched, secondHud.Matched,
-                            actualModal, unexpectedMenu))
-                        Fail(freshField,
-                            "관리 가공 K 재진입 HUD 이미지 3/4·2프레임 미확인 · 입력 없이 정지");
+                    if (menuAppeared)
+                        continue;
                 }
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
