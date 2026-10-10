@@ -855,11 +855,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         Fail(freshField, "관리 가공 K 직전 실제 확인창 패널+버튼 감지 · 입력 차단");
                     if (!firstField || !secondField)
                         Fail(freshField, "관리 가공 K 직전 일반 필드 HUD 2프레임 미확인 · 입력 없이 정지");
-                    // If a facility/hub appeared during settling, re-enter
-                    // its normal branch instead of toggling K over it.
-                    if (HasFixedProcessingHubVisual(freshField) ||
-                        HasFixedFacilityHeaderVisual(freshField))
-                        continue;
+                    // 2026-10-10 16:43 live regression: both field HUD frames can
+                    // be positive while fixed facility/header pixels match foliage
+                    // or other world UI. The earlier facility/hub branches have
+                    // already checked the current screen. After TWO confirmed
+                    // ordinary-world frames and no true modal, do not let a
+                    // secondary title/brightness heuristic silently suppress K.
+                    // The CLI idle guard below remains mandatory before K.
                 }
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
