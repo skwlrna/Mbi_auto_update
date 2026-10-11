@@ -44,10 +44,10 @@ internal sealed partial class ScenarioEngine
                 // No blind left-button click. Require an exact Korean EXIT
                 // label within the visually-confirmed left button region.
                 _abyssResultOcr ??= new OcrRecognizer();
-                var left = ScaleAbyssResultRoi(AbyssExitButtonRoi, frame.Size);
+                var left = ScaleAbyssResultRoi(AbyssResultLayout.ScheduledExitLabelRoi, frame.Size);
                 var firstExit = await _abyssResultOcr.FindCompactLabelAsync(
                     frame, left, "나가기", ct);
-                if (!firstExit.Found || !left.Contains(firstExit.Center))
+                if (!firstExit.Found || !left.Contains(firstExit.Bounds))
                 {
                     previousRetry = DetectionResult.NotFound;
                     await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
@@ -57,12 +57,13 @@ internal sealed partial class ScenarioEngine
                 await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
                 using var fresh = await CaptureGameWindowAsync(ct);
                 var freshRetry = await DetectAbyssResultRetryAsync(fresh, ct);
-                var freshLeft = ScaleAbyssResultRoi(AbyssExitButtonRoi, fresh.Size);
+                var freshLeft = ScaleAbyssResultRoi(AbyssResultLayout.ScheduledExitLabelRoi, fresh.Size);
                 var confirmedExit = await _abyssResultOcr.FindCompactLabelAsync(
                     fresh, freshLeft, "나가기", ct);
                 if (!freshRetry.Found || !freshRetry.Bounds.IntersectsWith(retry.Bounds) ||
-                    !confirmedExit.Found || !freshLeft.Contains(confirmedExit.Center) ||
-                    !freshLeft.IntersectsWith(firstExit.Bounds))
+                    !confirmedExit.Found ||
+                    !AbyssResultLayout.HasStableScheduledExitLabel(
+                        firstExit.Bounds, confirmedExit.Bounds, left, freshLeft))
                 {
                     previousRetry = DetectionResult.NotFound;
                     continue;
@@ -71,7 +72,7 @@ internal sealed partial class ScenarioEngine
                 ct.ThrowIfCancellationRequested();
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                 NativeMethods.SetForegroundWindow(_hwnd);
-                Log?.Invoke("[병행] 결과 2회 + 나가기 텍스트 2회 확인 -> 나가기 1회 클릭");
+                Log?.Invoke("[병행] 결과 2회 + 왼쪽 나가기 전체 문구/동일 위치 2회 확인 -> 나가기 1회 클릭");
                 DiagnosticObserveClick("abyss_scheduler_exit", confirmedExit.Center);
                 _input.ClickClientPoint(_hwnd, confirmedExit.Center);
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
