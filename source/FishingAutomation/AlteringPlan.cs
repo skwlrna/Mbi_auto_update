@@ -999,7 +999,11 @@ internal sealed class AlteringAutomation
         if (Progress is null) return;
 
         long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
-        long confirmed = Math.Max(0, current - baseline - oldMinimum);
+        long confirmed = _session is { ReceiptTrackingEnabled: true } tracked
+            ? checked((long)Math.Max(0,
+                tracked.ConfirmedReceivedWorks - tracked.InitialExistingWorks) *
+                plan.ProducedPerWork)
+            : Math.Max(0, current - baseline - oldMinimum);
         confirmed = Math.Min(plan.TargetQuantity, confirmed);
 
         var matching = Matching(works, plan).ToArray();
