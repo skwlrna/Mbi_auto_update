@@ -28,6 +28,7 @@ namespace DungeonVisionBot
  class Definition {public List<Step> Steps=new(){new()};}
  class Input {public int Clicks;public long At;public void ClickClientPoint(nint h,Point p){Clicks++;At=Stopwatch.GetTimestamp();}}
  static class NativeMethods {public static void SetForegroundWindow(nint h){}}
+ static class WindowTools { public static Rectangle GetClientScreenRect(nint hwnd)=>new(0,0,800,1000); }
  class RestartCycleException:Exception{}
  internal sealed partial class ScenarioEngine
  {
