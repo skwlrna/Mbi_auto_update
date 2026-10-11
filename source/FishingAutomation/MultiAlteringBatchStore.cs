@@ -445,15 +445,21 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 (s.PendingConsumptionTransactionId is not null &&
                     (!s.PendingRegistration ||
                      !Guid.TryParseExact(s.PendingConsumptionTransactionId, "N", out _))) ||
-                s.MultiState == MultiAlteringItemState.Completed &&
-                (s.CompletedAt is null || s.QueuedWorks != s.RequiredWorks || s.PendingRegistration ||
-                 s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity ||
-                 s.ReceiptTrackingEnabled &&
-                 s.ConfirmedReceivedWorks != s.InitialExistingWorks + s.QueuedWorks))
+                (s.MultiState == MultiAlteringItemState.Completed &&
+                 (s.CompletedAt is null || s.QueuedWorks != s.RequiredWorks || s.PendingRegistration ||
+                  s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity ||
+                  s.ReceiptTrackingEnabled &&
+                  s.ConfirmedReceivedWorks != s.InitialExistingWorks + s.QueuedWorks) ||
+                 s.MultiState == MultiAlteringItemState.RawMaterialExhausted &&
+                 (!s.RawMaterialExhausted || s.CompletedAt is null || s.PendingRegistration ||
+                  s.QueuedWorks >= s.RequiredWorks ||
+                  s.ReceiptTrackingEnabled &&
+                  s.ConfirmedReceivedWorks != s.InitialExistingWorks + s.QueuedWorks) ||
+                 s.RawMaterialExhausted && s.FacilityName != "가죽 가공 시설")
                 throw new InvalidDataException("다중가공 품목 기록 불일치/손상 · 기록 보존");
         }
         if (b.State != MultiAlteringBatchState.Active &&
-            (b.CompletedAt is null || b.Items.Any(s => s.MultiState != MultiAlteringItemState.Completed)))
+            (b.CompletedAt is null || b.Items.Any(s => !MultiAlteringItemStatePolicy.IsTerminal(s.MultiState))))
             throw new InvalidDataException("다중가공 전체 완료 증거 부족 · 기록 보존");
         if (b.Version == 1 &&
             (b.PreparedConsumption is not null || b.AppliedConsumption.Length != 0))
@@ -480,7 +486,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
              b.PendingReceipt.CountsByPlanKey.Values.Any(n => n < 0) ||
              b.PendingReceipt.CountsByPlanKey.Values.Sum() > b.PendingReceipt.TotalFacilityWorks ||
              b.Items.Where(x => x.FacilityName == b.PendingReceipt.FacilityName &&
-                x.MultiState != MultiAlteringItemState.Completed)
+                !MultiAlteringItemStatePolicy.IsTerminal(x.MultiState))
                 .Any(x => x.ReceiptTrackingEnabled &&
                     x.MultiState != MultiAlteringItemState.RecoveryRequired)))
             throw new InvalidDataException("F9 수령 직전 대기열 기록 손상 · 안전 정지");
@@ -499,11 +505,17 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         return plans.Where(p => Session(p).MultiState == MultiAlteringItemState.Completed).ToArray();
     }
 
+    internal IReadOnlyList<AlteringPlan> FinishedPlans(IReadOnlyList<AlteringPlan> plans)
+    {
+        if (!SamePlans(Batch, plans)) throw new InvalidOperationException("배치 계획 불일치 · 안전 정지");
+        return plans.Where(p => MultiAlteringItemStatePolicy.IsTerminal(Session(p).MultiState)).ToArray();
+    }
+
     private void SaveItem(AlteringPlan plan, AlteringSessionState state)
     {
         var previous = Session(plan);
         if (Batch.State != MultiAlteringBatchState.Active || state.BatchId != Batch.BatchId ||
-            !state.MatchesPlan(plan) || previous.MultiState == MultiAlteringItemState.Completed && state != previous)
+            !state.MatchesPlan(plan) || MultiAlteringItemStatePolicy.IsTerminal(previous.MultiState) && state != previous)
             throw new InvalidOperationException("다중가공 완료/배치 기록 변경 차단");
         // A producer credit may have been atomically applied by a recursive
         // consumer while this item's automation still holds an older copy.
@@ -536,7 +548,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         foreach (var (output, count) in before)
         {
             if (count < 0 || !Batch.Items.Any(s =>
-                s.MultiState != MultiAlteringItemState.Completed &&
+                !MultiAlteringItemStatePolicy.IsTerminal(s.MultiState) &&
                 PlanFrom(s).OutputName == output))
                 throw new InvalidOperationException(
                     "F05 소비 대상 생산자 불일치 · 기록 보존 · 입력 차단");
@@ -576,7 +588,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         foreach (var (output, amount) in credits)
         {
             int index = Array.FindIndex(items, x =>
-                x.MultiState != MultiAlteringItemState.Completed &&
+                !MultiAlteringItemStatePolicy.IsTerminal(x.MultiState) &&
                 PlanFrom(x).OutputName == output);
             if (index < 0)
                 throw new InvalidOperationException("F05 소비 생산자 사라짐 · 거래 유지");
@@ -608,7 +620,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             throw new InvalidOperationException("미확정 수령 거래 · 수령 입력 차단");
         var active = Batch.Items.Where(s =>
             s.FacilityName == plan.FacilityName &&
-            s.MultiState != MultiAlteringItemState.Completed).ToArray();
+            !MultiAlteringItemStatePolicy.IsTerminal(s.MultiState)).ToArray();
         MultiAlteringReceiptSnapshot? pending = null;
         if (active.Any(s => s.ReceiptTrackingEnabled))
         {
@@ -646,7 +658,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             PendingReceipt = pending,
             Items = Batch.Items.Select(s =>
                 s.FacilityName == plan.FacilityName &&
-                s.MultiState != MultiAlteringItemState.Completed
+                !MultiAlteringItemStatePolicy.IsTerminal(s.MultiState)
                     ? s with {
                         MultiState = MultiAlteringItemState.RecoveryRequired,
                         Stage = "수령 확정 대기"
@@ -666,7 +678,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         for (int i = 0; i < items.Length; i++)
         {
             var s = items[i];
-            if (s.FacilityName != plan.FacilityName || s.MultiState == MultiAlteringItemState.Completed) continue;
+            if (s.FacilityName != plan.FacilityName || MultiAlteringItemStatePolicy.IsTerminal(s.MultiState)) continue;
             var p = new AlteringPlan(s.FacilityName, s.DisplayName, s.TargetQuantity, s.ProducedPerWork, false, s.RecipeOrdinal);
             long current = checked(await data.ItemCountAsync(p.OutputName, ct) + s.CreditedInternalConsumptionQuantity);
             int receivedWorks = s.ConfirmedReceivedWorks;
@@ -707,7 +719,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     {
         if (Batch.PreparedConsumption is not null)
             throw new InvalidOperationException("F05 미확정 소비 거래 · 배치 종료 차단");
-        if (Batch.Items.Any(s => s.MultiState != MultiAlteringItemState.Completed))
+        if (Batch.Items.Any(s => !MultiAlteringItemStatePolicy.IsTerminal(s.MultiState)))
             throw new InvalidOperationException("전체 품목 완료 증거 부족 · 배치 종료 차단");
         if (Batch.State == MultiAlteringBatchState.Active)
             Commit(Batch with { State = MultiAlteringBatchState.Completed, CompletedAt = DateTimeOffset.UtcNow });
