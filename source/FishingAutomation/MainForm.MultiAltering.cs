@@ -289,7 +289,7 @@ public sealed partial class MainForm
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);
-                if (!itemCompleted) consumptionLedger.RegisterProducer(
+                if (!MultiAlteringItemStatePolicy.IsTerminal(session.MultiState)) consumptionLedger.RegisterProducer(
                     plan,
                     (quantity, consumerDisplayName) =>
                         automation.RefreshDurableConsumption());
