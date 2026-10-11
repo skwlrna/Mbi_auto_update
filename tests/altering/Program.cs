@@ -1133,6 +1133,37 @@ await resolvedAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.ReservedWings == 0,
     "missing materials are resolved inside the same zero-wing altering session");
 
+// Leather at the leather facility is a RAW input. A shortage is a normal
+// partial terminal: never invoke recursive supply or fabricate goal completion.
+var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
+var exhaustedWorld = new FakeWorld(exhaustedLeather) { Available = false };
+var exhaustedResolver = new FakeResolver(exhaustedWorld);
+var exhaustedAuto = new AlteringAutomation(
+    exhaustedWorld, exhaustedWorld, (_, _) => Task.CompletedTask,
+    4, exhaustedResolver);
+var exhaustedResult = await exhaustedAuto.RunAsync(exhaustedLeather, default);
+Check(exhaustedResult == AlteringRunResult.RawMaterialExhausted &&
+      exhaustedWorld.QueueCalls == 0 && exhaustedResolver.Calls == 0 &&
+      exhaustedAuto.ReservedWings == 0,
+    "raw leather shortage terminates this recipe without replenishment, registration, or wings");
+Check(LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
+          new AlteringRecipe("가죽+", false, 3, "short", [new("가죽", 1, 0)], "가죽 가공 시설")) &&
+      !LeatherRawMaterialPolicy.EndsOnShortage(plan,
+          new AlteringRecipe(plan.DisplayName, false, 3, "short", [new("철 광석", 1, 0)], plan.FacilityName)) &&
+      MultiAlteringItemStatePolicy.IsTerminal(MultiAlteringItemState.RawMaterialExhausted) &&
+      !MultiAlteringItemStatePolicy.IsTerminal(MultiAlteringItemState.InProgress),
+    "only leather-facility shortages are partial terminal, without changing other recipes");
+
+var oldLeatherWork = new FakeWorld(exhaustedLeather) { Available = false };
+oldLeatherWork.AddPending();
+var oldLeatherResult = await new AlteringAutomation(
+    oldLeatherWork, oldLeatherWork, (_, _) => Task.CompletedTask, 4)
+    .RunAsync(exhaustedLeather, default);
+Check(oldLeatherResult == AlteringRunResult.RawMaterialExhausted &&
+      oldLeatherWork.QueueCalls == 0 && oldLeatherWork.CollectionCount == 1 &&
+      oldLeatherWork.Owned == 3,
+    "old leather jobs finish and are collected normally without starting any new jobs");
+
 var noDeparturePlan = plan with { TargetQuantity = 3 };
 var m1NoDepartureWorld = new FakeWorld(noDeparturePlan) { Available = false };
 var m1NoDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());

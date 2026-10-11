@@ -217,14 +217,24 @@ public sealed partial class MainForm
                 {
                     try
                     {
-                        await automation.RunAsync(plan, token);
+                        var result = await automation.RunAsync(plan, token);
                         Ui(() =>
                         {
                             _dungeonCompleted = automation.QueuedWorks;
-                            _productionCurrentQuantity = plan.TargetQuantity;
-                            _productionProgressSummary =
-                                $"{plan.DisplayName} {plan.TargetQuantity:N0}/{plan.TargetQuantity:N0} · 등록 {automation.QueuedWorks}/{plan.RequiredWorks} · 완료";
-                            _log.Write("[자동 가공] 목표 작업 완료 · 이어하기 기록 삭제");
+                            if (result == AlteringRunResult.RawMaterialExhausted)
+                            {
+                                _productionProgressSummary =
+                                    $"{plan.DisplayName} 가죽 원재료 소진 · 목표 미달 종료 · " +
+                                    $"등록 {automation.QueuedWorks}/{plan.RequiredWorks} · 실제 수령 {_productionCurrentQuantity:N0}/{plan.TargetQuantity:N0}";
+                                _log.Write("[자동 가공] 가죽 원재료 소진 · 자동 보충 없이 해당 작업 종료");
+                            }
+                            else
+                            {
+                                _productionCurrentQuantity = plan.TargetQuantity;
+                                _productionProgressSummary =
+                                    $"{plan.DisplayName} {plan.TargetQuantity:N0}/{plan.TargetQuantity:N0} · 등록 {automation.QueuedWorks}/{plan.RequiredWorks} · 완료";
+                                _log.Write("[자동 가공] 목표 작업 완료 · 이어하기 기록 삭제");
+                            }
                             RefreshProductionDashboard();
                         });
                     }

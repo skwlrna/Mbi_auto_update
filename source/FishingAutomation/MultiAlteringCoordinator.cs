@@ -340,7 +340,8 @@ internal sealed class MultiAlteringCoordinator
                             throw new InvalidOperationException("품목 완료의 영구 저장 증거 부족 · 안전 정지");
                         completed.Add(Key(plan));
                         Log?.Invoke(
-                            $"[다중가공] 품목 완료 {completed.Count}/{plans.Count} · {plan.DisplayName}");
+                            $"[다중가공] 품목 처리 종료 {completed.Count}/{plans.Count} · {plan.DisplayName} · " +
+                            "목표 전량 완료 또는 원재료 소진");
                     }
 
                     works = await readWorks(ct);

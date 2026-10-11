@@ -289,7 +289,7 @@ public sealed partial class MainForm
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                 automations.Add(key, automation);
-                if (!itemCompleted) consumptionLedger.RegisterProducer(
+                if (!MultiAlteringItemStatePolicy.IsTerminal(session.MultiState)) consumptionLedger.RegisterProducer(
                     plan,
                     (quantity, consumerDisplayName) =>
                         automation.RefreshDurableConsumption());
@@ -376,6 +376,15 @@ public sealed partial class MainForm
                 var recipe = matching[plan.RecipeOrdinal - 1];
                 var liveWorks = await rawAlteringData.WorksAsync(ct);
                 bool occupied = liveWorks.Any(x => x.FacilityName == plan.FacilityName);
+                // Leather is raw material: do not pre-gather or recursively
+                // manufacture a replacement. The batch engine records a normal
+                // partial terminal state once already-queued works finish.
+                if (LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공] {plan.DisplayName} 가죽 원재료 부족 · 선행채집 생략 · 해당 품목만 종료 예정"));
+                    return;
+                }
                 if (recipe.MissingIngredients.Count == 0)
                 {
                     Ui(() => _log.Write(
@@ -413,7 +422,7 @@ public sealed partial class MainForm
             var coordinator = new MultiAlteringCoordinator(
                 laneState,
                 FacilityLaneOwner.Main,
-                restoreCompleted: batchStore.CompletedPlans,
+                restoreCompleted: batchStore.FinishedPlans,
                 fillInitialVacancies: true);
             coordinator.Log += text => Ui(() =>
             {
@@ -442,10 +451,11 @@ public sealed partial class MainForm
                         plan,
                         FacilityLaneOwner.Main,
                         registered);
-                    bool planCompleted = result == AlteringRunResult.Completed;
-                    if (planCompleted)
+                    bool finished = result is AlteringRunResult.Completed or
+                        AlteringRunResult.RawMaterialExhausted;
+                    if (finished)
                         consumptionLedger.UnregisterProducer(plan);
-                    return planCompleted;
+                    return finished;
                 },
                 rawAlteringData.WorksAsync,
                 Task.Delay,
@@ -454,12 +464,27 @@ public sealed partial class MainForm
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
-            _productionCurrentQuantity = _productionTargetQuantity;
-            _productionProgressSummary =
-                $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 품목 순차 배치 운용 완료";
-            NoteMultiAlteringAction("모든 다중가공 작업 완료 · 수령 및 확인 완료");
-            _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 품목 순차 배치 운용");
-            SetStatus("다중가공 완료", Green);
+            int rawExhaustedCount = plans.Count(p =>
+                batchStore.Session(p).MultiState == MultiAlteringItemState.RawMaterialExhausted);
+            _productionCurrentQuantity = progress.Values.Sum();
+            if (rawExhaustedCount > 0)
+            {
+                _productionProgressSummary =
+                    $"다중가공 종료 · 완료 {plans.Count - rawExhaustedCount}종 · 가죽 원재료 소진 {rawExhaustedCount}종 · " +
+                    $"실제 수령 {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0}";
+                NoteMultiAlteringAction("가죽 원재료 소진 품목은 목표 미달 종료 · 다른 품목 처리 완료");
+                _log.Write("[다중가공] 재료 소진 품목은 목표 달성으로 계산하지 않음 · 나머지 작업 완료");
+                SetStatus("다중가공 종료 · 가죽 원재료 소진", Color.DarkOrange);
+            }
+            else
+            {
+                _productionCurrentQuantity = _productionTargetQuantity;
+                _productionProgressSummary =
+                    $"다중가공 {plans.Count}/{plans.Count}종 완료 · 시설별 품목 순차 배치 운용 완료";
+                NoteMultiAlteringAction("모든 다중가공 작업 완료 · 수령 및 확인 완료");
+                _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 품목 순차 배치 운용");
+                SetStatus("다중가공 완료", Green);
+            }
 
         }
         catch (OperationCanceledException)
