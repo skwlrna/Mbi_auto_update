@@ -104,7 +104,7 @@ internal static class MultiAlteringRecentResume
             throw new InvalidOperationException(
                 $"{session.DisplayName}: 기존 {session.InitialExistingWorks}건 + 이번 등록 {session.QueuedWorks}건 − " +
                 $"수령 상당 {received}건 = 예상 {expectedLive}건, 실제 {liveWorks}건. " +
-                "작업 소유권/수령 불일치로 이어하기 차단");
+                "게임 대기열 작업 소유권/수령 불일치로 이어하기 차단");
 
         // Credit older jobs FIRST, never attribute their production to this
         // saved goal. Q remains the durable number of confirmed new F9 inputs;
