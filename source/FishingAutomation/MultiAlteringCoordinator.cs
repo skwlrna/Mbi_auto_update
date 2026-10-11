@@ -132,7 +132,8 @@ internal sealed class MultiAlteringCoordinator
         Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
         Func<TimeSpan, CancellationToken, Task> delay,
         CancellationToken ct,
-        Func<AlteringPlan, CancellationToken, Task>? preparePlan = null)
+        Func<AlteringPlan, CancellationToken, Task>? preparePlan = null,
+        Func<CancellationToken, Task>? onIdleAbyssRound = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -439,6 +440,19 @@ internal sealed class MultiAlteringCoordinator
             Log?.Invoke(
                 $"[다중가공] 병렬 대기 · 진행/대기 {runningSlots}건 · 완료 누적 {completedSlots}건 · " +
                 $"다음 확인 약 {Math.Clamp(waitSeconds, 1, 30)}초 · 배치 전체 완료 전 이동 없음");
+
+            // No crafting, receipt, or movement is in flight here. This callback
+            // owns all input until the abyss has EXITED to the verified outside HUD.
+            // Immediately re-query works afterwards; never act on stale observations.
+            if (onIdleAbyssRound is not null &&
+                AbyssAlteringSchedulePolicy.CanRun(active))
+            {
+                Log?.Invoke("[병행] 가공 시설 전체 대기 확인 -> 어비스 1판에 게임 입력권 양도");
+                await onIdleAbyssRound(ct);
+                ct.ThrowIfCancellationRequested();
+                Log?.Invoke("[병행] 어비스 밖 복귀 확인 -> 가공 대기열 재조회");
+                continue;
+            }
 
             await delay(
                 TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 1, 30)),
