@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/dungeon/WaterwayBoardPolicy.cs" Link="WaterwayBoardPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/dungeon/WaterwayMarkPolicy.cs" Link="WaterwayMarkPolicy.cs" />
   </ItemGroup>
 </Project>
