@@ -151,7 +151,7 @@ jobs:
               $batch -notmatch 'PendingReceipt = null' -or
               $policy -notmatch 'session.ConfirmedReceivedWorks' -or
               $runner -notmatch 'BeginReceiptWithEvidenceAsync' -or
-              $ui -notmatch '_alteringPage.Font.FontFamily' -or
+              $ui -notmatch '_alteringPage.Items.Font' -or
               $ui -notmatch 'basePixels' -or
               $tests -notmatch '14 confirmed receipts') {
             throw 'Receipt evidence persistence or matched production font missing'
