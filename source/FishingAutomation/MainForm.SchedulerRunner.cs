@@ -68,6 +68,7 @@ public sealed partial class MainForm
                 _log.Write("[스케줄러] 1단계 제작 시작 · 기존 전체 음식/아이템 검색에서 선택한 품목 사용");
                 _dungeonTask = null;
                 await StartCraftingAsync();
+                token.ThrowIfCancellationRequested();
                 if (_dungeonTask is not Task craftingTask)
                     throw new InvalidOperationException("제작 작업이 시작되지 않았습니다. 후속 가공/어비스를 실행하지 않습니다.");
 
