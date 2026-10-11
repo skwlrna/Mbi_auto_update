@@ -13,6 +13,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private readonly WindowCapture _capture = new();
     private readonly GuardedInputController _input;
     private readonly string _baseDir;
+    private readonly bool _scheduledResultExit;
     private readonly Dictionary<string, long> _monitorLastAction = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _monitorLastScan = new(StringComparer.OrdinalIgnoreCase);
     private int _cycle;
@@ -33,12 +34,16 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     public event Action<string>? Log;
     public string InputMode => _input.ModeName;
 
-    public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir, FishingAutomation.MabinogiMobileCli? cli = null)
+    public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir, FishingAutomation.MabinogiMobileCli? cli = null,
+        bool scheduledResultExit = false)
     {
         _hwnd = hwnd;
         _settings = settings;
         _scenario = scenario;
         _baseDir = baseDir;
+        _scheduledResultExit = scheduledResultExit;
+        if (scheduledResultExit && (!string.Equals(new DirectoryInfo(baseDir).Name, "abyss", StringComparison.OrdinalIgnoreCase) || scenario.Repeat))
+            throw new InvalidOperationException("병행 어비스는 어비스 1판 후 종료 설정에서만 허용됩니다.");
         if (cli is not null)
             _inventoryLoot = new FishingAutomation.InventoryLootTracker(cli.GetItemsAsync, FishingAutomation.LootStats.TrackedItemNames);
         _detector = new TargetDetector(targets.Where(t => !t.Id.StartsWith("route_")), baseDir);
@@ -834,7 +839,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
         if (IsAbyss && step.Target == "abyss_result_retry")
         {
-            await RetryAbyssResultAsync(ct);
+            if (_scheduledResultExit)
+                await ExitAbyssResultForScheduledProcessingAsync(ct);
+            else
+                await RetryAbyssResultAsync(ct);
             return;
         }
         // STABLE_CHALLENGE_GUARD_V2_CALL
