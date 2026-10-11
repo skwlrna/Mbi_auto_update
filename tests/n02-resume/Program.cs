@@ -939,6 +939,114 @@ static class Program
             Check(world.Registered.Count == registered,
                 "Mismatch in single-character mode led to duplicate registration");
         });
+        await Test("V3.1.83 initial same-item jobs conserve owned queue and old receipts", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            world.AddCompleted(Wood, 2);
+            string run = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            string id;
+            using (var batch = new MultiAlteringBatchStore(run))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                Check(batch.Session(Wood).InitialExistingWorks == 2, "Two earlier slots not saved");
+                id = batch.BatchId;
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                { QueuedWorks = 3, MultiState = MultiAlteringItemState.InProgress });
+                for (int i = 0; i < 3; i++)
+                    await world.QueueAsync(Wood, () => { }, default);
+            }
+            var recent = MultiAlteringRecentResume.Latest(temp.Path)!;
+            Check(recent.BatchId == id, "F9 batch ID changed before restart");
+            var first = await MultiAlteringRecentResume.VerifyAsync(
+                recent, Identity, world, default);
+            Check(first[0].LiveWorks == 5 && first[0].Confirmed == 0 &&
+                first[0].RegisteredOutput == 30 && first[0].AdditionalOutput == 70,
+                "Old queued works were incorrectly counted towards new goal");
+            world.Works.RemoveRange(0, 2);
+            world.Counts[Wood.OutputName] = 20;
+            var restored = await MultiAlteringRecentResume.VerifyAsync(
+                recent, Identity, world, default);
+            Check(restored[0].LiveWorks == 3 && restored[0].Confirmed == 0 &&
+                restored[0].RegisteredOutput == 30 && restored[0].AdditionalOutput == 70,
+                "Old received output incorrectly credited to F9 progress");
+            world.Works.RemoveAt(0);
+            world.Counts[Wood.OutputName] = 30;
+            var third = await MultiAlteringRecentResume.VerifyAsync(
+                recent, Identity, world, default);
+            Check(third[0].LiveWorks == 2 && third[0].Confirmed == 10 &&
+                third[0].RegisteredOutput == 20 && third[0].AdditionalOutput == 70,
+                "Saved target, finished quantity and remaining registered works diverged");
+            using var actualResume = new MultiAlteringBatchStore(run);
+            await actualResume.OpenAsync(new[] { Wood }, Identity, world, default);
+            Check(actualResume.IsResuming && actualResume.BatchId == id &&
+                actualResume.Session(Wood).QueuedWorks == 3 &&
+                actualResume.Session(Wood).InitialExistingWorks == 2,
+                "Resume path reset original goal or historical slot ownership");
+        });
+        await Test("V3.1.83 same-item old job mismatch stays fail-closed", async () =>
+        {
+            var session = AlteringSessionState.Create(Wood, Identity, 10, 2) with
+            { QueuedWorks = 3, MultiState = MultiAlteringItemState.InProgress };
+            var conserved = MultiAlteringRecentResume.ReconcileOwnedWorks(session, 20, 3);
+            Check(conserved.OwnReceivedOutput == 0 &&
+                conserved.OwnRegisteredOutstandingOutput == 30,
+                "Old jobs contributed towards the new F9 goal");
+            await Reject(() =>
+            {
+                MultiAlteringRecentResume.ReconcileOwnedWorks(session, 20, 4);
+                return Task.CompletedTask;
+            }, "작업 소유권");
+            await Reject(() =>
+            {
+                MultiAlteringRecentResume.ReconcileOwnedWorks(session, 21, 3);
+                return Task.CompletedTask;
+            }, "증명할 수 없는");
+            await Reject(() =>
+            {
+                MultiAlteringRecentResume.ReconcileOwnedWorks(session, 60, 0);
+                return Task.CompletedTask;
+            }, "증명할 수 없는");
+            await Reject(() =>
+            {
+                MultiAlteringRecentResume.ReconcileOwnedWorks(session, 0, 4);
+                return Task.CompletedTask;
+            }, "작업 소유권");
+        });
+        await Test("V3.1.83 realm-only batch owns pre-existing and new slots without bypass", async () =>
+        {
+            using var temp = new Temp();
+            var realm = new CliIdentityContext(null, null, null, "single-realm");
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            world.AddCompleted(Wood, 2);
+            string run = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            using (var batch = new MultiAlteringBatchStore(run))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, realm, world, default);
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with
+                    { QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress });
+                await world.QueueAsync(Wood, () => { }, default);
+            }
+            var recent = MultiAlteringRecentResume.Latest(temp.Path)!;
+            var valid = await MultiAlteringRecentResume.VerifyAsync(
+                recent, realm, world, default, allowSingleCharacter: true);
+            Check(valid[0].LiveWorks == 3 && valid[0].RegisteredOutput == 10,
+                "One-character saved old/new slots were incorrectly rejected");
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                recent, realm, world, default), "사용자 확인");
+            using var old = new MultiAlteringBatchStore(run);
+            await old.OpenAsync(new[] { Wood }, realm, world, default,
+                allowSingleCharacter: true);
+            Check(old.IsResuming && old.Session(Wood).InitialExistingWorks == 2,
+                "Realm-only restore wrongly compares all slots against new registrations");
+            world.Works.RemoveAt(0);
+            world.Counts[Wood.OutputName] = 0;
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                recent, realm, world, default, allowSingleCharacter: true),
+                "작업 소유권");
+        });
         Console.WriteLine($"N02: {passed} deterministic tests passed; temporary files; fake game only.");
     }
 
