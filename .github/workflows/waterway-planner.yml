@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "source/FishingAutomation/dungeon/WaterwayBoardPolicy.cs"
+      - "source/FishingAutomation/dungeon/WaterwayMarkPolicy.cs"
       - "source/FishingAutomation/dungeon/ScatteredWaterwayMechanics.cs"
       - "source/FishingAutomation/dungeon/ScenarioEngine.WaterwayMechanics.cs"
       - "source/FishingAutomation/dungeon/ScenarioEngine.cs"
