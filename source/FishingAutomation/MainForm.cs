@@ -5,6 +5,7 @@ namespace FishingAutomation;
 
 public sealed partial class MainForm : Form
 {
+    private const int HOTKEY_COMBINED = 9003;
     private const int HOTKEY_TEST = 9000;
     private const int HOTKEY_START = 9001;
     private const int HOTKEY_STOP = 9002;
@@ -54,6 +55,8 @@ public sealed partial class MainForm : Form
     private string? _activeMode;
     private bool _starting;
     private bool _cancelStart;
+    // Disabled by default; the ordinary abyss and processing entry points are unchanged.
+    private bool _combinedAlteringRequested;
 
     private static readonly Color WindowBg = Color.FromArgb(4, 22, 38);
     private static readonly Color PanelBg = Color.FromArgb(9, 34, 58);
@@ -294,6 +297,20 @@ public sealed partial class MainForm : Form
         panel.Controls.Add(valueLabel);
         panel.Controls.Add(cap);
         return panel;
+    }
+
+    private void ToggleCombinedAltering()
+    {
+        if (AnyRunning || SelectedMode != "가공")
+        {
+            _log.Write("[병행] 설정 변경은 자동가공 대기 상태에서만 가능합니다.");
+            return;
+        }
+        _combinedAlteringRequested = !_combinedAlteringRequested;
+        _log.Write("[병행] 가공 대기 중 어비스 " +
+            (_combinedAlteringRequested ? "사용" : "사용 안 함") +
+            $" · 던전={SelectedAbyssDungeon} · F9는 기존 가공 목표로 시작");
+        SetStatus(_combinedAlteringRequested ? "가공+어비스 준비(F7 해제)" : "가공 단독 준비", Blue);
     }
 
     private void StartSelected()
@@ -745,6 +762,7 @@ public sealed partial class MainForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_COMBINED, FishingAutomation.NativeMethods.MOD_NOREPEAT, 0x76); // F7
         FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_TEST, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F8);
         FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_START, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F9);
         FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_STOP, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F10);
@@ -752,6 +770,7 @@ public sealed partial class MainForm : Form
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        FishingAutomation.NativeMethods.UnregisterHotKey(Handle, HOTKEY_COMBINED);
         FishingAutomation.NativeMethods.UnregisterHotKey(Handle, HOTKEY_TEST);
         FishingAutomation.NativeMethods.UnregisterHotKey(Handle, HOTKEY_START);
         FishingAutomation.NativeMethods.UnregisterHotKey(Handle, HOTKEY_STOP);
@@ -764,7 +783,8 @@ public sealed partial class MainForm : Form
         if (m.Msg == FishingAutomation.NativeMethods.WM_HOTKEY)
         {
             int id = m.WParam.ToInt32();
-            if (id == HOTKEY_TEST) TestOrRefresh();
+            if (id == HOTKEY_COMBINED) ToggleCombinedAltering();
+            else if (id == HOTKEY_TEST) TestOrRefresh();
             else if (id == HOTKEY_START) StartSelected();
             else if (id == HOTKEY_STOP) StopSelected();
         }
