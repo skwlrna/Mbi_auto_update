@@ -589,6 +589,11 @@ internal sealed class AlteringAutomation
             var outstanding = Matching(works, plan).ToArray();
             if (QueuedWorks == plan.RequiredWorks && outstanding.Length == 0)
             {
+                if (_session is { ReceiptTrackingEnabled: true } receipt &&
+                    receipt.ConfirmedReceivedWorks !=
+                        receipt.InitialExistingWorks + QueuedWorks)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}: 대기열이 비었지만 수령 확정 기록이 부족합니다 · 자동 완료 차단");
                 long grossGained = EffectiveOutputQuantity(
                     await _data.ItemCountAsync(plan.OutputName, ct)) - baseline;
                 long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
