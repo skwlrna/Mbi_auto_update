@@ -28,6 +28,56 @@ Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(-1) }),
 Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(0, true) }),
     "all slots complete: process before abyss");
 
+// Departure is an efficiency gate, NOT an Abyss battle duration limit.
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(120) }, 180),
+    "180s selectable departure gate rejects a shorter processing wait");
+Assert(AbyssAlteringSchedulePolicy.CanRun(new[] { Work(200), Work(180) }, 180),
+    "180s selectable departure gate accepts all active lanes");
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(200) }, -1),
+    "invalid departure gate fails closed");
+
+// The manager watchdog excludes every second spent inside Abyss, regardless
+// of how long the dungeon takes. The server-owned processing countdown does
+// not stop; the next manager read must query the real works anew.
+DateTimeOffset pauseClock = new(2026, 10, 12, 1, 0, 0, TimeSpan.Zero);
+var pauseWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => pauseClock);
+var pauseWork = Work(400);
+pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+pauseClock = pauseClock.AddSeconds(100);
+pauseWatch.PauseForAbyss();
+pauseClock = pauseClock.AddMinutes(11); // variable dungeon length, longer than stall threshold
+bool pausedWatchRejectedRead = false;
+try { pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork }); }
+catch (InvalidOperationException) { pausedWatchRejectedRead = true; }
+Assert(pausedWatchRejectedRead,
+    "no processing manager/watchdog observation while Abyss owns the UI");
+pauseWatch.ResumeAfterAbyssExit();
+pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+pauseClock = pauseClock.AddSeconds(19);
+pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+pauseClock = pauseClock.AddSeconds(2);
+bool pauseWatchEventuallyStopped = false;
+try { pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork }); }
+catch (InvalidOperationException ex)
+{
+    pauseWatchEventuallyStopped = ex.Message.Contains("다중가공 시설별 정체 감지");
+}
+Assert(pauseWatchEventuallyStopped,
+    "11 minutes inside Abyss excluded, 101+20 seconds active stall still detected");
+
+// Even a 1-hour Abyss excursion cannot trigger a false stall on the first
+// fresh processing read after verified exit.
+DateTimeOffset longClock = new(2026, 10, 12, 1, 0, 0, TimeSpan.Zero);
+var longWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => longClock);
+longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+longWatch.PauseForAbyss();
+longClock = longClock.AddHours(1);
+longWatch.ResumeAfterAbyssExit();
+longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+Assert(true, "Abyss duration never becomes manager stall time after return");
+
 // Run the real coordinator with pure fake data: the input owner never overlaps.
 var plan = new AlteringPlan("가죽 가공 시설", "가죽", 1, 1, false);
 var simulatedWorks = new List<AlteringWork> { Work(200) };
