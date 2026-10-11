@@ -1,0 +1,23 @@
+name: Waterway planner regression
+on:
+  pull_request:
+    paths:
+      - "source/FishingAutomation/dungeon/WaterwayBoardPolicy.cs"
+      - "source/FishingAutomation/dungeon/ScatteredWaterwayMechanics.cs"
+      - "source/FishingAutomation/dungeon/ScenarioEngine.WaterwayMechanics.cs"
+      - "source/FishingAutomation/dungeon/ScenarioEngine.cs"
+      - "tests/waterway/**"
+      - ".github/workflows/waterway-planner.yml"
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Board logic regression
+        run: dotnet run --project tests/waterway/Regression.csproj
+      - name: Application compile check
+        run: dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release
