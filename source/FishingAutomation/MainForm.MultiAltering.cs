@@ -444,6 +444,10 @@ public sealed partial class MainForm
                     coordinatorToken.ThrowIfCancellationRequested();
                     // Leaving a facility invalidates physical onsite proof.
                     // The next normal processing operation must re-prove travel.
+                    // Reuse the existing zero-Spirit-Wings guarded field-exit
+                    // used by gathering. It closes only positively identified
+                    // recipe/facility/hub UI and never blindly clicks unknown UI.
+                    await screen.ExitToFieldAsync(coordinatorToken);
                     laneState.InvalidateOnsite("병행 어비스 이동 · 이전 가공시설 현장권한 무효화");
                     await RunCombinedAbyssRoundAsync(coordinatorToken);
                 }
