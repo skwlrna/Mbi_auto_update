@@ -251,10 +251,20 @@ internal interface IAlteringSupplyResolver
     Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct);
 }
 
+internal static class LeatherRawMaterialPolicy
+{
+    // Leather inputs are raw materials: do not recursively craft or auto-gather
+    // replacements when a leather-facility recipe runs out of ingredients.
+    internal static bool EndsOnShortage(AlteringPlan plan, AlteringRecipe recipe)
+        => plan.FacilityName == "가죽 가공 시설" &&
+           recipe.MissingIngredients.Count > 0;
+}
+
 internal enum AlteringRunResult
 {
     Completed,
-    BatchQueued
+    BatchQueued,
+    RawMaterialExhausted
 }
 
 internal sealed class AlteringAutomation
@@ -309,8 +319,8 @@ internal sealed class AlteringAutomation
         _afterReceipt = afterReceipt;
     }
 
-    internal async Task RunAsync(AlteringPlan plan, CancellationToken ct)
-        => _ = await RunCoreAsync(plan, yieldAtBatchBoundary: false, batchRegistrationLimit: null, ct);
+    internal Task<AlteringRunResult> RunAsync(AlteringPlan plan, CancellationToken ct)
+        => RunCoreAsync(plan, yieldAtBatchBoundary: false, batchRegistrationLimit: null, ct);
 
     internal Task<AlteringRunResult> RunBatchAsync(AlteringPlan plan, CancellationToken ct)
         => RunCoreAsync(plan, yieldAtBatchBoundary: true, batchRegistrationLimit: null, ct);
@@ -348,9 +358,12 @@ internal sealed class AlteringAutomation
                 throw new InvalidOperationException("다중가공 수령 확정 중 중단 · RecoveryRequired · 신규 등록 없이 정지");
             if (_session.MultiState == MultiAlteringItemState.Completed)
                 return ReturnCompleted(plan);
+            if (_session.MultiState == MultiAlteringItemState.RawMaterialExhausted)
+                return ReturnRawMaterialExhausted(plan);
         }
         QueuedWorks = 0;
         ReservedWings = 0;
+        bool rawMaterialExhausted = _session?.RawMaterialExhausted == true;
 
         var recipes = await _data.RecipesAsync(ct);
         var selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
@@ -561,6 +574,38 @@ internal sealed class AlteringAutomation
             if (_session?.BatchId is not null && _session.MultiState == MultiAlteringItemState.Completed)
                 return ReturnCompleted(plan);
 
+            // Once raw leather is exhausted, never register another work or try
+            // gathering. Leave queued works untouched until the ordinary
+            // whole-facility completion/receipt path has drained the lane.
+            if (rawMaterialExhausted || _session?.RawMaterialExhausted == true)
+            {
+                if (works.Any(x => x.FacilityName == plan.FacilityName))
+                {
+                    if (yieldAtBatchBoundary)
+                        return AlteringRunResult.BatchQueued;
+                    await _delay(TimeSpan.FromSeconds(5), ct);
+                    continue;
+                }
+
+                await ReportProgressAsync(works, plan, baseline, initialExistingCount,
+                    "가죽 원재료 소진 · 목표 미달 종료", ct);
+                if (_session is not null)
+                {
+                    SaveSession(_session with
+                    {
+                        RawMaterialExhausted = true,
+                        MultiState = MultiAlteringItemState.RawMaterialExhausted,
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        Stage = "가죽 원재료 소진 · 목표 미달 종료"
+                    });
+                    if (_session.BatchId is null)
+                        _sessionStore?.Delete();
+                }
+                Log?.Invoke($"[자동 가공] 가죽 원재료 소진 · {plan.DisplayName} 신규 등록 중단 · " +
+                            $"등록 {QueuedWorks}/{plan.RequiredWorks} · 목표 미달 정상 종료 · 다른 품목 계속");
+                return AlteringRunResult.RawMaterialExhausted;
+            }
+
             string progressSignature = ProgressSignature(works, plan, QueuedWorks);
             if (!string.Equals(progressSignature, lastProgressSignature, StringComparison.Ordinal))
             {
@@ -651,6 +696,21 @@ internal sealed class AlteringAutomation
                         !selected[plan.RecipeOrdinal - 1].Alterable)
                     {
                         var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                        if (recipe is not null && LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
+                        {
+                            rawMaterialExhausted = true;
+                            string shortages = string.Join(", ", recipe.MissingIngredients.Select(x =>
+                                $"{x.DisplayName} {x.Owned}/{x.Required}"));
+                            if (_session is not null)
+                                SaveSession(_session with
+                                {
+                                    RawMaterialExhausted = true,
+                                    Stage = "가죽 원재료 소진 · 신규 등록 중단"
+                                });
+                            Log?.Invoke($"[자동 가공] 가죽 원재료 소진 · {plan.DisplayName} · {shortages} · " +
+                                        "자동 채집/하위 가공 없이 해당 품목 신규 등록 종료 · 기존 작업은 유지");
+                            continue;
+                        }
                         if (recipe is not null &&
                             recipe.MissingIngredients.Count > 0 &&
                             _supplyResolver is not null)
@@ -922,7 +982,8 @@ internal sealed class AlteringAutomation
     private void SaveStage(string stage)
     {
         if (_session is null || _sessionStore is null) return;
-        if (_session.BatchId is not null && _session.MultiState == MultiAlteringItemState.Completed) return;
+        if (_session.BatchId is not null && MultiAlteringItemStatePolicy.IsTerminal(_session.MultiState)) return;
+        if (_session.RawMaterialExhausted) return; // Preserve durable no-more-registration reason.
         SaveSession(_session with { Stage = stage });
     }
 
@@ -965,6 +1026,19 @@ internal sealed class AlteringAutomation
     {
         if (_session?.BatchId is not null && _sessionStore is not null)
             _session = _sessionStore.Load() ?? throw new InvalidDataException("다중가공 품목 기록 소실 · 안전 정지");
+    }
+
+    private AlteringRunResult ReturnRawMaterialExhausted(AlteringPlan plan)
+    {
+        QueuedWorks = _session!.QueuedWorks;
+        long received = _session.ReceiptTrackingEnabled
+            ? Math.Max(0, _session.ConfirmedReceivedWorks - _session.InitialExistingWorks) *
+              (long)plan.ProducedPerWork
+            : Math.Max(0, _session.LastObservedOutputQuantity - _session.BaselineQuantity -
+                 _session.InitialExistingMinimum);
+        Progress?.Invoke(new(Math.Min(received, plan.TargetQuantity), plan.TargetQuantity,
+            QueuedWorks, plan.RequiredWorks, 0, null, "가죽 원재료 소진 · 목표 미달 종료"));
+        return AlteringRunResult.RawMaterialExhausted;
     }
 
     private AlteringRunResult ReturnCompleted(AlteringPlan plan)
