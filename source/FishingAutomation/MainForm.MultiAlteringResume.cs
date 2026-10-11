@@ -159,12 +159,12 @@ public sealed partial class MainForm
         // Use the existing page's ACTUAL fitted font, not an unscaled 17px
         // modal font. ProductionPage applies its own client-size/DPI scaling.
         // Reuse the same font family and relative size across modal controls.
-        float basePixels = _alteringPage.Font.Unit == GraphicsUnit.Pixel
-            ? _alteringPage.Font.Size
-            : _alteringPage.Font.SizeInPoints * _alteringPage.DeviceDpi / 72f;
-        basePixels = Math.Clamp(basePixels, 12f, 18f);
+        // Items is a real child of the auto-fit production layout. Unlike the
+        // page parent, its Font is recalculated on resize and DPI changes.
+        var fittedPageFont = _alteringPage.Items.Font;
+        float basePixels = Math.Clamp(fittedPageFont.Size, 12f, 16f);
         Font UiFont(float referencePixels, FontStyle style = FontStyle.Regular)
-            => new(_alteringPage.Font.FontFamily,
+            => new(fittedPageFont.FontFamily,
                 Math.Max(11f, MathF.Round(basePixels * referencePixels / 18f)),
                 style, GraphicsUnit.Pixel);
 
