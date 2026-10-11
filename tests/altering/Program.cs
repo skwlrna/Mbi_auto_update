@@ -1138,12 +1138,13 @@ Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.Reser
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
 var exhaustedWorld = new FakeWorld(exhaustedLeather) { Available = false };
 var exhaustedResolver = new FakeResolver(exhaustedWorld);
-var exhaustedResult = await new AlteringAutomation(
+var exhaustedAuto = new AlteringAutomation(
     exhaustedWorld, exhaustedWorld, (_, _) => Task.CompletedTask,
-    4, exhaustedResolver).RunAsync(exhaustedLeather, default);
+    4, exhaustedResolver);
+var exhaustedResult = await exhaustedAuto.RunAsync(exhaustedLeather, default);
 Check(exhaustedResult == AlteringRunResult.RawMaterialExhausted &&
       exhaustedWorld.QueueCalls == 0 && exhaustedResolver.Calls == 0 &&
-      exhaustedWorld.ReservedWings == 0,
+      exhaustedAuto.ReservedWings == 0,
     "raw leather shortage terminates this recipe without replenishment, registration, or wings");
 Check(LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
           new AlteringRecipe("가죽+", false, 3, "short", [new("가죽", 1, 0)], "가죽 가공 시설")) &&
