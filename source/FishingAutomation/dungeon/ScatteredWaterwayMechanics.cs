@@ -144,7 +144,7 @@ internal sealed class ScatteredWaterwayMechanics
             return null;
 
         bool targeted = StageCue(frame, s.PlayerTargetedTemplate);
-        return new Plan("표식", "mark:" + mark,
+        return new Plan("표식", "mark:" + mark + ":targeted:" + (targeted ? "1" : "0"),
             $"내 표식과 소환 몬스터 표식 일치: {mark}; 투창 대상 확인={(targeted ? "예" : "미확인")}",
             s.KeysByMark.GetValueOrDefault(mark) ?? Array.Empty<string>(),
             InputEvidenceVerified: targeted);
@@ -165,7 +165,7 @@ internal sealed class ScatteredWaterwayMechanics
             return null;
 
         bool ready = StageCue(frame, s.PortalReadyTemplate);
-        return new Plan("파도", "wave:" + wave,
+        return new Plan("파도", "wave:" + wave + ":ready:" + (ready ? "1" : "0"),
             $"진행 방향={wave}; 대응 포탈 시각 확인; 포탈 사용 가능={(ready ? "예" : "미확인")}",
             s.KeysByWave.GetValueOrDefault(wave) ?? Array.Empty<string>(),
             InputEvidenceVerified: ready);
@@ -210,7 +210,9 @@ internal sealed class ScatteredWaterwayMechanics
 
         bool targeted = StageCue(frame, s.PlayerTargetedTemplate);
         bool calibratedSafe = hasSafeEvidence && safe.Contains(decision.Cell);
-        return new Plan("틱택토", "board:" + board,
+        return new Plan("틱택토", "board:" + board + ":cell:" + decision.Cell +
+                ":targeted:" + (targeted ? "1" : "0") +
+                ":safe:" + (calibratedSafe ? "1" : "0"),
             $"보드={board}, 선택 칸={decision.Cell + 1}, 전략={decision.Reason}, 표적={(targeted ? "확인" : "미확인")}, 안전칸={(calibratedSafe ? "확인" : "미확인")}",
             s.KeysByCell.GetValueOrDefault(decision.Cell.ToString()) ?? Array.Empty<string>(),
             InputEvidenceVerified: targeted && calibratedSafe);
@@ -222,7 +224,7 @@ internal sealed class ScatteredWaterwayMechanics
         if (StageCue(frame, s.GoldSafeZoneTemplate))
         {
             bool ready = StageCue(frame, s.GoldEntryWindowTemplate);
-            return new Plan("승천", "ascension:gold",
+            return new Plan("승천", "ascension:gold:ready:" + (ready ? "1" : "0"),
                 $"금색 안전 구역 표시; 이동 타이밍={(ready ? "확인" : "미확인")}",
                 s.KeysToGoldZone, InputEvidenceVerified: ready);
         }
