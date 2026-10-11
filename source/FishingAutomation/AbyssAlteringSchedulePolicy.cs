@@ -1,20 +1,26 @@
 namespace FishingAutomation;
 
-// A pure, read-only eligibility decision. Never grants UI/input authority by itself.
+// A pure, read-only departure decision. The threshold is a short-wait
+// efficiency filter, NOT a prediction of how long an Abyss dungeon will take.
+// Once entered, the run continues until verified exit or safety cancellation.
 internal static class AbyssAlteringSchedulePolicy
 {
-    // A short queue should finish normally, without an expensive dungeon detour.
     internal const long MinimumUsefulWaitSeconds = 90;
 
-    internal static bool CanRun(IReadOnlyList<AlteringWork> works)
+    internal static bool CanRun(
+        IReadOnlyList<AlteringWork> works,
+        long minimumWaitSeconds = MinimumUsefulWaitSeconds)
     {
-        if (works is null || works.Count == 0) return false;
-        var inProgress = works.Where(x => x.State == "InProgress" && !x.IsCompleted).ToArray();
+        if (minimumWaitSeconds < 1 || works is null || works.Count == 0)
+            return false;
+        var inProgress = works
+            .Where(x => x.State == "InProgress" && !x.IsCompleted)
+            .ToArray();
         if (inProgress.Length == 0) return false;
 
-        // Every active facility batch must have enough estimated time remaining.
-        // Unknown/negative timers mean no safe handoff. Completed slots are
-        // harmless here: normal facility-wide receipt remains deferred.
-        return inProgress.All(x => x.RemainingSeconds >= MinimumUsefulWaitSeconds);
+        // All active facility lanes must have a known, sufficiently long
+        // wait. Real processing continues while the manager is away; always
+        // re-query the server after verified outside return.
+        return inProgress.All(x => x.RemainingSeconds >= minimumWaitSeconds);
     }
 }
