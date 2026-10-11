@@ -76,3 +76,59 @@ for (int raw = 0; raw < 19683; raw++)
 }
 passed++;
 Console.WriteLine($"WaterwayBoardPolicy: {passed} PASS + 19,683 board safety snapshots");
+
+
+{
+    var marks = new WaterwayMarkPolicy();
+    long t = 10000;
+
+    // Six unique priest glyphs are cached before the player becomes targeted.
+    foreach (var (symbol, x, y) in new (string, int, int)[]
+    {
+        ("fire", 110, 310), ("ice", 220, 340), ("dark", 330, 360),
+        ("lightning", 440, 390), ("poison", 550, 410), ("unknown_sixth", 660, 440)
+    })
+        marks.ObservePriest(symbol, x, y, 0.96, t);
+
+    marks.ObserveBoss("poison", t);
+    Assert(marks.RecentPriestCount(t + 200) == 6, "six priests should be tracked");
+    passed++;
+    Assert(marks.Choose(null, t + 200) is null, "boss cue alone must not trigger");
+    passed++;
+    Assert(marks.Choose("fire", t + 200) is null, "player glyph must match boss");
+    passed++;
+    var target = marks.Choose("poison", t + 200);
+    Assert(target?.MarkX == 550 && target.MarkY == 410 &&
+        target.Symbol == "poison", "correct pre-located priest");
+    passed++;
+
+    // After camera movement the cached position is replaced, never fixed.
+    marks.ObservePriest("poison", 305, 525, 0.99, t + 300);
+    target = marks.Choose("poison", t + 400);
+    Assert(target?.MarkX == 305 && target.MarkY == 525, "dynamic relocation");
+    passed++;
+
+    Assert(marks.Choose("poison", t + 1700) is null,
+        "stale priest screen coordinates must expire");
+    passed++;
+
+    marks.ObservePriest("poison", 305, 525, 0.90, t + 1800);
+    marks.ObserveBoss("ice", t + 1800);
+    Assert(marks.Choose("poison", t + 1800) is null,
+        "boss symbol change must invalidate old target");
+    passed++;
+
+    marks.ObservePriest("ice", -5, 400, 0.90, t + 1800);
+    marks.Reset();
+    Assert(marks.RecentPriestCount(t + 1800) == 0 &&
+        marks.Choose("ice", t + 1800) is null,
+        "new dungeon round must erase stale locations");
+    passed++;
+
+    marks.ObserveBoss("fire", t + 3000);
+    marks.ObservePriest("fire", 420, 800, 0.94, t + 3000);
+    Assert(marks.Choose("fire", t + 3000)?.MarkX == 420,
+        "fresh encounter after reset");
+    passed++;
+}
+Console.WriteLine("WaterwayMarkPolicy: 9 PASS (dynamic coordinates, mismatch, TTL, reset)");
