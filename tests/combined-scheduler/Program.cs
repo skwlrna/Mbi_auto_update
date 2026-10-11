@@ -140,4 +140,25 @@ Assert(!AbyssResultLayout.HasStableScheduledExitLabel(
         Rectangle.Empty, new Rectangle(120, 918, 93, 22), leftCrop, leftCrop),
     "missing first result text fails closed");
 
+// Fixed input target must be independent of OCR glyph centers. The left
+// button center comes from the user's portrait result layout, not from the
+// former broader green-button detection ROI (whose center was X=250).
+Point fixedExit = AbyssResultLayout.FixedButtonCenter(true, new Size(800, 1000));
+Point fixedRetry = AbyssResultLayout.FixedButtonCenter(false, new Size(800, 1000));
+Assert(fixedExit == new Point(165, 930) && fixedRetry == new Point(400, 930),
+    "fixed canonical left exit/middle retry click points");
+Assert(fixedExit.X < 280 && fixedRetry.X is > 310 and < 490 && fixedExit.Y == fixedRetry.Y,
+    "fixed exit and retry clicks cannot target the same result button");
+Assert(AbyssResultLayout.FixedButtonCenter(true, new Size(815, 920)) == new Point(168, 856) &&
+       AbyssResultLayout.FixedButtonCenter(false, new Size(815, 920)) == new Point(408, 856),
+    "fixed centers scale independently for real 815x920 game-client capture");
+bool refusedInvalidAspect = false;
+try { _ = AbyssResultLayout.FixedButtonCenter(true, new Size(706, 1536)); }
+catch (InvalidOperationException) { refusedInvalidAspect = true; }
+Assert(refusedInvalidAspect, "do not click unadjusted coordinates on an iPhone screenshot aspect");
+bool refusedMissingClient = false;
+try { _ = AbyssResultLayout.FixedButtonCenter(false, Size.Empty); }
+catch (InvalidOperationException) { refusedMissingClient = true; }
+Assert(refusedMissingClient, "missing client geometry blocks fixed click");
+
 Console.WriteLine("Combined scheduler regressions passed.");
