@@ -853,7 +853,9 @@ public sealed partial class MainForm
             _start.Enabled = !busy && !_loading && (available || hasBatch);
             if (_resume is not null) _resume.Enabled = !busy && !_loading;
             _stop.Enabled = running;
-            bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
+            bool ownRun = IsAltering
+                ? _owner._activeMode is "가공" or "어비스 + 가공"
+                : _owner._activeMode == "채집";
             bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
             int target = ownRun ? _owner._productionTargetQuantity : (int)Quantity.Value;
