@@ -4,6 +4,72 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
+// flag after the move when the pre-click field guard already tolerates it.
+var travelIdle = new GatheringActivity(
+    IsDead: false, IsReviving: false, IsInCombat: false,
+    IsAutoPlaying: false, IsAutoTraveling: false,
+    IsDialoguePlaying: false, IsWaitingForSelection: false,
+    DungeonState: "NotInDungeon", IsInBattlefield: false,
+    IsPlayingTutorial: false, IsInScenario: false,
+    IsPlayingPerformance: false, IsPlayingMiniGame: false,
+    IsHousingEditMode: false, MainButtonState: "Compass",
+    HasTarget: false, AvailableInteractionType: "None",
+    LastRunningInteractionType: "Altering");
+Check(AlteringTravelActivityPolicy.AssessAfterMove(travelIdle) ==
+      AlteringTravelActivityVerdict.SafeToObserve,
+    "F9 travel: ordinary field safe to observe");
+Check(GatheringSafetyPolicy.IsSafeField(travelIdle with { IsReviving = true }) &&
+      AlteringTravelActivityPolicy.AssessAfterMove(travelIdle with { IsReviving = true }) ==
+      AlteringTravelActivityVerdict.SafeToObserve,
+    "F9 travel: stale CLI Reviving has the same result before and after move");
+Check(AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsDialoguePlaying = true }) ==
+      AlteringTravelActivityVerdict.AwaitPossibleTravelDialog &&
+      AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsWaitingForSelection = true }) ==
+      AlteringTravelActivityVerdict.AwaitPossibleTravelDialog &&
+      AlteringTravelActivityPolicy.MaxAmbiguousFrames == 3,
+    "F9 travel: ambiguous CLI dialogue/selection only waits three no-input frames");
+Check(AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
+        travelIdle with { IsDialoguePlaying = true, IsWaitingForSelection = true }) &&
+      !GatheringSafetyPolicy.IsSafeField(
+        travelIdle with { IsDialoguePlaying = true }),
+    "F9 travel: only an independently verified managed travel popup can tolerate dialogue flags");
+Check(AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsDead = true }) == AlteringTravelActivityVerdict.Unsafe &&
+      AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsInCombat = true }) == AlteringTravelActivityVerdict.Unsafe &&
+      AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { DungeonState = "InDungeon" }) == AlteringTravelActivityVerdict.Unsafe &&
+      AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsInCombat = true, IsDialoguePlaying = true }) ==
+        AlteringTravelActivityVerdict.Unsafe,
+    "F9 travel: genuine death/combat/dungeon never enters transient-dialog wait");
+Check(!AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
+        travelIdle with { IsInCombat = true, IsDialoguePlaying = true }) &&
+      !AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
+        travelIdle with { IsDead = true }) &&
+      !AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
+        travelIdle with { IsAutoTraveling = true }) &&
+      !AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
+        travelIdle with { IsPlayingMiniGame = true }) &&
+      !AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
+        travelIdle with { IsWaitingForSelection = true, DungeonState = "InDungeon" }),
+    "F9 travel: actual hazards and existing travel cannot authorize popup Space");
+Check(AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsAutoTraveling = true, IsDialoguePlaying = true }) ==
+      AlteringTravelActivityVerdict.Unsafe &&
+      AlteringTravelActivityPolicy.AssessAfterMove(
+        travelIdle with { IsDialoguePlaying = true, IsPlayingTutorial = true }) ==
+      AlteringTravelActivityVerdict.Unsafe,
+    "F9 travel: travel/dialogue and tutorial/dialogue combinations fail closed");
+Check(AlteringTravelActivityPolicy.Describe(
+        travelIdle with { IsDialoguePlaying = true }).Contains("Dialogue=True") &&
+      AlteringTravelActivityPolicy.Describe(travelIdle).Contains("Dungeon=NotInDungeon"),
+    "F9 travel: errors expose exact safety bits instead of misleading generic messages");
+
+// Existing F9 travel and receipt safety regressions follow unchanged.
 // V3.1.76: F9 long-distance facility travel expires by elapsed time,
  // not 120 UI/CLI poll iterations. No extension on loading or confirmation.
 Check(AlteringFacilityTravelConfirmPolicy.ManagedTravelTimeout == TimeSpan.FromMinutes(5) &&

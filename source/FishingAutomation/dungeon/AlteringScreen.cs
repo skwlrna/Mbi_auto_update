@@ -1389,6 +1389,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             plan.FacilityName, reason, new InvalidOperationException(reason));
     }
 
+    // F9-specific popup gate. The normal idle check correctly rejects all
+    // dialogs BEFORE inputs, but an already verified travel confirmation can
+    // set Dialogue/WaitingSelection in the CLI. Only the exact two-frame
+    // travel visual plus the earlier move click may authorize its Space.
+    private async Task RequireManagedTravelPopupReadyAsync(
+        AlteringPlan plan, string phase, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var response = await _cli.GetActivityAsync(ct);
+        GatheringActivity? activity = response.Success
+            ? GatheringQueries.ParseActivity(response)
+            : null;
+        if (activity is not null &&
+            AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(activity))
+            return;
+
+        string reason = "관리 시설 이동 확인창 입력 차단 · " + phase +
+            " · CLI " + (activity is null ? "조회 불명" :
+                AlteringTravelActivityPolicy.Describe(activity));
+        Log?.Invoke("[자동 가공] " + plan.ScreenTitle + " · " + reason);
+        throw new AlteringCoordinatorFacilityMismatchException(
+            plan.FacilityName, reason, new InvalidOperationException(reason));
+    }
+
     public async Task QueueAsync(
         AlteringPlan plan,
         AlteringFacilityEntryDirective directive,
@@ -2007,6 +2031,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // auto-travel. The counter is consecutive and resets on readable CLI.
         int loadingDepartureStreak = 0;
         bool confirmedMoveTransition = false;
+        int ambiguousTravelActivityFrames = 0;
 
         // V3.1.76: start the timer after the first confirmed move click.
         // The old 120 polls (~54 seconds of delays plus CLI/OCR time) could
@@ -2088,13 +2113,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     // dialogs can have correct green/Cancel/Space UI but Korean
                     // OCR fails. OCR is diagnostic here, NOT the Space gate.
                     // Never accept a green popup outside this proven move click.
-                    await RequireManagedIdleAsync(
-                        plan, directive, "시설 이동 확인 팝업 Space 직전", ct);
+                    await RequireManagedTravelPopupReadyAsync(
+                        plan, "시설 이동 확인 팝업 Space 직전", ct);
                     using var freshDialog = Capture(ct);
-                    // Preserve a second independent idle/activity confirmation
-                    // and a fresh non-travel CLI status before either Space.
-                    await RequireManagedIdleAsync(
-                        plan, directive, "시설 이동 팝업 최종 CLI 허가", ct);
+                    // A second frame must confirm the EXACT travel-dialog UI.
+                    // Dialogue/WaitingSelection CLI flags are tolerated ONLY
+                    // within this already verified managed move sequence.
+                    await RequireManagedTravelPopupReadyAsync(
+                        plan, "시설 이동 팝업 최종 CLI 허가", ct);
                     bool? freshAutoTravel = await TryAutoTravelingAsync(ct);
                     if (!AlteringFacilityTravelConfirmPolicy.CanConfirmManagedTravelPopupAfterMoveClick(
                             moveClickSent,
@@ -2174,9 +2200,34 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             {
                 loadingDepartureStreak = 0;
                 activity = GatheringQueries.ParseActivity(activityResponse);
-                if (!activity.IsSafeField)
+                var travelActivity = AlteringTravelActivityPolicy.AssessAfterMove(activity);
+                if (travelActivity == AlteringTravelActivityVerdict.AwaitPossibleTravelDialog)
+                {
+                    ambiguousTravelActivityFrames++;
+                    Log?.Invoke("[자동 가공] " + plan.ScreenTitle +
+                        " · 이동 직후 CLI 대화/선택 상태, 이동 확인창 재탐색 " +
+                        ambiguousTravelActivityFrames + "/" +
+                        AlteringTravelActivityPolicy.MaxAmbiguousFrames +
+                        " · 입력 없음 · " + AlteringTravelActivityPolicy.Describe(activity));
+                    if (ambiguousTravelActivityFrames <
+                        AlteringTravelActivityPolicy.MaxAmbiguousFrames)
+                        continue;
+
                     throw new InvalidOperationException(
-                        "설비 이동 중 전투·대화 등 안전하지 않은 상태가 확인되어 정지합니다.");
+                        "설비 이동 중 확인되지 않은 대화/선택 상태가 반복되어 정지합니다. " +
+                        AlteringTravelActivityPolicy.Describe(activity));
+                }
+
+                ambiguousTravelActivityFrames = 0;
+                if (travelActivity == AlteringTravelActivityVerdict.Unsafe)
+                {
+                    Log?.Invoke("[자동 가공] " + plan.ScreenTitle +
+                        " · 설비 이동 CLI 위험 상태 · " +
+                        AlteringTravelActivityPolicy.Describe(activity));
+                    throw new InvalidOperationException(
+                        "설비 이동 중 안전하지 않은 상태가 확인되어 정지합니다. " +
+                        AlteringTravelActivityPolicy.Describe(activity));
+                }
 
                 if (activity.IsAutoTraveling)
                 {
