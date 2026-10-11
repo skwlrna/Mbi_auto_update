@@ -153,7 +153,7 @@ jobs:
               $runner -notmatch 'BeginReceiptWithEvidenceAsync' -or
               $ui -notmatch '_alteringPage.Items.Font' -or
               $ui -notmatch 'basePixels' -or
-              $tests -notmatch '14 confirmed receipts') {
+              $tests -notmatch 'durable receipt preimage excludes completed-but-uncollected work') {
             throw 'Receipt evidence persistence or matched production font missing'
           }
 
