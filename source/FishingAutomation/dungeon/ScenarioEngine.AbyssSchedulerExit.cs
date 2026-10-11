@@ -69,12 +69,21 @@ internal sealed partial class ScenarioEngine
                     continue;
                 }
 
+                // OCR authenticates the left-hand label but never determines
+                // where to click. Both independent result frames must also show
+                // green directly under the same fixed canonical button center.
+                var firstClick = ConfirmAbyssFixedButtonClick(frame, exit: true);
+                var click = ConfirmAbyssFixedButtonClick(fresh, exit: true);
+                if (firstClick != click)
+                    throw new InvalidOperationException("병행 어비스 나가기 확인 중 게임 창 크기가 변했습니다.");
+
                 ct.ThrowIfCancellationRequested();
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
+                VerifyAbyssClickClientGeometry(_hwnd, fresh.Size);
                 NativeMethods.SetForegroundWindow(_hwnd);
-                Log?.Invoke("[병행] 결과 2회 + 왼쪽 나가기 전체 문구/동일 위치 2회 확인 -> 나가기 1회 클릭");
-                DiagnosticObserveClick("abyss_scheduler_exit", confirmedExit.Center);
-                _input.ClickClientPoint(_hwnd, confirmedExit.Center);
+                Log?.Invoke($"[병행] 결과 2회 + 나가기 문구 2회 + 고정 초록 버튼 2회 확인 -> 왼쪽 나가기 1회 클릭 @ {click}");
+                DiagnosticObserveClick("abyss_scheduler_exit_fixed", click);
+                _input.ClickClientPoint(_hwnd, click);
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
                 await WaitForAbyssHomeAfterNormalExitAsync(ct);
                 Log?.Invoke("[병행] 던전 밖 HUD 3회 확인 -> 가공 관리자로 제어권 반환");
