@@ -105,7 +105,7 @@ jobs:
               $policy -notmatch 'bool allowSingleCharacter = false' -or
               $policy -notmatch 'allowSingleCharacter \|\|' -or
               $ui -notmatch 'confirmedSingleCharacter = true' -or
-              $ui -notmatch 'MessageBoxDefaultButton.Button2' -or
+              $ui -notmatch 'safeDefault\?\.Focus' -or
               $run -notmatch 'confirmedSingleCharacterResume' -or
               $run -notmatch 'allowSingleCharacter: singleCharacterMode && confirmedSingleCharacterResume' -or
               $tests -notmatch 'one-character realm-only resume requires explicit authorization' -or
