@@ -77,7 +77,9 @@ internal sealed class ScatteredWaterwayMechanics
     private readonly string _baseDir;
     private readonly TemplateMatcher _matcher;
     private readonly WaterwayMarkPolicy _markTracker = new();
-    internal bool ObserveOnly => _settings.ObserveOnly || !_settings.AllowKeyboardActions;
+    // No real-image or movement validation exists for this draft. Configuration
+    // switches cannot grant input authority until that evidence is reviewed.
+    internal bool ObserveOnly => true;
     internal int ScanIntervalMs => Math.Max(250, _settings.ScanIntervalMs);
     internal int InputCooldownMs => Math.Max(2500, _settings.InputCooldownMs);
     internal int TapDelayMs => Math.Clamp(_settings.TapDelayMs, 100, 250);
@@ -101,8 +103,7 @@ internal sealed class ScatteredWaterwayMechanics
 
         if (!settings.Enabled) return null;
         log?.Invoke("[흩어진 물길] 기믹 분석 활성 · " +
-            (settings.ObserveOnly || !settings.AllowKeyboardActions ?
-                "관찰 전용(키 입력 차단)" : "키 입력 허용(시각 증거와 동선 재검증 필요)"));
+            "관찰 전용(실제 이미지·이동 미검증, 키 입력 차단)");
         return new ScatteredWaterwayMechanics(settings, baseDir);
     }
 
@@ -167,7 +168,11 @@ internal sealed class ScatteredWaterwayMechanics
                 Match: Locate(frame, pair.Value, s.BossRoi.ToRectangle())))
             .Where(pair => pair.Match.Found)
             .ToArray();
-        if (bossMatches.Length > 1) return null; // ambiguous boss mark
+        if (bossMatches.Length > 1)
+        {
+            _markTracker.Reset(); // ambiguity invalidates cached authority too
+            return null;
+        }
         if (bossMatches.Length == 1)
             _markTracker.ObserveBoss(bossMatches[0].Symbol, now);
 
@@ -176,10 +181,10 @@ internal sealed class ScatteredWaterwayMechanics
 
         // Target notification is the same glyph appearing over the PLAYER.
         // No reaction to the boss glyph alone; avoid moving prematurely.
-        string? player = null;
-        if (s.PlayerMarkers.TryGetValue(boss, out var playerTemplate) &&
-            Locate(frame, playerTemplate, s.PlayerRoi.ToRectangle()).Found)
-            player = boss;
+        var playerMatches = s.PlayerMarkers
+            .Where(pair => Locate(frame, pair.Value, s.PlayerRoi.ToRectangle()).Found)
+            .Select(pair => pair.Key).ToArray();
+        string? player = playerMatches.Length == 1 ? playerMatches[0] : null;
 
         var target = _markTracker.Choose(player, now);
         int readyPriests = _markTracker.RecentPriestCount(now);
@@ -225,7 +230,7 @@ internal sealed class ScatteredWaterwayMechanics
         return new Plan("파도", "wave:" + wave + ":ready:" + (ready ? "1" : "0"),
             $"진행 방향={wave}; 대응 포탈 시각 확인; 포탈 사용 가능={(ready ? "예" : "미확인")}",
             s.KeysByWave.GetValueOrDefault(wave) ?? Array.Empty<string>(),
-            InputEvidenceVerified: ready);
+            InputEvidenceVerified: false);
     }
 
     private Plan? ReadBoard(Bitmap frame)
@@ -272,7 +277,7 @@ internal sealed class ScatteredWaterwayMechanics
                 ":safe:" + (calibratedSafe ? "1" : "0"),
             $"보드={board}, 선택 칸={decision.Cell + 1}, 전략={decision.Reason}, 표적={(targeted ? "확인" : "미확인")}, 안전칸={(calibratedSafe ? "확인" : "미확인")}",
             s.KeysByCell.GetValueOrDefault(decision.Cell.ToString()) ?? Array.Empty<string>(),
-            InputEvidenceVerified: targeted && calibratedSafe);
+            InputEvidenceVerified: false);
     }
 
     private Plan? ReadAscension(Bitmap frame)
@@ -283,7 +288,7 @@ internal sealed class ScatteredWaterwayMechanics
             bool ready = StageCue(frame, s.GoldEntryWindowTemplate);
             return new Plan("승천", "ascension:gold:ready:" + (ready ? "1" : "0"),
                 $"금색 안전 구역 표시; 이동 타이밍={(ready ? "확인" : "미확인")}",
-                s.KeysToGoldZone, InputEvidenceVerified: ready);
+                s.KeysToGoldZone, InputEvidenceVerified: false);
         }
 
         if (!StageCue(frame, s.ShieldCueTemplate)) return null;
@@ -305,7 +310,7 @@ internal sealed class ScatteredWaterwayMechanics
     internal bool TryGetValidatedKeys(Plan plan, out ushort[] codes)
     {
         codes = Array.Empty<ushort>();
-        if (!plan.InputEvidenceVerified ||
+        if (ObserveOnly || !plan.InputEvidenceVerified ||
             plan.Keys.Length is < 1 or > 8)
             return false;
 

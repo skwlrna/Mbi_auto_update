@@ -9,9 +9,14 @@ on:
       - "source/FishingAutomation/dungeon/ScenarioEngine.cs"
       - "tests/waterway/**"
       - "tests/waterway-packet/**"
+      - "tests/waterway-observation/**"
+      - "source/FishingAutomation/abyss/config/waterway_mechanics.json"
+      - "source/FishingAutomation/FishingAutomation.csproj"
       - "source/FishingAutomation/dungeon/WaterwayPacketTraceDecoder.cs"
       - ".github/workflows/waterway-planner.yml"
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   check:
     runs-on: windows-latest
@@ -24,5 +29,7 @@ jobs:
         run: dotnet run --project tests/waterway/Regression.csproj
       - name: Offline packet trace regression
         run: dotnet run --project tests/waterway-packet/Regression.csproj
+      - name: Observation and input lock regression (synthetic recognition)
+        run: dotnet run --project tests/waterway-observation/Regression.csproj -c Release
       - name: Application compile check
         run: dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release

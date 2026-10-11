@@ -1,6 +1,8 @@
 # 흩어진 물길 v3.1.84 — 읽기 전용 기믹 관찰
 
 기본 설정: Enabled=false / ObserveOnly=true / AllowKeyboardActions=false.
+본 초안은 설정을 바꿔도 모든 물길 입력을 코드에서 차단합니다.
+파도·안전칸·금색 구역의 화면 단서만으로 이동 검증을 대체하지 않습니다.
 기존 UI·가공·낚시·채집 기능을 변경하지 않습니다. 영상 좌표와 키 이동이 검증되기 전에는 입력 금지입니다.
 
 ## 1번방: 플레이 영상 및 사용자 확인 사항
@@ -36,6 +38,8 @@ PlayerMarkers(내 머리 위 표적 문양). 보스·사제·플레이어 ROI를
 ## 회귀 검사
 - dotnet run --project tests/waterway/Regression.csproj
 - dotnet run --project tests/waterway-packet/Regression.csproj
+- dotnet run --project tests/waterway-observation/Regression.csproj -c Release
 - dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release
 
 CI 성공은 실제 게임 자동 파훼가 성공한다는 뜻이 아니다.
+관찰 회귀는 합성 인식 결과를 사용하며 실제 PNG 인식 검증이 아닙니다.
