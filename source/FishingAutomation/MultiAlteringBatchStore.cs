@@ -319,7 +319,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                     {
                         var recorded = saved.Items.Where(x => x.FacilityName == facility).ToArray();
                         var visible = live.Where(x => x.FacilityName == facility).ToArray();
-                        if (visible.Length > recorded.Sum(x => x.QueuedWorks) ||
+                        if (visible.Length > recorded.Sum(x => checked(x.QueuedWorks + x.InitialExistingWorks)) ||
                             visible.Any(w => !recorded.Any(x =>
                                 x.DisplayName == w.DisplayName ||
                                 PlanFrom(x).OutputName == w.DisplayName)))
