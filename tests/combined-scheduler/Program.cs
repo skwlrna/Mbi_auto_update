@@ -55,6 +55,62 @@ await coordinator.RunAsync(
 Assert(events.SequenceEqual(new[] { "abyss", "processing" }),
     "abyss finishes and yields before processing next action");
 
+// A failed exit must never release the input lease back to production.
+int callsAfterFailure = 0;
+bool caughtExitFailure = false;
+try
+{
+    var failureCoordinator = new MultiAlteringCoordinator();
+    using var failureTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await failureCoordinator.RunAsync(
+        new[] { plan },
+        (_, _, _) =>
+        {
+            callsAfterFailure++;
+            return Task.FromResult(false);
+        },
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(new[] { Work(300) }),
+        (_, _) => throw new Exception("Delay is not permitted on failure"),
+        failureTimeout.Token,
+        onIdleAbyssRound: _ => throw new InvalidOperationException("Unverified exit"));
+}
+catch (InvalidOperationException ex) when (ex.Message == "Unverified exit")
+{
+    caughtExitFailure = true;
+}
+Assert(caughtExitFailure && callsAfterFailure == 0,
+    "failed abyss exit stops before any further processing action");
+
+// Cancellation during the handoff also forbids subsequent input.
+int callsAfterCancel = 0;
+using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+bool cancellationObserved = false;
+try
+{
+    var cancelCoordinator = new MultiAlteringCoordinator();
+    await cancelCoordinator.RunAsync(
+        new[] { plan },
+        (_, _, _) =>
+        {
+            callsAfterCancel++;
+            return Task.FromResult(false);
+        },
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(new[] { Work(300) }),
+        (_, _) => throw new Exception("Delay is not permitted on cancellation"),
+        cancel.Token,
+        onIdleAbyssRound: _ =>
+        {
+            cancel.Cancel();
+            return Task.CompletedTask;
+        });
+}
+catch (OperationCanceledException)
+{
+    cancellationObserved = true;
+}
+Assert(cancellationObserved && callsAfterCancel == 0,
+    "F10 cancellation inside abyss prevents another processing action");
+
 var cfg = JsonDocument.Parse(File.ReadAllText(
     Path.Combine(Directory.GetCurrentDirectory(), "source/FishingAutomation/abyss/config/scenario.json")));
 Assert(cfg.RootElement.GetProperty("Repeat").GetBoolean(),
