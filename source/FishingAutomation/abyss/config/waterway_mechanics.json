@@ -3,23 +3,36 @@
   "ObserveOnly": true,
   "AllowKeyboardActions": false,
   "Threshold": 0.88,
-  "ScanIntervalMs": 450,
+  "ScanIntervalMs": 250,
   "InputCooldownMs": 3500,
   "TapDelayMs": 140,
   "Mark": {
     "CueTemplate": "templates/mechanics/mark_phase_cue.png",
-    "PlayerTargetedTemplate": "templates/mechanics/mark_player_targeted.png",
+    "BossRoi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 0,
+      "Height": 0
+    },
     "PlayerRoi": {
       "X": 0,
       "Y": 0,
       "Width": 0,
       "Height": 0
     },
-    "MonsterRoi": {
+    "PriestRoi": {
       "X": 0,
       "Y": 0,
       "Width": 0,
       "Height": 0
+    },
+    "BossMarkers": {
+      "fire": "templates/mechanics/boss_fire.png",
+      "ice": "templates/mechanics/boss_ice.png",
+      "dark": "templates/mechanics/boss_dark.png",
+      "lightning": "templates/mechanics/boss_lightning.png",
+      "poison": "templates/mechanics/boss_poison.png",
+      "unknown_sixth": "templates/mechanics/boss_unknown_sixth.png"
     },
     "PlayerMarkers": {
       "fire": "templates/mechanics/player_fire.png",
@@ -29,13 +42,13 @@
       "poison": "templates/mechanics/player_poison.png",
       "unknown_sixth": "templates/mechanics/player_unknown_sixth.png"
     },
-    "MonsterMarkers": {
-      "fire": "templates/mechanics/monster_fire.png",
-      "ice": "templates/mechanics/monster_ice.png",
-      "dark": "templates/mechanics/monster_dark.png",
-      "lightning": "templates/mechanics/monster_lightning.png",
-      "poison": "templates/mechanics/monster_poison.png",
-      "unknown_sixth": "templates/mechanics/monster_unknown_sixth.png"
+    "PriestMarkers": {
+      "fire": "templates/mechanics/priest_fire.png",
+      "ice": "templates/mechanics/priest_ice.png",
+      "dark": "templates/mechanics/priest_dark.png",
+      "lightning": "templates/mechanics/priest_lightning.png",
+      "poison": "templates/mechanics/priest_poison.png",
+      "unknown_sixth": "templates/mechanics/priest_unknown_sixth.png"
     },
     "KeysByMark": {
       "fire": [],
