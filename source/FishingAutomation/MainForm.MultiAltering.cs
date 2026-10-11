@@ -17,6 +17,8 @@ public sealed partial class MainForm
             return;
 
         bool isResume = resumeDirectory is not null;
+        // Snapshot once before awaits; F7 cannot change it while this batch runs.
+        bool combinedAbyss = _combinedAlteringRequested;
         bool completed = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
@@ -432,6 +434,21 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
+            // The existing coordinator remains the sole owner of every receipt,
+            // registration, material acquisition and on-disk journal.
+            // In combined mode it lends control to Abyss ONLY at a pure idle
+            // boundary, and blocks until Abyss has exited to the outside HUD.
+            Func<CancellationToken, Task>? idleAbyssRound = combinedAbyss
+                ? async coordinatorToken =>
+                {
+                    coordinatorToken.ThrowIfCancellationRequested();
+                    // Leaving a facility invalidates physical onsite proof.
+                    // The next normal processing operation must re-prove travel.
+                    laneState.InvalidateOnsite("병행 어비스 이동 · 이전 가공시설 현장권한 무효화");
+                    await RunCombinedAbyssRoundAsync(coordinatorToken);
+                }
+                : null;
+
             // Keep durable filesystem IO off the hotkey/UI thread. F10 only
             // cancels the run token; no callback waits for checkpoint persistence.
             await Task.Run(() => coordinator.RunAsync(
@@ -460,7 +477,8 @@ public sealed partial class MainForm
                 rawAlteringData.WorksAsync,
                 Task.Delay,
                 token,
-                preparePlan: PreparePlanMaterialsAsync), token);
+                preparePlan: PreparePlanMaterialsAsync,
+                onIdleAbyssRound: idleAbyssRound), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
