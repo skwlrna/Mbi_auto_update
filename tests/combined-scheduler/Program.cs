@@ -82,6 +82,7 @@ Assert(true, "Abyss duration never becomes manager stall time after return");
 var plan = new AlteringPlan("가죽 가공 시설", "가죽", 1, 1, false);
 var simulatedWorks = new List<AlteringWork> { Work(200) };
 var events = new List<string>();
+int readsAfterOutside = 0;
 var coordinator = new MultiAlteringCoordinator();
 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 await coordinator.RunAsync(
@@ -93,7 +94,11 @@ await coordinator.RunAsync(
         await Task.CompletedTask;
         return true;
     },
-    token => Task.FromResult<IReadOnlyList<AlteringWork>>(simulatedWorks.ToArray()),
+    token =>
+    {
+        if (events.Contains("abyss")) readsAfterOutside++;
+        return Task.FromResult<IReadOnlyList<AlteringWork>>(simulatedWorks.ToArray());
+    },
     (_, _) => throw new Exception("Unexpected ordinary delay when abyss was eligible"),
     timeout.Token,
     onIdleAbyssRound: async token =>
@@ -106,6 +111,8 @@ await coordinator.RunAsync(
     });
 Assert(events.SequenceEqual(new[] { "abyss", "processing" }),
     "abyss finishes and yields before processing next action");
+Assert(readsAfterOutside > 0,
+    "confirmed outside exit causes a fresh server works read before processing");
 
 // A failed exit must never release the input lease back to production.
 int callsAfterFailure = 0;
