@@ -9,11 +9,15 @@ internal sealed class ScatteredWaterwayMechanics
     internal sealed class StageOne
     {
         public string CueTemplate { get; set; } = "";
-        public string PlayerTargetedTemplate { get; set; } = "";
+        // Distinct ROIs are essential: all three groups can use identical glyph art.
+        public RectDef BossRoi { get; set; } = new();
         public RectDef PlayerRoi { get; set; } = new();
-        public RectDef MonsterRoi { get; set; } = new();
+        public RectDef PriestRoi { get; set; } = new();
+        public Dictionary<string, string> BossMarkers { get; set; } = new();
         public Dictionary<string, string> PlayerMarkers { get; set; } = new();
-        public Dictionary<string, string> MonsterMarkers { get; set; } = new();
+        public Dictionary<string, string> PriestMarkers { get; set; } = new();
+        // Retained only for config migration; a fixed symbol -> key route is unsafe
+        // when the six priests swap positions every run. Never read these keys.
         public Dictionary<string, string[]> KeysByMark { get; set; } = new();
     }
 
@@ -72,6 +76,7 @@ internal sealed class ScatteredWaterwayMechanics
     private readonly Options _settings;
     private readonly string _baseDir;
     private readonly TemplateMatcher _matcher;
+    private readonly WaterwayMarkPolicy _markTracker = new();
     internal bool ObserveOnly => _settings.ObserveOnly || !_settings.AllowKeyboardActions;
     internal int ScanIntervalMs => Math.Max(250, _settings.ScanIntervalMs);
     internal int InputCooldownMs => Math.Max(2500, _settings.InputCooldownMs);
@@ -109,6 +114,17 @@ internal sealed class ScatteredWaterwayMechanics
         return File.Exists(full);
     }
 
+    internal void ResetRound() => _markTracker.Reset();
+
+    private DetectionResult Locate(Bitmap frame, string templatePath, Rectangle roi)
+    {
+        if (!FileReady(templatePath)) return DetectionResult.NotFound;
+        var safe = WindowCapture.ClampRoi(roi, frame.Size);
+        if (safe.Width < 8 || safe.Height < 8) return DetectionResult.NotFound;
+        return _matcher.Find(frame, safe, templatePath,
+            Math.Clamp(_settings.Threshold, 0.75, 0.99));
+    }
+
     private bool Seen(Bitmap frame, string templatePath, Rectangle roi)
     {
         if (!FileReady(templatePath)) return false;
@@ -133,21 +149,62 @@ internal sealed class ScatteredWaterwayMechanics
         var s = _settings.Mark;
         if (!StageCue(frame, s.CueTemplate)) return null;
 
-        var matches = s.PlayerMarkers
-            .Where(kv => Seen(frame, kv.Value, s.PlayerRoi.ToRectangle()))
-            .Select(kv => kv.Key).ToArray();
-        if (matches.Length != 1) return null;
-        string mark = matches[0];
+        long now = Environment.TickCount64;
+        // Scan all six priest glyphs BEFORE the player becomes a target.
+        // Keep only recent screen pixel coordinates; they change with camera
+        // movement, and can never substitute for a calibrated world route.
+        foreach (var pair in s.PriestMarkers)
+        {
+            var hit = Locate(frame, pair.Value, s.PriestRoi.ToRectangle());
+            if (hit.Found)
+                _markTracker.ObservePriest(pair.Key,
+                    hit.Center.X, hit.Center.Y, hit.Score, now);
+        }
 
-        if (!s.MonsterMarkers.TryGetValue(mark, out string? monster) ||
-            !Seen(frame, monster, s.MonsterRoi.ToRectangle()))
-            return null;
+        // The boss's overhead glyph defines the correct priest.
+        var bossMatches = s.BossMarkers
+            .Select(pair => (Symbol: pair.Key,
+                Match: Locate(frame, pair.Value, s.BossRoi.ToRectangle())))
+            .Where(pair => pair.Match.Found)
+            .ToArray();
+        if (bossMatches.Length > 1) return null; // ambiguous boss mark
+        if (bossMatches.Length == 1)
+            _markTracker.ObserveBoss(bossMatches[0].Symbol, now);
 
-        bool targeted = StageCue(frame, s.PlayerTargetedTemplate);
-        return new Plan("표식", "mark:" + mark + ":targeted:" + (targeted ? "1" : "0"),
-            $"내 표식과 소환 몬스터 표식 일치: {mark}; 투창 대상 확인={(targeted ? "예" : "미확인")}",
-            s.KeysByMark.GetValueOrDefault(mark) ?? Array.Empty<string>(),
-            InputEvidenceVerified: targeted);
+        string? boss = _markTracker.RecentBoss(now);
+        if (boss is null) return null;
+
+        // Target notification is the same glyph appearing over the PLAYER.
+        // No reaction to the boss glyph alone; avoid moving prematurely.
+        string? player = null;
+        if (s.PlayerMarkers.TryGetValue(boss, out var playerTemplate) &&
+            Locate(frame, playerTemplate, s.PlayerRoi.ToRectangle()).Found)
+            player = boss;
+
+        var target = _markTracker.Choose(player, now);
+        int readyPriests = _markTracker.RecentPriestCount(now);
+        if (target is null)
+        {
+            return new Plan("투창 대기",
+                "mark:wait:" + boss + ":target:" + (player is null ? "0" : "1")
+                    + ":priests:" + readyPriests,
+                "보스 문양=" + boss +
+                "; 확인된 사제=" + readyPriests + "/6; 내 표적=" +
+                (player is null ? "아니오/미확인" : "확인, 사제 재탐색 필요"),
+                Array.Empty<string>());
+        }
+
+        // We know WHERE the correct PRIEST'S GLYPH is, not its feet or
+        // the moving spear telegraph overlap. Keep key actions blocked.
+        return new Plan("투창 표적",
+            "mark:target:" + boss + ":" +
+                (target.MarkX / 16) + ":" + (target.MarkY / 16),
+            "보스/내 표적 문양=" + boss +
+                "; 정답 사제 머리 위 문양 중심=(" + target.MarkX + "," +
+                target.MarkY + "), 신뢰도=" + target.Confidence.ToString("0.00") +
+                "; 사제와 공격 범위 동시 포함 여부 미확인 → 이동 보류",
+            Array.Empty<string>(),
+            InputEvidenceVerified: false);
     }
 
     private Plan? ReadWave(Bitmap frame)
