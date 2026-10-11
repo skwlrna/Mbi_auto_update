@@ -15,6 +15,7 @@ public sealed partial class MainForm
         private readonly CheckBox _crafts = new();
         private readonly CheckBox _abyss = new();
         private readonly ComboBox _abyssChoice = new();
+        private readonly ComboBox _minimumWaitChoice = new();
         private readonly Label _alteringSummary = new();
         private readonly Label _craftingSummary = new();
         private readonly Label _abyssSummary = new();
@@ -26,6 +27,11 @@ public sealed partial class MainForm
         internal bool UseCrafting => _crafts.Checked;
         internal bool UseAbyss => _abyss.Checked;
         internal string AbyssDungeon => _abyssChoice.SelectedItem?.ToString() ?? "허상의 정박지";
+        internal long MinimumAbyssWaitSeconds => _minimumWaitChoice.SelectedIndex switch
+        {
+            0 => 90, 1 => 120, 2 => 180, 3 => 240, 4 => 300,
+            _ => 120
+        };
 
         internal SchedulerPage(MainForm owner)
         {
@@ -82,6 +88,15 @@ public sealed partial class MainForm
             };
             _tabs.Padding = new Point(16, 8);
             _tabs.Appearance = TabAppearance.Normal;
+            _minimumWaitChoice.DropDownStyle = ComboBoxStyle.DropDownList;
+            _minimumWaitChoice.AccessibleName = "어비스 진입 최소 가공 남은 시간";
+            _minimumWaitChoice.BackColor = PanelBg;
+            _minimumWaitChoice.ForeColor = TitleText;
+            _minimumWaitChoice.FlatStyle = FlatStyle.Flat;
+            _minimumWaitChoice.Items.AddRange(new object[] { "90초", "120초", "180초", "240초", "300초" });
+            _minimumWaitChoice.SelectedIndex = 1;
+            _minimumWaitChoice.SelectedIndexChanged += (_, _) => RefreshSnapshot();
+
             _tabs.TabPages.Add(MakeOverview());
             _tabs.TabPages.Add(MakeAltering());
             _tabs.TabPages.Add(MakeCrafting());
@@ -236,19 +251,25 @@ public sealed partial class MainForm
         private TabPage MakeAbyss()
         {
             var tab = Tab("어비스 설정");
-            var layout = Vertical(5);
+            var layout = Vertical(7);
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.Controls.Add(Txt("병행 어비스 던전 선택", TitleText, 17, true), 0, 0);
             _abyssChoice.Dock = DockStyle.Fill;
             _abyssChoice.Font = new Font("맑은 고딕", 13f);
             layout.Controls.Add(_abyssChoice, 0, 1);
-            layout.Controls.Add(_abyssSummary, 0, 2);
-            layout.Controls.Add(Txt("1판 종료 후 결과 화면에서 '나가기'를 확인하고, 던전 밖 확인 전에는 가공 입력을 재개하지 않습니다.", Muted, 11), 0, 3);
-            layout.Controls.Add(Txt("실게임 결과 화면 사진을 이용한 '나가기' 검증은 아직 완료되지 않았으므로 운영 버전으로 배포하지 않습니다.", Color.Orange, 11), 0, 4);
+            layout.Controls.Add(Txt("어비스 출발 기준 · 가공 최소 남은시간 (던전 최대시간이 아님)", TitleText, 12), 0, 2);
+            _minimumWaitChoice.Dock = DockStyle.Fill;
+            _minimumWaitChoice.Font = new Font("맑은 고딕", 13f);
+            layout.Controls.Add(_minimumWaitChoice, 0, 3);
+            layout.Controls.Add(_abyssSummary, 0, 4);
+            layout.Controls.Add(Txt("어비스 중 가공 관리자 정체 감시만 일시정지합니다. 실제 서버 가공은 계속 진행됩니다. 나가기 → 필드 HUD 확인 뒤 감시를 재개하고 작업 목록을 다시 조회합니다.", Muted, 11), 0, 5);
+            layout.Controls.Add(Txt("Windows 실게임에서 고정좌표 클릭 및 던전 밖 HUD 복귀 검증이 필요하므로 운영 버전으로 배포하지 않습니다.", Color.Orange, 11), 0, 6);
             tab.Controls.Add(layout);
             return tab;
         }
@@ -268,7 +289,8 @@ public sealed partial class MainForm
                 ? $"제작 품목 : {recipe}  ·  목표 {_owner._craftingPage.Quantity.Value:N0}개"
                 : "제작 상세에서 음식 또는 아이템을 검색하고 선택하세요.";
 
-            _abyssSummary.Text = "선택 던전 : " + AbyssDungeon + "  ·  가공 대기 중 1판씩";
+            _abyssSummary.Text = "선택 던전 : " + AbyssDungeon + "  ·  출발 기준 " +
+                MinimumAbyssWaitSeconds + "초 · 어비스 종료/필드 복귀 시 가공 재조회";
 
             bool running = _owner._schedulerRunning;
             _runStatus.Text = running
@@ -279,6 +301,7 @@ public sealed partial class MainForm
             _start.Enabled = !running && !_owner.AnyRunning;
             _crafts.Enabled = _alters.Enabled = _abyss.Enabled = !running;
             _abyssChoice.Enabled = !running;
+            _minimumWaitChoice.Enabled = !running;
         }
     }
 
