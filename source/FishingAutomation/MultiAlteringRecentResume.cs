@@ -93,6 +93,29 @@ internal static class MultiAlteringRecentResume
             throw new InvalidOperationException(
                 $"{session.DisplayName}: 이어하기 가공 장부 값이 잘못됐습니다.");
         long total = checked((long)session.InitialExistingWorks + session.QueuedWorks);
+        if (session.ReceiptTrackingEnabled)
+        {
+            // Receipt confirmation requires BOTH the saved pre-input queue
+            // snapshot and the proven post-input facility drain. Inventory
+            // surplus cannot create any additional receipt credits.
+            long received = session.ConfirmedReceivedWorks;
+            long expected = total - received;
+            if (received < 0 || received > total || liveWorks != expected)
+                throw new InvalidOperationException(
+                    $"{session.DisplayName}: 수령 확정 {received}건 / 전체 {total}건 / " +
+                    $"예상 대기열 {expected}건 / 실제 {liveWorks}건 · 게임 대기열 불일치");
+            long minimumOutput = checked(received * session.ProducedPerWork);
+            if (gainedOutput < minimumOutput)
+                throw new InvalidOperationException(
+                    $"{session.DisplayName}: 수령 확정 {received}건에 비해 완성품 증가가 부족합니다 · 안전 정지");
+            long ownReceived = Math.Max(0, received - session.InitialExistingWorks);
+            long ownPending = session.QueuedWorks - ownReceived;
+            return new(received, checked(ownReceived * session.ProducedPerWork),
+                checked(ownPending * session.ProducedPerWork), expected);
+        }
+        // Older releases had no pre-input receipt journal. Keep the older
+        // EXACT stock/queue equality check; do not reinterpret uncertain
+        // historical inventory gains as verified receipts.
         if (gainedOutput % session.ProducedPerWork != 0 ||
             gainedOutput > checked(total * session.ProducedPerWork))
             throw new InvalidOperationException(
@@ -145,6 +168,7 @@ internal static class MultiAlteringRecentResume
             throw new InvalidOperationException(
                 "서버명만 확인된 1캐릭터 이어하기는 사용자 확인이 필요합니다 · 기존 작업 기록 보존 · 입력 차단");
         if (actual.PreparedConsumption is not null ||
+            actual.PendingReceipt is not null ||
             actual.Items.Any(s => s.MultiState == MultiAlteringItemState.RecoveryRequired ||
                 s.PendingRegistration || s.PendingConsumptionTransactionId is not null))
             throw new InvalidOperationException(
@@ -223,6 +247,7 @@ internal static class MultiAlteringRecentResume
             reloaded.Identity != actual.Identity ||
             reloaded.Items.Length != actual.Items.Length ||
             reloaded.PreparedConsumption is not null ||
+            reloaded.PendingReceipt is not null ||
             reloaded.Items.Any(x => x.PendingRegistration ||
                 x.PendingConsumptionTransactionId is not null ||
                 x.MultiState == MultiAlteringItemState.RecoveryRequired))
