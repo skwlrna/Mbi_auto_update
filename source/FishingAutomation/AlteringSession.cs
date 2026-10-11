@@ -4,7 +4,13 @@ using System.Text.Json;
 
 namespace FishingAutomation;
 
-internal enum MultiAlteringItemState { NotStarted, InProgress, Completed, RecoveryRequired }
+internal enum MultiAlteringItemState { NotStarted, InProgress, Completed, RecoveryRequired, RawMaterialExhausted }
+
+internal static class MultiAlteringItemStatePolicy
+{
+    internal static bool IsTerminal(MultiAlteringItemState state)
+        => state is MultiAlteringItemState.Completed or MultiAlteringItemState.RawMaterialExhausted;
+}
 
 internal sealed record AlteringSessionState
 {
@@ -12,6 +18,7 @@ internal sealed record AlteringSessionState
     public string? BatchId { get; init; }
     public MultiAlteringItemState MultiState { get; init; }
     public DateTimeOffset? CompletedAt { get; init; }
+    public bool RawMaterialExhausted { get; init; }
     public string FacilityName { get; init; } = "";
     public string DisplayName { get; init; } = "";
     public int TargetQuantity { get; init; }
