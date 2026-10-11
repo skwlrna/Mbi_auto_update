@@ -153,11 +153,20 @@ public sealed partial class MainForm
     // Match the existing production page: borderless navy window, Segoe-free
     // Malgun Gothic pixel fonts, blue action, muted border and inline header.
     // No Windows white title bar, default MessageBox or separate typography.
-    private static Form MakeResumeDialog(string title, string headline, string details,
+    private Form MakeResumeDialog(string title, string headline, string details,
         params (string Label, DialogResult Result)[] commands)
     {
-        static Font UiFont(float pixels, FontStyle style = FontStyle.Regular)
-            => new("맑은 고딕", pixels, style, GraphicsUnit.Pixel);
+        // Use the existing page's ACTUAL fitted font, not an unscaled 17px
+        // modal font. ProductionPage applies its own client-size/DPI scaling.
+        // Reuse the same font family and relative size across modal controls.
+        float basePixels = _alteringPage.Font.Unit == GraphicsUnit.Pixel
+            ? _alteringPage.Font.Size
+            : _alteringPage.Font.SizeInPoints * _alteringPage.DeviceDpi / 72f;
+        basePixels = Math.Clamp(basePixels, 12f, 18f);
+        Font UiFont(float referencePixels, FontStyle style = FontStyle.Regular)
+            => new(_alteringPage.Font.FontFamily,
+                Math.Max(11f, MathF.Round(basePixels * referencePixels / 18f)),
+                style, GraphicsUnit.Pixel);
 
         var dialog = new Form
         {
@@ -242,14 +251,14 @@ public sealed partial class MainForm
             Margin = new Padding(20, 0, 20, 3),
             Padding = new Padding(12)
         };
-        var content = new RichTextBox
+        var content = new TextBox
         {
+            Multiline = true,
             Dock = DockStyle.Fill,
             BorderStyle = BorderStyle.None,
             ReadOnly = true,
             TabStop = false,
-            DetectUrls = false,
-            ScrollBars = RichTextBoxScrollBars.Vertical,
+            ScrollBars = ScrollBars.Vertical,
             BackColor = PanelBg,
             ForeColor = TitleText,
             Font = UiFont(17),
