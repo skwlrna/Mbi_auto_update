@@ -1047,6 +1047,77 @@ static class Program
                 recent, realm, world, default, allowSingleCharacter: true),
                 "작업 소유권");
         });
+        await Test("V3.1.84 durable receipt preimage excludes completed-but-uncollected work", async () =>
+        {
+            using var temp = new Temp();
+            var plan = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 10, false);
+            var world = new World(new[] { plan }) { ImmediateCompletion = false };
+            world.AddCompleted(plan, 1); // older same-item game work
+            string dir = Path.Combine(temp.Path, "fresh-runs", "f9-" +
+                Guid.NewGuid().ToString("N"));
+            using (var batch = new MultiAlteringBatchStore(dir))
+            {
+                await batch.OpenFreshAsync(new[] { plan }, Identity, world, default);
+                Check(batch.Session(plan).ReceiptTrackingEnabled &&
+                    batch.Session(plan).InitialExistingWorks == 1,
+                    "Fresh F9 must explicitly enable receipt provenance with old queue counted");
+                batch.PlanStore(plan).Save(batch.Session(plan) with
+                { QueuedWorks = 20, MultiState = MultiAlteringItemState.InProgress });
+                // One saved receipt of the previous job and 6 new jobs
+                for (int i = 0; i < 6; i++) await world.QueueAsync(plan, () => { }, default);
+                await world.Delay(TimeSpan.Zero, default);
+                await batch.BeginReceiptWithEvidenceAsync(plan, world, default);
+                await world.CollectAsync(plan, default);
+                await batch.ConfirmReceiptAsync(plan, world, default);
+                Check(batch.Session(plan).ConfirmedReceivedWorks == 7,
+                    "First seven facility works not durably credited");
+                for (int i = 0; i < 7; i++) await world.QueueAsync(plan, () => { }, default);
+                await world.Delay(TimeSpan.Zero, default);
+                await batch.BeginReceiptWithEvidenceAsync(plan, world, default);
+                await world.CollectAsync(plan, default);
+                await batch.ConfirmReceiptAsync(plan, world, default);
+                Check(batch.Session(plan).ConfirmedReceivedWorks == 14,
+                    "Fourteen verified receipts not recorded");
+                for (int i = 0; i < 7; i++) await world.QueueAsync(plan, () => { }, default);
+                await world.Delay(TimeSpan.Zero, default);
+            }
+            // Exactly the reported problem: 21 total jobs, 14 proven
+            // received, seven complete but NOT received; inventory increased
+            // by 17 works. The three surplus works are never credited to F9.
+            world.Counts[plan.OutputName] += 30;
+            var recent = MultiAlteringRecentResume.Latest(temp.Path)!;
+            var lines = await MultiAlteringRecentResume.VerifyAsync(
+                recent, Identity, world, default);
+            Check(lines.Single().LiveWorks == 7 &&
+                lines.Single().Confirmed == 130 &&
+                lines.Single().RegisteredOutput == 70 &&
+                lines.Single().AdditionalOutput == 0,
+                "Excess output was incorrectly classified as three more receipts");
+            var restored = new MultiAlteringBatchStore(dir);
+            using (restored)
+            {
+                await restored.OpenAsync(new[] { plan }, Identity, world, default);
+                Check(restored.Session(plan).ConfirmedReceivedWorks == 14 &&
+                    restored.Session(plan).QueuedWorks == 20 &&
+                    restored.Session(plan).InitialExistingWorks == 1,
+                    "Durable receipt/registration counts changed on F10 resume");
+            }
+            world.Works.RemoveAt(0); // unexplained cancellation
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                recent, Identity, world, default), "게임 대기열");
+        });
+        await Test("V3.1.84 old manifests with unproven surplus remain fail-closed", async () =>
+        {
+            var prior = AlteringSessionState.Create(
+                new AlteringPlan("가죽 가공 시설", "가죽+", 200, 10, false),
+                Identity, 0, 1) with { QueuedWorks = 20 };
+            Check(!prior.ReceiptTrackingEnabled, "Old receipt evidence was invented");
+            await Reject(() =>
+            {
+                MultiAlteringRecentResume.ReconcileOwnedWorks(prior, 170, 7);
+                return Task.CompletedTask;
+            }, "게임 대기열");
+        });
         Console.WriteLine($"N02: {passed} deterministic tests passed; temporary files; fake game only.");
     }
 
@@ -1071,7 +1142,7 @@ static class Program
                 automations.Add(MultiAlteringBatchStore.Key(plan), new AlteringAutomation(world, world, Delay, 3,
                     sessionStore: store, session: store.Load(), facilityState: lane,
                     onConfirmedReceipt: (p, works) => lane.Observe(p.FacilityName, works, allowShrink: true),
-                    beforeReceipt: batch.BeginReceiptAsync,
+                    beforeReceipt: (p, ct) => batch.BeginReceiptWithEvidenceAsync(p, world, ct),
                     afterReceipt: (p, ct) => batch.ConfirmReceiptAsync(p, world, ct)));
             }
         }
