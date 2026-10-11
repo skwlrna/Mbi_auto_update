@@ -1064,8 +1064,8 @@ static class Program
                     batch.Session(plan).InitialExistingWorks == 1,
                     "Fresh F9 must explicitly enable receipt provenance with old queue counted");
                 batch.PlanStore(plan).Save(batch.Session(plan) with
-                { QueuedWorks = 20, MultiState = MultiAlteringItemState.InProgress });
-                // One saved receipt of the previous job and 6 new jobs
+                { QueuedWorks = 6, MultiState = MultiAlteringItemState.InProgress });
+                // First seven slots: one prior job + six registered by this batch
                 for (int i = 0; i < 6; i++) await world.QueueAsync(plan, () => { }, default);
                 await world.Delay(TimeSpan.Zero, default);
                 await batch.BeginReceiptWithEvidenceAsync(plan, world, default);
@@ -1073,6 +1073,7 @@ static class Program
                 await batch.ConfirmReceiptAsync(plan, world, default);
                 Check(batch.Session(plan).ConfirmedReceivedWorks == 7,
                     "First seven facility works not durably credited");
+                batch.PlanStore(plan).Save(batch.Session(plan) with { QueuedWorks = 13 });
                 for (int i = 0; i < 7; i++) await world.QueueAsync(plan, () => { }, default);
                 await world.Delay(TimeSpan.Zero, default);
                 await batch.BeginReceiptWithEvidenceAsync(plan, world, default);
@@ -1080,6 +1081,7 @@ static class Program
                 await batch.ConfirmReceiptAsync(plan, world, default);
                 Check(batch.Session(plan).ConfirmedReceivedWorks == 14,
                     "Fourteen verified receipts not recorded");
+                batch.PlanStore(plan).Save(batch.Session(plan) with { QueuedWorks = 20 });
                 for (int i = 0; i < 7; i++) await world.QueueAsync(plan, () => { }, default);
                 await world.Delay(TimeSpan.Zero, default);
             }
