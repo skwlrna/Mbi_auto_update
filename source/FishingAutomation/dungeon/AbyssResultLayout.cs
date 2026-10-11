@@ -30,6 +30,28 @@ internal static class AbyssResultLayout
                firstText.IntersectsWith(secondText);
     }
 
+    // Canonical 800x1000 *game-client* button centers. These are candidate
+    // centers derived from the provided portrait result image, not from any OCR
+    // bounding box. Keep them separate from the broader three-button visual
+    // verification ROIs, which have deliberately not changed.
+    internal static readonly Point ExitFixedCenter800 = new(165, 930);
+    internal static readonly Point RetryFixedCenter800 = new(400, 930);
+
+    internal static Point FixedButtonCenter(bool exit, Size capturedClientSize)
+    {
+        if (capturedClientSize.Width <= 0 || capturedClientSize.Height <= 0)
+            throw new InvalidOperationException("고정 버튼 클릭: 유효한 게임 클라이언트 크기가 아닙니다.");
+
+        double aspect = capturedClientSize.Width / (double)capturedClientSize.Height;
+        if (aspect < 0.74 || aspect > 0.92)
+            throw new InvalidOperationException("고정 버튼 클릭: 검증 범위를 벗어난 게임 창 비율입니다.");
+
+        Point canonical = exit ? ExitFixedCenter800 : RetryFixedCenter800;
+        return new Point(
+            (int)Math.Round(canonical.X * capturedClientSize.Width / 800.0),
+            (int)Math.Round(canonical.Y * capturedClientSize.Height / 1000.0));
+    }
+
     public static bool IsConfirmed(Rectangle exit, Rectangle retry, Rectangle other)
     {
         if (exit.Width <= 0 || exit.Height <= 0 || retry.Width <= 0 || retry.Height <= 0 || other.Width <= 0 || other.Height <= 0)
