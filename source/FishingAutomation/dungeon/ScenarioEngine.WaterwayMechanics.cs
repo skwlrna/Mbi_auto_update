@@ -9,6 +9,16 @@ internal sealed partial class ScenarioEngine
     private string? _waterwayLastSignature;
     private int _waterwayAbsentFrames;
 
+    private void ResetWaterwayRound()
+    {
+        // Stage/coords/signature from the previous dungeon round must not leak.
+        _waterway?.ResetRound();
+        _waterwayLastScan = 0;
+        _waterwayLastInput = 0;
+        _waterwayLastSignature = null;
+        _waterwayAbsentFrames = 0;
+    }
+
     private async Task<bool> TryWaterwayMechanicAsync(Bitmap frame, CancellationToken ct)
     {
         if (!_waterwayInitialized)
