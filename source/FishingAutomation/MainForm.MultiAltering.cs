@@ -194,7 +194,8 @@ public sealed partial class MainForm
                 sessionDir,
                 laneState: laneState,
                 internalConsumptionObserver: consumptionLedger,
-                beforeReceipt: batchStore.BeginReceiptAsync,
+                beforeReceipt: (receiptPlan, receiptToken) =>
+                    batchStore.BeginReceiptWithEvidenceAsync(receiptPlan, rawAlteringData, receiptToken),
                 afterReceipt: ConfirmBatchReceiptAsync);
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData,
@@ -282,7 +283,8 @@ public sealed partial class MainForm
                             remainingWorks,
                             allowShrink: true),
                     facilityState: laneState,
-                    beforeReceipt: batchStore.BeginReceiptAsync,
+                    beforeReceipt: (receiptPlan, receiptToken) =>
+                    batchStore.BeginReceiptWithEvidenceAsync(receiptPlan, rawAlteringData, receiptToken),
                     afterReceipt: ConfirmBatchReceiptAsync);
 
                 var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
@@ -294,13 +296,18 @@ public sealed partial class MainForm
 
                 long currentOutputForStatus =
                     itemCompleted ? 0 : await rawAlteringData.ItemCountAsync(plan.OutputName, token);
-                long restoredConfirmed = itemCompleted ? plan.TargetQuantity : Math.Clamp(
-                    currentOutputForStatus +
-                        session.CreditedInternalConsumptionQuantity -
-                        session.BaselineQuantity -
-                        session.InitialExistingMinimum,
-                    0,
-                    plan.TargetQuantity);
+                long restoredConfirmed = itemCompleted ? plan.TargetQuantity :
+                    session.ReceiptTrackingEnabled
+                        ? Math.Clamp(
+                            checked((long)Math.Max(0,
+                                session.ConfirmedReceivedWorks - session.InitialExistingWorks) *
+                                plan.ProducedPerWork), 0, plan.TargetQuantity)
+                        : Math.Clamp(
+                            currentOutputForStatus +
+                                session.CreditedInternalConsumptionQuantity -
+                                session.BaselineQuantity -
+                                session.InitialExistingMinimum,
+                            0, plan.TargetQuantity);
                 var matchingWorks = currentWorks.Where(x =>
                     x.FacilityName == plan.FacilityName &&
                     (x.DisplayName == plan.DisplayName ||

@@ -23,6 +23,11 @@ internal sealed record AlteringSessionState
     public long LastObservedOutputQuantity { get; init; }
     public long CreditedInternalConsumptionQuantity { get; init; }
     public int InitialExistingWorks { get; init; }
+    // V3.1.84+: enabled ONLY for new F9 batches that record a durable
+    // before-input work-count receipt snapshot and an after-input confirmation.
+    // Old V3.1.83 checkpoints intentionally remain unproven.
+    public bool ReceiptTrackingEnabled { get; init; }
+    public int ConfirmedReceivedWorks { get; init; }
     public bool PendingRegistration { get; init; }
     // F05: ties the pending registration to ONE durable applied transaction ID.
     public string? PendingConsumptionTransactionId { get; init; }
@@ -128,7 +133,9 @@ internal class AlteringSessionStore
                 state.QueuedWorks < 0 || state.QueuedWorks > state.RequiredWorks ||
                 state.BaselineQuantity < 0 || state.LastObservedOutputQuantity < state.BaselineQuantity ||
                 state.CreditedInternalConsumptionQuantity < 0 ||
-                state.InitialExistingWorks < 0 || state.PendingBeforeMatchingCount < 0)
+                state.InitialExistingWorks < 0 || state.PendingBeforeMatchingCount < 0 ||
+                state.ConfirmedReceivedWorks < 0 ||
+                state.ConfirmedReceivedWorks > state.InitialExistingWorks + state.QueuedWorks)
                 throw new InvalidDataException("자동 가공 이어하기 파일의 값이 올바르지 않습니다.");
             return state;
         }

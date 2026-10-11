@@ -402,7 +402,20 @@ internal sealed class AlteringAutomation
             //   2) same-item jobs that are still present in the live queue.
             // This safely handles the user receiving completed jobs and cancelling
             // the remaining queued jobs before pressing F9 again.
-            if (initialExistingCount == 0)
+            if (_session.ReceiptTrackingEnabled)
+            {
+                int expectedLive = checked(_session.InitialExistingWorks +
+                    _session.QueuedWorks - _session.ConfirmedReceivedWorks);
+                if (currentKnownWorks != expectedLive)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}: 수령 확정 기록과 게임 대기열 불일치 · " +
+                        $"예상 {expectedLive}건 / 현재 {currentKnownWorks}건 · 안전 정지");
+                if (currentOutput - baseline <
+                    checked((long)_session.ConfirmedReceivedWorks * plan.ProducedPerWork))
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}: 수령 기록에 비해 완성품이 부족합니다 · 안전 정지");
+            }
+            else if (initialExistingCount == 0)
             {
                 long gainedSinceStart = Math.Max(0, currentOutput - baseline);
                 int completedEquivalent = checked((int)Math.Min(
@@ -576,6 +589,11 @@ internal sealed class AlteringAutomation
             var outstanding = Matching(works, plan).ToArray();
             if (QueuedWorks == plan.RequiredWorks && outstanding.Length == 0)
             {
+                if (_session is { ReceiptTrackingEnabled: true } receipt &&
+                    receipt.ConfirmedReceivedWorks !=
+                        receipt.InitialExistingWorks + QueuedWorks)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}: 대기열이 비었지만 수령 확정 기록이 부족합니다 · 자동 완료 차단");
                 long grossGained = EffectiveOutputQuantity(
                     await _data.ItemCountAsync(plan.OutputName, ct)) - baseline;
                 long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
@@ -986,7 +1004,11 @@ internal sealed class AlteringAutomation
         if (Progress is null) return;
 
         long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
-        long confirmed = Math.Max(0, current - baseline - oldMinimum);
+        long confirmed = _session is { ReceiptTrackingEnabled: true } tracked
+            ? checked((long)Math.Max(0,
+                tracked.ConfirmedReceivedWorks - tracked.InitialExistingWorks) *
+                plan.ProducedPerWork)
+            : Math.Max(0, current - baseline - oldMinimum);
         confirmed = Math.Min(plan.TargetQuantity, confirmed);
 
         var matching = Matching(works, plan).ToArray();

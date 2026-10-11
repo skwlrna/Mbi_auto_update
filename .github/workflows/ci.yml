@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.83"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.84"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.83</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3183-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.83"')) {
+          if ($p -notmatch '<Version>3\.1\.84</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3184-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.84"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -134,6 +134,27 @@ jobs:
               $tests -notmatch 'V3.1.83 initial same-item jobs conserve' -or
               $tests -notmatch 'V3.1.83 realm-only batch owns') {
             throw 'V3.1.83 resume safe old-work reconciliation or production modal theme regression'
+          }
+
+      - name: V3.1.84 durable confirmed receipt and scaled modal font contract
+        shell: pwsh
+        run: |
+          $batch = Get-Content source/FishingAutomation/MultiAlteringBatchStore.cs -Raw
+          $session = Get-Content source/FishingAutomation/AlteringSession.cs -Raw
+          $runner = Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $policy = Get-Content source/FishingAutomation/MultiAlteringRecentResume.cs -Raw
+          $ui = Get-Content source/FishingAutomation/MainForm.MultiAlteringResume.cs -Raw
+          $tests = Get-Content tests/n02-resume/Program.cs -Raw
+          if ($session -notmatch 'ConfirmedReceivedWorks' -or
+              $session -notmatch 'ReceiptTrackingEnabled' -or
+              $batch -notmatch 'BeginReceiptWithEvidenceAsync' -or
+              $batch -notmatch 'PendingReceipt = null' -or
+              $policy -notmatch 'session.ConfirmedReceivedWorks' -or
+              $runner -notmatch 'BeginReceiptWithEvidenceAsync' -or
+              $ui -notmatch '_alteringPage.Items.Font' -or
+              $ui -notmatch 'basePixels' -or
+              $tests -notmatch 'durable receipt preimage excludes completed-but-uncollected work') {
+            throw 'Receipt evidence persistence or matched production font missing'
           }
 
       - name: Updater rollback regression tests

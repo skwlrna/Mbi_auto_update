@@ -16,10 +16,19 @@ internal sealed record MultiAlteringConsumptionTransaction
     public Dictionary<string, long> AppliedCredits { get; init; } = new(StringComparer.Ordinal);
 }
 
+internal sealed record MultiAlteringReceiptSnapshot
+{
+    public string FacilityName { get; init; } = "";
+    public Dictionary<string, int> CountsByPlanKey { get; init; } = new(StringComparer.Ordinal);
+    public int TotalFacilityWorks { get; init; }
+}
+
 internal sealed record MultiAlteringBatch
 {
     public int Version { get; init; } = 2;
     public MultiAlteringConsumptionTransaction? PreparedConsumption { get; init; }
+    // Atomic before-input receipt intent. Any crash leaves RecoveryRequired.
+    public MultiAlteringReceiptSnapshot? PendingReceipt { get; init; }
     public MultiAlteringConsumptionTransaction[] AppliedConsumption { get; init; } = [];
     public string BatchId { get; init; } = "";
     public bool MigratedFromLegacy { get; init; }
@@ -282,6 +291,9 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                     Commit(saved with { Version = 2 });
                     saved = Batch;
                 }
+                if (saved.PendingReceipt is not null)
+                    throw new InvalidOperationException(
+                        "수령 입력 직전·직후 미확정 기록이 있습니다 · RecoveryRequired · 기존 기록 보존");
                 if (saved.PreparedConsumption is not null)
                     throw new InvalidOperationException(
                         "F05 미확정 소비 거래가 있습니다 · RecoveryRequired · 중복 등록/보정 없이 안전 정지");
@@ -372,7 +384,10 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 long baseline = await data.ItemCountAsync(plan.OutputName, ct);
                 int existing = works.Count(x => x.FacilityName == plan.FacilityName &&
                     (x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName));
-                items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with { BatchId = batchId });
+                items.Add(AlteringSessionState.Create(plan, identity, baseline, existing) with {
+                    BatchId = batchId,
+                    ReceiptTrackingEnabled = allowPreexistingSelectedFacilityWorks
+                });
             }
         }
         // Never credit old jobs towards the new target. Also ensure that
@@ -426,12 +441,15 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 !Enum.IsDefined(s.MultiState) || s.QueuedWorks < 0 || s.QueuedWorks > s.RequiredWorks ||
                 s.BaselineQuantity < 0 || s.LastObservedOutputQuantity < s.BaselineQuantity ||
                 s.CreditedInternalConsumptionQuantity < 0 || s.InitialExistingWorks < 0 || s.PendingBeforeMatchingCount < 0 ||
+                s.ConfirmedReceivedWorks < 0 || s.ConfirmedReceivedWorks > s.InitialExistingWorks + s.QueuedWorks ||
                 (s.PendingConsumptionTransactionId is not null &&
                     (!s.PendingRegistration ||
                      !Guid.TryParseExact(s.PendingConsumptionTransactionId, "N", out _))) ||
                 s.MultiState == MultiAlteringItemState.Completed &&
                 (s.CompletedAt is null || s.QueuedWorks != s.RequiredWorks || s.PendingRegistration ||
-                 s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity))
+                 s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity ||
+                 s.ReceiptTrackingEnabled &&
+                 s.ConfirmedReceivedWorks != s.InitialExistingWorks + s.QueuedWorks))
                 throw new InvalidDataException("다중가공 품목 기록 불일치/손상 · 기록 보존");
         }
         if (b.State != MultiAlteringBatchState.Active &&
@@ -455,6 +473,19 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 b.PreparedConsumption == tx && tx.AppliedCredits.Count > 0)
                 throw new InvalidDataException("F05 소비 거래 기록 손상 · 안전 정지");
         }
+        if (b.PendingReceipt is not null &&
+            (string.IsNullOrWhiteSpace(b.PendingReceipt.FacilityName) ||
+             b.PendingReceipt.TotalFacilityWorks < 1 ||
+             b.PendingReceipt.CountsByPlanKey is null ||
+             b.PendingReceipt.CountsByPlanKey.Values.Any(n => n < 0) ||
+             b.PendingReceipt.CountsByPlanKey.Values.Sum() > b.PendingReceipt.TotalFacilityWorks ||
+             b.Items.Where(x => x.FacilityName == b.PendingReceipt.FacilityName &&
+                x.MultiState != MultiAlteringItemState.Completed)
+                .Any(x => x.ReceiptTrackingEnabled &&
+                    x.MultiState != MultiAlteringItemState.RecoveryRequired)))
+            throw new InvalidDataException("F9 수령 직전 대기열 기록 손상 · 안전 정지");
+        if (b.State != MultiAlteringBatchState.Active && b.PendingReceipt is not null)
+            throw new InvalidDataException("미확정 수령 기록이 남은 배치 종료 차단");
         if (b.State != MultiAlteringBatchState.Active && b.PreparedConsumption is not null)
             throw new InvalidDataException("F05 미확정 소비 거래가 남은 배치 종료 차단");
     }
@@ -481,6 +512,12 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             previous.CreditedInternalConsumptionQuantity)
             state = state with {
                 CreditedInternalConsumptionQuantity = previous.CreditedInternalConsumptionQuantity
+            };
+        // A concurrently refreshed automation must never roll back a
+        // confirmed receipt from the atomic facility-wide journal.
+        if (state.ConfirmedReceivedWorks < previous.ConfirmedReceivedWorks)
+            state = state with {
+                ConfirmedReceivedWorks = previous.ConfirmedReceivedWorks
             };
         Commit(Batch with { Items = Batch.Items.Select(s => Key(s) == Key(plan) ? state : s).ToArray() });
     }
@@ -558,16 +595,64 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         return true;
     }
 
-    internal Task BeginReceiptAsync(AlteringPlan plan, CancellationToken ct)
+    internal Task BeginReceiptAsync(AlteringPlan plan, CancellationToken ct) =>
+        BeginReceiptWithEvidenceAsync(plan, null, ct);
+
+    internal async Task BeginReceiptWithEvidenceAsync(
+        AlteringPlan plan, IAlteringData? data, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (Batch.PreparedConsumption is not null)
             throw new InvalidOperationException("F05 미확정 등록 소비 거래 · 수령 차단");
-        Commit(Batch with { Items = Batch.Items.Select(s =>
-            s.FacilityName == plan.FacilityName && s.MultiState != MultiAlteringItemState.Completed
-                ? s with { MultiState = MultiAlteringItemState.RecoveryRequired, Stage = "수령 확정 대기" } : s).ToArray() });
+        if (Batch.PendingReceipt is not null)
+            throw new InvalidOperationException("미확정 수령 거래 · 수령 입력 차단");
+        var active = Batch.Items.Where(s =>
+            s.FacilityName == plan.FacilityName &&
+            s.MultiState != MultiAlteringItemState.Completed).ToArray();
+        MultiAlteringReceiptSnapshot? pending = null;
+        if (active.Any(s => s.ReceiptTrackingEnabled))
+        {
+            if (data is null)
+                throw new InvalidOperationException(
+                    "새 F9 작업 수령에는 사전 대기열 조회가 필수입니다 · 입력 차단");
+            var works = (await data.WorksAsync(ct))
+                .Where(w => w.FacilityName == plan.FacilityName).ToArray();
+            if (works.Length == 0 || works.Any(w => !w.IsCompleted) || works.Length > 7)
+                throw new InvalidOperationException(
+                    "시설 전체 완료 대기열을 증명하지 못해 수령 입력 차단");
+            var byPlan = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var s in active)
+            {
+                var p = PlanFrom(s);
+                int matching = works.Count(w =>
+                    w.DisplayName == p.DisplayName ||
+                    w.DisplayName == p.OutputName);
+                if (s.ReceiptTrackingEnabled &&
+                    s.ConfirmedReceivedWorks + matching >
+                        s.InitialExistingWorks + s.QueuedWorks)
+                    throw new InvalidOperationException(
+                        $"{s.DisplayName}: 수령 예정 작업이 저장 등록 수보다 많습니다 · 중복 수령 차단");
+                if (s.ReceiptTrackingEnabled) byPlan[Key(s)] = matching;
+            }
+            pending = new MultiAlteringReceiptSnapshot
+            {
+                FacilityName = plan.FacilityName,
+                TotalFacilityWorks = works.Length,
+                CountsByPlanKey = byPlan
+            };
+        }
         ct.ThrowIfCancellationRequested();
-        return Task.CompletedTask;
+        Commit(Batch with {
+            PendingReceipt = pending,
+            Items = Batch.Items.Select(s =>
+                s.FacilityName == plan.FacilityName &&
+                s.MultiState != MultiAlteringItemState.Completed
+                    ? s with {
+                        MultiState = MultiAlteringItemState.RecoveryRequired,
+                        Stage = "수령 확정 대기"
+                    } : s).ToArray()
+        });
+        ct.ThrowIfCancellationRequested();
     }
 
     internal async Task ConfirmReceiptAsync(AlteringPlan plan, IAlteringData data, CancellationToken ct)
@@ -584,18 +669,38 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             if (s.FacilityName != plan.FacilityName || s.MultiState == MultiAlteringItemState.Completed) continue;
             var p = new AlteringPlan(s.FacilityName, s.DisplayName, s.TargetQuantity, s.ProducedPerWork, false, s.RecipeOrdinal);
             long current = checked(await data.ItemCountAsync(p.OutputName, ct) + s.CreditedInternalConsumptionQuantity);
+            int receivedWorks = s.ConfirmedReceivedWorks;
+            if (s.ReceiptTrackingEnabled)
+            {
+                if (Batch.PendingReceipt is null ||
+                    Batch.PendingReceipt.FacilityName != plan.FacilityName ||
+                    !Batch.PendingReceipt.CountsByPlanKey.TryGetValue(Key(s), out int justCollected))
+                    throw new InvalidOperationException(
+                        "수령 전 저장한 작업 수 기록이 없습니다 · RecoveryRequired 유지");
+                receivedWorks = checked(receivedWorks + justCollected);
+                if (receivedWorks > s.InitialExistingWorks + s.QueuedWorks)
+                    throw new InvalidOperationException(
+                        "수령 기록이 등록 횟수를 초과합니다 · RecoveryRequired 유지");
+                if (current - s.BaselineQuantity < checked((long)receivedWorks * s.ProducedPerWork))
+                    throw new InvalidOperationException(
+                        "수령 후 보유량이 확인한 작업 수보다 적습니다 · RecoveryRequired 유지");
+            }
             if (current < s.LastObservedOutputQuantity)
                 throw new InvalidOperationException("수령 수량 감소 · 완료 증거 불확실 · RecoveryRequired 유지");
             long gain = current - s.BaselineQuantity - s.InitialExistingMinimum;
-            bool complete = s.QueuedWorks == s.RequiredWorks && !s.PendingRegistration && gain >= p.ExpectedQuantity;
+            bool complete = s.QueuedWorks == s.RequiredWorks && !s.PendingRegistration &&
+                gain >= p.ExpectedQuantity &&
+                (!s.ReceiptTrackingEnabled ||
+                 receivedWorks == s.InitialExistingWorks + s.QueuedWorks);
             if (s.QueuedWorks == s.RequiredWorks && !complete)
                 throw new InvalidOperationException("전량 등록 품목의 수령 증거 부족 · RecoveryRequired 유지");
             items[i] = s with { LastObservedOutputQuantity = current,
+                ConfirmedReceivedWorks = receivedWorks,
                 MultiState = complete ? MultiAlteringItemState.Completed : MultiAlteringItemState.InProgress,
                 CompletedAt = complete ? DateTimeOffset.UtcNow : null, Stage = complete ? "완료" : "가공 진행" };
         }
         ct.ThrowIfCancellationRequested();
-        Commit(Batch with { Items = items });
+        Commit(Batch with { Items = items, PendingReceipt = null });
     }
 
     internal void Complete()
