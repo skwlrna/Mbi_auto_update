@@ -7,7 +7,8 @@ public sealed partial class MainForm
     // Runs inline inside the multi-altering coordinator's idle callback.
     // It owns the game window exclusively until the exit HUD is verified.
     // No normal dungeon task or second input worker is started.
-    private async Task RunCombinedAbyssRoundAsync(CancellationToken token)
+    private async Task RunCombinedAbyssRoundAsync(
+        CancellationToken token, string dungeonName, string dungeonTargetId)
     {
         token.ThrowIfCancellationRequested();
         var windows = WindowTools.EnumerateVisibleWindows();
@@ -27,9 +28,9 @@ public sealed partial class MainForm
         scenario.Repeat = false;
         foreach (var step in scenario.Steps)
             if (step.Target.Equals("abyss_selected_dungeon", StringComparison.OrdinalIgnoreCase))
-                step.Target = SelectedAbyssTargetId;
+                step.Target = dungeonTargetId;
 
-        _log.Write("[병행] 대기 시간 활용 어비스 1판 시작 · " + SelectedAbyssDungeon);
+        _log.Write("[병행] 대기 시간 활용 어비스 1판 시작 · " + dungeonName);
         using var engine = new ScenarioEngine(
             windows[0].Handle, settings, scenario, targets, baseDir, _cli,
             scheduledResultExit: true);
