@@ -455,7 +455,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                   s.QueuedWorks >= s.RequiredWorks ||
                   s.ReceiptTrackingEnabled &&
                   s.ConfirmedReceivedWorks != s.InitialExistingWorks + s.QueuedWorks) ||
-                 s.RawMaterialExhausted && s.FacilityName != "가죽 가공 시설")
+                 s.RawMaterialExhausted && s.FacilityName != "가죽 가공 시설"))
                 throw new InvalidDataException("다중가공 품목 기록 불일치/손상 · 기록 보존");
         }
         if (b.State != MultiAlteringBatchState.Active &&
