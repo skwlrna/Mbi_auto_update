@@ -79,6 +79,46 @@ internal static class MultiAlteringRecentResume
         }
     }
 
+    internal sealed record OwnedWorkReconciliation(
+        long TotalReceivedWorks, long OwnReceivedOutput,
+        long OwnRegisteredOutstandingOutput, long ExpectedLive);
+
+    // Evidence only. Does not update a ledger, assume stable work IDs or send
+    // a game input. Pre-existing same-item jobs are never credited to F9.
+    internal static OwnedWorkReconciliation ReconcileOwnedWorks(
+        AlteringSessionState session, long gainedOutput, int liveWorks)
+    {
+        if (session.ProducedPerWork <= 0 || session.InitialExistingWorks < 0 ||
+            session.QueuedWorks < 0 || liveWorks < 0 || gainedOutput < 0)
+            throw new InvalidOperationException(
+                $"{session.DisplayName}: 이어하기 가공 장부 값이 잘못됐습니다.");
+        long total = checked((long)session.InitialExistingWorks + session.QueuedWorks);
+        if (gainedOutput % session.ProducedPerWork != 0 ||
+            gainedOutput > checked(total * session.ProducedPerWork))
+            throw new InvalidOperationException(
+                $"{session.DisplayName}: 저장된 기존 작업과 이번 등록 작업으로 증명할 수 없는 완성 수량 · 안전 정지");
+
+        long received = gainedOutput / session.ProducedPerWork;
+        long expectedLive = total - received;
+        if (liveWorks != expectedLive)
+            throw new InvalidOperationException(
+                $"{session.DisplayName}: 기존 {session.InitialExistingWorks}건 + 이번 등록 {session.QueuedWorks}건 − " +
+                $"수령 상당 {received}건 = 예상 {expectedLive}건, 실제 {liveWorks}건. " +
+                "작업 소유권/수령 불일치로 이어하기 차단");
+
+        // Credit older jobs FIRST, never attribute their production to this
+        // saved goal. Q remains the durable number of confirmed new F9 inputs;
+        // re-registering Q because old and new jobs are visually identical
+        // would duplicate production.
+        long newlyReceivedWorks = Math.Max(0, received - session.InitialExistingWorks);
+        long outstandingNewWorks = session.QueuedWorks - newlyReceivedWorks;
+        if (outstandingNewWorks < 0)
+            throw new InvalidOperationException(
+                $"{session.DisplayName}: 이번 작업의 수령 수량이 등록 기록을 초과했습니다.");
+        return new(received, checked(newlyReceivedWorks * session.ProducedPerWork),
+            checked(outstandingNewWorks * session.ProducedPerWork), expectedLive);
+    }
+
     internal static async Task<IReadOnlyList<MultiAlteringResumeLine>> VerifyAsync(
         MultiAlteringRecentRun selected, CliIdentityContext identity,
         IAlteringData data, CancellationToken ct,
@@ -129,42 +169,41 @@ internal static class MultiAlteringRecentResume
                 result.Add(new(plan, plan.TargetQuantity, 0, 0, 0));
                 continue;
             }
-            if (session.InitialExistingWorks != 0)
-                throw new InvalidOperationException(
-                    $"{plan.DisplayName}: 시작 전부터 있던 동일 품목 작업의 소유권을 이어하기에서 구분할 수 없습니다 · 안전 정지");
             long current = checked(await data.ItemCountAsync(plan.OutputName, ct) +
                 session.CreditedInternalConsumptionQuantity);
             if (current < session.LastObservedOutputQuantity ||
                 current < session.BaselineQuantity)
                 throw new InvalidOperationException(
                     $"{plan.DisplayName}: 저장 이후 완성품 재고가 감소했거나 소비 기록과 불일치합니다 · 자동 복원 차단");
-            long earned = current - session.BaselineQuantity;
-            if (earned > checked((long)session.QueuedWorks * plan.ProducedPerWork) ||
-                earned % plan.ProducedPerWork != 0)
-                throw new InvalidOperationException(
-                    $"{plan.DisplayName}: 등록 기록으로 증명할 수 없는 완성품 증가 · 자동 이어하기 차단");
-            long confirmed = Math.Clamp(earned, 0, plan.TargetQuantity);
-            int completedEquivalent = (int)Math.Min(session.QueuedWorks,
-                earned / plan.ProducedPerWork);
             var facility = before.Where(x => x.FacilityName == plan.FacilityName).ToArray();
             int live = facility.Count(x =>
                 x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName);
-            int expectedLive = session.QueuedWorks - completedEquivalent;
+            if (facility.Length > 7)
+                throw new InvalidOperationException(
+                    $"{plan.FacilityName}: 시설 대기열이 7칸을 초과하여 검증할 수 없습니다.");
+            // Old F9 jobs are NOT part of this batch's goal. The durable
+            // initial-existing counter is a separate provenance bucket.
+            // Work IDs are unavailable: only a fully conserved sum of
+            // collected output and remaining live jobs can authorize resume.
+            var accounted = ReconcileOwnedWorks(
+                session, checked(current - session.BaselineQuantity), live);
+            long confirmed = Math.Clamp(accounted.OwnReceivedOutput, 0, plan.TargetQuantity);
+            long registeredOutput = accounted.OwnRegisteredOutstandingOutput;
+            long additional = Math.Max(0, plan.TargetQuantity - confirmed - registeredOutput);
             if (session.QueuedWorks == session.RequiredWorks && live == 0 &&
                 session.MultiState != MultiAlteringItemState.Completed)
                 throw new InvalidOperationException(
                     $"{plan.DisplayName}: 전량 등록 작업은 사라졌지만 완료 수령 확정 기록이 없습니다 · 중복 수령/등록 차단");
-            if (live != expectedLive)
+            if (live != accounted.ExpectedLive)
                 throw new InvalidOperationException(
-                    $"{plan.DisplayName}: 저장 등록 {session.QueuedWorks}건 · 확인된 완성 작업 {completedEquivalent}건 · " +
-                    $"게임 대기열 {live}건. 등록/수령/수동 취소가 불명확하여 자동 이어하기 차단");
+                    $"{plan.DisplayName}: 저장 기존 {session.InitialExistingWorks}건 · 이번 등록 {session.QueuedWorks}건 · " +
+                    $"완성/수령 상당 {accounted.TotalReceivedWorks}건 · 실제 대기열 {live}건. " +
+                    "수동 취소·타인 등록·수령 불일치 가능성 · 자동 이어하기 차단");
             if (facility.Any(x => !plans.Any(p =>
                 p.FacilityName == x.FacilityName &&
                 (p.DisplayName == x.DisplayName || p.OutputName == x.DisplayName))))
                 throw new InvalidOperationException(
                     $"{plan.FacilityName}: 저장 목표 밖의 게임 작업이 남아 시설 소유권이 불명확합니다.");
-            long registeredOutput = checked((long)live * plan.ProducedPerWork);
-            long additional = Math.Max(0, plan.TargetQuantity - confirmed - registeredOutput);
             result.Add(new(plan, confirmed, live, registeredOutput, additional));
         }
         var after = await data.WorksAsync(ct);
@@ -178,9 +217,17 @@ internal static class MultiAlteringRecentResume
         if (Shape(before) != Shape(after))
             throw new InvalidOperationException(
                 "이어하기 검증 도중 실제 시설 대기열이 변경됐습니다 · 다시 검증하세요.");
-        if (MultiAlteringBatchStore.ReadManifestSnapshot(selected.Directory).BatchId !=
-            selected.BatchId)
-            throw new InvalidOperationException("이어하기 기록이 변경됐습니다.");
+        var reloaded = MultiAlteringBatchStore.ReadManifestSnapshot(selected.Directory);
+        if (reloaded.BatchId != selected.BatchId ||
+            reloaded.State != MultiAlteringBatchState.Active ||
+            reloaded.Identity != actual.Identity ||
+            reloaded.Items.Length != actual.Items.Length ||
+            reloaded.PreparedConsumption is not null ||
+            reloaded.Items.Any(x => x.PendingRegistration ||
+                x.PendingConsumptionTransactionId is not null ||
+                x.MultiState == MultiAlteringItemState.RecoveryRequired))
+            throw new InvalidOperationException(
+                "이어하기 검증 도중 저장 기록이 변경됐습니다 · 다시 검증하세요.");
         return result;
     }
 }
