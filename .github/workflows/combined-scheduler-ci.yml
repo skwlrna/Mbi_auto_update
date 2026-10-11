@@ -1,6 +1,12 @@
 name: Abyss + Altering Scheduler Validation
 
 on:
+  push:
+    branches: ['feature/unified-scheduler-ui-v1']
+    paths:
+      - 'source/FishingAutomation/**'
+      - 'tests/**'
+      - '.github/workflows/combined-scheduler-ci.yml'
   pull_request:
     paths:
       - 'source/FishingAutomation/**'
