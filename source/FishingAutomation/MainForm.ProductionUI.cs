@@ -115,6 +115,7 @@ public sealed partial class MainForm
         _gatheringPage.UpdateExecution();
         _alteringPage.UpdateExecution();
         _craftingPage.UpdateExecution();
+        _schedulerPage?.RefreshSnapshot();
         if (_productionPageMode == "제작")
         {
             _ = RefreshCraftingStateAsync();
