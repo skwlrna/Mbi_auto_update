@@ -98,19 +98,19 @@ internal static class MultiAlteringRecentResume
             // Receipt confirmation requires BOTH the saved pre-input queue
             // snapshot and the proven post-input facility drain. Inventory
             // surplus cannot create any additional receipt credits.
-            long received = session.ConfirmedReceivedWorks;
-            long expected = total - received;
-            if (received < 0 || received > total || liveWorks != expected)
+            long trackedReceived = session.ConfirmedReceivedWorks;
+            long expected = total - trackedReceived;
+            if (trackedReceived < 0 || trackedReceived > total || liveWorks != expected)
                 throw new InvalidOperationException(
-                    $"{session.DisplayName}: 수령 확정 {received}건 / 전체 {total}건 / " +
+                    $"{session.DisplayName}: 수령 확정 {trackedReceived}건 / 전체 {total}건 / " +
                     $"예상 대기열 {expected}건 / 실제 {liveWorks}건 · 게임 대기열 불일치");
-            long minimumOutput = checked(received * session.ProducedPerWork);
+            long minimumOutput = checked(trackedReceived * session.ProducedPerWork);
             if (gainedOutput < minimumOutput)
                 throw new InvalidOperationException(
-                    $"{session.DisplayName}: 수령 확정 {received}건에 비해 완성품 증가가 부족합니다 · 안전 정지");
-            long ownReceived = Math.Max(0, received - session.InitialExistingWorks);
+                    $"{session.DisplayName}: 수령 확정 {trackedReceived}건에 비해 완성품 증가가 부족합니다 · 안전 정지");
+            long ownReceived = Math.Max(0, trackedReceived - session.InitialExistingWorks);
             long ownPending = session.QueuedWorks - ownReceived;
-            return new(received, checked(ownReceived * session.ProducedPerWork),
+            return new(trackedReceived, checked(ownReceived * session.ProducedPerWork),
                 checked(ownPending * session.ProducedPerWork), expected);
         }
         // Older releases had no pre-input receipt journal. Keep the older
