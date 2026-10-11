@@ -6,3 +6,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("N02ResumeRegression")]
 
 [assembly: InternalsVisibleTo("F05ConsumptionJournalRegression")]
+
+[assembly: InternalsVisibleTo("CombinedSchedulerRegression")]
