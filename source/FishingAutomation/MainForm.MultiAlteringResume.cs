@@ -127,7 +127,8 @@ public sealed partial class MainForm
             _log.Write("[다중가공] 이어하기 수동 확인 · 최근 배치 " + recent.BatchId);
             _resumeUiBusy = false; // StartMultiAlteringAsync sets the running guard synchronously.
             await StartMultiAlteringAsync(
-                recent.Plans, recent.Directory, recent.BatchId, confirmedSingleCharacter);
+                recent.Plans, recent.Directory, recent.BatchId, confirmedSingleCharacter,
+                abyssCompanion: SelectedMode == "어비스 + 가공");
         }
         catch (Exception ex)
         {
