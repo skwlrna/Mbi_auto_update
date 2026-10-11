@@ -402,7 +402,20 @@ internal sealed class AlteringAutomation
             //   2) same-item jobs that are still present in the live queue.
             // This safely handles the user receiving completed jobs and cancelling
             // the remaining queued jobs before pressing F9 again.
-            if (initialExistingCount == 0)
+            if (_session.ReceiptTrackingEnabled)
+            {
+                int expectedLive = checked(_session.InitialExistingWorks +
+                    _session.QueuedWorks - _session.ConfirmedReceivedWorks);
+                if (currentKnownWorks != expectedLive)
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}: 수령 확정 기록과 게임 대기열 불일치 · " +
+                        $"예상 {expectedLive}건 / 현재 {currentKnownWorks}건 · 안전 정지");
+                if (currentOutput - baseline <
+                    checked((long)_session.ConfirmedReceivedWorks * plan.ProducedPerWork))
+                    throw new InvalidOperationException(
+                        $"{plan.DisplayName}: 수령 기록에 비해 완성품이 부족합니다 · 안전 정지");
+            }
+            else if (initialExistingCount == 0)
             {
                 long gainedSinceStart = Math.Max(0, currentOutput - baseline);
                 int completedEquivalent = checked((int)Math.Min(
