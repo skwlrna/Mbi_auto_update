@@ -437,6 +437,13 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
+            Func<TimeSpan, CancellationToken, Task> idleWait = abyssCompanion
+                ? (delay, idleToken) => WaitOrRunScheduledAbyssAsync(
+                    delay, plans, rawAlteringData, visualAltering,
+                    laneState, windows[0].Handle,
+                    companionTarget, companionDungeon, idleToken)
+                : Task.Delay;
+
             // Keep durable filesystem IO off the hotkey/UI thread. F10 only
             // cancels the run token; no callback waits for checkpoint persistence.
             await Task.Run(() => coordinator.RunAsync(
@@ -463,12 +470,7 @@ public sealed partial class MainForm
                     return finished;
                 },
                 rawAlteringData.WorksAsync,
-                abyssCompanion
-                    ? (idleDelay, idleToken) => WaitOrRunScheduledAbyssAsync(
-                        idleDelay, plans, rawAlteringData, visualAltering,
-                        laneState, windows[0].Handle,
-                        companionTarget, companionDungeon, idleToken)
-                    : Task.Delay,
+                idleWait,
                 token,
                 preparePlan: PreparePlanMaterialsAsync), token);
 
