@@ -304,7 +304,9 @@ public sealed partial class MainForm
             {
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (index < 0 || index >= _owner._abyssDungeon.Items.Count) return;
-                _owner._mode.SelectedIndex = 2;
+                // Keep the companion mode active when choosing its dungeon.
+                if (_owner._mode.SelectedIndex != 7)
+                    _owner._mode.SelectedIndex = 2;
                 _owner._abyssDungeon.SelectedIndex = index;
                 _owner.UpdateDashboard();
             });
