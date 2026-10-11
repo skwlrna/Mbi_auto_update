@@ -709,7 +709,7 @@ internal sealed class AlteringAutomation
                                 });
                             Log?.Invoke($"[자동 가공] 가죽 원재료 소진 · {plan.DisplayName} · {shortages} · " +
                                         "자동 채집/하위 가공 없이 해당 품목 신규 등록 종료 · 기존 작업은 유지");
-                            continue;
+                            break; // Exit the inner registration loop, then handle queued work above.
                         }
                         if (recipe is not null &&
                             recipe.MissingIngredients.Count > 0 &&
