@@ -827,6 +827,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
         if (IsAbyss && step.Target.Equals("abyss_touch_screen", StringComparison.OrdinalIgnoreCase))
         {
+            ResetWaterwayRound();
             AbyssEnterCombatClearWait("5단계 전투 종료/클리어 화면 대기 시작");
             await StartAbyssCombatClockAsync(ct);
             CommitInventoryLootRetry();
@@ -866,6 +867,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 {
                     abyssClearConsecutive = 0;
                     if (await CheckMonitorsAsync(frame, ct))
+                        continue;
+                    // Read-only by default. Clear confirmation and recovery
+                    // monitors always take precedence over optional mechanics.
+                    if (await TryWaterwayMechanicAsync(frame, ct))
                         continue;
                 }
                 else
