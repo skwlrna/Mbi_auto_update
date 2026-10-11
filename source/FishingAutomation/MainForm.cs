@@ -635,7 +635,7 @@ public sealed partial class MainForm : Form
     {
         UpdateDashboard();
         string mode = _activeMode ?? SelectedMode;
-        if (mode is "가공" or "어비스 + 가공" or "채집" or "제작")
+        if (mode is "가공" or "채집" or "제작" || mode == "어비스 + 가공")
         {
             var elapsed = _dungeonStartedAt.HasValue ? (_dungeonStoppedAt ?? DateTime.Now) - _dungeonStartedAt.Value : TimeSpan.Zero;
             long current = Math.Max(0, _productionCurrentQuantity);
