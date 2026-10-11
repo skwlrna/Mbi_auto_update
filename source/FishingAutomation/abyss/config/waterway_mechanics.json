@@ -7,6 +7,15 @@
   "InputCooldownMs": 3500,
   "TapDelayMs": 140,
   "Mark": {
+    "ExperimentalExecution": false,
+    "PlayerFeetTemplate": "",
+    "PriestFeetTemplate": "",
+    "PlayerFeetSearch": { "X": 0, "Y": 0, "Width": 0, "Height": 0 },
+    "PriestFeetSearch": { "X": 0, "Y": 0, "Width": 0, "Height": 0 },
+    "SharedRangeTemplate": "",
+    "SuccessTemplate": "",
+    "FailureTemplate": "",
+    "Motions": [],
     "CueTemplate": "templates/mechanics/mark_phase_cue.png",
     "BossRoi": {
       "X": 0,

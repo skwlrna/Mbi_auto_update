@@ -64,6 +64,30 @@ internal sealed partial class ScenarioEngine
         _waterwayLastSignature = confirmed.Signature;
         Log?.Invoke($"[흩어진 물길/{confirmed.Stage}] 2프레임 확인: {confirmed.Description}");
 
+        if (handler.ExperimentalMarkExecution && confirmed.Stage == "투창 표적")
+        {
+            var result = await WaterwayMarkExecutor.RunAsync(async token =>
+            {
+                await Task.Delay(90, token);
+                using var fresh = await CaptureGameWindowAsync(token);
+                if ((await DetectAbyssConfirmedClearAsync(fresh, token)).Found ||
+                    await CheckMonitorsAsync(fresh, token)) return null;
+                return handler.ReadMarkExecution(fresh);
+            }, async (key, token) =>
+            {
+                // The current draft always remains observe-only. Preserve the
+                // guarded transport for a future evidence-reviewed experiment.
+                if (handler.ObserveOnly) throw new InvalidOperationException("미검증 물길 입력 차단");
+                if (!ScatteredWaterwayMechanics.TryGetScanCode(key, out var code))
+                    throw new InvalidOperationException("이동 키 오류");
+                _input.TapScanCode(code, token);
+                await Task.Delay(handler.TapDelayMs, token);
+            }, handler.MarkMotions, inputAuthorized: !handler.ObserveOnly,
+                () => Environment.TickCount64, ct);
+            Log?.Invoke($"[흩어진 물길/실험] {result.State}: {result.Reason}; 이동 입력={result.Taps}");
+            return false;
+        }
+
         if (handler.ObserveOnly)
             return false;
 

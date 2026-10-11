@@ -19,6 +19,17 @@ internal sealed class ScatteredWaterwayMechanics
         // Retained only for config migration; a fixed symbol -> key route is unsafe
         // when the six priests swap positions every run. Never read these keys.
         public Dictionary<string, string[]> KeysByMark { get; set; } = new();
+        public bool ExperimentalExecution { get; set; }
+        public string PlayerFeetTemplate { get; set; } = "";
+        public string PriestFeetTemplate { get; set; } = "";
+        // Relative search boxes below each independently recognized head glyph.
+        // Empty defaults deliberately prevent guessing feet from glyph positions.
+        public RectDef PlayerFeetSearch { get; set; } = new();
+        public RectDef PriestFeetSearch { get; set; } = new();
+        public string SharedRangeTemplate { get; set; } = "";
+        public string SuccessTemplate { get; set; } = "";
+        public string FailureTemplate { get; set; } = "";
+        public List<WaterwayMarkExecutor.Motion> Motions { get; set; } = new();
     }
 
     internal sealed class StageTwo
@@ -83,6 +94,8 @@ internal sealed class ScatteredWaterwayMechanics
     internal int ScanIntervalMs => Math.Max(250, _settings.ScanIntervalMs);
     internal int InputCooldownMs => Math.Max(2500, _settings.InputCooldownMs);
     internal int TapDelayMs => Math.Clamp(_settings.TapDelayMs, 100, 250);
+    internal bool ExperimentalMarkExecution => _settings.Mark.ExperimentalExecution;
+    internal IReadOnlyList<WaterwayMarkExecutor.Motion> MarkMotions => _settings.Mark.Motions;
 
     private ScatteredWaterwayMechanics(Options settings, string baseDir)
     {
@@ -116,6 +129,35 @@ internal sealed class ScatteredWaterwayMechanics
     }
 
     internal void ResetRound() => _markTracker.Reset();
+
+    internal WaterwayMarkExecutor.Observation? ReadMarkExecution(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000 || !ExperimentalMarkExecution)
+            return null;
+        var s = _settings.Mark;
+        long now = Environment.TickCount64;
+        bool success = StageCue(frame, s.SuccessTemplate);
+        bool failure = StageCue(frame, s.FailureTemplate);
+        if (success || failure)
+            return new("", -1, -1, -1, -1, now, false, success, failure);
+        var plan = ReadMark(frame);
+        if (plan?.Stage != "투창 표적") return null;
+        var boss = _markTracker.RecentBoss(now);
+        var target = _markTracker.Choose(boss, now);
+        if (target is null || boss is null || !s.PlayerMarkers.TryGetValue(boss, out var template)) return null;
+        var player = Locate(frame, template, s.PlayerRoi.ToRectangle());
+        if (!player.Found) return null;
+        static Rectangle Around(Point glyph, RectDef search) =>
+            new(glyph.X + search.X, glyph.Y + search.Y, search.Width, search.Height);
+        var playerFeet = Locate(frame, s.PlayerFeetTemplate, Around(player.Center, s.PlayerFeetSearch));
+        var priestFeet = Locate(frame, s.PriestFeetTemplate,
+            Around(new Point(target.MarkX, target.MarkY), s.PriestFeetSearch));
+        if (!playerFeet.Found || !priestFeet.Found) return null;
+        // Shared-range art and result cues require actual frame calibration.
+        return new(boss, playerFeet.Center.X, playerFeet.Center.Y,
+            priestFeet.Center.X, priestFeet.Center.Y, now,
+            StageCue(frame, s.SharedRangeTemplate), false, false);
+    }
 
     private DetectionResult Locate(Bitmap frame, string templatePath, Rectangle roi)
     {
