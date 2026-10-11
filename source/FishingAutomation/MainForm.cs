@@ -629,8 +629,10 @@ public sealed partial class MainForm : Form
             string readyText = SelectedMode == "어비스"
                 ? $"어비스 준비 완료 · {SelectedAbyssDungeon}"
                 : SelectedMode == "가공"
-                    ? (_combinedAlteringRequested ? $"자동 가공 + 어비스 준비 · {SelectedAbyssDungeon} · F7 변경" : "자동 가공 준비 · F7 병행 설정")
-                    : $"{DisplayModeName(SelectedMode)} 준비 완료";
+                    ? "자동 가공 준비 · 단독 실행"
+                    : SelectedMode == "스케줄러"
+                        ? "스케줄러 준비 · 작업 계획 탭에서 구성"
+                        : $"{DisplayModeName(SelectedMode)} 준비 완료";
             SetStatus(count > 0 ? readyText : "게임 창 확인 필요", count > 0 ? Green : Color.DarkOrange);
         }
     }
