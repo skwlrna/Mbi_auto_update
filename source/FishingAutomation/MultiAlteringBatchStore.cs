@@ -602,8 +602,10 @@ internal sealed class MultiAlteringBatchStore : IDisposable
         AlteringPlan plan, IAlteringData? data, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (Batch.PreparedConsumption is not null || Batch.PendingReceipt is not null)
-            throw new InvalidOperationException("미확정 소비/수령 거래 · 수령 입력 차단");
+        if (Batch.PreparedConsumption is not null)
+            throw new InvalidOperationException("F05 미확정 등록 소비 거래 · 수령 차단");
+        if (Batch.PendingReceipt is not null)
+            throw new InvalidOperationException("미확정 수령 거래 · 수령 입력 차단");
         var active = Batch.Items.Where(s =>
             s.FacilityName == plan.FacilityName &&
             s.MultiState != MultiAlteringItemState.Completed).ToArray();
