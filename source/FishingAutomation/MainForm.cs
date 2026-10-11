@@ -777,7 +777,7 @@ public sealed partial class MainForm : Form
         if (m.Msg == FishingAutomation.NativeMethods.WM_HOTKEY)
         {
             int id = m.WParam.ToInt32();
-            else if (id == HOTKEY_TEST) TestOrRefresh();
+            if (id == HOTKEY_TEST) TestOrRefresh();
             else if (id == HOTKEY_START) StartSelected();
             else if (id == HOTKEY_STOP) StopSelected();
         }
