@@ -226,7 +226,7 @@ public sealed partial class MainForm : Form
 
     private void UpdateAbyssSelectorVisibility()
     {
-        bool show = SelectedMode == "어비스";
+        bool show = SelectedMode is "어비스" or "어비스 + 가공";
         _abyssDungeonLabel.Visible = show;
         _abyssDungeon.Visible = show;
         _abyssDungeon.Enabled = show && _activeMode is null;
@@ -308,7 +308,7 @@ public sealed partial class MainForm : Form
         if (SelectedMode == "낚시") StartFishing();
         else if (SelectedMode == "던전") _ = StartScenarioAsync("던전", "dungeon");
         else if (SelectedMode == "페카 심층") _ = StartScenarioAsync("페카 심층", "dungeon");
-        else if (SelectedMode == "가공") _ = StartAlteringAsync();
+        else if (SelectedMode is "가공" or "어비스 + 가공") _ = StartAlteringAsync();
         else if (SelectedMode == "채집") _ = StartGatheringAsync();
         else if (SelectedMode == "제작") _ = StartCraftingAsync();
         else _ = StartScenarioAsync("어비스", "abyss");
@@ -617,8 +617,8 @@ public sealed partial class MainForm : Form
         {
             _inputValue.Text = _dungeonInputName;
             int count = WindowTools.EnumerateVisibleWindows().Count;
-            string readyText = SelectedMode == "어비스"
-                ? $"어비스 준비 완료 · {SelectedAbyssDungeon}"
+            string readyText = SelectedMode is "어비스" or "어비스 + 가공"
+                ? $"{SelectedMode} 준비 완료 · {SelectedAbyssDungeon}"
                 : $"{DisplayModeName(SelectedMode)} 준비 완료";
             SetStatus(count > 0 ? readyText : "게임 창 확인 필요", count > 0 ? Green : Color.DarkOrange);
         }
@@ -635,7 +635,7 @@ public sealed partial class MainForm : Form
     {
         UpdateDashboard();
         string mode = _activeMode ?? SelectedMode;
-        if (mode is "가공" or "채집" or "제작")
+        if (mode is "가공" or "채집" or "제작" || mode == "어비스 + 가공")
         {
             var elapsed = _dungeonStartedAt.HasValue ? (_dungeonStoppedAt ?? DateTime.Now) - _dungeonStartedAt.Value : TimeSpan.Zero;
             long current = Math.Max(0, _productionCurrentQuantity);

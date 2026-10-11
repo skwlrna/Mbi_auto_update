@@ -4,6 +4,43 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// Companion scheduler admission is READ-ONLY and must never starve a ready lane.
+var companionPlans = new[]
+{
+    new AlteringPlan("가죽 가공 시설", "가죽", 10, 1, false),
+    new AlteringPlan("목재 가공 시설", "나무판", 10, 1, false)
+};
+AlteringWork Work(string facility, string state, long remaining, bool done = false)
+    => new("가죽", facility, state, done, remaining);
+Check(!AbyssAlteringIdlePolicy.CanYieldToAbyss(
+    Array.Empty<AlteringWork>(), companionPlans),
+    "Companion: empty processing queue does not start Abyss");
+Check(AbyssAlteringIdlePolicy.CanYieldToAbyss(new[]
+    { Work("가죽 가공 시설", "InProgress", 900) }, companionPlans),
+    "Companion: long active batch permits one Abyss cycle");
+Check(!AbyssAlteringIdlePolicy.CanYieldToAbyss(new[]
+    { Work("가죽 가공 시설", "InProgress", 120) }, companionPlans),
+    "Companion: imminent completion keeps screen with processing");
+Check(!AbyssAlteringIdlePolicy.CanYieldToAbyss(new[]
+    { Work("가죽 가공 시설", "Completed", 0, true) }, companionPlans),
+    "Companion: fully completed lane must collect first");
+Check(!AbyssAlteringIdlePolicy.CanYieldToAbyss(new[]
+    { Work("가죽 가공 시설", "InProgress", 900),
+      Work("목재 가공 시설", "Completed", 0, true) }, companionPlans),
+    "Companion: any completed facility blocks new dungeon");
+Check(!AbyssAlteringIdlePolicy.CanYieldToAbyss(new[]
+    { Work("가죽 가공 시설", "Pending", 900) }, companionPlans),
+    "Companion: unknown work state blocks dungeon");
+Check(!AbyssAlteringIdlePolicy.CanYieldToAbyss(
+    Enumerable.Range(0, 8).Select(_ =>
+        Work("가죽 가공 시설", "InProgress", 900)).ToArray(),
+    companionPlans), "Companion: impossible >7 slot lane blocks dungeon");
+Check(AbyssAlteringIdlePolicy.CanYieldToAbyss(new[]
+    { Work("가죽 가공 시설", "InProgress", 900),
+      Work("가죽 가공 시설", "Completed", 0, true),
+      Work("다른 시설", "Completed", 0, true) }, companionPlans),
+    "Companion: partial completion and unrelated works cannot authorize receipt");
+// 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
 var travelIdle = new GatheringActivity(

@@ -847,13 +847,20 @@ public sealed partial class MainForm
             if (_clearQueue is not null) _clearQueue.Enabled = !busy && _alteringQueue.Items.Count > 0;
             _alteringQueue.Enabled = !busy;
             bool hasBatch = IsAltering && _alteringQueue.Items.Count > 0;
-            _start.Text = hasBatch
-                ? $"▶   다중가공 {_alteringQueue.Items.Count}종 시작 (F9)"
-                : "▶   " + AccessibleName + " 시작 (F9)";
+            bool companion = IsAltering && _owner.SelectedMode == "어비스 + 가공";
+            _start.Text = companion
+                ? (hasBatch
+                    ? $"▶   어비스 + 다중가공 {_alteringQueue.Items.Count}종 시작 (F9)"
+                    : "▶   어비스 + 자동가공 시작 (F9)")
+                : hasBatch
+                    ? $"▶   다중가공 {_alteringQueue.Items.Count}종 시작 (F9)"
+                    : "▶   " + AccessibleName + " 시작 (F9)";
             _start.Enabled = !busy && !_loading && (available || hasBatch);
             if (_resume is not null) _resume.Enabled = !busy && !_loading;
             _stop.Enabled = running;
-            bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");
+            bool ownRun = IsAltering
+                ? _owner._activeMode is "가공" or "어비스 + 가공"
+                : _owner._activeMode == "채집";
             bool ownResult = _owner._productionLastMode == (IsAltering ? "가공" : "채집") && _owner._productionDisplayName == SelectedName;
             long current = ownRun || ownResult ? _owner._productionCurrentQuantity : 0;
             int target = ownRun ? _owner._productionTargetQuantity : (int)Quantity.Value;

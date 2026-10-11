@@ -18,7 +18,10 @@ public sealed partial class MainForm
             var orders = queued.Count > 0
                 ? queued
                 : new[] { SelectedAlteringPlan() };
-            await StartMultiAlteringAsync(orders);
+            if (SelectedMode == "어비스 + 가공")
+                await StartMultiAlteringAsync(orders, abyssCompanion: true);
+            else
+                await StartMultiAlteringAsync(orders);
             return;
         }
 

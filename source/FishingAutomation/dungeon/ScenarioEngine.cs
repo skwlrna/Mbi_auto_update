@@ -16,6 +16,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private readonly Dictionary<string, long> _monitorLastAction = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _monitorLastScan = new(StringComparer.OrdinalIgnoreCase);
     private int _cycle;
+    // Scheduler-only opt-in. The ordinary infinite Abyss path is unchanged.
+    private readonly bool _exitAfterFirstResult;
     private long _lastAbyssOutsideHudScoreLog;
     private int _currentStepIndex;
     private int _resumeStepIndex;
@@ -33,12 +35,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     public event Action<string>? Log;
     public string InputMode => _input.ModeName;
 
-    public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir, FishingAutomation.MabinogiMobileCli? cli = null)
+    public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir, FishingAutomation.MabinogiMobileCli? cli = null, bool exitAfterFirstResult = false)
     {
         _hwnd = hwnd;
         _settings = settings;
         _scenario = scenario;
         _baseDir = baseDir;
+        _exitAfterFirstResult = exitAfterFirstResult;
         if (cli is not null)
             _inventoryLoot = new FishingAutomation.InventoryLootTracker(cli.GetItemsAsync, FishingAutomation.LootStats.TrackedItemNames);
         _detector = new TargetDetector(targets.Where(t => !t.Id.StartsWith("route_")), baseDir);
@@ -123,6 +126,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 {
                     _currentStepIndex = i;
                     ct.ThrowIfCancellationRequested();
+                    if (_exitAfterFirstResult && IsAbyss &&
+                        _scenario.Steps[i].Target == "abyss_result_retry")
+                    {
+                        // Result-page exit must complete before the processing owner resumes.
+                        await ExitAbyssResultForAlteringAsync(ct);
+                        Log?.Invoke($"===== {_cycle}판 완료 · 가공 복귀를 위해 던전 밖 확인 =====");
+                        return;
+                    }
                     await ExecuteStepAsync(_scenario.Steps[i], ct);
                     // Only completed work resets the repeated-recovery budget.
                     repeatedRecoveryStep = -1;

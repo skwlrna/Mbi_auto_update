@@ -10,7 +10,7 @@ public sealed partial class MainForm
 
     private void BuildLayout()
     {
-        _mode.Items.AddRange(new object[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집", "제작" });
+        _mode.Items.AddRange(new object[] { "낚시", "던전", "어비스", "페카 심층", "가공", "채집", "제작", "어비스 + 가공" });
         _mode.SelectedIndex = 0;
         _dungeonDestination.Items.AddRange(new object[] { "현재 위치" });
         _dungeonDestination.SelectedIndex = 0;
@@ -95,7 +95,7 @@ public sealed partial class MainForm
         private float ScaleY => Math.Max(1, Height) / 1086f;
         private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";
         private bool ShouldShowAbyssDungeonPicker =>
-            string.Equals(EffectiveMode, "어비스", StringComparison.Ordinal);
+            EffectiveMode is "어비스" or "어비스 + 가공";
         private bool ShouldShowProductionPage => _owner._productionPageMode is "가공" or "채집" or "제작";
 
         public ReferenceDashboard(MainForm owner)
@@ -273,7 +273,7 @@ public sealed partial class MainForm
             {
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
-                _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : null;
+                _owner._productionPageMode = mode is 4 or 7 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : null;
                 _owner._mode.SelectedIndex = mode;
                 UpdateAbyssDungeonPickerVisibility();
                 if (_owner._productionPageMode == "가공")
@@ -304,7 +304,9 @@ public sealed partial class MainForm
             {
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (index < 0 || index >= _owner._abyssDungeon.Items.Count) return;
-                _owner._mode.SelectedIndex = 2;
+                // Keep the companion mode active when choosing its dungeon.
+                if (_owner._mode.SelectedIndex != 7)
+                    _owner._mode.SelectedIndex = 2;
                 _owner._abyssDungeon.SelectedIndex = index;
                 _owner.UpdateDashboard();
             });
@@ -313,7 +315,7 @@ public sealed partial class MainForm
         private void ShowModeMenu()
         {
             if (_owner.AnyRunning || _owner._activeMode is not null) return;
-            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "자동 가공", "자동 채집", "제작" }, SelectMode, 418, 312);
+            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "자동 가공", "자동 채집", "제작", "어비스 + 가공" }, SelectMode, 418, 312);
         }
 
         private void ShowDungeonMenu()
@@ -338,7 +340,7 @@ public sealed partial class MainForm
                 return;
             }
 
-            if (string.Equals(mode, "어비스", StringComparison.Ordinal))
+            if (mode is "어비스" or "어비스 + 가공")
             {
                 ShowMenu(new[] { "허상의 정박지", "광기의 동굴", "흩어진 물길" }, SelectDungeon, 680, 312);
             }

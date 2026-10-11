@@ -11,10 +11,15 @@ public sealed partial class MainForm
     private async Task StartMultiAlteringAsync(
         IReadOnlyList<AlteringPlan> plans, string? resumeDirectory = null,
         string? expectedResumeBatchId = null,
-        bool confirmedSingleCharacterResume = false)
+        bool confirmedSingleCharacterResume = false,
+        bool abyssCompanion = false)
     {
         if (_multiAlteringRunning)
             return;
+
+        // Snapshot the dungeon selection on the UI thread before the first await.
+        string companionDungeon = abyssCompanion ? SelectedAbyssDungeon : "";
+        string companionTarget = abyssCompanion ? SelectedAbyssTargetId : "";
 
         bool isResume = resumeDirectory is not null;
         bool completed = false;
@@ -26,7 +31,7 @@ public sealed partial class MainForm
         _multiAlteringCts = new CancellationTokenSource();
         var token = _multiAlteringCts.Token;
 
-        _activeMode = "가공";
+        _activeMode = abyssCompanion ? "어비스 + 가공" : "가공";
         _mode.Enabled = false;
         _runError = null;
         _dungeonStartedAt = DateTime.Now;
@@ -432,6 +437,13 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
+            Func<TimeSpan, CancellationToken, Task> idleWait = abyssCompanion
+                ? (delay, idleToken) => WaitOrRunScheduledAbyssAsync(
+                    delay, plans, rawAlteringData, visualAltering,
+                    laneState, windows[0].Handle,
+                    companionTarget, companionDungeon, idleToken)
+                : Task.Delay;
+
             // Keep durable filesystem IO off the hotkey/UI thread. F10 only
             // cancels the run token; no callback waits for checkpoint persistence.
             await Task.Run(() => coordinator.RunAsync(
@@ -458,7 +470,7 @@ public sealed partial class MainForm
                     return finished;
                 },
                 rawAlteringData.WorksAsync,
-                Task.Delay,
+                idleWait,
                 token,
                 preparePlan: PreparePlanMaterialsAsync), token);
 
