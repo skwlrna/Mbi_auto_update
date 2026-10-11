@@ -953,7 +953,8 @@ static class Program
                 Check(batch.Session(Wood).InitialExistingWorks == 2, "Two earlier slots not saved");
                 id = batch.BatchId;
                 batch.PlanStore(Wood).Save(batch.Session(Wood) with
-                { QueuedWorks = 3, MultiState = MultiAlteringItemState.InProgress });
+                { QueuedWorks = 3, MultiState = MultiAlteringItemState.InProgress,
+                    ReceiptTrackingEnabled = false }); // V3.1.83 manifest without receipt proof
                 for (int i = 0; i < 3; i++)
                     await world.QueueAsync(Wood, () => { }, default);
             }
@@ -1026,7 +1027,8 @@ static class Program
             {
                 await batch.OpenFreshAsync(new[] { Wood }, realm, world, default);
                 batch.PlanStore(Wood).Save(batch.Session(Wood) with
-                    { QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress });
+                    { QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress,
+                    ReceiptTrackingEnabled = false }); // V3.1.83 manifest
                 await world.QueueAsync(Wood, () => { }, default);
             }
             var recent = MultiAlteringRecentResume.Latest(temp.Path)!;
