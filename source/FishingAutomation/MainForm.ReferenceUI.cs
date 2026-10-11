@@ -216,8 +216,8 @@ public sealed partial class MainForm
             AddButton("던전", new(18, 231, 170, 59), () => SelectMode(1), "swords", "nav");
             AddButton("어비스", new(18, 301, 170, 59), () => SelectMode(2), "abyss", "nav");
             AddButton("자동 가공", new(18, 371, 170, 59), () => SelectMode(4), "game", "nav");
-            AddButton("자동 채집", new(18, 441, 170, 59), () => SelectMode(5), "leaf", "nav");
-            AddButton("제작", new(18, 511, 170, 59), () => SelectMode(6), "game", "nav");
+            AddButton("제작", new(18, 441, 170, 59), () => SelectMode(6), "game", "nav");
+            AddButton("자동 채집", new(18, 511, 170, 59), () => SelectMode(5), "leaf", "nav");
             AddButton("스케줄러", new(18, 581, 170, 59), () => SelectMode(7), "list", "nav");
             AddButton("설정", new(18, 651, 170, 59), () => ShowMenu(
                 new[] { "텔레그램", "에러 전송", "인식" }, i =>
@@ -319,7 +319,8 @@ public sealed partial class MainForm
         private void ShowModeMenu()
         {
             if (_owner.AnyRunning || _owner._activeMode is not null) return;
-            ShowMenu(new[] { "낚시", "던전", "어비스", "페카 심층", "자동 가공", "자동 채집", "제작", "스케줄러" }, SelectMode, 418, 312);
+            ShowMenu(new[] { "낚시", "던전", "어비스", "자동 가공", "제작", "자동 채집", "스케줄러" },
+                index => SelectMode(new[] { 0, 1, 2, 4, 6, 5, 7 }[index]), 418, 312);
         }
 
         private void ShowDungeonMenu()
