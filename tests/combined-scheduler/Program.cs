@@ -56,7 +56,7 @@ Assert(events.SequenceEqual(new[] { "abyss", "processing" }),
     "abyss finishes and yields before processing next action");
 
 var cfg = JsonDocument.Parse(File.ReadAllText(
-    Path.Combine(AppContext.BaseDirectory, "../../../../source/FishingAutomation/abyss/config/scenario.json")));
+    Path.Combine(Directory.GetCurrentDirectory(), "source/FishingAutomation/abyss/config/scenario.json")));
 Assert(cfg.RootElement.GetProperty("Repeat").GetBoolean(),
     "packaged ordinary abyss scenario still repeats forever");
 Console.WriteLine("Combined scheduler regressions passed.");
