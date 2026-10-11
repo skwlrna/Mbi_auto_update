@@ -1,46 +1,67 @@
 {
   "Enabled": false,
   "ObserveOnly": true,
+  "AllowKeyboardActions": false,
   "Threshold": 0.88,
   "ScanIntervalMs": 450,
-  "InputCooldownMs": 2500,
+  "InputCooldownMs": 3500,
   "TapDelayMs": 140,
   "Mark": {
-    "CueTemplate": "templates/mechanics/mark_cue.png",
-    "Roi": {
+    "CueTemplate": "templates/mechanics/mark_phase_cue.png",
+    "PlayerTargetedTemplate": "templates/mechanics/mark_player_targeted.png",
+    "PlayerRoi": {
       "X": 0,
       "Y": 0,
-      "Width": 800,
-      "Height": 1000
+      "Width": 0,
+      "Height": 0
+    },
+    "MonsterRoi": {
+      "X": 0,
+      "Y": 0,
+      "Width": 0,
+      "Height": 0
     },
     "PlayerMarkers": {
-      "mark_a": "templates/mechanics/player_mark_a.png",
-      "mark_b": "templates/mechanics/player_mark_b.png"
+      "fire": "templates/mechanics/player_fire.png",
+      "ice": "templates/mechanics/player_ice.png",
+      "dark": "templates/mechanics/player_dark.png",
+      "lightning": "templates/mechanics/player_lightning.png",
+      "poison": "templates/mechanics/player_poison.png",
+      "unknown_sixth": "templates/mechanics/player_unknown_sixth.png"
     },
     "MonsterMarkers": {
-      "mark_a": "templates/mechanics/monster_mark_a.png",
-      "mark_b": "templates/mechanics/monster_mark_b.png"
+      "fire": "templates/mechanics/monster_fire.png",
+      "ice": "templates/mechanics/monster_ice.png",
+      "dark": "templates/mechanics/monster_dark.png",
+      "lightning": "templates/mechanics/monster_lightning.png",
+      "poison": "templates/mechanics/monster_poison.png",
+      "unknown_sixth": "templates/mechanics/monster_unknown_sixth.png"
     },
     "KeysByMark": {
-      "mark_a": [],
-      "mark_b": []
+      "fire": [],
+      "ice": [],
+      "dark": [],
+      "lightning": [],
+      "poison": [],
+      "unknown_sixth": []
     }
   },
   "Wave": {
-    "CueTemplate": "templates/mechanics/wave_cue.png",
+    "CueTemplate": "templates/mechanics/wave_phase_cue.png",
     "Roi": {
       "X": 0,
       "Y": 0,
       "Width": 800,
       "Height": 1000
     },
+    "PortalReadyTemplate": "templates/mechanics/portal_ready.png",
     "WaveCues": {
       "left": "templates/mechanics/wave_left.png",
       "right": "templates/mechanics/wave_right.png"
     },
     "SafePortalCues": {
-      "left": "templates/mechanics/portal_for_left_wave.png",
-      "right": "templates/mechanics/portal_for_right_wave.png"
+      "left": "templates/mechanics/safe_portal_left_wave.png",
+      "right": "templates/mechanics/safe_portal_right_wave.png"
     },
     "KeysByWave": {
       "left": [],
@@ -48,11 +69,14 @@
     }
   },
   "Board": {
-    "CueTemplate": "templates/mechanics/board_cue.png",
+    "CueTemplate": "templates/mechanics/board_phase_cue.png",
+    "PlayerTargetedTemplate": "templates/mechanics/board_player_targeted.png",
     "CellRois": [],
     "OTemplate": "templates/mechanics/board_o.png",
     "XTemplate": "templates/mechanics/board_x.png",
     "EmptyTemplate": "templates/mechanics/board_empty.png",
+    "SafeEmptyTemplate": "templates/mechanics/board_safe_empty.png",
+    "FloodedTemplate": "templates/mechanics/board_flooded.png",
     "KeysByCell": {
       "0": [],
       "1": [],
@@ -64,5 +88,11 @@
       "7": [],
       "8": []
     }
+  },
+  "Ascension": {
+    "ShieldCueTemplate": "templates/mechanics/ascension_shield.png",
+    "GoldSafeZoneTemplate": "templates/mechanics/ascension_gold_safezone.png",
+    "GoldEntryWindowTemplate": "templates/mechanics/ascension_gold_entry_window.png",
+    "KeysToGoldZone": []
   }
 }
