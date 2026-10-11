@@ -32,7 +32,7 @@ public sealed partial class MainForm
             _owner = owner;
             Name = "SchedulerPage";
             AccessibleName = "통합 스케줄러";
-            Dock = DockStyle.Fill;
+            Dock = DockStyle.None; // Dashboard owns responsive bounds; never cover sidebar.
             Visible = false;
             BackColor = WindowBg;
             ForeColor = TitleText;
@@ -53,6 +53,15 @@ public sealed partial class MainForm
             header.Controls.Add(owner.SectionTitle("통합 스케줄러", 25), 0, 0);
             header.Controls.Add(Txt("가공 · 제작 · 어비스를 하나의 입력권으로 순차 관리합니다. 상세 제법/음식 검색은 기존 화면 그대로 사용합니다.", Muted, 12), 0, 1);
             root.Controls.Add(header, 0, 0);
+
+            foreach (var summary in new[] { _alteringSummary, _craftingSummary, _abyssSummary })
+            {
+                summary.ForeColor = TitleText;
+                summary.Font = new Font("맑은 고딕", 12f);
+                summary.Dock = DockStyle.Fill;
+                summary.TextAlign = ContentAlignment.MiddleLeft;
+                summary.AutoEllipsis = true;
+            }
 
             _tabs.Dock = DockStyle.Fill;
             _tabs.Font = new Font("맑은 고딕", 10f, FontStyle.Bold);
@@ -229,9 +238,6 @@ public sealed partial class MainForm
         {
             if (IsDisposed || _alteringSummary is null || _craftingSummary is null) return;
             IReadOnlyList<AlteringPlan> plans = _owner._alteringPage?.QueuedAlteringPlans ?? Array.Empty<AlteringPlan>();
-            _alteringSummary.ForeColor = TitleText;
-            _alteringSummary.Font = new Font("맑은 고딕", 12f);
-            _alteringSummary.Dock = DockStyle.Fill;
             _alteringSummary.Text = plans.Count > 0
                 ? "등록 작업 " + plans.Count + "종 : " +
                   string.Join(" / ", plans.Take(5).Select(x => $"{x.DisplayName} {x.TargetQuantity:N0}개")) +
@@ -239,16 +245,10 @@ public sealed partial class MainForm
                 : "다중 작업 목록이 비어 있습니다. 가공 상세에서 품목을 선택하고 작업에 추가하세요.\n" +
                   "단일 선택 품목은 시작 시 한 개 작업으로 사용합니다.";
 
-            _craftingSummary.ForeColor = TitleText;
-            _craftingSummary.Font = new Font("맑은 고딕", 12f);
-            _craftingSummary.Dock = DockStyle.Fill;
             _craftingSummary.Text = _owner._craftingPage?.SelectedName is string recipe
                 ? $"제작 품목 : {recipe}  ·  목표 {_owner._craftingPage.Quantity.Value:N0}개"
                 : "제작 상세에서 음식 또는 아이템을 검색하고 선택하세요.";
 
-            _abyssSummary.ForeColor = TitleText;
-            _abyssSummary.Font = new Font("맑은 고딕", 12f);
-            _abyssSummary.Dock = DockStyle.Fill;
             _abyssSummary.Text = "선택 던전 : " + AbyssDungeon + "  ·  가공 대기 중 1판씩";
 
             bool running = _owner._schedulerRunning;
