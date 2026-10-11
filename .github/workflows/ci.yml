@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.82"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.83"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.82</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3182-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.82"')) {
+          if ($p -notmatch '<Version>3\.1\.83</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3183-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.83"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -111,6 +111,29 @@ jobs:
               $tests -notmatch 'one-character realm-only resume requires explicit authorization' -or
               $tests -notmatch 'copper ore maps to copper vein') {
             throw 'V3.1.82 ore correction or guarded one-character resume missing'
+          }
+
+      - name: V3.1.83 old-work resume and original UI theme contract
+        shell: pwsh
+        run: |
+          $resume = Get-Content source/FishingAutomation/MainForm.MultiAlteringResume.cs -Raw
+          $policy = Get-Content source/FishingAutomation/MultiAlteringRecentResume.cs -Raw
+          $store = Get-Content source/FishingAutomation/MultiAlteringBatchStore.cs -Raw
+          $tests = Get-Content tests/n02-resume/Program.cs -Raw
+          if ($resume -match 'MessageBox.Show' -or
+              $resume -notmatch 'FormBorderStyle.None' -or
+              $resume -notmatch 'WindowBg' -or
+              $resume -notmatch 'PanelBg' -or
+              $resume -notmatch 'GraphicsUnit.Pixel' -or
+              $resume -notmatch 'FontStyle.Bold' -or
+              $resume -notmatch 'DialogResult.Cancel' -or
+              $policy -notmatch 'ReconcileOwnedWorks' -or
+              $policy -notmatch 'session.InitialExistingWorks' -or
+              $policy -notmatch 'current - session.BaselineQuantity' -or
+              $store -notmatch 'x.QueuedWorks \+ x.InitialExistingWorks' -or
+              $tests -notmatch 'V3.1.83 initial same-item jobs conserve' -or
+              $tests -notmatch 'V3.1.83 realm-only batch owns') {
+            throw 'V3.1.83 resume safe old-work reconciliation or production modal theme regression'
           }
 
       - name: Updater rollback regression tests
