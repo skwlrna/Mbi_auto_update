@@ -67,7 +67,7 @@ internal sealed class WaterwayPacketTraceDecoder
             if (encoding == 1)
             {
                 try { payload = BoundedDecompress(payload); }
-                catch (InvalidDataException) { continue; }
+                catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException) { continue; }
             }
             else if (encoding != 0) continue;
 
