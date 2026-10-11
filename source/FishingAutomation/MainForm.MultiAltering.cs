@@ -19,6 +19,10 @@ public sealed partial class MainForm
         bool isResume = resumeDirectory is not null;
         // Snapshot once before awaits; F7 cannot change it while this batch runs.
         bool combinedAbyss = _combinedAlteringRequested;
+        // Snapshot all WinForms selections on the F9/UI thread.
+        // A coordinator worker must not read ComboBox controls.
+        string combinedAbyssDungeonName = SelectedAbyssDungeon;
+        string combinedAbyssTargetId = SelectedAbyssTargetId;
         bool completed = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
@@ -449,7 +453,8 @@ public sealed partial class MainForm
                     // recipe/facility/hub UI and never blindly clicks unknown UI.
                     await screen.ExitToFieldAsync(coordinatorToken);
                     laneState.InvalidateOnsite("병행 어비스 이동 · 이전 가공시설 현장권한 무효화");
-                    await RunCombinedAbyssRoundAsync(coordinatorToken);
+                    await RunCombinedAbyssRoundAsync(coordinatorToken,
+                        combinedAbyssDungeonName, combinedAbyssTargetId);
                 }
                 : null;
 
