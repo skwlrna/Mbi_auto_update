@@ -19,6 +19,9 @@ public sealed partial class MainForm
         bool isResume = resumeDirectory is not null;
         // Snapshot once before awaits; F7 cannot change it while this batch runs.
         bool combinedAbyss = _combinedAlteringRequested;
+        long minimumAbyssWaitSeconds = combinedAbyss
+            ? _schedulerPage.MinimumAbyssWaitSeconds
+            : AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds;
         // Snapshot all WinForms selections on the F9/UI thread.
         // A coordinator worker must not read ComboBox controls.
         string combinedAbyssDungeonName = SelectedAbyssDungeon;
@@ -487,7 +490,8 @@ public sealed partial class MainForm
                 Task.Delay,
                 token,
                 preparePlan: PreparePlanMaterialsAsync,
-                onIdleAbyssRound: idleAbyssRound), token);
+                onIdleAbyssRound: idleAbyssRound,
+                minimumAbyssWaitSeconds: minimumAbyssWaitSeconds), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
