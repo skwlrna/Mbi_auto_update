@@ -22,9 +22,9 @@ public sealed partial class MainForm
 
             if (recent is null)
             {
-                MessageBox.Show(this,
-                    "이어할 최근 대량가공 작업이 없습니다. 새 작업은 F9로 시작하세요.",
-                    "대량가공 이어하기", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ShowResumeNotice("대량가공 이어하기", "이어할 최근 작업 없음",
+                    "이어할 최근 대량가공 작업이 없습니다." + Environment.NewLine +
+                    "새 작업은 기존처럼 F9로 시작할 수 있습니다.");
                 return;
             }
 
@@ -46,23 +46,26 @@ public sealed partial class MainForm
                 if (choice == DialogResult.Cancel || choice == DialogResult.None) return;
                 if (choice == DialogResult.Abort)
                 {
-                    if (MessageBox.Show(this,
-                            "최근 대량가공의 이어하기 기록을 초기화하시겠습니까?" +
-                            Environment.NewLine + Environment.NewLine +
-                            "게임 내 작업·완성품은 그대로이며, 원본 배치 기록도 삭제하지 않습니다." +
-                            Environment.NewLine +
-                            "초기화한 기록은 자동 이어하기 목록에 다시 나타나지 않습니다.",
-                            "대량가공 기록 초기화",
-                            MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-                        return;
+                    using (var reset = MakeResumeDialog(
+                        "대량가공 기록 초기화", "최근 작업 초기화",
+                        "최근 대량가공의 이어하기 대상을 초기화하시겠습니까?" +
+                        Environment.NewLine + Environment.NewLine +
+                        "게임에 등록된 작업·완성품은 그대로 유지합니다." +
+                        Environment.NewLine +
+                        "원본 배치 기록도 삭제하지 않습니다." +
+                        Environment.NewLine +
+                        "현재 작업은 이어하기 목록에서만 숨깁니다.",
+                        ("초기화", DialogResult.Yes),
+                        ("취소", DialogResult.Cancel)))
+                        if (reset.ShowDialog(this) != DialogResult.Yes) return;
 
                     using (var lease = new MultiAlteringBatchStore(root))
                         MultiAlteringRecentResume.HideLatest(root, recent.BatchId);
                     _log.Write("[다중가공] 최근 이어하기 대상 초기화 · " +
                         recent.BatchId + " · 원본/게임 작업 보존");
-                    MessageBox.Show(this, "최근 이어하기 대상이 초기화됐습니다." +
-                        Environment.NewLine + "기존 게임 작업과 생산품은 변경되지 않았습니다.",
-                        "초기화 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    ShowResumeNotice("초기화 완료", "최근 작업 기록 숨김",
+                        "최근 이어하기 대상이 초기화됐습니다." + Environment.NewLine +
+                        "게임 작업·완성품과 원본 기록은 변경하지 않았습니다.");
                     return;
                 }
             }
@@ -78,16 +81,19 @@ public sealed partial class MainForm
             {
                 if (string.IsNullOrWhiteSpace(identity.Baseline.RealmName))
                     throw new InvalidOperationException("1캐릭터 이어하기 서버 확인 실패 · 기록 보존");
-                var consent = MessageBox.Show(this,
+                using (var consent = MakeResumeDialog(
+                    "1캐릭터 이어하기 확인", "같은 캐릭터 사용 확인",
                     "현재 서버: " + identity.Baseline.RealmName + Environment.NewLine +
-                    "대량가공을 이 서버의 같은 캐릭터 하나로만 사용하셨습니까?" +
-                    Environment.NewLine + "서버명으로 다른 캐릭터는 구별하지 못합니다." +
-                    Environment.NewLine + "다른 캐릭터라면 [아니요]를 선택하세요." +
-                    Environment.NewLine + "가공 대기열과 수량 검증은 그대로 적용합니다.",
-                    "1캐릭터 전용 이어하기 확인",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button2);
-                if (consent != DialogResult.Yes) return;
+                    "이 서버의 같은 캐릭터 하나로만 대량가공하셨습니까?" +
+                    Environment.NewLine + Environment.NewLine +
+                    "서버명만으로 다른 캐릭터를 구별할 수 없습니다." +
+                    Environment.NewLine +
+                    "다른 캐릭터였다면 반드시 [아니요]를 선택하세요." +
+                    Environment.NewLine +
+                    "게임 대기열과 수량 검증은 그대로 유지합니다.",
+                    ("예, 같은 캐릭터", DialogResult.Yes),
+                    ("아니요", DialogResult.Cancel)))
+                    if (consent.ShowDialog(this) != DialogResult.Yes) return;
                 confirmedSingleCharacter = true;
                 _log.Write("[다중가공] 서버명 전용 이어하기 · 사용자가 동일 캐릭터 사용 확인");
             }
@@ -126,8 +132,9 @@ public sealed partial class MainForm
         catch (Exception ex)
         {
             _log.Write("[다중가공] 이어하기 검증/초기화 실패 · 입력 없음 · " + ex.Message);
-            MessageBox.Show(this, ex.Message, "대량가공 이어하기 차단",
-                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowResumeNotice("대량가공 이어하기 차단", "상태 검증 실패",
+                ex.Message + Environment.NewLine + Environment.NewLine +
+                "작업과 저장 기록은 변경하지 않았습니다.");
         }
         finally
         {
@@ -136,72 +143,172 @@ public sealed partial class MainForm
         }
     }
 
+    private void ShowResumeNotice(string title, string headline, string details)
+    {
+        using var dialog = MakeResumeDialog(
+            title, headline, details, ("확인", DialogResult.Cancel));
+        dialog.ShowDialog(this);
+    }
+
+    // Match the existing production page: borderless navy window, Segoe-free
+    // Malgun Gothic pixel fonts, blue action, muted border and inline header.
+    // No Windows white title bar, default MessageBox or separate typography.
     private static Form MakeResumeDialog(string title, string headline, string details,
         params (string Label, DialogResult Result)[] commands)
     {
+        static Font UiFont(float pixels, FontStyle style = FontStyle.Regular)
+            => new("맑은 고딕", pixels, style, GraphicsUnit.Pixel);
+
         var dialog = new Form
         {
             Text = title,
-            Width = 620,
-            Height = 390,
+            Width = 700,
+            Height = 430,
             StartPosition = FormStartPosition.CenterParent,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
+            FormBorderStyle = FormBorderStyle.None,
             MinimizeBox = false,
             MaximizeBox = false,
             ShowInTaskbar = false,
-            BackColor = WindowBg,
+            BackColor = Border,
             ForeColor = TitleText,
-            Font = new Font("맑은 고딕", 10f),
-            AutoScaleMode = AutoScaleMode.Dpi
+            Font = UiFont(18),
+            AutoScaleMode = AutoScaleMode.None,
+            Padding = new Padding(2),
+            KeyPreview = true
         };
-        var layout = new TableLayoutPanel
+
+        var shell = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1,
-            Padding = new Padding(18, 16, 18, 14),
-            BackColor = WindowBg
+            Dock = DockStyle.Fill,
+            BackColor = WindowBg,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            ColumnCount = 1,
+            RowCount = 4
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-        layout.Controls.Add(new Label
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
+
+        var titleBar = new Panel
         {
-            Dock = DockStyle.Fill, Text = headline, ForeColor = TitleText,
-            Font = new Font("맑은 고딕", 14, FontStyle.Bold),
+            Dock = DockStyle.Fill,
+            BackColor = PanelBg,
+            Margin = Padding.Empty
+        };
+        titleBar.Controls.Add(new Label
+        {
+            Text = "Mabi_Auto   /   " + title,
+            Font = UiFont(19, FontStyle.Bold),
+            ForeColor = TitleText,
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Color.Transparent,
+            Dock = DockStyle.Fill,
+            Padding = new Padding(18, 0, 0, 0)
+        });
+        var close = new Button
+        {
+            Text = "×",
+            DialogResult = DialogResult.Cancel,
+            Dock = DockStyle.Right,
+            Width = 50,
+            BackColor = PanelBg,
+            ForeColor = TitleText,
+            Font = UiFont(24),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand,
+            TabStop = false
+        };
+        close.FlatAppearance.BorderSize = 0;
+        titleBar.Controls.Add(close);
+        close.BringToFront();
+        shell.Controls.Add(titleBar, 0, 0);
+
+        shell.Controls.Add(new Label
+        {
+            Text = headline,
+            ForeColor = TitleText,
+            Font = UiFont(21, FontStyle.Bold),
+            Dock = DockStyle.Fill,
+            Margin = new Padding(20, 9, 20, 4),
             TextAlign = ContentAlignment.MiddleLeft
-        }, 0, 0);
-        layout.Controls.Add(new TextBox
-        {
-            Dock = DockStyle.Fill, ReadOnly = true, Multiline = true,
-            ScrollBars = ScrollBars.Vertical, TabStop = false,
-            Text = details, BackColor = PanelBg, ForeColor = TitleText,
-            BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("맑은 고딕", 10f)
         }, 0, 1);
-        var buttons = new FlowLayoutPanel
+
+        var detailsSurface = new Panel
         {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false, Margin = Padding.Empty,
-            BackColor = Color.Transparent
+            Dock = DockStyle.Fill,
+            BackColor = PanelBg,
+            Margin = new Padding(20, 0, 20, 3),
+            Padding = new Padding(12)
         };
+        var content = new RichTextBox
+        {
+            Dock = DockStyle.Fill,
+            BorderStyle = BorderStyle.None,
+            ReadOnly = true,
+            TabStop = false,
+            DetectUrls = false,
+            ScrollBars = RichTextBoxScrollBars.Vertical,
+            BackColor = PanelBg,
+            ForeColor = TitleText,
+            Font = UiFont(17),
+            Text = details,
+            WordWrap = true
+        };
+        detailsSurface.Controls.Add(content);
+        shell.Controls.Add(detailsSurface, 0, 2);
+
+        var footer = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            BackColor = WindowBg,
+            Margin = Padding.Empty,
+            Padding = new Padding(16, 6, 20, 8)
+        };
+        Button? safeDefault = null;
         foreach (var command in commands)
         {
-            var btn = new Button
+            var button = new Button
             {
-                Text = command.Label, DialogResult = command.Result,
-                Width = command.Label.Length >= 7 ? 150 : 112, Height = 39,
-                Margin = new Padding(7, 4, 0, 4),
-                BackColor = command.Result == DialogResult.OK ? Blue : PanelBg,
-                ForeColor = command.Result == DialogResult.OK ? Color.White : TitleText,
+                Text = command.Label,
+                DialogResult = command.Result,
+                Width = command.Label.Length > 6 ? 162 : 120,
+                Height = 46,
+                Margin = new Padding(8, 0, 0, 0),
+                BackColor = command.Result is DialogResult.OK or DialogResult.Yes
+                    ? Blue : PanelBg,
+                ForeColor = TitleText,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("맑은 고딕", 10f, FontStyle.Bold)
+                Font = UiFont(17, FontStyle.Bold),
+                Cursor = Cursors.Hand
             };
-            btn.FlatAppearance.BorderSize = 0;
-            buttons.Controls.Add(btn);
-            if (command.Result == DialogResult.OK) dialog.AcceptButton = btn;
-            if (command.Result == DialogResult.Cancel) dialog.CancelButton = btn;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = command.Result is DialogResult.OK or DialogResult.Yes
+                ? Color.FromArgb(0, 207, 255) : Border;
+            footer.Controls.Add(button);
+            if (command.Result == DialogResult.OK) dialog.AcceptButton = button;
+            if (command.Result == DialogResult.Cancel)
+            {
+                dialog.CancelButton = button;
+                safeDefault = button;
+            }
         }
-        layout.Controls.Add(buttons, 0, 2);
-        dialog.Controls.Add(layout);
+
+        shell.Controls.Add(footer, 0, 3);
+        dialog.Controls.Add(shell);
+        dialog.Shown += (_, _) => safeDefault?.Focus();
+        dialog.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                dialog.DialogResult = DialogResult.Cancel;
+                dialog.Close();
+                e.Handled = true;
+            }
+        };
         return dialog;
     }
 }
