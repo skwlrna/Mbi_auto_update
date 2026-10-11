@@ -65,6 +65,21 @@ public sealed partial class MainForm
 
             _tabs.Dock = DockStyle.Fill;
             _tabs.Font = new Font("맑은 고딕", 10f, FontStyle.Bold);
+            _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            _tabs.SizeMode = TabSizeMode.Fixed;
+            _tabs.ItemSize = new Size(144, 39);
+            _tabs.DrawItem += (_, e) =>
+            {
+                if (e.Index < 0) return;
+                bool selected = _tabs.SelectedIndex == e.Index;
+                using var fill = new SolidBrush(selected ? PanelBg : WindowBg);
+                using var edge = new Pen(selected ? Blue : Border);
+                e.Graphics.FillRectangle(fill, e.Bounds);
+                e.Graphics.DrawRectangle(edge, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                TextRenderer.DrawText(e.Graphics, _tabs.TabPages[e.Index].Text, _tabs.Font,
+                    e.Bounds, selected ? TitleText : Muted,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
             _tabs.Padding = new Point(16, 8);
             _tabs.Appearance = TabAppearance.Normal;
             _tabs.TabPages.Add(MakeOverview());
@@ -97,6 +112,10 @@ public sealed partial class MainForm
             _abyss.CheckedChanged += (_, _) => RefreshSnapshot();
 
             _abyssChoice.DropDownStyle = ComboBoxStyle.DropDownList;
+            _abyssChoice.AccessibleName = "스케줄러 어비스 던전";
+            _abyssChoice.BackColor = PanelBg;
+            _abyssChoice.ForeColor = TitleText;
+            _abyssChoice.FlatStyle = FlatStyle.Flat;
             _abyssChoice.Items.AddRange(new object[] { "허상의 정박지", "광기의 동굴", "흩어진 물길" });
             _abyssChoice.SelectedIndex = Math.Max(0, owner._abyssDungeon.SelectedIndex);
             _abyssChoice.SelectedIndexChanged += (_, _) =>
