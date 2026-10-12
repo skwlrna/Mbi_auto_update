@@ -30,11 +30,12 @@ internal static class AbyssResultLayout
                firstText.IntersectsWith(secondText);
     }
 
-    // Canonical 800x1000 *game-client* button centers. These are candidate
-    // centers derived from the provided portrait result image, not from any OCR
-    // bounding box. Keep them separate from the broader three-button visual
-    // verification ROIs, which have deliberately not changed.
-    internal static readonly Point ExitFixedCenter800 = new(165, 930);
+    // Canonical 800x1000 game-client coordinates, independent of OCR text bounds.
+    // The 2026-10-12 Windows runtime capture shows the left green "나가기"
+    // button at approximately x=180..320, y=922..978. The old (165,930)
+    // was outside that button and failed the required green-patch verification.
+    // Keep the ordinary Abyss middle retry and three-button ROIs unchanged.
+    internal static readonly Point ExitFixedCenter800 = new(250, 950);
     internal static readonly Point RetryFixedCenter800 = new(400, 930);
 
     internal static Point FixedButtonCenter(bool exit, Size capturedClientSize)
