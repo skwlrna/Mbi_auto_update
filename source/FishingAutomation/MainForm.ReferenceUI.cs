@@ -234,7 +234,7 @@ public sealed partial class MainForm
             AddButton("인식 관리", new(16, 480, 200, 54), owner.ShowVisualRecognitionTest, "scan-eye", "nav");
             AddButton("로그 / 진단", new(16, 549, 200, 54), () =>
             {
-                owner._logExpanded = !owner._logExpanded;
+                owner._logExpanded = true;
                 owner.ApplyLogVisibility();
                 UpdateAbyssDungeonPickerVisibility();
             }, "log", "nav");
@@ -243,7 +243,7 @@ public sealed partial class MainForm
             _modeTabs.Add(AddButton("어비스", new(716, 190, 210, 62), () => SelectMode(2), "abyss", "mode-tab"));
             AddButton("미니 모드", new(16, 991, 200, 46), () => owner.ToggleMini(true), "", "quiet");
 
-            // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
+            // Only destination selection remains; mode selection is via the visible tabs.
             AddButton("던전 선택", new(932, 284, 42, 58), ShowDungeonMenu, "chevron", "chrome");
             owner._updateButton = AddButton("업데이트 확인", new(1163, 800, 228, 43), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
             for (int i = 0; i < 3; i++)
@@ -290,6 +290,13 @@ public sealed partial class MainForm
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
                 _showHome = false;
+                // Log diagnostics is a separate destination, not an overlay
+                // that should remain above automation, production or scheduling.
+                if (_owner._logExpanded)
+                {
+                    _owner._logExpanded = false;
+                    _owner.ApplyLogVisibility();
+                }
                 _selectedNavigation = mode == 7 ? "스케줄러" : mode is 4 or 5 or 6 ? "생산 관리" : "자동화 실행";
                 _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : mode == 7 ? "스케줄러" : null;
                 _owner._mode.SelectedIndex = mode;
