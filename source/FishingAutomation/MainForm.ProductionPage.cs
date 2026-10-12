@@ -227,7 +227,7 @@ public sealed partial class MainForm
                 BackColor = Color.Transparent, AccessibleName = "실행 상태"
             };
             right.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
-            right.RowStyles.Add(new RowStyle(altering ? SizeType.Absolute : SizeType.Percent, altering ? 320 : 100));
+            right.RowStyles.Add(new RowStyle(altering ? SizeType.Absolute : SizeType.Percent, altering ? 294 : 100));
             if (altering) right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var goalCard = new LauncherCard { Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 10) };
             goalCard.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"));
@@ -318,6 +318,7 @@ public sealed partial class MainForm
                 foreach (var x in rows) x.Style.Height = x.Size * scale; foreach (var x in columns) x.Style.Width = x.Size * scale;
                 _reload.Width = Math.Max(70, (int)(110 * scale)); if (_inspect is not null) _inspect.Width = Math.Max(64, (int)(90 * scale));
                 Items.ItemHeight = Math.Max(26, Items.Font.Height + Math.Max(7, (int)(8 * scale)));
+                if (IsAltering) _alteringQueue.ItemHeight = Math.Max(26, _alteringQueue.Font.Height + Math.Max(7, (int)(8 * scale)));
                 foreach (var field in Descendants(root).Where(c => c.Tag is string tag && tag == "production-field")) LayoutField(field);
                 root.ResumeLayout(true); fitting = false;
             }
@@ -402,7 +403,7 @@ public sealed partial class MainForm
                 using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
                 e.Graphics.FillRectangle(background, e.Bounds);
                 TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
-                    selected ? Color.White : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    selected ? Color.FromArgb(22, 58, 112) : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
             };
         }
@@ -429,71 +430,51 @@ public sealed partial class MainForm
 
         private Control BuildAlteringQueueArea()
         {
+            // Title and management actions need their own rows at small window sizes.
+            // A FlowLayoutPanel alongside the heading previously clipped both.
             var layout = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Margin = Padding.Empty,
-                BackColor = Color.Transparent,
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Margin = Padding.Empty, BackColor = Color.Transparent,
                 AccessibleName = "다중가공 작업 목록 영역"
             };
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.Controls.Add(new Label
+            {
+                Text = "다중가공 작업 목록", Dock = DockStyle.Fill,
+                ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = false,
+                Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel)
+            }, 0, 0);
 
-            var header = new Panel
+            var buttons = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
-                BackColor = Color.Transparent,
-                Margin = Padding.Empty
+                Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
+                Margin = Padding.Empty, Padding = Padding.Empty,
+                BackColor = Color.Transparent, AccessibleName = "다중가공 작업 관리"
             };
-            header.Controls.Add(new Label
-            {
-                Text = "다중가공 목록",
-                Dock = DockStyle.Fill,
-                ForeColor = TitleText,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font = new Font("맑은 고딕", 16f, FontStyle.Bold, GraphicsUnit.Pixel)
-            });
-
-            var buttons = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Right,
-                Width = 230,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty,
-                BackColor = Color.Transparent
-            };
+            for (int i = 0; i < 3; i++)
+                buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3f));
             _addQueue = PageButton("+ 추가", AddCurrentAlteringQueue);
             _removeQueue = PageButton("삭제", RemoveSelectedAlteringQueue);
             _clearQueue = PageButton("비우기", ClearQueuedAlteringPlans);
             _addQueue.AccessibleName = "다중가공 작업 추가";
             _removeQueue.AccessibleName = "다중가공 작업 삭제";
             _clearQueue.AccessibleName = "다중가공 작업 비우기";
-            foreach (var button in new[] { _addQueue, _removeQueue, _clearQueue })
-            {
-                button.Dock = DockStyle.None;
-                button.Width = 72;
-                button.Height = 29;
-                button.Margin = new Padding(2, 1, 2, 1);
-            }
-            buttons.Controls.Add(_addQueue);
-            buttons.Controls.Add(_removeQueue);
-            buttons.Controls.Add(_clearQueue);
-            header.Controls.Add(buttons);
-            layout.Controls.Add(header, 0, 0);
+            buttons.Controls.Add(_addQueue, 0, 0);
+            buttons.Controls.Add(_removeQueue, 1, 0);
+            buttons.Controls.Add(_clearQueue, 2, 0);
+            layout.Controls.Add(buttons, 0, 1);
 
             var surface = new LauncherCard
             {
-                Dock = DockStyle.Fill,
-                BackColor = CardBg2,
-                Padding = new Padding(5),
-                Margin = new Padding(0, 2, 0, 2)
+                Dock = DockStyle.Fill, BackColor = CardBg2,
+                Padding = new Padding(5), Margin = new Padding(0, 2, 0, 2)
             };
             surface.Controls.Add(_alteringQueue);
-            layout.Controls.Add(surface, 0, 1);
+            layout.Controls.Add(surface, 0, 2);
             return layout;
         }
 

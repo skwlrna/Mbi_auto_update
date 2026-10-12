@@ -420,7 +420,7 @@ public sealed partial class MainForm
                 using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
                 e.Graphics.FillRectangle(background, e.Bounds);
                 TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
-                    selected ? Color.White : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    selected ? Color.FromArgb(22, 58, 112) : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
             };
         }

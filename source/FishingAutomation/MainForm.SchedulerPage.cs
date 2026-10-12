@@ -100,17 +100,17 @@ public sealed partial class MainForm
             foreach (var summary in new[] { _alteringSummary, _craftingSummary, _abyssSummary })
             {
                 summary.ForeColor = TitleText;
-                summary.Font = new Font("맑은 고딕", 12f);
+                summary.Font = new Font("맑은 고딕", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
                 summary.Dock = DockStyle.Fill;
                 summary.TextAlign = ContentAlignment.MiddleLeft;
                 summary.AutoEllipsis = true;
             }
 
             _tabs.Dock = DockStyle.Fill;
-            _tabs.Font = new Font("맑은 고딕", 10f, FontStyle.Bold);
+            _tabs.Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel);
             _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             _tabs.SizeMode = TabSizeMode.Fixed;
-            _tabs.ItemSize = new Size(152, 43);
+            _tabs.ItemSize = new Size(152, 49);
             _tabs.DrawItem += (_, e) =>
             {
                 if (e.Index < 0) return;
@@ -141,16 +141,19 @@ public sealed partial class MainForm
             _tabs.SelectedIndexChanged += (_, _) => RefreshSnapshot();
             root.Controls.Add(_tabs, 0, 1);
 
-            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = WindowBg };
+            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Border, Padding = new Padding(1), Margin = new Padding(0, 2, 0, 0) };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 54));
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 27));
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 19));
             _runStatus.Dock = DockStyle.Fill;
             _runStatus.AccessibleName = "스케줄러 실행 안내";
-            _runStatus.Font = new Font("맑은 고딕", 10f, FontStyle.Bold);
+            _runStatus.Font = new Font("맑은 고딕", 16f, FontStyle.Bold, GraphicsUnit.Pixel);
             _runStatus.TextAlign = ContentAlignment.MiddleLeft;
             _runStatus.ForeColor = Muted;
-            _runStatus.AutoEllipsis = true;
+            _runStatus.AutoEllipsis = false;
+            _runStatus.BackColor = CardBg;
+            _runStatus.Padding = new Padding(10, 3, 6, 3);
+            _runStatus.Margin = new Padding(2, 5, 5, 5);
             footer.Controls.Add(_runStatus, 0, 0);
             _start = ActionButton("▶  스케줄러 시작 (F9)", () => _ = owner.StartSchedulerAsync(), true);
             footer.Controls.Add(_start, 1, 0);
@@ -184,7 +187,7 @@ public sealed partial class MainForm
         private static Label Txt(string message, Color color, float size = 13, bool bold = false) => new()
         {
             Text = message, ForeColor = color, Dock = DockStyle.Fill,
-            Font = new Font("맑은 고딕", size, bold ? FontStyle.Bold : FontStyle.Regular),
+            Font = new Font("맑은 고딕", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel),
             TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true
         };
 
@@ -194,7 +197,7 @@ public sealed partial class MainForm
             {
                 Text = label, Dock = DockStyle.Fill, FlatStyle = FlatStyle.Flat,
                 BackColor = primary ? Blue : CardBg2, ForeColor = primary ? Color.White : TitleText,
-                Font = new Font("맑은 고딕", 11f, FontStyle.Bold),
+                Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand, Margin = new Padding(4)
             };
             button.FlatAppearance.BorderColor = primary ? Blue : Border;
@@ -223,20 +226,20 @@ public sealed partial class MainForm
         {
             var tab = Tab("작업 계획");
             var layout = Vertical(7);
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 63));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 63));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 63));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.Controls.Add(Txt("실행 순서 및 사용 설정", TitleText, 17, true), 0, 0);
+            layout.Controls.Add(Txt("실행 순서 및 사용 설정", TitleText, 20, true), 0, 0);
             LayoutCheck(_crafts, "1. 제작  ·  선택한 음식 / 아이템 목표 수량까지 작업", layout, 1);
             LayoutCheck(_alters, "2. 다중가공  ·  시설별 다중 작업 등록 / 수령 / 재료 해결", layout, 2);
             LayoutCheck(_abyss, "3. 어비스  ·  가공 대기 중 한 판 실행 후 퇴장 검증", layout, 3);
             layout.Controls.Add(BuildSequencePreview(), 0, 4);
-            layout.Controls.Add(Txt("제작은 현 단계에서 먼저 끝내는 방식입니다. 제작 중 어비스로 전환하지 않습니다.", Muted, 11), 0, 5);
-            layout.Controls.Add(Txt("각 탭에서 가공·제작·어비스 설정 확인 후 F9로 시작하세요. F10은 모든 단계의 중단 요청입니다.", Muted, 11), 0, 6);
+            layout.Controls.Add(Txt("제작은 먼저 완료하며, 제작 중 어비스로 전환하지 않습니다.", Muted, 15), 0, 5);
+            layout.Controls.Add(Txt("각 작업 설정을 확인한 뒤 F9 시작 · F10 정지", Muted, 15), 0, 6);
             tab.Controls.Add(layout);
             return tab;
         }
@@ -258,8 +261,8 @@ public sealed partial class MainForm
                 {
                     Text = steps[i], Dock = DockStyle.Fill, BackColor = AccentSoft,
                     ForeColor = TitleText, TextAlign = ContentAlignment.MiddleCenter,
-                    Font = new Font("맑은 고딕", 10f, FontStyle.Bold),
-                    Margin = new Padding(3), AutoEllipsis = true
+                    Font = new Font("맑은 고딕", 16f, FontStyle.Bold, GraphicsUnit.Pixel),
+                    Margin = new Padding(3), AutoEllipsis = false
                 }, i, 0);
             }
             return flow;
@@ -267,13 +270,24 @@ public sealed partial class MainForm
 
         private static void LayoutCheck(CheckBox cb, string caption, TableLayoutPanel table, int row)
         {
-            cb.Text = caption; cb.Dock = DockStyle.Fill; cb.AutoSize = false;
-            cb.CheckAlign = ContentAlignment.MiddleLeft; cb.Padding = new Padding(8);
+            // One bordered card per step; wrapped labels must not disappear into
+            // the nearly identical surrounding white surfaces.
+            var edge = new Panel
+            {
+                Dock = DockStyle.Fill, Margin = new Padding(2, 3, 2, 3),
+                Padding = new Padding(1), BackColor = Border
+            };
+            cb.Text = caption;
+            cb.Dock = DockStyle.Fill;
+            cb.AutoSize = false;
+            cb.CheckAlign = ContentAlignment.MiddleLeft;
+            cb.Padding = new Padding(12, 3, 8, 3);
             cb.ForeColor = TitleText;
-            cb.Font = new Font("맑은 고딕", 12f);
-            cb.BackColor = PanelBg;
+            cb.Font = new Font("맑은 고딕", 17f, FontStyle.Regular, GraphicsUnit.Pixel);
+            cb.BackColor = CardBg;
             cb.FlatStyle = FlatStyle.Flat;
-            table.Controls.Add(cb, 0, row);
+            edge.Controls.Add(cb);
+            table.Controls.Add(edge, 0, row);
         }
 
         private TabPage MakeAltering()
