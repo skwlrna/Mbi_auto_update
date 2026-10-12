@@ -20,6 +20,20 @@ public sealed partial class MainForm
         private readonly Label _craftingSummary = new();
         private readonly Label _abyssSummary = new();
         private readonly Label _runStatus = new();
+        private string? _lastStartFeedback;
+        internal string? LastStartFeedback => _lastStartFeedback;
+
+        // Keep failed F9/button preflight visible across the 1-second UI refresh.
+        internal void ReportStartFeedback(string message)
+        {
+            _lastStartFeedback = message;
+            _runStatus.Text = message;
+            _runStatus.ForeColor = Color.DarkOrange;
+            _runStatus.AccessibleDescription = message;
+            _runStatus.Invalidate();
+        }
+
+        private void ClearStartFeedback() => _lastStartFeedback = null;
         private readonly Button _start;
         private readonly TabControl _tabs = new();
 
@@ -109,6 +123,8 @@ public sealed partial class MainForm
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 27));
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 19));
             _runStatus.Dock = DockStyle.Fill;
+            _runStatus.AccessibleName = "스케줄러 실행 안내";
+            _runStatus.Font = new Font("맑은 고딕", 10f, FontStyle.Bold);
             _runStatus.TextAlign = ContentAlignment.MiddleLeft;
             _runStatus.ForeColor = Muted;
             _runStatus.AutoEllipsis = true;
@@ -122,9 +138,9 @@ public sealed partial class MainForm
             _alters.Checked = true;
             _abyss.Checked = true;
             _crafts.Checked = false;
-            _alters.CheckedChanged += (_, _) => RefreshSnapshot();
-            _crafts.CheckedChanged += (_, _) => RefreshSnapshot();
-            _abyss.CheckedChanged += (_, _) => RefreshSnapshot();
+            _alters.CheckedChanged += (_, _) => { ClearStartFeedback(); RefreshSnapshot(); };
+            _crafts.CheckedChanged += (_, _) => { ClearStartFeedback(); RefreshSnapshot(); };
+            _abyss.CheckedChanged += (_, _) => { ClearStartFeedback(); RefreshSnapshot(); };
 
             _abyssChoice.DropDownStyle = ComboBoxStyle.DropDownList;
             _abyssChoice.AccessibleName = "스케줄러 어비스 던전";
@@ -293,12 +309,16 @@ public sealed partial class MainForm
                 MinimumAbyssWaitSeconds + "초 · 어비스 종료/필드 복귀 시 가공 재조회";
 
             bool running = _owner._schedulerRunning;
+            if (running) ClearStartFeedback();
             _runStatus.Text = running
                 ? "스케줄러 실행 중 · 제작 → 가공 + 어비스 (F10 정지)"
-                : "준비 · " + (_crafts.Checked ? "제작 " : "") +
+                : _lastStartFeedback ?? ("준비 · " + (_crafts.Checked ? "제작 " : "") +
                   (_alters.Checked ? "가공 " : "") +
-                  (_abyss.Checked ? "어비스" : "");
-            _start.Enabled = !running && !_owner.AnyRunning;
+                  (_abyss.Checked ? "어비스" : ""));
+            _runStatus.ForeColor = _lastStartFeedback is not null ? Color.DarkOrange : Muted;
+            // Allow an attempted click even if a different runner holds input;
+            // the guarded handler explains why it cannot start. Never run twice.
+            _start.Enabled = !running;
             _crafts.Enabled = _alters.Enabled = _abyss.Enabled = !running;
             _abyssChoice.Enabled = !running;
             _minimumWaitChoice.Enabled = !running;
