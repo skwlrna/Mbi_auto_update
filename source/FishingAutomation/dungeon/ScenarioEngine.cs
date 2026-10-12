@@ -14,6 +14,18 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private readonly GuardedInputController _input;
     private readonly string _baseDir;
     private readonly bool _scheduledResultExit;
+    private bool _scheduledOutsideExitVerified;
+    internal bool ScheduledOutsideExitVerified => _scheduledResultExit && _scheduledOutsideExitVerified;
+
+    // Invoked exclusively AFTER an actual 3-frame outside-HUD proof, with
+    // explicit exit input already observed. No recovery status alone can set it.
+    private void RecordScheduledOutsideExit(string source)
+    {
+        if (!_scheduledResultExit) return;
+        _scheduledOutsideExitVerified = true;
+        Log?.Invoke("[병행] 던전 밖 3프레임 검증 기록 확정 · " + source);
+    }
+
     private readonly Dictionary<string, long> _monitorLastAction = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _monitorLastScan = new(StringComparer.OrdinalIgnoreCase);
     private int _cycle;
@@ -82,7 +94,15 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     public async Task RunAsync(CancellationToken ct)
     {
         _input.SetCancellation(ct);
-        try { await RunCoreAsync(ct); }
+        try
+        {
+            await RunCoreAsync(ct);
+            // Non-repeat scheduled runs used to fall out of the loop after a
+            // RestartCycleException, a reconnect, or a Smart Recovery even if
+            // still inside Abyss. A return is never an exit proof.
+            ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+                _scheduledResultExit, _scheduledOutsideExitVerified, ct);
+        }
         catch (Exception ex)
         {
             if (!ct.IsCancellationRequested)
@@ -378,8 +398,19 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             using var frame = await CaptureGameWindowAsync(ct);
             if ((await DetectAbyssResultRetryAsync(frame, ct)).Found)
             {
-                await RetryAbyssResultAsync(ct);
-                _resumeStepIndex = AbyssCombatStepIndex;
+                if (_scheduledResultExit)
+                {
+                    // Processing scheduler must never press "다시 하기" during
+                    // Smart Recovery. Use the guarded LEFT exit path instead.
+                    Log?.Invoke("[병행 복구] 결과 화면 확인 -> 다시 하기 금지 · 검증된 나가기 수행");
+                    await ExitAbyssResultForScheduledProcessingAsync(ct);
+                    _resumeStepIndex = 0;
+                }
+                else
+                {
+                    await RetryAbyssResultAsync(ct);
+                    _resumeStepIndex = AbyssCombatStepIndex;
+                }
                 return true;
             }
             long now = Environment.TickCount64;
@@ -393,6 +424,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 }
                 _abyssCombatStartedAt = null;
                 _resumeStepIndex = 0;
+                // outsideCheckArmed is set only after an explicit, guarded
+                // exit click in THIS recovery. The three fresh HUD frames
+                // prove that processing may be resumed.
+                RecordScheduledOutsideExit("복구 퇴장 후 HUD 연속 3회");
                 Log?.Invoke("[어비스 자동복구] 던전 밖 HUD 3/4 이상 확인 -> 복구 즉시 완료, 처음부터 재시작");
                 return true;
             }
@@ -1430,6 +1465,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 Log?.Invoke($"[어비스] 퇴장 후 던전 밖 HUD 3/4 이상 확인 {outsideConsecutive}/3");
                 if (outsideConsecutive >= 3)
                 {
+                    RecordScheduledOutsideExit("나가기 클릭 후 HUD 연속 3회");
                     Log?.Invoke("[어비스] 퇴장 후 던전 밖 HUD 3회 연속 확인 완료 -> 다음 입장 준비");
                     return;
                 }
