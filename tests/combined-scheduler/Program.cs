@@ -78,6 +78,13 @@ longWatch.ResumeAfterAbyssExit();
 longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
 Assert(true, "Abyss duration never becomes manager stall time after return");
 
+Assert(ScheduledAbyssReturnPolicy.RecoveryResultAction(true) ==
+       AbyssRecoveryResultAction.ExitForProcessing,
+    "scheduled recovery result must use LEFT exit, never middle retry");
+Assert(ScheduledAbyssReturnPolicy.RecoveryResultAction(false) ==
+       AbyssRecoveryResultAction.RetryDungeon,
+    "ordinary Abyss recovery keeps its existing middle retry behavior");
+
 // A non-repeating scenario can return without finishing after network restart,
 // Timeout Smart Recovery, or RestartCycleException. Such a return is NOT proof
 // that the character left Abyss.
