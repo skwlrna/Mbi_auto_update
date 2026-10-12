@@ -64,6 +64,10 @@ internal static class Program
             var globalStart = Field<Button>(form, "_mainActionButton");
             Check(globalStart.Visible && globalStart.Enabled,
                 "global bottom start is clickable while scheduler page is open");
+            Check(!Field<Button>(form, "_updateButton").Visible,
+                "update check is hidden outside home");
+            Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "스케줄러",
+                "scheduler exclusively owns selected navigation state");
             var schedulerStart = All(scheduler).OfType<Button>()
                 .Single(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal));
             var schedulerStatus = All(scheduler).OfType<Label>()
@@ -111,6 +115,12 @@ internal static class Program
             typeof(MainForm).GetField("_starting", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .SetValue(form, false);
             Menu("홈"); Pump();
+            var dashboard = Field<Control>(form, "_referenceDashboard");
+            var updateCheck = Field<Button>(form, "_updateButton");
+            Check(updateCheck.Visible && updateCheck.Text == "업데이트 확인",
+                "update check appears on home dashboard");
+            Check(Field<string>(dashboard, "_selectedNavigation") == "홈",
+                "home is the sole selected navigation destination");
 
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
@@ -278,6 +288,8 @@ internal static class Program
             {
                 Menu(mode);
                 Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
+                Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "자동화 실행",
+                    "mode tab keeps single automation navigation selection: " + mode);
             }
             fake.Fail = true; Menu("자동 채집");
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick();
@@ -332,6 +344,24 @@ internal static class Program
                     Check(values.Length >= 6 && values.All(x => x.Height >= x.Font.Height),
                         page.Name + " progress and status text fits at " + size);
                     Check(values.All(x => FullyContained(x, page)), page.Name + " status cards do not extend beyond parent rows at " + size);
+                    if (page == altering)
+                    {
+                        var queueLayout = All(altering).OfType<TableLayoutPanel>()
+                            .Single(x => x.AccessibleName == "다중가공 작업 목록 영역");
+                        var queueTitle = All(queueLayout).OfType<Label>()
+                            .Single(x => x.Text == "다중가공 작업 목록");
+                        var queueActions = All(queueLayout).OfType<Button>()
+                            .Where(x => x.AccessibleName?.StartsWith("다중가공 작업 ", StringComparison.Ordinal) == true).ToArray();
+                        Check(queueLayout.RowCount == 3 && queueTitle.Width >=
+                                  TextRenderer.MeasureText(queueTitle.Text, queueTitle.Font).Width - 4,
+                            "multi-altering title has dedicated non-clipped row at " + size);
+                        Check(queueActions.Length == 3 && queueActions.All(x =>
+                                  x.Width >= TextRenderer.MeasureText(x.Text, x.Font).Width + 4 &&
+                                  x.Height >= x.Font.Height),
+                            "multi-altering action labels fit without truncation at " + size);
+                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "생산 관리",
+                            "production navigation remains exclusively selected at " + size);
+                    }
                     if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }
                 }
             }
