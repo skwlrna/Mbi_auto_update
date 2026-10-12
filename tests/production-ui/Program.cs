@@ -27,7 +27,33 @@ internal static class Program
                 .Single(x => x.AccessibleName?.EndsWith("목표 수량", StringComparison.Ordinal) == true);
             int QuantityValue(TextBox input) => int.Parse(input.Text, System.Globalization.CultureInfo.InvariantCulture);
             void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
-            void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
+            void Menu(string name)
+            {
+                if (name is "낚시" or "던전" or "어비스")
+                {
+                    // Enter the automation workspace first; modes are its three
+                    // visible tabs, not independent top-level sidebar entries.
+                    controls.OfType<Button>().Single(x => x.Text == "자동화 실행").PerformClick();
+                    Pump();
+                    controls.OfType<Button>().Single(x => x.Text == name).PerformClick();
+                    return;
+                }
+                if (name is "자동 가공" or "자동 채집" or "제작")
+                {
+                    // The clean-white navigation intentionally groups these three modes.
+                    // Exercise the actual visible production menu, not an obsolete hidden shortcut.
+                    controls.OfType<Button>().Single(x => x.Text == "생산 관리").PerformClick();
+                    Pump();
+                    var dashboard = Field<Control>(form, "_referenceDashboard");
+                    var popup = Field<ContextMenuStrip>(dashboard, "_openMenu");
+                    Check(popup.Visible, "production menu opens from the sidebar");
+                    var item = popup.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == name);
+                    item.PerformClick();
+                    return;
+                }
+                controls.OfType<Button>().Single(x => x.Text == name &&
+                    !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
+            }
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             // Real V3.1.88 report: neither the visible start button nor F9
             // appeared to do anything when scheduler lacked a chosen recipe.

@@ -57,12 +57,12 @@ public sealed partial class MainForm : Form
     // Disabled by default; the ordinary abyss and processing entry points are unchanged.
     private bool _combinedAlteringRequested;
 
-    private static readonly Color WindowBg = Color.FromArgb(21, 24, 29);
-    private static readonly Color PanelBg = Color.FromArgb(32, 37, 45);
-    private static readonly Color Border = Color.FromArgb(61, 69, 82);
-    private static readonly Color TitleText = Color.FromArgb(238, 242, 248);
-    private static readonly Color Blue = Color.FromArgb(59, 130, 246);
-    private static readonly Color Green = Color.FromArgb(74, 222, 128);
+    private static readonly Color WindowBg = Color.FromArgb(246, 248, 252);
+    private static readonly Color PanelBg = Color.White;
+    private static readonly Color Border = Color.FromArgb(223, 230, 240);
+    private static readonly Color TitleText = Color.FromArgb(23, 32, 51);
+    private static readonly Color Blue = Color.FromArgb(40, 112, 242);
+    private static readonly Color Green = Color.FromArgb(22, 143, 99);
 
     public MainForm() : this(null) { }
 

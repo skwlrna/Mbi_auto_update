@@ -249,7 +249,7 @@ public sealed partial class MainForm
                 label.AutoEllipsis = true; label.BackColor = Color.Transparent; label.Margin = Padding.Empty;
             }
             _percentage.TextAlign = ContentAlignment.MiddleRight;
-            _progressText.ForeColor = _percentage.ForeColor = Color.FromArgb(96, 165, 250);
+            _progressText.ForeColor = _percentage.ForeColor = Blue;
             _progress.Dock = DockStyle.Fill; _progress.Margin = new Padding(0, 3, 0, 3); _progress.Paint += (_, e) => DrawProgress(e.Graphics);
             status.Controls.Add(_state, 0, 1); status.Controls.Add(_condition, 0, 2); status.Controls.Add(progressLine, 0, 3);
             status.Controls.Add(_progress, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_collection, 0, 6);
@@ -269,7 +269,7 @@ public sealed partial class MainForm
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 40 : 70));
             if (altering) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.AccessibleName = AccessibleName + " 시작";
+            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.ForeColor = Color.White; _start.AccessibleName = AccessibleName + " 시작";
             _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
             actions.Controls.Add(_start, 0, 0);
             if (altering)

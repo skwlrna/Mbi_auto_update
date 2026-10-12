@@ -84,11 +84,13 @@ public sealed partial class MainForm
         private readonly Image?[] _dungeonPreviews;
         private readonly List<(Control Control, RectangleF Bounds)> _positions = new();
         private readonly List<ReferenceButton> _gallery = new();
+        private readonly List<ReferenceButton> _modeTabs = new();
+        private bool _showHome = true;
         private readonly ToolTip _tips = new();
         private ContextMenuStrip? _openMenu;
         private readonly Font _baseFont = new("맑은 고딕", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
         private readonly Color _text = TitleText;
-        private readonly Color _cyan = Color.FromArgb(96, 165, 250);
+        private readonly Color _cyan = Blue;
         private readonly Color _green = Green;
         private readonly Color _line = Line;
         private float ScaleX => Math.Max(1, Width) / 1448f;
@@ -107,7 +109,7 @@ public sealed partial class MainForm
             {
                 _art = new Bitmap(1448, 1086);
                 using var artGraphics = Graphics.FromImage(_art);
-                artGraphics.Clear(Color.FromArgb(0, 18, 35));
+                artGraphics.Clear(WindowBg);
             }
             else
             {
@@ -149,7 +151,7 @@ public sealed partial class MainForm
                 Text = $"{owner._autoStopTime.Hours:00}:{owner._autoStopTime.Minutes:00}",
                 TextAlign = HorizontalAlignment.Center,
                 BackColor = CardBg2,
-                ForeColor = Color.White,
+                ForeColor = TitleText,
                 BorderStyle = BorderStyle.FixedSingle,
                 Font = new Font(_baseFont.FontFamily, 9.5f, FontStyle.Bold, GraphicsUnit.Point),
                 PromptChar = ' ',
@@ -206,31 +208,42 @@ public sealed partial class MainForm
                 owner.WindowState = owner.WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
             }, "max", "chrome");
             AddButton("닫기", new(1377, 8, 64, 48), owner.Close, "close", "chrome");
-            AddButton("홈", new(16, 102, 200, 54), () =>
+            // Seven clear destinations. Automation and production variants live under their own menus.
+            AddButton("홈", new(16, 135, 200, 54), () =>
             {
+                _showHome = true;
                 owner._productionPageMode = null;
-                owner._logExpanded = false; owner.ApplyLogVisibility();
+                owner._logExpanded = false;
+                owner.ApplyLogVisibility();
                 UpdateAbyssDungeonPickerVisibility();
-            }, "home", "nav-selected");
-            AddButton("낚시", new(16, 191, 200, 54), () => SelectMode(0), "fish", "nav");
-            AddButton("던전", new(16, 253, 200, 54), () => SelectMode(1), "swords", "nav");
-            AddButton("어비스", new(16, 315, 200, 54), () => SelectMode(2), "abyss", "nav");
-            AddButton("자동 가공", new(16, 405, 200, 54), () => SelectMode(4), "game", "nav");
-            AddButton("제작", new(16, 467, 200, 54), () => SelectMode(6), "game", "nav");
-            AddButton("자동 채집", new(16, 529, 200, 54), () => SelectMode(5), "leaf", "nav");
-            AddButton("스케줄러", new(16, 641, 200, 54), () => SelectMode(7), "list", "nav");
-            AddButton("설정", new(16, 735, 200, 54), () => ShowMenu(
-                new[] { "텔레그램", "에러 전송", "인식" }, i =>
+            }, "home", "nav");
+            AddButton("자동화 실행", new(16, 204, 200, 54), () => SelectMode(0), "play", "nav");
+            AddButton("생산 관리", new(16, 273, 200, 54), () => ShowMenu(
+                new[] { "자동 가공", "자동 채집", "제작" },
+                i => SelectMode(new[] { 4, 5, 6 }[i]), 228, 273), "game", "nav");
+            AddButton("스케줄러", new(16, 342, 200, 54), () => SelectMode(7), "list", "nav");
+            AddButton("인식 관리", new(16, 411, 200, 54), owner.ShowVisualRecognitionTest, "image", "nav");
+            AddButton("로그 / 진단", new(16, 480, 200, 54), () =>
+            {
+                owner._logExpanded = !owner._logExpanded;
+                owner.ApplyLogVisibility();
+                UpdateAbyssDungeonPickerVisibility();
+            }, "log", "nav");
+            AddButton("설정", new(16, 549, 200, 54), () => ShowMenu(
+                new[] { "텔레그램 알림", "오류 전송", "업데이트 확인" }, i =>
                 {
                     if (i == 0) owner.ShowTelegramSettings();
                     else if (i == 1) owner.ShowErrorUploadSettings();
-                    else owner.ShowVisualRecognitionTest();
-                }, 240, 735), "list", "nav");
+                    else _ = owner.CheckForUpdatesAsync(true);
+                }, 228, 549), "list", "nav");
+            _modeTabs.Add(AddButton("낚시", new(276, 190, 210, 62), () => SelectMode(0), "fish", "mode-tab"));
+            _modeTabs.Add(AddButton("던전", new(496, 190, 210, 62), () => SelectMode(1), "swords", "mode-tab"));
+            _modeTabs.Add(AddButton("어비스", new(716, 190, 210, 62), () => SelectMode(2), "abyss", "mode-tab"));
             AddButton("미니 모드", new(16, 991, 200, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
-            AddButton("현재 모드 선택", new(557, 187, 42, 58), ShowModeMenu, "chevron", "chrome");
-            AddButton("던전 선택", new(933, 187, 42, 58), ShowDungeonMenu, "chevron", "chrome");
+            AddButton("현재 모드 선택", new(935, 190, 42, 62), ShowModeMenu, "chevron", "chrome");
+            AddButton("던전 선택", new(932, 284, 42, 58), ShowDungeonMenu, "chevron", "chrome");
             owner._updateButton = AddButton("업데이트 확인", new(1190, 884, 206, 36), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
             for (int i = 0; i < 3; i++)
             {
@@ -277,6 +290,7 @@ public sealed partial class MainForm
             {
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
+                _showHome = false;
                 _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : mode == 7 ? "스케줄러" : null;
                 _owner._mode.SelectedIndex = mode;
                 UpdateAbyssDungeonPickerVisibility();
@@ -319,8 +333,8 @@ public sealed partial class MainForm
         private void ShowModeMenu()
         {
             if (_owner.AnyRunning || _owner._activeMode is not null) return;
-            ShowMenu(new[] { "낚시", "던전", "어비스", "자동 가공", "제작", "자동 채집", "스케줄러" },
-                index => SelectMode(new[] { 0, 1, 2, 4, 6, 5, 7 }[index]), 557, 245);
+            ShowMenu(new[] { "낚시", "던전", "어비스" },
+                index => SelectMode(index), 935, 252);
         }
 
         private void ShowDungeonMenu()
@@ -363,7 +377,7 @@ public sealed partial class MainForm
 
                 var menu = new ContextMenuStrip
                 {
-                    BackColor = Color.FromArgb(3, 28, 49),
+                    BackColor = CardBg,
                     ForeColor = _text,
                     Font = Font,
                     ShowImageMargin = false
@@ -390,7 +404,7 @@ public sealed partial class MainForm
             var button = new ReferenceButton(this, icon, kind)
             {
                 Text = text, AccessibleName = text, Cursor = Cursors.Hand, TabStop = true,
-                BackColor = CardBg, ForeColor = Color.White,
+                BackColor = CardBg, ForeColor = TitleText,
                 FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false
             };
             button.Click += (_, _) => _owner.SafeUiAction(text, action);
@@ -401,11 +415,12 @@ public sealed partial class MainForm
 
         public void UpdateAbyssDungeonPickerVisibility()
         {
-            bool showButtons = ShouldShowAbyssDungeonPicker && !_owner._logExpanded;
+            bool showButtons = !_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded;
             foreach (var button in _gallery) button.Visible = showButtons;
             if (_owner._alteringPage is not null)
             {
                 bool production = ShouldShowProductionPage;
+                foreach (var tab in _modeTabs) tab.Visible = !_showHome && !production;
                 _owner._alteringPage.Visible = production && _owner._productionPageMode == "가공";
                 _owner._gatheringPage.Visible = production && _owner._productionPageMode == "채집";
                 _owner._craftingPage.Visible = production && _owner._productionPageMode == "제작";
@@ -416,8 +431,10 @@ public sealed partial class MainForm
                     // production/scheduler page. Previously it was hidden while the
                     // painted dashboard still suggested a start control existed.
                     if (control is ProductionPage || control is CraftingPage || control is SchedulerPage || control == _owner._logView || control == _owner._logToggle || control == _owner._mainActionButton || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
-                    if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !production;
+                    if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !_showHome && !production;
                 }
+                _owner._mainActionButton.Visible = !_showHome || _owner.AnyRunning;
+                _owner._logToggle.Visible = !_showHome;
                 if (_owner._logExpanded) _owner._logView.BringToFront();
             }
             Invalidate();
@@ -448,7 +465,7 @@ public sealed partial class MainForm
             if (e.Button != MouseButtons.Left) return;
             float x = e.X / ScaleX, y = e.Y / ScaleY;
             if (y < 65) { _owner.DragReferenceWindow(); return; }
-            if (ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 994)
+            if (!_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 994)
                 SelectDungeon(Math.Clamp((int)((x - 270) / 242), 0, 2));
         }
 
@@ -476,7 +493,7 @@ public sealed partial class MainForm
 
         private void Card(Graphics g, RectangleF r, bool selected = false)
         {
-            using var path = Round(r);
+            using var path = Round(r, 13);
             using var surface = new SolidBrush(selected ? AccentSoft : CardBg);
             g.FillPath(surface, path);
             using var pen = new Pen(selected ? _cyan : _line, selected ? 2 : 1);
@@ -545,106 +562,143 @@ public sealed partial class MainForm
             using (var nav = new SolidBrush(NavBg)) g.FillRectangle(nav, 0, 65, 232, 1021);
             using (var line = new Pen(Line)) { g.DrawLine(line, 0, 65, 1448, 65); g.DrawLine(line, 232, 65, 232, 1086); }
             Icon(g, "game", new(28, 20, 30, 28), _cyan);
-            TextAt(g, "Mabi Auto", new(76, 14, 170, 43), 25, true, Color.White);
+            TextAt(g, "Mabi Auto", new(76, 14, 170, 43), 25, true, TitleText);
             TextAt(g, UpdateManager.CurrentVersion, new(262, 18, 115, 31), 15, false, Muted);
             TextAt(g, "AUTOMATION WORKSPACE", new(399, 18, 580, 31), 14, false, Muted);
-            TextAt(g, "워크스페이스", new(30, 75, 190, 24), 13, false, Muted);
-            TextAt(g, "자동화", new(30, 162, 190, 24), 13, false, Muted);
-            TextAt(g, "생산", new(30, 378, 190, 24), 13, false, Muted);
-            TextAt(g, "작업 계획", new(30, 612, 190, 24), 13, false, Muted);
-            TextAt(g, "환경", new(30, 706, 190, 24), 13, false, Muted);
-            TextAt(g, "키보드 단축키", new(30, 837, 190, 28), 14, true);
+            TextAt(g, "WORKSPACE", new(30, 89, 190, 28), 13, true, Muted);
+            TextAt(g, "빠른 단축키", new(30, 837, 190, 28), 14, true);
             TextAt(g, "F9   작업 시작\nF10  실행 정지\nF8   테스트 / 새로고침", new(30, 879, 190, 86), 15, false, Muted, multiline: true);
             if (ShouldShowProductionPage) return;
+            if (_showHome) PaintHome(g);
+            else PaintAutomation(g);
+        }
 
-            TextAt(g, "실행 대시보드", new(256, 88, 660, 58), 36, true, Color.White);
-            TextAt(g, "작업과 실행 상태를 한곳에서 확인하세요.", new(257, 142, 745, 29), 17, false, Muted);
-            Card(g, new(1092, 94, 330, 70));
+        // Read-only home. Every value is taken from the existing live runtime state,
+        // rather than mock statistics or an invented scheduling calendar.
+        private void PaintHome(Graphics g)
+        {
+            TextAt(g, "홈 대시보드", new(278, 91, 800, 64), 34, true, TitleText);
+            TextAt(g, "현재 작업과 설정 상태를 한눈에 확인하세요.", new(279, 153, 900, 32), 18, false, Muted);
 
-            Card(g, new(256, 185, 356, 77));
-            TextAt(g, "실행 모드", new(277, 193, 240, 24), 15, false, Muted);
-            TextAt(g, _owner._currentModeValue.Text, new(277, 219, 263, 33), 23, true, Color.White);
-            Card(g, new(628, 185, 368, 77));
-            TextAt(g, "작업 대상", new(649, 193, 270, 24), 15, false, Muted);
-            TextAt(g, _owner._currentDungeonValue.Text, new(649, 219, 275, 33), 21, true, Color.White);
-            Card(g, new(1012, 185, 410, 77));
-            Dot(g, 1038, 225, 6, _owner._statusValue.ForeColor);
-            TextAt(g, _owner._statusValue.Text, new(1058, 201, 344, 48), 20, true, _owner._statusValue.ForeColor);
+            Card(g, new(256, 206, 362, 151));
+            TextAt(g, "현재 상태", new(280, 221, 300, 30), 17, true, Muted);
+            Dot(g, 291, 301, 7, _owner._statusValue.ForeColor);
+            TextAt(g, _owner._statusValue.Text, new(312, 269, 282, 60), 25, true, TitleText);
 
-            Metric(g, new(256, 280, 278, 118), "총 실행 시간", _owner._elapsedValue.Text, "clock", _cyan);
-            Metric(g, new(551, 280, 278, 118), "성공", _owner._successValue.Text, "check", _green);
-            Metric(g, new(847, 280, 278, 118), "실패", _owner._failureValue.Text, "close", Color.FromArgb(248, 113, 113));
-            Metric(g, new(1143, 280, 279, 118), "복구", _owner._timeoutValue.Text, "refresh", _cyan);
+            Card(g, new(634, 206, 364, 151));
+            TextAt(g, "실행 모드", new(658, 221, 280, 30), 17, true, Muted);
+            TextAt(g, _owner._currentModeValue.Text, new(658, 268, 311, 60), 25, true, TitleText);
 
-            Card(g, new(256, 414, 740, 229));
-            TextAt(g, "현재 진행", new(279, 429, 370, 36), 21, true, Color.White);
-            TextAt(g, _owner.AnyRunning ? "실행 중" : "대기", new(810, 429, 161, 36), 17, true, _owner._statusValue.ForeColor, StringAlignment.Far);
-            TextAt(g, _owner._currentStepValue.Text, new(279, 479, 687, 48), 27, true, Color.White);
+            Card(g, new(1014, 206, 408, 151));
+            TextAt(g, "총 실행 시간", new(1038, 221, 300, 30), 17, true, Muted);
+            TextAt(g, _owner._elapsedValue.Text, new(1038, 268, 350, 60), 25, true, TitleText);
+
+            Card(g, new(256, 376, 740, 389));
+            TextAt(g, "현재 진행 상황", new(280, 398, 680, 40), 22, true, TitleText);
+            TextAt(g, "진행 단계", new(280, 457, 186, 32), 16, false, Muted);
+            TextAt(g, _owner._currentStepValue.Text, new(465, 447, 495, 56), 20, true, TitleText);
+            TextAt(g, "현재 작업", new(280, 513, 186, 32), 16, false, Muted);
+            TextAt(g, _owner._currentDungeonValue.Text, new(465, 506, 495, 46), 18, true, TitleText);
+            TextAt(g, "진행률", new(280, 567, 186, 32), 16, false, Muted);
             using (var track = new SolidBrush(CardBg2))
-            using (var path = Round(new(279, 548, 693, 10), 5)) g.FillPath(track, path);
+            using (var roundTrack = Round(new(280, 611, 650, 12), 6))
+                g.FillPath(track, roundTrack);
             if (_owner._progress.Value > 0)
             {
-                using var fill = new SolidBrush(_cyan);
-                using var path = Round(new(279, 548, Math.Max(10, 693 * _owner._progress.Value / 100f), 10), 5);
+                using var fill = new SolidBrush(Blue);
+                using var roundFill = Round(new(280, 611, Math.Max(12, 650 * _owner._progress.Value / 100f), 12), 6);
+                g.FillPath(fill, roundFill);
+            }
+            TextAt(g, _owner._progress.Value + "%", new(824, 564, 110, 35), 16, true, Blue, StringAlignment.Far);
+            using (var separator = new Pen(Line)) g.DrawLine(separator, 280, 663, 964, 663);
+            TextAt(g, "최근 인식", new(280, 678, 150, 36), 16, false, Muted);
+            TextAt(g, _owner._recentDetectValue.Text, new(448, 674, 514, 47), 18, true, TitleText);
+
+            Card(g, new(1014, 376, 408, 389));
+            TextAt(g, "설정 및 시스템 상태", new(1038, 398, 365, 42), 22, true, TitleText);
+            var checks = new (string Caption, Label Value)[]
+            {
+                ("게임 연결", _owner._sysGameValue),
+                ("이미지 템플릿", _owner._sysTemplateValue),
+                ("OCR 인식", _owner._sysOcrValue),
+                ("입력 장치", _owner._sysInputValue),
+                ("자동 업데이트", _owner._sysUpdateValue)
+            };
+            for (int i = 0; i < checks.Length; i++)
+            {
+                int y = 466 + i * 56;
+                TextAt(g, checks[i].Caption, new(1038, y, 188, 39), 16, false, Muted);
+                TextAt(g, checks[i].Value.Text, new(1212, y, 178, 39), 16, true, checks[i].Value.ForeColor, StringAlignment.Far);
+                if (i < checks.Length - 1)
+                    using (var border = new Pen(Line)) g.DrawLine(border, 1038, y + 49, 1398, y + 49);
+            }
+            Card(g, new(256, 784, 1166, 158));
+            TextAt(g, "최근 활동", new(280, 805, 320, 40), 21, true, TitleText);
+            var log = string.IsNullOrWhiteSpace(_owner._progressLogPreview.Text)
+                ? "실행을 시작하면 최근 활동이 표시됩니다." : _owner._progressLogPreview.Text;
+            TextAt(g, log, new(280, 860, 1088, 58), 18, false, Muted, multiline: true);
+        }
+
+        private void PaintAutomation(Graphics g)
+        {
+            TextAt(g, "자동화 실행", new(278, 91, 800, 60), 34, true, TitleText);
+            TextAt(g, "낚시 · 던전 · 어비스 중 실행할 작업을 선택하세요.", new(279, 151, 1000, 30), 18, false, Muted);
+
+            Card(g, new(256, 273, 740, 372));
+            TextAt(g, EffectiveMode + " 모드", new(280, 295, 635, 42), 24, true, TitleText);
+            TextAt(g, "선택한 모드의 주요 정보", new(280, 348, 610, 30), 17, false, Muted);
+            using (var divider = new Pen(Line)) g.DrawLine(divider, 280, 396, 963, 396);
+            TextAt(g, "작업 대상", new(280, 417, 168, 36), 17, false, Muted);
+            TextAt(g, _owner._currentDungeonValue.Text, new(454, 417, 450, 36), 18, true, TitleText);
+            TextAt(g, "현재 단계", new(280, 471, 168, 36), 17, false, Muted);
+            TextAt(g, _owner._currentStepValue.Text, new(454, 464, 472, 52), 18, true, TitleText, multiline: true);
+            TextAt(g, "최근 인식", new(280, 530, 168, 36), 17, false, Muted);
+            TextAt(g, _owner._recentDetectValue.Text, new(454, 529, 469, 40), 18, true, TitleText);
+            TextAt(g, "F8 테스트  ·  F9 시작  ·  F10 정지", new(280, 589, 680, 32), 16, false, Muted);
+
+            Card(g, new(1012, 273, 410, 372));
+            TextAt(g, "실행 상태", new(1037, 295, 350, 40), 23, true, TitleText);
+            Dot(g, 1051, 379, 8, _owner._statusValue.ForeColor);
+            TextAt(g, _owner._statusValue.Text, new(1074, 347, 320, 60), 22, true, TitleText);
+            TextAt(g, "경과 시간", new(1037, 438, 160, 34), 16, false, Muted);
+            TextAt(g, _owner._elapsedValue.Text, new(1200, 433, 196, 42), 19, true, TitleText, StringAlignment.Far);
+            TextAt(g, "인식 상태", new(1037, 498, 160, 34), 16, false, Muted);
+            TextAt(g, _owner._sysOcrValue.Text, new(1200, 493, 196, 42), 18, true, _owner._sysOcrValue.ForeColor, StringAlignment.Far);
+            using (var track = new SolidBrush(CardBg2))
+            using (var path = Round(new(1038, 573, 356, 10), 5)) g.FillPath(track, path);
+            if (_owner._progress.Value > 0)
+            {
+                using var fill = new SolidBrush(Blue);
+                using var path = Round(new(1038, 573, Math.Max(10, 356 * _owner._progress.Value / 100f), 10), 5);
                 g.FillPath(fill, path);
             }
-            TextAt(g, "최근 인식  " + _owner._recentDetectValue.Text, new(279, 578, 365, 35), 16, false, Muted);
-            TextAt(g, _owner._stageTime.Text, new(655, 578, 317, 35), 14, false, Muted, StringAlignment.Far);
 
-            Card(g, new(1012, 414, 410, 523));
-            TextAt(g, "실행 준비 상태", new(1037, 435, 345, 40), 23, true, Color.White);
-            var status = new (string Icon, string Caption, Label Value)[]
-            {
-                ("game", "게임 창", _owner._sysGameValue), ("image", "이미지 템플릿", _owner._sysTemplateValue),
-                ("ocr", "OCR 인식", _owner._sysOcrValue), ("keyboard", "키보드 입력", _owner._sysInputValue),
-                ("send", "와치독", _owner._sysWatchdogValue), ("bell", "텔레그램", _owner._sysTelegramValue),
-                ("server", "업데이트", _owner._sysUpdateValue)
-            };
-            for (int i = 0; i < status.Length; i++)
-            {
-                float y = 489 + i * 51;
-                Icon(g, status[i].Icon, new(1037, y + 10, 22, 22), Muted);
-                TextAt(g, status[i].Caption, new(1073, y, 169, 42), 17);
-                Dot(g, 1254, y + 21, 4, status[i].Value.ForeColor);
-                TextAt(g, status[i].Value.Text, new(1270, y, 128, 42), 15, true, status[i].Value.ForeColor, StringAlignment.Far);
-                using var separator = new Pen(Line);
-                g.DrawLine(separator, 1037, y + 47, 1397, y + 47);
-            }
-            TextAt(g, _owner._updateStatusValue.Text, new(1037, 883, 143, 36), 14, false, Muted);
-
-            Card(g, new(256, 659, 740, 278));
+            Card(g, new(256, 662, 740, 275));
             if (ShouldShowAbyssDungeonPicker)
             {
-                TextAt(g, "어비스 목적지", new(279, 677, 689, 35), 22, true, Color.White);
+                TextAt(g, "어비스 목적지", new(279, 680, 689, 35), 21, true, TitleText);
                 string[] names = { "허상의 정박지", "광기의 동굴", "흩어진 물길" };
                 for (int i = 0; i < 3; i++)
                 {
                     int x = 270 + i * 242;
                     Card(g, new(x, 731, 224, 191), i == _owner._abyssDungeon.SelectedIndex);
-                    var previewBounds = new RectangleF(x + 7, 739, 210, 76);
-                    if (_dungeonPreviews[i] is Image preview) g.DrawImage(preview, previewBounds);
-                    else TextAt(g, "미리보기 없음", previewBounds, 14, false, Muted, StringAlignment.Center);
-                    TextAt(g, names[i], new(x + 8, 823, 208, 34), 19, true, Color.White, StringAlignment.Center);
+                    var preview = new RectangleF(x + 7, 739, 210, 76);
+                    if (_dungeonPreviews[i] is Image picture) g.DrawImage(picture, preview);
+                    else TextAt(g, "미리보기 없음", preview, 14, false, Muted, StringAlignment.Center);
+                    TextAt(g, names[i], new(x + 8, 823, 208, 34), 18, true, TitleText, StringAlignment.Center);
                 }
             }
             else
             {
-                TextAt(g, "작업 브리핑", new(279, 677, 689, 35), 22, true, Color.White);
-                string guide = EffectiveMode switch
-                {
-                    "낚시" => "낚시 자동화 · F8은 실제 Space 입력 테스트입니다.",
-                    "던전" => "현재 위치의 던전에서 실행합니다. 시작 전 대상을 확인하세요.",
-                    "페카 심층" => "작업 대상 메뉴에서 심층 1-1 또는 2-1 경로를 선택하세요.",
-                    _ => "생산 작업은 해당 화면에서 품목과 목표 수량을 설정하세요."
-                };
-                TextAt(g, guide, new(279, 724, 689, 55), 18, false, Muted, multiline: true);
-                using var divider = new Pen(Line);
-                g.DrawLine(divider, 279, 789, 972, 789);
-                string preview = string.IsNullOrWhiteSpace(_owner._progressLogPreview.Text)
-                    ? "실행을 시작하면 최근 진행 내용이 표시됩니다." : _owner._progressLogPreview.Text;
-                TextAt(g, "최근 진행", new(279, 807, 689, 27), 14, true, _cyan);
-                TextAt(g, preview, new(279, 845, 689, 69), 16, false, TitleText, multiline: true);
+                TextAt(g, "현재 작업 안내", new(279, 686, 680, 40), 21, true, TitleText);
+                string guide = EffectiveMode == "낚시" ? "낚시 자동화 · F8로 실제 키 입력을 테스트할 수 있습니다."
+                    : "던전 자동화 · 게임 화면과 대상 상태를 확인하고 실행하세요.";
+                TextAt(g, guide, new(279, 741, 680, 58), 18, false, Muted, multiline: true);
+                TextAt(g, _owner._progressLogPreview.Text, new(279, 830, 680, 60), 16, false, Muted, multiline: true);
             }
+            Card(g, new(1012, 662, 410, 275));
+            TextAt(g, "최근 로그", new(1037, 684, 335, 39), 22, true, TitleText);
+            TextAt(g, _owner._progressLogPreview.Text, new(1037, 736, 360, 120), 16, false, Muted, multiline: true);
         }
 
         private void Metric(Graphics g, RectangleF bounds, string caption, string? value, string icon, Color accent)
@@ -653,7 +707,7 @@ public sealed partial class MainForm
             TextAt(g, caption, new(bounds.X + 20, bounds.Y + 14, bounds.Width - 66, 27), 16, false, Muted);
             Icon(g, icon, new(bounds.Right - 43, bounds.Y + 18, 22, 22), accent);
             TextAt(g, string.IsNullOrWhiteSpace(value) ? "0" : value,
-                new(bounds.X + 20, bounds.Y + 49, bounds.Width - 40, 52), 34, true, Color.White);
+                new(bounds.X + 20, bounds.Y + 49, bounds.Width - 40, 52), 34, true, TitleText);
         }
 
         private void Info(Graphics g, RectangleF r, string icon, string caption, string value, float iconX)
@@ -668,7 +722,7 @@ public sealed partial class MainForm
             {
                 Icon(g, icon, new(r.X + 11, r.Y + 9, 25, 25), _cyan);
                 TextAt(g, caption, new(r.X + 45, r.Y + 7, r.Width - 55, 28), 15);
-                TextAt(g, value, new(r.X + 11, r.Y + 36, r.Width - 22, 44), 13, true, Color.White, StringAlignment.Center, multiline: true);
+                TextAt(g, value, new(r.X + 11, r.Y + 36, r.Width - 22, 44), 13, true, TitleText, StringAlignment.Center, multiline: true);
                 return;
             }
 
@@ -676,14 +730,14 @@ public sealed partial class MainForm
             float left = iconX + 55;
             float reserved = caption is "현재 모드" or "선택 던전" ? 42 : 10;
             TextAt(g, caption, new(left, r.Y + 12, r.Right - left - reserved, 24), 16);
-            TextAt(g, value, new(left, r.Y + 32, r.Right - left - reserved, 50), 18, true, Color.White);
+            TextAt(g, value, new(left, r.Y + 32, r.Right - left - reserved, 50), 18, true, TitleText);
         }
 
         private void Stat(Graphics g, float y, string icon, string caption, string value, Color c)
         {
             Icon(g, icon, new(844, y + 10, 26, 26), c);
             TextAt(g, caption, new(884, y, 124, 46), 16);
-            TextAt(g, string.IsNullOrWhiteSpace(value) ? "0" : value, new(1007, y, 83, 46), 20, true, Color.White, StringAlignment.Far);
+            TextAt(g, string.IsNullOrWhiteSpace(value) ? "0" : value, new(1007, y, 83, 46), 20, true, TitleText, StringAlignment.Far);
             if (y < 550) { using var pen = new Pen(Line); g.DrawLine(pen, 844, y + 48, 1096, y + 48); }
         }
 
@@ -774,21 +828,19 @@ public sealed partial class MainForm
                 bool selected = _kind == "choose" && Tag is int index && index == _ui._owner._abyssDungeon.SelectedIndex;
                 bool action = _kind == "action";
                 bool nav = _kind.StartsWith("nav");
-                bool navSelected = nav && (Text == "홈" ? _ui._owner._productionPageMode is null && _ui.EffectiveMode is not ("낚시" or "던전" or "어비스" or "페카 심층")
-                     : Text == "스케줄러" ? _ui._owner._productionPageMode == "스케줄러"
-                    : Text == "자동 가공" ? _ui._owner._productionPageMode == "가공"
-                    : Text == "자동 채집" ? _ui._owner._productionPageMode == "채집"
-                    : Text == "낚시" ? _ui.EffectiveMode == "낚시" && _ui._owner._productionPageMode is null
-                    : Text == "제작" ? _ui._owner._productionPageMode == "제작"
-                    : Text == "어비스" ? _ui.EffectiveMode == "어비스"
-                    : Text == "던전" && _ui.EffectiveMode == "던전");
-                bool strong = action || selected || navSelected;
+                bool navSelected = nav && (Text == "홈" ? _ui._showHome
+                    : Text == "자동화 실행" ? !_ui._showHome && _ui._owner._productionPageMode is null
+                    : Text == "생산 관리" ? _ui._owner._productionPageMode is "가공" or "채집" or "제작"
+                    : Text == "스케줄러" ? _ui._owner._productionPageMode == "스케줄러"
+                    : Text == "로그 / 진단" && _ui._owner._logExpanded);
+                bool modeSelected = _kind == "mode-tab" && Text == _ui.EffectiveMode;
+                bool strong = action || selected || navSelected || modeSelected;
                 bool bare = _kind == "chrome" || nav && !navSelected;
-                Color top = navSelected ? AccentSoft : strong ? Accent : CardBg2;
+                Color top = navSelected || modeSelected ? AccentSoft : strong ? Accent : CardBg2;
                 Color bottom = top;
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }
                 if (_pressed) top = bottom;
-                else if (_hover) top = Color.FromArgb(48, 58, 73);
+                else if (_hover) top = action ? Color.FromArgb(29, 93, 209) : AccentSoft;
                 if (!Enabled) { top = bottom = NavBg; }
                 using (var baseFill = new SolidBrush(nav ? NavBg : _kind == "chrome" ? CardBg : WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
                 var r = new RectangleF(1, 1, Math.Max(1, w - 2), Math.Max(1, h - 2));
@@ -805,7 +857,7 @@ public sealed partial class MainForm
                         g.FillRectangle(marker, 4, 15, 4, Math.Max(4, h - 30));
                     }
                 }
-                Color fg = Enabled ? TitleText : Muted;
+                Color fg = !Enabled ? Muted : action ? Color.White : navSelected || modeSelected ? Blue : TitleText;
                 if (_kind == "chrome")
                 {
                     _ui.Icon(g, _icon, new((w - 24) / 2, (h - 24) / 2, 24, 24), fg);
@@ -814,7 +866,7 @@ public sealed partial class MainForm
                 {
                     string caption = Text.TrimStart('●', '○', '▶', '■', '▤', ' ');
                     float font = action ? 19 : nav ? 20 : _kind == "log" ? 20 : _kind == "quiet" && w < 150 ? 14 : 18;
-                    if (nav) { _ui.Icon(g, _icon, new(18, (h - 30) / 2, 30, 30), fg); _ui.TextAt(g, caption, new(67, 0, w - 73, h), font, strong, fg); }
+                    if (nav || _kind == "mode-tab") { _ui.Icon(g, _icon, new(18, (h - 30) / 2, 30, 30), fg); _ui.TextAt(g, caption, new(67, 0, w - 73, h), font, strong, fg); }
                     else if (_kind == "choose")
                     {
                         using var ring = new Pen(selected ? _ui._cyan : fg, 2);
@@ -838,7 +890,7 @@ public sealed partial class MainForm
                 }
                 if (Focused && ShowFocusCues)
                 {
-                    using var focus = new Pen(Color.White, 1) { DashStyle = DashStyle.Dot };
+                    using var focus = new Pen(Blue, 1) { DashStyle = DashStyle.Dot };
                     g.DrawRectangle(focus, 5, 5, Math.Max(1, w - 10), Math.Max(1, h - 10));
                 }
             }
