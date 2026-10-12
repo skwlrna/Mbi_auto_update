@@ -224,43 +224,40 @@ public sealed partial class MainForm
             AddButton("생산 관리", new(16, 273, 200, 54), () => ShowMenu(
                 new[] { "자동 가공", "자동 채집", "제작" },
                 i => SelectMode(new[] { 4, 5, 6 }[i]), 228, 273), "game", "nav");
-            AddButton("스케줄러", new(16, 342, 200, 54), () => SelectMode(7), "list", "nav");
-            AddButton("인식 관리", new(16, 411, 200, 54), owner.ShowVisualRecognitionTest, "image", "nav");
-            AddButton("로그 / 진단", new(16, 480, 200, 54), () =>
+            AddButton("스케줄러", new(16, 342, 200, 54), () => SelectMode(7), "calendar-clock", "nav");
+            AddButton("설정", new(16, 411, 200, 54), () => ShowMenu(
+                new[] { "텔레그램 알림", "오류 전송" }, i =>
+                {
+                    if (i == 0) owner.ShowTelegramSettings();
+                    else owner.ShowErrorUploadSettings();
+                }, 228, 411), "settings", "nav");
+            AddButton("인식 관리", new(16, 480, 200, 54), owner.ShowVisualRecognitionTest, "scan-eye", "nav");
+            AddButton("로그 / 진단", new(16, 549, 200, 54), () =>
             {
                 owner._logExpanded = !owner._logExpanded;
                 owner.ApplyLogVisibility();
                 UpdateAbyssDungeonPickerVisibility();
             }, "log", "nav");
-            AddButton("설정", new(16, 549, 200, 54), () => ShowMenu(
-                new[] { "텔레그램 알림", "오류 전송" }, i =>
-                {
-                    if (i == 0) owner.ShowTelegramSettings();
-                    else owner.ShowErrorUploadSettings();
-                }, 228, 549), "list", "nav");
             _modeTabs.Add(AddButton("낚시", new(276, 190, 210, 62), () => SelectMode(0), "fish", "mode-tab"));
             _modeTabs.Add(AddButton("던전", new(496, 190, 210, 62), () => SelectMode(1), "swords", "mode-tab"));
             _modeTabs.Add(AddButton("어비스", new(716, 190, 210, 62), () => SelectMode(2), "abyss", "mode-tab"));
             AddButton("미니 모드", new(16, 991, 200, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
-            AddButton("현재 모드 선택", new(935, 190, 42, 62), ShowModeMenu, "chevron", "chrome");
             AddButton("던전 선택", new(932, 284, 42, 58), ShowDungeonMenu, "chevron", "chrome");
             owner._updateButton = AddButton("업데이트 확인", new(1163, 800, 228, 43), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
             for (int i = 0; i < 3; i++)
             {
                 int index = i;
-                var choose = AddButton("선택하기", new(278 + i * 242, 864, 208, 48), () => SelectDungeon(index), "radio", "choose");
+                var choose = AddButton("선택하기", new(278 + i * 380, 864, 346, 48), () => SelectDungeon(index), "radio", "choose");
                 choose.Tag = i;
                 _gallery.Add(choose);
                 owner._dungeonButtons.Add(choose);
             }
-            owner._logToggle = AddButton("상세 로그", new(256, 962, 564, 75), () =>
-            {
-                owner._logExpanded = !owner._logExpanded;
-                owner.ApplyLogVisibility();
-            }, "log", "log");
-            owner._mainActionButton = AddButton("자동 실행 시작", new(838, 962, 584, 75), () =>
+            // Logs can only be opened from the sidebar. Preserve the legacy
+            // detached control so ApplyLogVisibility remains safe.
+            owner._logToggle = new Button { Visible = false };
+            owner._mainActionButton = AddButton("자동 실행 시작", new(256, 962, 1166, 75), () =>
             {
                 if (owner.AnyRunning) owner.StopSelected(); else owner.StartSelected();
             }, "play", "action");
@@ -438,7 +435,7 @@ public sealed partial class MainForm
                     if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !_showHome && !production;
                 }
                 _owner._mainActionButton.Visible = !_showHome || _owner.AnyRunning;
-                _owner._logToggle.Visible = !_showHome;
+                _owner._logToggle.Visible = false;
                 _owner._updateButton.Visible = _showHome;
                 if (_owner._logExpanded) _owner._logView.BringToFront();
             }
@@ -475,8 +472,8 @@ public sealed partial class MainForm
             if (e.Button != MouseButtons.Left) return;
             float x = e.X / ScaleX, y = e.Y / ScaleY;
             if (y < 65) { _owner.DragReferenceWindow(); return; }
-            if (!_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 994)
-                SelectDungeon(Math.Clamp((int)((x - 270) / 242), 0, 2));
+            if (!_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 1412)
+                SelectDungeon(Math.Clamp((int)((x - 270) / 380), 0, 2));
         }
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
@@ -683,32 +680,30 @@ public sealed partial class MainForm
                 g.FillPath(fill, path);
             }
 
-            Card(g, new(256, 662, 740, 275));
+            // Wider content card replaces the redundant Recent Log pane.
+            Card(g, new(256, 662, 1166, 275));
             if (ShouldShowAbyssDungeonPicker)
             {
-                TextAt(g, "어비스 목적지", new(279, 680, 689, 35), 21, true, TitleText);
+                TextAt(g, "어비스 목적지", new(279, 680, 1100, 35), 21, true, TitleText);
                 string[] names = { "허상의 정박지", "광기의 동굴", "흩어진 물길" };
                 for (int i = 0; i < 3; i++)
                 {
-                    int x = 270 + i * 242;
-                    Card(g, new(x, 731, 224, 191), i == _owner._abyssDungeon.SelectedIndex);
-                    var preview = new RectangleF(x + 7, 739, 210, 76);
+                    int x = 270 + i * 380;
+                    Card(g, new(x, 731, 364, 191), i == _owner._abyssDungeon.SelectedIndex);
+                    var preview = new RectangleF(x + 7, 739, 350, 76);
                     if (_dungeonPreviews[i] is Image picture) g.DrawImage(picture, preview);
                     else TextAt(g, "미리보기 없음", preview, 14, false, Muted, StringAlignment.Center);
-                    TextAt(g, names[i], new(x + 8, 823, 208, 34), 18, true, TitleText, StringAlignment.Center);
+                    TextAt(g, names[i], new(x + 8, 823, 348, 34), 18, true, TitleText, StringAlignment.Center);
                 }
             }
             else
             {
-                TextAt(g, "현재 작업 안내", new(279, 686, 680, 40), 21, true, TitleText);
+                TextAt(g, "현재 작업 안내", new(279, 686, 1065, 40), 21, true, TitleText);
                 string guide = EffectiveMode == "낚시" ? "낚시 자동화 · F8로 실제 키 입력을 테스트할 수 있습니다."
                     : "던전 자동화 · 게임 화면과 대상 상태를 확인하고 실행하세요.";
-                TextAt(g, guide, new(279, 741, 680, 58), 18, false, Muted, multiline: true);
-                TextAt(g, _owner._progressLogPreview.Text, new(279, 830, 680, 60), 16, false, Muted, multiline: true);
+                TextAt(g, guide, new(279, 741, 1065, 58), 18, false, Muted, multiline: true);
+                TextAt(g, "로그 기록은 왼쪽 로그 / 진단 메뉴에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
             }
-            Card(g, new(1012, 662, 410, 275));
-            TextAt(g, "최근 로그", new(1037, 684, 335, 39), 22, true, TitleText);
-            TextAt(g, _owner._progressLogPreview.Text, new(1037, 736, 360, 120), 16, false, Muted, multiline: true);
         }
 
         private void Metric(Graphics g, RectangleF bounds, string caption, string? value, string icon, Color accent)
@@ -777,6 +772,17 @@ public sealed partial class MainForm
                     for (int i = 0; i < 8; i++) { double a = i * Math.PI / 4; g.DrawLine(pen, 16 + 10 * (float)Math.Cos(a), 16 + 10 * (float)Math.Sin(a), 16 + 15 * (float)Math.Cos(a), 16 + 15 * (float)Math.Sin(a)); } break;
                 case "crosshair": g.DrawEllipse(pen, 5, 5, 22, 22); g.DrawLine(pen, 16, 0, 16, 10); g.DrawLine(pen, 16, 22, 16, 32); g.DrawLine(pen, 0, 16, 10, 16); g.DrawLine(pen, 22, 16, 32, 16); break;
                 case "map": g.FillPolygon(fill, new PointF[] { new(2, 4), new(10, 1), new(10, 28), new(2, 31) }); g.FillPolygon(fill, new PointF[] { new(13, 2), new(20, 5), new(20, 31), new(13, 28) }); g.FillPolygon(fill, new PointF[] { new(23, 5), new(30, 1), new(30, 27), new(23, 31) }); break;
+                case "calendar-clock":
+                    g.DrawRectangle(pen, 2, 4, 26, 23); g.DrawLine(pen, 2, 11, 28, 11);
+                    g.DrawLine(pen, 9, 0, 9, 8); g.DrawLine(pen, 22, 0, 22, 8);
+                    g.FillEllipse(fill, 7, 16, 3, 3); g.FillEllipse(fill, 14, 16, 3, 3);
+                    g.DrawEllipse(pen, 19, 19, 12, 12); g.DrawLine(pen, 25, 21, 25, 25); g.DrawLine(pen, 25, 25, 28, 27); break;
+                case "scan-eye":
+                    g.DrawLine(pen, 1, 10, 1, 2); g.DrawLine(pen, 1, 2, 9, 2);
+                    g.DrawLine(pen, 23, 2, 31, 2); g.DrawLine(pen, 31, 2, 31, 10);
+                    g.DrawLine(pen, 1, 22, 1, 30); g.DrawLine(pen, 1, 30, 9, 30);
+                    g.DrawLine(pen, 23, 30, 31, 30); g.DrawLine(pen, 31, 30, 31, 22);
+                    g.DrawEllipse(pen, 9, 11, 14, 11); g.FillEllipse(fill, 14, 14, 4, 4); break;
                 case "list": for (int i = 0; i < 3; i++) { g.FillEllipse(fill, 1, 4 + i * 10, 4, 4); g.DrawLine(pen, 11, 6 + i * 10, 29, 6 + i * 10); } break;
                 case "image": g.DrawRectangle(pen, 2, 3, 28, 26); g.FillEllipse(fill, 7, 7, 6, 6); g.DrawLines(pen, new PointF[] { new(3, 24), new(12, 17), new(17, 21), new(23, 14), new(29, 21) }); break;
                 case "play": g.FillPolygon(fill, new PointF[] { new(5, 2), new(28, 16), new(5, 30) }); break;
@@ -843,13 +849,14 @@ public sealed partial class MainForm
                     : !_ui._owner._logExpanded && Text == _ui._selectedNavigation);
                 bool modeSelected = _kind == "mode-tab" && Text == _ui.EffectiveMode;
                 bool strong = action || selected || navSelected || modeSelected;
-                bool bare = _kind == "chrome" || nav && !navSelected;
+                // Unselected WORKSPACE entries retain visible card backgrounds and borders.
+                bool bare = _kind == "chrome";
                 Color top = navSelected || modeSelected ? AccentSoft : action ? Accent : CardBg;
                 Color bottom = top;
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }
                 if (_pressed) top = action ? Color.FromArgb(29, 93, 209) : (navSelected || modeSelected ? AccentSoft : CardBg2);
                 else if (_hover && !navSelected && !modeSelected) top = action ? Color.FromArgb(29, 93, 209) : CardBg2;
-                if (!Enabled) { top = bottom = NavBg; }
+                if (!Enabled) { top = bottom = CardBg2; }
                 using (var baseFill = new SolidBrush(nav ? NavBg : _kind == "chrome" ? CardBg : WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
                 var r = new RectangleF(1, 1, Math.Max(1, w - 2), Math.Max(1, h - 2));
                 using var shape = Round(r, action ? 11 : 7);
@@ -890,9 +897,19 @@ public sealed partial class MainForm
                     }
                     else if (action)
                     {
-                        if (_ui._owner.AnyRunning) { using var stop = new SolidBrush(fg); g.FillRectangle(stop, 24, (h - 22) / 2, 22, 22); }
-                        else _ui.Icon(g, "play", new(22, (h - 30) / 2, 30, 30), fg);
-                        _ui.TextAt(g, caption, new(66, 0, w - 80, h), font, true, Color.White);
+                        float px = Math.Max(13f, MathF.Round(font * Math.Min(sx, sy)));
+                        using var labelFont = new Font(_ui._baseFont.FontFamily, px, FontStyle.Bold, GraphicsUnit.Pixel);
+                        float textWidth = TextRenderer.MeasureText(caption, labelFont,
+                            Size.Empty, TextFormatFlags.NoPadding).Width / sx;
+                        float startX = Math.Max(12f, (w - (30f + 14f + textWidth)) / 2f);
+                        if (_ui._owner.AnyRunning)
+                        {
+                            using var stop = new SolidBrush(fg);
+                            g.FillRectangle(stop, startX + 5, (h - 21) / 2, 21, 21);
+                        }
+                        else _ui.Icon(g, "play", new(startX, (h - 30) / 2, 30, 30), fg);
+                        _ui.TextAt(g, caption, new(startX + 44, 0, textWidth + 12, h),
+                            font, true, Color.White, StringAlignment.Center);
                     }
                     else _ui.TextAt(g, caption, new(5, 0, w - 10, h), font, false, fg, StringAlignment.Center);
                 }

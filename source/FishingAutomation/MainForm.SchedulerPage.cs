@@ -35,29 +35,10 @@ public sealed partial class MainForm
 
         private void ClearStartFeedback() => _lastStartFeedback = null;
         private readonly Button _start;
-        private readonly TabControl _tabs = new FluentTabControl();
+        private readonly TabControl _tabs = new();
 
-        // Native tabs keep keyboard and accessibility behavior; only their exposed
-        // system-colored frame is repainted to match the shared white surface.
-        private sealed class FluentTabControl : TabControl
-        {
-            protected override void WndProc(ref Message m)
-            {
-                base.WndProc(ref m);
-                if (m.Msg is not (0x000F or 0x0317 or 0x0318) || TabCount == 0) return;
-                if (m.Msg != 0x000F && m.WParam == IntPtr.Zero) return;
-                using var graphics = m.Msg == 0x000F
-                    ? Graphics.FromHwnd(Handle) : Graphics.FromHdc(m.WParam);
-                var lastTab = GetTabRect(TabCount - 1);
-                using var surface = new SolidBrush(WindowBg);
-                graphics.FillRectangle(surface, lastTab.Right + 2, 0,
-                    Math.Max(0, Width - lastTab.Right - 2), lastTab.Bottom);
-                using var frame = new Pen(WindowBg, 4);
-                graphics.DrawRectangle(frame, 1, lastTab.Bottom + 2,
-                    Math.Max(1, Width - 3), Math.Max(1, Height - lastTab.Bottom - 4));
-            }
-        }
-
+        // Keep the native tab painter; manually overpainting its window frame
+        // erased inactive tab labels until hover refreshed the screen.
         internal bool UseAltering => _alters.Checked;
         internal bool UseCrafting => _crafts.Checked;
         internal bool UseAbyss => _abyss.Checked;
@@ -120,7 +101,7 @@ public sealed partial class MainForm
                 e.Graphics.FillRectangle(fill, e.Bounds);
                 e.Graphics.DrawRectangle(edge, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
                 TextRenderer.DrawText(e.Graphics, _tabs.TabPages[e.Index].Text, _tabs.Font,
-                    e.Bounds, selected ? TitleText : Muted,
+                    e.Bounds, selected ? Color.FromArgb(22, 58, 112) : TitleText,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             };
             _tabs.Padding = new Point(16, 8);
@@ -138,7 +119,7 @@ public sealed partial class MainForm
             _tabs.TabPages.Add(MakeAltering());
             _tabs.TabPages.Add(MakeCrafting());
             _tabs.TabPages.Add(MakeAbyss());
-            _tabs.SelectedIndexChanged += (_, _) => RefreshSnapshot();
+            _tabs.SelectedIndexChanged += (_, _) => { _tabs.Invalidate(); RefreshSnapshot(); };
             root.Controls.Add(_tabs, 0, 1);
 
             var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Border, Padding = new Padding(1), Margin = new Padding(0, 2, 0, 0) };
