@@ -85,6 +85,8 @@ public sealed partial class MainForm
         private readonly List<(Control Control, RectangleF Bounds)> _positions = new();
         private readonly List<ReferenceButton> _gallery = new();
         private readonly List<ReferenceButton> _modeTabs = new();
+        private readonly List<ReferenceButton> _navigationButtons = new();
+        private string _selectedNavigation = "홈";
         private bool _showHome = true;
         private readonly ToolTip _tips = new();
         private ContextMenuStrip? _openMenu;
@@ -212,6 +214,7 @@ public sealed partial class MainForm
             AddButton("홈", new(16, 135, 200, 54), () =>
             {
                 _showHome = true;
+                _selectedNavigation = "홈";
                 owner._productionPageMode = null;
                 owner._logExpanded = false;
                 owner.ApplyLogVisibility();
@@ -291,6 +294,7 @@ public sealed partial class MainForm
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
                 _showHome = false;
+                _selectedNavigation = mode == 7 ? "스케줄러" : mode is 4 or 5 or 6 ? "생산 관리" : "자동화 실행";
                 _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : mode == 7 ? "스케줄러" : null;
                 _owner._mode.SelectedIndex = mode;
                 UpdateAbyssDungeonPickerVisibility();
@@ -410,6 +414,7 @@ public sealed partial class MainForm
             button.Click += (_, _) => _owner.SafeUiAction(text, action);
             Controls.Add(button);
             _positions.Add((button, bounds));
+            if (kind == "nav") _navigationButtons.Add(button);
             return button;
         }
 
@@ -437,6 +442,11 @@ public sealed partial class MainForm
                 _owner._logToggle.Visible = !_showHome;
                 if (_owner._logExpanded) _owner._logView.BringToFront();
             }
+            // Each WinForms owner-drawn button keeps its own paint surface.
+            // Explicitly repaint previous choices when the active page changes.
+            foreach (var nav in _navigationButtons) nav.Invalidate();
+            foreach (var tab in _modeTabs) tab.Invalidate();
+            foreach (var option in _gallery) option.Invalidate();
             Invalidate();
         }
 
@@ -828,19 +838,17 @@ public sealed partial class MainForm
                 bool selected = _kind == "choose" && Tag is int index && index == _ui._owner._abyssDungeon.SelectedIndex;
                 bool action = _kind == "action";
                 bool nav = _kind.StartsWith("nav");
-                bool navSelected = nav && (Text == "홈" ? _ui._showHome
-                    : Text == "자동화 실행" ? !_ui._showHome && _ui._owner._productionPageMode is null
-                    : Text == "생산 관리" ? _ui._owner._productionPageMode is "가공" or "채집" or "제작"
-                    : Text == "스케줄러" ? _ui._owner._productionPageMode == "스케줄러"
-                    : Text == "로그 / 진단" && _ui._owner._logExpanded);
+                bool navSelected = nav && (Text == "로그 / 진단"
+                    ? _ui._owner._logExpanded
+                    : !_ui._owner._logExpanded && Text == _ui._selectedNavigation);
                 bool modeSelected = _kind == "mode-tab" && Text == _ui.EffectiveMode;
                 bool strong = action || selected || navSelected || modeSelected;
                 bool bare = _kind == "chrome" || nav && !navSelected;
-                Color top = navSelected || modeSelected ? AccentSoft : strong ? Accent : CardBg2;
+                Color top = navSelected || modeSelected ? AccentSoft : action ? Accent : CardBg;
                 Color bottom = top;
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }
-                if (_pressed) top = bottom;
-                else if (_hover) top = action ? Color.FromArgb(29, 93, 209) : AccentSoft;
+                if (_pressed) top = action ? Color.FromArgb(29, 93, 209) : (navSelected || modeSelected ? AccentSoft : CardBg2);
+                else if (_hover && !navSelected && !modeSelected) top = action ? Color.FromArgb(29, 93, 209) : CardBg2;
                 if (!Enabled) { top = bottom = NavBg; }
                 using (var baseFill = new SolidBrush(nav ? NavBg : _kind == "chrome" ? CardBg : WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
                 var r = new RectangleF(1, 1, Math.Max(1, w - 2), Math.Max(1, h - 2));
@@ -849,7 +857,7 @@ public sealed partial class MainForm
                 {
                     using var fill = new SolidBrush(top);
                     g.FillPath(fill, shape);
-                    using var border = new Pen(strong ? _ui._cyan : _ui._line, strong ? 1.7f : 1f);
+                    using var border = new Pen(navSelected || modeSelected || selected ? _ui._cyan : _ui._line, navSelected || modeSelected || selected ? 1.7f : 1f);
                     g.DrawPath(border, shape);
                     if (navSelected)
                     {
@@ -865,7 +873,7 @@ public sealed partial class MainForm
                 else
                 {
                     string caption = Text.TrimStart('●', '○', '▶', '■', '▤', ' ');
-                    float font = action ? 19 : nav ? 20 : _kind == "log" ? 20 : _kind == "quiet" && w < 150 ? 14 : 18;
+                    float font = action ? 19 : nav ? 19 : _kind == "mode-tab" ? 19 : _kind == "log" ? 19 : _kind == "quiet" && w < 150 ? 14 : 18;
                     if (nav || _kind == "mode-tab") { _ui.Icon(g, _icon, new(18, (h - 30) / 2, 30, 30), fg); _ui.TextAt(g, caption, new(67, 0, w - 73, h), font, strong, fg); }
                     else if (_kind == "choose")
                     {
