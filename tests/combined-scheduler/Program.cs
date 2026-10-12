@@ -1,0 +1,303 @@
+using FishingAutomation;
+using DungeonVisionBot;
+using System.Drawing;
+using System.Text.Json;
+
+static void Assert(bool condition, string message)
+{
+    if (!condition) throw new Exception(message);
+    Console.WriteLine("PASS " + message);
+}
+
+static AlteringWork Work(long seconds, bool completed = false)
+    => new("가죽", "가죽 가공 시설",
+        completed ? "Completed" : "InProgress", completed, seconds);
+
+Assert(!AbyssAlteringSchedulePolicy.CanRun(Array.Empty<AlteringWork>()),
+    "no work: never enter abyss");
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(89) }),
+    "short remaining work: wait normally");
+Assert(AbyssAlteringSchedulePolicy.CanRun(new[] { Work(90) }),
+    "90s remaining: safe to yield");
+Assert(AbyssAlteringSchedulePolicy.CanRun(new[] { Work(700), Work(180), Work(0, true) }),
+    "completed slots may remain with other running slots");
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(500), Work(30) }),
+    "shortest remaining active job controls handoff");
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(-1) }),
+    "invalid timer: no excursion");
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(0, true) }),
+    "all slots complete: process before abyss");
+
+// Departure is an efficiency gate, NOT an Abyss battle duration limit.
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(120) }, 180),
+    "180s selectable departure gate rejects a shorter processing wait");
+Assert(AbyssAlteringSchedulePolicy.CanRun(new[] { Work(200), Work(180) }, 180),
+    "180s selectable departure gate accepts all active lanes");
+Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(200) }, -1),
+    "invalid departure gate fails closed");
+
+// The manager watchdog excludes every second spent inside Abyss, regardless
+// of how long the dungeon takes. The server-owned processing countdown does
+// not stop; the next manager read must query the real works anew.
+DateTimeOffset pauseClock = new(2026, 10, 12, 1, 0, 0, TimeSpan.Zero);
+var pauseWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => pauseClock);
+var pauseWork = Work(400);
+pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+pauseClock = pauseClock.AddSeconds(100);
+pauseWatch.PauseForAbyss();
+pauseClock = pauseClock.AddMinutes(11); // variable dungeon length, longer than stall threshold
+bool pausedWatchRejectedRead = false;
+try { pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork }); }
+catch (InvalidOperationException) { pausedWatchRejectedRead = true; }
+Assert(pausedWatchRejectedRead,
+    "no processing manager/watchdog observation while Abyss owns the UI");
+pauseWatch.ResumeAfterAbyssExit();
+pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+pauseClock = pauseClock.AddSeconds(19);
+pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+pauseClock = pauseClock.AddSeconds(2);
+bool pauseWatchEventuallyStopped = false;
+try { pauseWatch.Observe("가죽 가공 시설", new[] { pauseWork }); }
+catch (InvalidOperationException ex)
+{
+    pauseWatchEventuallyStopped = ex.Message.Contains("다중가공 시설별 정체 감지");
+}
+Assert(pauseWatchEventuallyStopped,
+    "11 minutes inside Abyss excluded, 101+20 seconds active stall still detected");
+
+// Even a 1-hour Abyss excursion cannot trigger a false stall on the first
+// fresh processing read after verified exit.
+DateTimeOffset longClock = new(2026, 10, 12, 1, 0, 0, TimeSpan.Zero);
+var longWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => longClock);
+longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+longWatch.PauseForAbyss();
+longClock = longClock.AddHours(1);
+longWatch.ResumeAfterAbyssExit();
+longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
+Assert(true, "Abyss duration never becomes manager stall time after return");
+
+Assert(ScheduledAbyssReturnPolicy.RecoveryResultAction(true) ==
+       AbyssRecoveryResultAction.ExitForProcessing,
+    "scheduled recovery result must use LEFT exit, never middle retry");
+Assert(ScheduledAbyssReturnPolicy.RecoveryResultAction(false) ==
+       AbyssRecoveryResultAction.RetryDungeon,
+    "ordinary Abyss recovery keeps its existing middle retry behavior");
+
+// A non-repeating scenario can return without finishing after network restart,
+// Timeout Smart Recovery, or RestartCycleException. Such a return is NOT proof
+// that the character left Abyss.
+bool silentRestartBlocked = false;
+try
+{
+    ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+        scheduledResultExit: true, outsideHudVerified: false, CancellationToken.None);
+}
+catch (InvalidOperationException ex)
+{
+    silentRestartBlocked = ex.Message.Contains("던전 밖 HUD 확인 기록이 없습니다");
+}
+Assert(silentRestartBlocked,
+    "silent scheduled restart/reconnect/recovery return cannot release processing");
+ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+    scheduledResultExit: true, outsideHudVerified: true, CancellationToken.None);
+Assert(true, "only verified outside HUD allows scheduled return");
+ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+    scheduledResultExit: false, outsideHudVerified: false, CancellationToken.None);
+Assert(true, "ordinary unscheduled Abyss unaffected by scheduler proof");
+using (var stopAfterExit = new CancellationTokenSource())
+{
+    stopAfterExit.Cancel();
+    bool canceledEvenWithProof = false;
+    try
+    {
+        ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+            scheduledResultExit: true, outsideHudVerified: true, stopAfterExit.Token);
+    }
+    catch (OperationCanceledException) { canceledEvenWithProof = true; }
+    Assert(canceledEvenWithProof,
+        "F10 always prevents processing even after outside HUD proof");
+}
+
+// Run the real coordinator with pure fake data: the input owner never overlaps.
+var plan = new AlteringPlan("가죽 가공 시설", "가죽", 1, 1, false);
+var simulatedWorks = new List<AlteringWork> { Work(200) };
+var events = new List<string>();
+int readsAfterOutside = 0;
+var coordinator = new MultiAlteringCoordinator();
+using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+await coordinator.RunAsync(
+    new[] { plan },
+    async (_, _, token) =>
+    {
+        events.Add("processing");
+        token.ThrowIfCancellationRequested();
+        await Task.CompletedTask;
+        return true;
+    },
+    token =>
+    {
+        if (events.Contains("abyss")) readsAfterOutside++;
+        return Task.FromResult<IReadOnlyList<AlteringWork>>(simulatedWorks.ToArray());
+    },
+    (_, _) => throw new Exception("Unexpected ordinary delay when abyss was eligible"),
+    timeout.Token,
+    onIdleAbyssRound: async token =>
+    {
+        token.ThrowIfCancellationRequested();
+        Assert(!events.Contains("processing"), "no processing input during abyss turn");
+        events.Add("abyss");
+        simulatedWorks.Clear(); // Simulate verified exit followed by refreshed CLI.
+        await Task.CompletedTask;
+    });
+Assert(events.SequenceEqual(new[] { "abyss", "processing" }),
+    "abyss finishes and yields before processing next action");
+Assert(readsAfterOutside > 0,
+    "confirmed outside exit causes a fresh server works read before processing");
+
+// A failed exit must never release the input lease back to production.
+int callsAfterFailure = 0;
+bool caughtExitFailure = false;
+try
+{
+    var failureCoordinator = new MultiAlteringCoordinator();
+    using var failureTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await failureCoordinator.RunAsync(
+        new[] { plan },
+        (_, _, _) =>
+        {
+            callsAfterFailure++;
+            return Task.FromResult(false);
+        },
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(new[] { Work(300) }),
+        (_, _) => throw new Exception("Delay is not permitted on failure"),
+        failureTimeout.Token,
+        onIdleAbyssRound: _ => throw new InvalidOperationException("Unverified exit"));
+}
+catch (InvalidOperationException ex) when (ex.Message == "Unverified exit")
+{
+    caughtExitFailure = true;
+}
+Assert(caughtExitFailure && callsAfterFailure == 0,
+    "failed abyss exit stops before any further processing action");
+
+// Regression for the real bug: previously a scheduled non-repeat Abyss engine
+// could silently complete after a network restart. The callback must reject
+// this and the manager must never read fresh processing jobs or press a key.
+int readsAfterSilentReturn = 0;
+int registrationsAfterSilentReturn = 0;
+bool silentReturnStoppedCoordinator = false;
+try
+{
+    var coordinatorAfterSilentReturn = new MultiAlteringCoordinator();
+    using var timeoutAfterSilentReturn = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await coordinatorAfterSilentReturn.RunAsync(
+        new[] { plan },
+        (_, _, _) =>
+        {
+            registrationsAfterSilentReturn++;
+            return Task.FromResult(false);
+        },
+        _ =>
+        {
+            readsAfterSilentReturn++;
+            return Task.FromResult<IReadOnlyList<AlteringWork>>(new[] { Work(300) });
+        },
+        (_, _) => throw new Exception("Unexpected delay after unverified recovery"),
+        timeoutAfterSilentReturn.Token,
+        onIdleAbyssRound: token =>
+        {
+            ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+                scheduledResultExit: true, outsideHudVerified: false, token);
+            return Task.CompletedTask;
+        });
+}
+catch (InvalidOperationException ex) when (
+    ex.Message.Contains("던전 밖 HUD 확인 기록이 없습니다"))
+{
+    silentReturnStoppedCoordinator = true;
+}
+Assert(silentReturnStoppedCoordinator && readsAfterSilentReturn > 0 &&
+       readsAfterSilentReturn < 4 && registrationsAfterSilentReturn == 0,
+    "failed scheduled return blocks subsequent processing polling and registration");
+
+// Cancellation during the handoff also forbids subsequent input.
+int callsAfterCancel = 0;
+using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+bool cancellationObserved = false;
+try
+{
+    var cancelCoordinator = new MultiAlteringCoordinator();
+    await cancelCoordinator.RunAsync(
+        new[] { plan },
+        (_, _, _) =>
+        {
+            callsAfterCancel++;
+            return Task.FromResult(false);
+        },
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(new[] { Work(300) }),
+        (_, _) => throw new Exception("Delay is not permitted on cancellation"),
+        cancel.Token,
+        onIdleAbyssRound: _ =>
+        {
+            cancel.Cancel();
+            return Task.CompletedTask;
+        });
+}
+catch (OperationCanceledException)
+{
+    cancellationObserved = true;
+}
+Assert(cancellationObserved && callsAfterCancel == 0,
+    "F10 cancellation inside abyss prevents another processing action");
+
+var cfg = JsonDocument.Parse(File.ReadAllText(
+    Path.Combine(Directory.GetCurrentDirectory(), "source/FishingAutomation/abyss/config/scenario.json")));
+Assert(cfg.RootElement.GetProperty("Repeat").GetBoolean(),
+    "packaged ordinary abyss scenario still repeats forever");
+// User-supplied full-screen phone image (706 x 1536) provides independent
+// *layout* evidence, not a Windows client capture. Normalized to 800 x 1000,
+// the left "나가기" text begins left of the original x=160 OCR crop.
+var leftCrop = AbyssResultLayout.ScheduledExitLabelRoi;
+Assert(leftCrop.Contains(new Rectangle(120, 915, 90, 25)),
+    "portrait screenshot's normalized full left exit label fits the OCR crop");
+Assert(leftCrop.Right < 310, "left exit-label crop cannot include the middle retry label");
+Assert(AbyssResultLayout.HasStableScheduledExitLabel(
+        new Rectangle(120, 918, 93, 22), new Rectangle(122, 917, 89, 23),
+        leftCrop, leftCrop),
+    "two exact left exit labels in overlapping locations authorize the click");
+Assert(!AbyssResultLayout.HasStableScheduledExitLabel(
+        new Rectangle(120, 918, 93, 22), new Rectangle(230, 918, 60, 22),
+        leftCrop, leftCrop),
+    "two different left-side text locations do not authorize the click");
+Assert(!AbyssResultLayout.HasStableScheduledExitLabel(
+        new Rectangle(120, 918, 93, 22), new Rectangle(320, 918, 75, 22),
+        leftCrop, leftCrop),
+    "OCR in middle retry button must never authorize left exit");
+Assert(!AbyssResultLayout.HasStableScheduledExitLabel(
+        Rectangle.Empty, new Rectangle(120, 918, 93, 22), leftCrop, leftCrop),
+    "missing first result text fails closed");
+
+// Fixed input target must be independent of OCR glyph centers. The left
+// button center comes from the user's portrait result layout, not from the
+// former broader green-button detection ROI (whose center was X=250).
+Point fixedExit = AbyssResultLayout.FixedButtonCenter(true, new Size(800, 1000));
+Point fixedRetry = AbyssResultLayout.FixedButtonCenter(false, new Size(800, 1000));
+Assert(fixedExit == new Point(165, 930) && fixedRetry == new Point(400, 930),
+    "fixed canonical left exit/middle retry click points");
+Assert(fixedExit.X < 280 && fixedRetry.X is > 310 and < 490 && fixedExit.Y == fixedRetry.Y,
+    "fixed exit and retry clicks cannot target the same result button");
+Assert(AbyssResultLayout.FixedButtonCenter(true, new Size(815, 920)) == new Point(168, 856) &&
+       AbyssResultLayout.FixedButtonCenter(false, new Size(815, 920)) == new Point(408, 856),
+    "fixed centers scale independently for real 815x920 game-client capture");
+bool refusedInvalidAspect = false;
+try { _ = AbyssResultLayout.FixedButtonCenter(true, new Size(706, 1536)); }
+catch (InvalidOperationException) { refusedInvalidAspect = true; }
+Assert(refusedInvalidAspect, "do not click unadjusted coordinates on an iPhone screenshot aspect");
+bool refusedMissingClient = false;
+try { _ = AbyssResultLayout.FixedButtonCenter(false, Size.Empty); }
+catch (InvalidOperationException) { refusedMissingClient = true; }
+Assert(refusedMissingClient, "missing client geometry blocks fixed click");
+
+Console.WriteLine("Combined scheduler regressions passed.");
