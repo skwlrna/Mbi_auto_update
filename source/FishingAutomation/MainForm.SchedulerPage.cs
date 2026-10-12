@@ -58,7 +58,7 @@ public sealed partial class MainForm
             Visible = false;
             BackColor = WindowBg;
             ForeColor = TitleText;
-            Font = new Font("맑은 고딕", 11f);
+            Font = new Font("맑은 고딕", 17f, FontStyle.Regular, GraphicsUnit.Pixel);
 
             var root = new TableLayoutPanel
             {
