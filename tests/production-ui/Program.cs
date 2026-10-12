@@ -72,6 +72,15 @@ internal static class Program
                 .Single(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal));
             var schedulerStatus = All(scheduler).OfType<Label>()
                 .Single(x => x.AccessibleName == "스케줄러 실행 안내");
+            var schedulerTabs = All(scheduler).OfType<TabControl>().Single();
+            Check(schedulerTabs.TabCount == 4 && schedulerTabs.Font.FontFamily.Name ==
+                  All(altering).OfType<Label>().Single(x => x.Text == "자동 가공").Font.FontFamily.Name &&
+                  schedulerTabs.Font.Size >= 16f && schedulerTabs.ItemSize.Height >= schedulerTabs.Font.Height + 8,
+                "scheduler tabs use readable common font and full-height text");
+            Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
+                  x.Text.StartsWith("2. ") || x.Text.StartsWith("3. ")).All(x =>
+                  x.Font.Size >= 16 && x.BackColor == Color.White),
+                "scheduler task card text is readable without hover");
             Check(schedulerStart.Enabled, "scheduler start remains clickable to explain missing plan");
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:"),
@@ -121,6 +130,17 @@ internal static class Program
                 "update check appears on home dashboard");
             Check(Field<string>(dashboard, "_selectedNavigation") == "홈",
                 "home is the sole selected navigation destination");
+            var navOrder = new[] { "홈", "자동화 실행", "생산 관리", "스케줄러",
+                "설정", "인식 관리", "로그 / 진단" };
+            var navButtons = controls.OfType<Button>().Where(x => navOrder.Contains(x.Text))
+                .OrderBy(x => x.Top).Select(x => x.Text).ToArray();
+            Check(navButtons.SequenceEqual(navOrder),
+                "workspace navigation order and icon destinations are consistent");
+            Check(!controls.OfType<Button>().Any(x => x.Text == "현재 모드 선택"),
+                "remove redundant mode-selection arrow beside fishing/dungeon/abyss");
+            Check(!Field<Button>(form, "_logToggle").Visible &&
+                  !controls.OfType<Button>().Any(x => x.Text.Contains("상세 로그", StringComparison.Ordinal)),
+                "individual pages no longer expose foldable log controls");
 
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
@@ -301,6 +321,21 @@ internal static class Program
             foreach (var size in new[] { new Size(940, 700), new Size(1200, 900) })
             {
                 form.ClientSize = size; Pump();
+                Menu("스케줄러"); Pump();
+                var schedulerActions = All(scheduler).OfType<Button>().Where(x =>
+                    x.Text.Contains("스케줄러 시작", StringComparison.Ordinal) ||
+                    x.Text.Contains("정지 (F10)", StringComparison.Ordinal)).ToArray();
+                Check(schedulerActions.Length == 2 && schedulerActions[0].Height == schedulerActions[1].Height &&
+                      schedulerActions.All(x => x.Height >= x.Font.Height &&
+                          x.TextAlign == ContentAlignment.MiddleCenter),
+                    "scheduler start/stop row heights and centered captions match at " + size);
+                Check(schedulerTabs.Font.Size >= 16f &&
+                      schedulerTabs.ItemSize.Height > schedulerTabs.Font.Height &&
+                      All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
+                          x.Text.StartsWith("2. ") || x.Text.StartsWith("3. "))
+                          .All(x => x.Height >= x.Font.Height),
+                    "scheduler tab/task labels stay readable at " + size);
+                if (args.Length > 0) Save(form, Path.Combine(args[0], "scheduler-" + size.Width + ".png"));
                 Menu("제작"); Pump();
                 float craftingScale = Math.Min(crafting.Width / 1212f, crafting.Height / 858f);
                 var craftingTitle = All(crafting).OfType<Label>().Single(x => x.Text == "제작");
