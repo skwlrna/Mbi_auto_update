@@ -398,7 +398,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             using var frame = await CaptureGameWindowAsync(ct);
             if ((await DetectAbyssResultRetryAsync(frame, ct)).Found)
             {
-                if (_scheduledResultExit)
+                if (ScheduledAbyssReturnPolicy.RecoveryResultAction(_scheduledResultExit) ==
+                    AbyssRecoveryResultAction.ExitForProcessing)
                 {
                     // Processing scheduler must never press "다시 하기" during
                     // Smart Recovery. Use the guarded LEFT exit path instead.
