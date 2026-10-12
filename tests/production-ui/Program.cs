@@ -56,6 +56,20 @@ internal static class Program
             Check(schedulerStatus.Text.Contains("시작 차단:"),
                 "F9 uses the same visible no-plan feedback as mouse click");
             Check(fake.Actions.Count == 0, "rejected start sends no game commands");
+            // A faulted async start task must be observed, logged and surfaced,
+            // not silently discarded by the void F9/click dispatch method.
+            var observer = typeof(MainForm).GetMethod("ObserveStartTaskAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var observed = (Task)observer.Invoke(form, new object[] {
+                Task.FromException(new InvalidOperationException("시작 전 제법 미선택 시험")),
+                "스케줄러"
+            })!;
+            PumpUntil(() => observed.IsCompleted);
+            observed.GetAwaiter().GetResult();
+            Check(schedulerStatus.Text.Contains("시작 전 제법 미선택 시험"),
+                "faulted asynchronous preparation becomes visible on scheduler");
+            typeof(MainForm).GetField("_runError", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(form, null);
             typeof(MainForm).GetField("_starting", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .SetValue(form, true);
             typeof(MainForm).GetMethod("StartSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
