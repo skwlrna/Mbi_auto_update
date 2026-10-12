@@ -77,22 +77,27 @@ internal sealed partial class ScenarioEngine
     // Result-row recognition is not enough to authorize an arbitrary screen
     // coordinate: verify the actual fixed click patch is green on both frames.
     // A 48x48 patch includes the green background even under white button text.
-    private static bool HasAbyssFixedButtonGreen(Bitmap frame, Point click)
+    private static double GetAbyssFixedButtonGreenRatio(Bitmap frame, Point click)
     {
         const int radius = 24;
         var square = new Rectangle(click.X - radius, click.Y - radius, radius * 2, radius * 2);
         if (!new Rectangle(Point.Empty, frame.Size).Contains(square))
-            return false;
-        return GetGreenButtonRatio(frame, square) >= 0.25;
+            return 0;
+        return GetGreenButtonRatio(frame, square);
     }
 
     private Point ConfirmAbyssFixedButtonClick(Bitmap frame, bool exit)
     {
         var point = AbyssResultLayout.FixedButtonCenter(exit, frame.Size);
         var required = ScaleAbyssResultRoi(exit ? AbyssExitButtonRoi : AbyssRetryButtonRoi, frame.Size);
-        if (!required.Contains(point) || !HasAbyssFixedButtonGreen(frame, point))
+        bool inButtonRoi = required.Contains(point);
+        double greenRatio = GetAbyssFixedButtonGreenRatio(frame, point);
+        if (!inButtonRoi || greenRatio < 0.25)
             throw new InvalidOperationException(
-                "어비스 결과 버튼 고정좌표의 초록색/버튼 영역 검증 실패. 클릭하지 않고 안전 정지합니다.");
+                "어비스 결과 버튼 고정좌표의 초록색/버튼 영역 검증 실패. 클릭하지 않고 안전 정지합니다. " +
+                $"type={(exit ? "exit" : "retry")}; center=({point.X},{point.Y}); " +
+                $"roi={required}; inRoi={inButtonRoi}; greenPatch={greenRatio:0.000} (min 0.250); " +
+                $"frame={frame.Width}x{frame.Height}");
         return point;
     }
 
