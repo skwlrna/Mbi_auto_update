@@ -38,7 +38,7 @@ public sealed partial class MainForm
         private readonly TabControl _tabs = new FluentTabControl();
 
         // Native tabs keep keyboard and accessibility behavior; only their exposed
-        // system-colored frame is repainted to match the surrounding dark surface.
+        // system-colored frame is repainted to match the shared white surface.
         private sealed class FluentTabControl : TabControl
         {
             protected override void WndProc(ref Message m)
@@ -91,10 +91,10 @@ public sealed partial class MainForm
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
-            var heading = owner.SectionTitle("통합 스케줄러", 20);
+            var heading = owner.SectionTitle("스케줄러", 20);
             heading.Font = new Font("맑은 고딕", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
             header.Controls.Add(heading, 0, 0);
-            header.Controls.Add(Txt("제작 · 가공을 순서대로 실행하고, 가공 대기 중 어비스를 진행합니다. 각 작업의 설정을 먼저 확인하세요.", Muted, 12), 0, 1);
+            header.Controls.Add(Txt("제작 → 가공 → 대기 중 어비스를 순서대로 실행합니다. 시작 전 각 작업을 확인하세요.", Muted, 12), 0, 1);
             root.Controls.Add(header, 0, 0);
 
             foreach (var summary in new[] { _alteringSummary, _craftingSummary, _abyssSummary })
@@ -193,12 +193,12 @@ public sealed partial class MainForm
             var button = new Button
             {
                 Text = label, Dock = DockStyle.Fill, FlatStyle = FlatStyle.Flat,
-                BackColor = primary ? Blue : PanelBg, ForeColor = TitleText,
+                BackColor = primary ? Blue : CardBg2, ForeColor = primary ? Color.White : TitleText,
                 Font = new Font("맑은 고딕", 11f, FontStyle.Bold),
                 Cursor = Cursors.Hand, Margin = new Padding(4)
             };
             button.FlatAppearance.BorderColor = primary ? Blue : Border;
-            button.FlatAppearance.MouseOverBackColor = AccentSoft;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(29, 93, 209) : AccentSoft;
             button.Click += (_, _) => run();
             return button;
         }
@@ -230,7 +230,7 @@ public sealed partial class MainForm
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.Controls.Add(Txt("실행할 작업 선택", TitleText, 17, true), 0, 0);
+            layout.Controls.Add(Txt("실행 순서 및 사용 설정", TitleText, 17, true), 0, 0);
             LayoutCheck(_crafts, "1. 제작  ·  선택한 음식 / 아이템 목표 수량까지 작업", layout, 1);
             LayoutCheck(_alters, "2. 다중가공  ·  시설별 다중 작업 등록 / 수령 / 재료 해결", layout, 2);
             LayoutCheck(_abyss, "3. 어비스  ·  가공 대기 중 한 판 실행 후 퇴장 검증", layout, 3);
