@@ -374,7 +374,7 @@ internal sealed partial class ScenarioEngine
 
                 await PrepareInventoryLootRetryAsync(ct);
 
-                Log?.Invoke("[어비스] 다시 하기 인식 -> 1초 대기 후 버튼 재확인");
+                Log?.Invoke("[어비스] 다시 하기 인식 -> 5초 안정화 대기 후 버튼 재확인");
                 await RetryClickDelay.WaitAsync(ct);
 
                 // Inventory queries can take time. Revalidate before sending input.
