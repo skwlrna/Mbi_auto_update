@@ -63,18 +63,18 @@ namespace DungeonVisionBot
    using(var frame=new Bitmap(800,1000))Check((await e.DetectAbyssLootAsync(frame,default)).Count==0,"production OCR fallback cannot bypass protected-item gate");
    OcrRecognizer.Lines=Array.Empty<DetectionResult>();
    e=new ScenarioEngine(){_abyssLootCountedForCurrentResult=true};
-   using(var ct=new CancellationTokenSource(8000))await e.RetryAbyssResultAsync(ct.Token);
-   Check(e._input.Clicks==1&&Stopwatch.GetElapsedTime(e.detectedAt,e._input.At).TotalMilliseconds>=995,"production retry waits one second and clicks once");
+   using(var ct=new CancellationTokenSource(15000))await e.RetryAbyssResultAsync(ct.Token);
+   Check(e._input.Clicks==1&&Stopwatch.GetElapsedTime(e.detectedAt,e._input.At).TotalMilliseconds>=4995,"production retry waits five seconds and clicks once");
    e=new(){_abyssLootCountedForCurrentResult=true,disappear=true};
    using(var ct=new CancellationTokenSource(1800)){try{await e.RetryAbyssResultAsync(ct.Token);}catch(OperationCanceledException){}}
    Check(e._input.Clicks==0,"production retry does not click vanished button");
    e=new(){_abyssLootCountedForCurrentResult=true};
    using(var ct=new CancellationTokenSource(600)){try{await e.RetryAbyssResultAsync(ct.Token);}catch(OperationCanceledException){}}
-   Check(e._input.Clicks==0,"production retry cancellation during one-second wait sends no click");
+   Check(e._input.Clicks==0,"production retry cancellation during five-second wait sends no click");
    var responses=new Queue<string>(new[]{"[]", "[{\"DisplayName\":\"허상의 마력석\",\"Count\":3,\"Location\":\"inventory\"}]", "[{\"DisplayName\":\"허상의 마력석\",\"Count\":3,\"Location\":\"inventory\"}]", "[{\"DisplayName\":\"허상의 마력석\",\"Count\":3,\"Location\":\"inventory\"}]"});
    e=new();e._inventoryLoot=new FishingAutomation.InventoryLootTracker(_=>Task.FromResult(FishingAutomation.MabinogiMobileCli.Parse("get_items",new(0,responses.Dequeue(),""))),new Dictionary<string,string>{{"h","허상의 마력석"}});
    await e.BeginInventoryLootRoundAsync(default);
-   using(var ct=new CancellationTokenSource(8000))await e.RetryAbyssResultAsync(ct.Token);
+   using(var ct=new CancellationTokenSource(15000))await e.RetryAbyssResultAsync(ct.Token);
    Check(FishingAutomation.LootStats.Recorded.GetValueOrDefault("h")==3,"production retry records actual CLI quantity before clicking");
    Check(e._input.Clicks==1&&!e._inventoryNextRoundClicked&&!e._abyssLootCountedForCurrentResult,"production retry commits next baseline only after combat transition");
   }
