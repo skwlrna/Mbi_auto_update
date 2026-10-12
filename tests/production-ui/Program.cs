@@ -68,28 +68,31 @@ internal static class Program
                 "update check is hidden outside home");
             Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "스케줄러",
                 "scheduler exclusively owns selected navigation state");
-            var schedulerStart = All(scheduler).OfType<Button>()
-                .Single(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal));
+            Check(!All(scheduler).OfType<Button>().Any(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal)),
+                "scheduler uses the one shared F9/F10 action instead of duplicate starts");
             var schedulerStatus = All(scheduler).OfType<Label>()
                 .Single(x => x.AccessibleName == "스케줄러 실행 안내");
             var schedulerTabs = All(scheduler).OfType<TabControl>().Single();
+            float InitialSchedulerFontScale() =>
+                Math.Min(scheduler.Width / 1212f, scheduler.Height / 858f);
             Check(schedulerTabs.TabCount == 4 && schedulerTabs.Font.FontFamily.Name ==
                   All(altering).OfType<Label>().Single(x => x.Text == "자동 가공").Font.FontFamily.Name &&
-                  schedulerTabs.Font.Size >= 16f && schedulerTabs.ItemSize.Height >= schedulerTabs.Font.Height + 8,
-                "scheduler tabs use readable common font and full-height text");
+                  schedulerTabs.Font.Size == Math.Max(12f, MathF.Round(17f * InitialSchedulerFontScale())) &&
+                  !schedulerTabs.HotTrack,
+                "scheduler tab font uses exact production resize formula with no hover activation");
             Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
                   x.Text.StartsWith("2. ") || x.Text.StartsWith("3. ")).All(x =>
-                  x.Font.Size >= 16 && x.BackColor == Color.White),
-                "scheduler task card text is readable without hover");
-            Check(schedulerStart.Enabled, "scheduler start remains clickable to explain missing plan");
+                  x.Font.Size == Math.Max(13f, MathF.Round(18f * InitialSchedulerFontScale())) &&
+                  x.ForeColor == Color.FromArgb(23, 32, 51) && x.BackColor == Color.White),
+                "scheduler checkbox captions use the same scaled font and constant contrast as production");
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:"),
                 "global bottom start forwards clicks to visible scheduler feedback");
-            schedulerStart.PerformClick(); Pump();
+            globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:") &&
                   schedulerStatus.Text.Contains("가공") &&
                   schedulerStatus.ForeColor == Color.DarkOrange,
-                "button explains missing altering selection visibly, not only in hidden logs");
+                "one shared F9 button explains missing altering selection visibly");
             var firstFeedback = schedulerStatus.Text;
             scheduler.GetType().GetMethod("RefreshSnapshot",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
@@ -322,19 +325,37 @@ internal static class Program
             {
                 form.ClientSize = size; Pump();
                 Menu("스케줄러"); Pump();
-                var schedulerActions = All(scheduler).OfType<Button>().Where(x =>
-                    x.Text.Contains("스케줄러 시작", StringComparison.Ordinal) ||
-                    x.Text.Contains("정지 (F10)", StringComparison.Ordinal)).ToArray();
-                Check(schedulerActions.Length == 2 && schedulerActions[0].Height == schedulerActions[1].Height &&
-                      schedulerActions.All(x => x.Height >= x.Font.Height &&
-                          x.TextAlign == ContentAlignment.MiddleCenter),
-                    "scheduler start/stop row heights and centered captions match at " + size);
-                Check(schedulerTabs.Font.Size >= 16f &&
-                      schedulerTabs.ItemSize.Height > schedulerTabs.Font.Height &&
-                      All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
-                          x.Text.StartsWith("2. ") || x.Text.StartsWith("3. "))
-                          .All(x => x.Height >= x.Font.Height),
-                    "scheduler tab/task labels stay readable at " + size);
+                float schedulerScale = Math.Min(scheduler.Width / 1212f, scheduler.Height / 858f);
+                float schedulerLayoutScale = Math.Min(scheduler.Width / 1004f, scheduler.Height / 711f);
+                var schedulerHeading = All(scheduler).OfType<Label>().Single(x => x.Text == "스케줄러");
+                var taskRows = All(scheduler).OfType<CheckBox>().Where(x =>
+                    x.Text.StartsWith("1. ") || x.Text.StartsWith("2. ") ||
+                    x.Text.StartsWith("3. ")).ToArray();
+                var preview = All(scheduler).OfType<TableLayoutPanel>()
+                    .Single(x => x.AccessibleName == "스케줄러 실행 순서");
+                var previewSteps = All(preview).OfType<Label>().ToArray();
+                Check(schedulerHeading.Font.Size == Math.Max(13f, MathF.Round(36f * schedulerScale)) &&
+                      schedulerTabs.Font.Size == Math.Max(12f, MathF.Round(17f * schedulerScale)) &&
+                      taskRows.Length == 3 &&
+                      taskRows.All(x => x.Font.Size == Math.Max(13f, MathF.Round(18f * schedulerScale))),
+                    "scheduler font sizes exactly match automatic altering and crafting scale at " + size);
+                Check(schedulerTabs.ItemSize.Height >= schedulerTabs.Font.Height + 12 &&
+                      schedulerTabs.ItemSize.Width * schedulerTabs.TabCount <= schedulerTabs.ClientSize.Width &&
+                      schedulerTabs.TabCount == 4,
+                    "all scheduler tab names fit their dedicated header at " + size);
+                Check(previewSteps.Length == 4 && previewSteps.All(x =>
+                      x.Height >= x.Font.Height + 2 &&
+                      x.Width >= TextRenderer.MeasureText(x.Text, x.Font,
+                          Size.Empty, TextFormatFlags.NoPadding).Width - 2 &&
+                      FullyContained(x, scheduler)) &&
+                      preview.Height >= previewSteps.Max(x => x.Font.Height + 2),
+                    "all four scheduler sequence steps remain fully inside their boxes at " + size);
+                Check(taskRows.All(x => x.Height >= x.Font.Height + 6) &&
+                      preview.Bottom <= schedulerTabs.TabPages[0].ClientSize.Height,
+                    "scheduler fixed row heights shrink with layout without hiding sequence steps at " + size);
+                Check(!All(scheduler).OfType<Button>().Any(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal)) &&
+                      globalStart.Visible && globalStart.Height >= globalStart.Font.Height,
+                    "only one shared and centered scheduler start action is visible at " + size);
                 if (args.Length > 0) Save(form, Path.Combine(args[0], "scheduler-" + size.Width + ".png"));
                 Menu("제작"); Pump();
                 float craftingScale = Math.Min(crafting.Width / 1212f, crafting.Height / 858f);

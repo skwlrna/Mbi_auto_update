@@ -34,7 +34,6 @@ public sealed partial class MainForm
         }
 
         private void ClearStartFeedback() => _lastStartFeedback = null;
-        private readonly Button _start;
         private readonly TabControl _tabs = new();
 
         // Keep the native tab painter; manually overpainting its window frame
@@ -67,7 +66,7 @@ public sealed partial class MainForm
             };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
@@ -91,6 +90,7 @@ public sealed partial class MainForm
             _tabs.Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel);
             _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             _tabs.SizeMode = TabSizeMode.Fixed;
+            _tabs.HotTrack = false; // Hover must never imply selection or enablement.
             _tabs.ItemSize = new Size(152, 49);
             _tabs.DrawItem += (_, e) =>
             {
@@ -122,10 +122,14 @@ public sealed partial class MainForm
             _tabs.SelectedIndexChanged += (_, _) => { _tabs.Invalidate(); RefreshSnapshot(); };
             root.Controls.Add(_tabs, 0, 1);
 
-            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = WindowBg, Margin = new Padding(0, 2, 0, 0) };
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            // The shared full-width button below the page already starts/stops the
+            // selected scheduler. Keep one visible action instead of two F9 buttons.
+            var footer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1,
+                BackColor = WindowBg, Margin = new Padding(0, 2, 0, 0)
+            };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             _runStatus.Dock = DockStyle.Fill;
             _runStatus.AccessibleName = "스케줄러 실행 안내";
             _runStatus.Font = new Font("맑은 고딕", 16f, FontStyle.Bold, GraphicsUnit.Pixel);
@@ -136,9 +140,6 @@ public sealed partial class MainForm
             _runStatus.Padding = new Padding(10, 3, 6, 3);
             _runStatus.Margin = new Padding(3);
             footer.Controls.Add(_runStatus, 0, 0);
-            _start = ActionButton("▶  스케줄러 시작 (F9)", () => _ = owner.StartSchedulerAsync(), true);
-            footer.Controls.Add(_start, 1, 0);
-            footer.Controls.Add(ActionButton("■  정지 (F10)", owner.StopSelected), 2, 0);
             root.Controls.Add(footer, 0, 2);
             Controls.Add(root);
 
@@ -162,13 +163,138 @@ public sealed partial class MainForm
                 _owner._abyssDungeon.SelectedIndex = _abyssChoice.SelectedIndex;
                 RefreshSnapshot();
             };
+            // Use the exact same font and layout scaling rules as automatic
+            // altering/crafting. Snapshot design metrics once, never repeatedly
+            // shrink already-scaled controls after a resize or DPI change.
+            var typography = Descendants(root).Prepend(root).ToArray();
+            foreach (Control control in typography)
+                control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
+            void Typography(Control control, float pixels) =>
+                control.Font = new Font("맑은 고딕", pixels, control.Font.Style, GraphicsUnit.Pixel);
+            Typography(heading, 36);
+            Typography(header.GetControlFromPosition(0, 1)!, 18);
+            Typography(_tabs, 17);
+            Typography(_runStatus, 17);
+            foreach (var summary in new[] { _alteringSummary, _craftingSummary, _abyssSummary })
+                Typography(summary, 18);
+            foreach (var cb in new[] { _crafts, _alters, _abyss }) Typography(cb, 18);
+            foreach (var cb in new[] { _abyssChoice, _minimumWaitChoice }) Typography(cb, 18);
+            foreach (var label in typography.OfType<Label>())
+            {
+                if (label == heading || label == _runStatus ||
+                    label == _alteringSummary || label == _craftingSummary || label == _abyssSummary) continue;
+                if (label.Font.Style.HasFlag(FontStyle.Bold) && label.Text is
+                    "실행 순서 및 사용 설정" or "병행 어비스 던전 선택" or
+                    "가공 상세 · 원본 작업 목록 연결" or "제작 상세 · 음식 / 아이템 검색")
+                    Typography(label, 21);
+            }
+            foreach (var button in typography.OfType<Button>()) Typography(button, 19);
+
+            var metrics = typography.Select(control => new SchedulerMetric(
+                control, control.Font.FontFamily.Name, control.Font.Size,
+                control.Font.Style, control.Padding, control.Margin)).ToArray();
+            var rows = typography.OfType<TableLayoutPanel>().SelectMany(table =>
+                table.RowStyles.Cast<RowStyle>().Where(row => row.SizeType == SizeType.Absolute)
+                    .Select(row => (Row: row, Original: row.Height))).ToArray();
+            var columns = typography.OfType<TableLayoutPanel>().SelectMany(table =>
+                table.ColumnStyles.Cast<ColumnStyle>().Where(col => col.SizeType == SizeType.Absolute)
+                    .Select(col => (Column: col, Original: col.Width))).ToArray();
+            var fonts = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
+            float previousScale = -1, previousFontScale = -1;
+            int previousDpi = -1;
+            bool fitting = false;
+            Disposed += (_, _) => { foreach (var font in fonts.Values) font.Dispose(); };
+
+            void FitPage()
+            {
+                if (fitting || ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
+                float layoutScale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
+                float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
+                if (Math.Abs(previousScale - layoutScale) < .00001f &&
+                    Math.Abs(previousFontScale - fontScale) < .00001f &&
+                    previousDpi == DeviceDpi) return;
+                previousScale = layoutScale;
+                previousFontScale = fontScale;
+                previousDpi = DeviceDpi;
+                fitting = true;
+                root.SuspendLayout();
+                try
+                {
+                    foreach (var metric in metrics)
+                    {
+                        float pixels = Math.Max(metric.Size >= 18f ? 13f : 12f,
+                            MathF.Round(metric.Size * fontScale));
+                        var key = (metric.Family, pixels, metric.Style);
+                        if (!fonts.TryGetValue(key, out Font? font))
+                        {
+                            font = new Font(metric.Family, pixels, metric.Style, GraphicsUnit.Pixel);
+                            fonts.Add(key, font);
+                        }
+                        metric.Control.Font = font;
+                        metric.Control.Padding = ScalePadding(metric.Padding, layoutScale);
+                        metric.Control.Margin = ScalePadding(metric.Margin, layoutScale);
+                    }
+                    foreach (var row in rows)
+                        row.Row.Height = Math.Max(26f, MathF.Round(row.Original * layoutScale));
+                    foreach (var col in columns)
+                        col.Column.Width = MathF.Round(col.Original * layoutScale);
+
+                    // Fixed WinForms tab headers need explicit scaling. All four
+                    // tabs share the available width, and captions never ellipsize.
+                    int tabHeight = Math.Max(_tabs.Font.Height + 12, (int)MathF.Round(49f * layoutScale));
+                    int tabWidth = Math.Max(95, (_tabs.ClientSize.Width - 8) / 4);
+                    var desiredTabs = new Size(tabWidth, tabHeight);
+                    if (_tabs.ItemSize != desiredTabs) _tabs.ItemSize = desiredTabs;
+                    _tabs.Invalidate();
+                }
+                finally
+                {
+                    root.ResumeLayout(true);
+                    fitting = false;
+                }
+            }
+            Resize += (_, _) => FitPage();
+            VisibleChanged += (_, _) => FitPage();
+            DpiChangedAfterParent += (_, _) => FitPage();
+            bool resizingTabs = false;
+            _tabs.Resize += (_, _) => { if (!fitting) FitTabWidth(); };
+            void FitTabWidth()
+            {
+                if (resizingTabs || _tabs.TabCount == 0 || _tabs.ClientSize.Width <= 0) return;
+                var desired = new Size(Math.Max(95, (_tabs.ClientSize.Width - 8) / _tabs.TabCount),
+                    _tabs.ItemSize.Height);
+                if (_tabs.ItemSize == desired) return;
+                // TabControl.ItemSize itself fires Resize on Windows.
+                // Prevent an infinite loop while the native tab adjusts its bounds.
+                resizingTabs = true;
+                try { _tabs.ItemSize = desired; }
+                finally { resizingTabs = false; }
+            }
+            FitPage();
             RefreshSnapshot();
+        }
+
+        private sealed record SchedulerMetric(
+            Control Control, string Family, float Size, FontStyle Style,
+            Padding Padding, Padding Margin);
+
+        private static Padding ScalePadding(Padding padding, float scale) => new(
+            (int)(padding.Left * scale), (int)(padding.Top * scale),
+            (int)(padding.Right * scale), (int)(padding.Bottom * scale));
+
+        private static IEnumerable<Control> Descendants(Control root)
+        {
+            foreach (Control child in root.Controls)
+            {
+                yield return child;
+                foreach (var nested in Descendants(child)) yield return nested;
+            }
         }
 
         private static Label Txt(string message, Color color, float size = 13, bool bold = false) => new()
         {
             Text = message, ForeColor = color, Dock = DockStyle.Fill,
-            Font = new Font("맑은 고딕", Math.Max(16f, size), bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel),
+            Font = new Font("맑은 고딕", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel),
             TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = false
         };
 
@@ -184,7 +310,10 @@ public sealed partial class MainForm
             };
             button.FlatAppearance.BorderColor = primary ? Blue : Border;
             button.FlatAppearance.BorderSize = 1;
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(29, 93, 209) : CardBg2;
+            // Hover changes neither background nor legibility; selected state is
+            // conveyed by actual tabs and checkboxes, not the mouse location.
+            button.FlatAppearance.MouseOverBackColor = button.BackColor;
+            button.FlatAppearance.MouseDownBackColor = button.BackColor;
             button.Click += (_, _) => run();
             return button;
         }
@@ -269,7 +398,7 @@ public sealed partial class MainForm
             cb.Font = new Font("맑은 고딕", 17f, FontStyle.Regular, GraphicsUnit.Pixel);
             cb.BackColor = CardBg;
             cb.UseVisualStyleBackColor = false;
-            cb.FlatStyle = FlatStyle.Standard;
+            cb.FlatStyle = FlatStyle.Flat;
             edge.Controls.Add(cb);
             table.Controls.Add(edge, 0, row);
         }
@@ -364,7 +493,6 @@ public sealed partial class MainForm
             _runStatus.ForeColor = _lastStartFeedback is not null ? Color.DarkOrange : TitleText;
             // Allow an attempted click even if a different runner holds input;
             // the guarded handler explains why it cannot start. Never run twice.
-            _start.Enabled = !running;
             _crafts.Enabled = _alters.Enabled = _abyss.Enabled = !running;
             _abyssChoice.Enabled = !running;
             _minimumWaitChoice.Enabled = !running;
