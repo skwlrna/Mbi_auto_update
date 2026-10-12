@@ -51,6 +51,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="abyss\templates\mechanics\**\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="abyss\templates\loot_v173\**\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
