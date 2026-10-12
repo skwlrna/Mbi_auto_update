@@ -37,7 +37,10 @@ public sealed partial class MainForm
 
         engine.Log += message => Ui(() => _log.Write("[병행 어비스] " + message));
         await engine.RunAsync(token);
-        token.ThrowIfCancellationRequested();
-        _log.Write("[병행] 어비스 1판 후 밖 복귀 완료 · 가공 재점검");
+        // Defence in depth: even if the scenario runner's completion path is
+        // refactored, this handoff may return ONLY after a confirmed outside HUD.
+        ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+            scheduledResultExit: true, engine.ScheduledOutsideExitVerified, token);
+        _log.Write("[병행] 정상 퇴장 / 던전 밖 HUD 검증 완료 · 가공 재조회 및 관리 복귀 허용");
     }
 }
