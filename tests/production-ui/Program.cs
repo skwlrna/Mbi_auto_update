@@ -35,11 +35,17 @@ internal static class Program
             var scheduler = controls.Single(x => x.Name == "SchedulerPage");
             Menu("스케줄러"); Pump();
             Check(scheduler.Visible, "scheduler page is visible after selecting sidebar");
+            var globalStart = Field<Button>(form, "_mainActionButton");
+            Check(globalStart.Visible && globalStart.Enabled,
+                "global bottom start is clickable while scheduler page is open");
             var schedulerStart = All(scheduler).OfType<Button>()
                 .Single(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal));
             var schedulerStatus = All(scheduler).OfType<Label>()
                 .Single(x => x.AccessibleName == "스케줄러 실행 안내");
             Check(schedulerStart.Enabled, "scheduler start remains clickable to explain missing plan");
+            globalStart.PerformClick(); Pump();
+            Check(schedulerStatus.Text.Contains("시작 차단:"),
+                "global bottom start forwards clicks to visible scheduler feedback");
             schedulerStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:") &&
                   schedulerStatus.Text.Contains("가공") &&
@@ -82,6 +88,8 @@ internal static class Program
 
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
+            Check(globalStart.Visible && globalStart.Enabled,
+                "global bottom start stays clickable on altering page");
             Check(!All(gathering).Any(x => x.Visible), "home to altering does not require gathering first");
             Menu("홈"); Check(!altering.Visible && !gathering.Visible, "home restores existing central content");
             Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ListBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
