@@ -73,7 +73,8 @@ internal static class Program
             var schedulerStatus = All(scheduler).OfType<Label>()
                 .Single(x => x.AccessibleName == "스케줄러 실행 안내");
             var schedulerTabs = All(scheduler).OfType<TabControl>().Single();
-            Check(schedulerTabs.TabCount == 4 && schedulerTabs.Font.FontFamily.Name == "맑은 고딕" &&
+            Check(schedulerTabs.TabCount == 4 && schedulerTabs.Font.FontFamily.Name ==
+                  All(altering).OfType<Label>().Single(x => x.Text == "자동 가공").Font.FontFamily.Name &&
                   schedulerTabs.Font.Size >= 16f && schedulerTabs.ItemSize.Height >= schedulerTabs.Font.Height + 8,
                 "scheduler tabs use readable common font and full-height text");
             Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
