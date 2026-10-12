@@ -421,7 +421,7 @@ public sealed partial class MainForm
 
         public void UpdateAbyssDungeonPickerVisibility()
         {
-            bool showButtons = ShouldShowAbyssDungeonPicker && !_owner._logExpanded;
+            bool showButtons = !_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded;
             foreach (var button in _gallery) button.Visible = showButtons;
             if (_owner._alteringPage is not null)
             {
@@ -844,7 +844,7 @@ public sealed partial class MainForm
                 bool modeSelected = _kind == "mode-tab" && Text == _ui.EffectiveMode;
                 bool strong = action || selected || navSelected || modeSelected;
                 bool bare = _kind == "chrome" || nav && !navSelected;
-                Color top = navSelected || modeSelected ? AccentSoft : strong ? Accent : CardBg;
+                Color top = navSelected || modeSelected ? AccentSoft : strong ? Accent : CardBg2;
                 Color bottom = top;
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }
                 if (_pressed) top = bottom;
