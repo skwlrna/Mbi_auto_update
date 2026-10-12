@@ -321,18 +321,46 @@ public sealed partial class MainForm : Form
             // Confirm immediately, before any slow CLI query or async preflight.
             SetStatus($"{DisplayModeName(mode)} 시작 요청 접수 · 설정 확인 중", Blue);
             if (mode == "낚시") StartFishing();
-            else if (mode == "던전") _ = StartScenarioAsync("던전", "dungeon");
-            else if (mode == "페카 심층") _ = StartScenarioAsync("페카 심층", "dungeon");
-            else if (mode == "스케줄러") _ = StartSchedulerAsync();
-            else if (mode == "가공") _ = StartAlteringAsync();
-            else if (mode == "채집") _ = StartGatheringAsync();
-            else if (mode == "제작") _ = StartCraftingAsync();
-            else _ = StartScenarioAsync("어비스", "abyss");
+            else if (mode == "던전") ObserveStartTask(StartScenarioAsync("던전", "dungeon"), mode);
+            else if (mode == "페카 심층") ObserveStartTask(StartScenarioAsync("페카 심층", "dungeon"), mode);
+            else if (mode == "스케줄러") ObserveStartTask(StartSchedulerAsync(), mode);
+            else if (mode == "가공") ObserveStartTask(StartAlteringAsync(), mode);
+            else if (mode == "채집") ObserveStartTask(StartGatheringAsync(), mode);
+            else if (mode == "제작") ObserveStartTask(StartCraftingAsync(), mode);
+            else ObserveStartTask(StartScenarioAsync("어비스", "abyss"), mode);
         }
         catch (Exception ex)
         {
             string reason = "시작 차단: " + ex.Message;
             _log.Write("[UI] " + reason);
+            SetStatus(reason, Color.Salmon);
+            if (mode == "스케줄러") _schedulerPage?.ReportStartFeedback(reason);
+        }
+    }
+
+    // Async Task failures that happen before the first await do not escape a
+    // synchronous StartSelected() caller. Discarding the returned Task used to
+    // produce a completely silent 'F9/button does nothing' for missing plans.
+    private void ObserveStartTask(Task task, string mode)
+    {
+        _ = ObserveStartTaskAsync(task, mode);
+    }
+
+    private async Task ObserveStartTaskAsync(Task task, string mode)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Write($"[UI 시작 요청] {mode} 취소 · 후속 입력 없음");
+        }
+        catch (Exception ex)
+        {
+            string reason = $"{DisplayModeName(mode)} 시작 실패: {ex.Message}";
+            _runError = ex.Message;
+            _log.Write("[UI 시작 오류] " + reason);
             SetStatus(reason, Color.Salmon);
             if (mode == "스케줄러") _schedulerPage?.ReportStartFeedback(reason);
         }
