@@ -308,16 +308,26 @@ Assert(!AbyssResultLayout.HasStableScheduledExitLabel(
         Rectangle.Empty, new Rectangle(120, 918, 93, 22), leftCrop, leftCrop),
     "missing first result text fails closed");
 
-// Fixed input target must be independent of OCR glyph centers. The left
-// button center comes from the user's portrait result layout, not from the
-// former broader green-button detection ROI (whose center was X=250).
+// Fixed input targets must be independent of OCR glyph centers. The actual
+// 2026-10-12 Windows 800x1000 runtime failure screenshot shows the left green
+// "나가기" button at roughly x=180..319/y=922..977 and retry at x=330..469.
+// Regression: (165,930) was *outside* the exit button and failed the click
+// patch green check, even though all three result buttons had been detected.
 Point fixedExit = AbyssResultLayout.FixedButtonCenter(true, new Size(800, 1000));
 Point fixedRetry = AbyssResultLayout.FixedButtonCenter(false, new Size(800, 1000));
-Assert(fixedExit == new Point(165, 930) && fixedRetry == new Point(400, 930),
-    "fixed canonical left exit/middle retry click points");
-Assert(fixedExit.X < 280 && fixedRetry.X is > 310 and < 490 && fixedExit.Y == fixedRetry.Y,
-    "fixed exit and retry clicks cannot target the same result button");
-Assert(AbyssResultLayout.FixedButtonCenter(true, new Size(815, 920)) == new Point(168, 856) &&
+var observedExitButton = new Rectangle(180, 922, 140, 56);
+var observedRetryButton = new Rectangle(330, 922, 140, 56);
+var exitGreenPatch = new Rectangle(fixedExit.X - 24, fixedExit.Y - 24, 48, 48);
+Assert(fixedExit == new Point(250, 950) && fixedRetry == new Point(400, 930),
+    "live-capture-corrected exit center; ordinary retry center stays unchanged");
+Assert(!observedExitButton.Contains(new Point(165, 930)),
+    "old scheduled exit coordinate is outside the captured green button");
+Assert(observedExitButton.Contains(fixedExit) && observedExitButton.Contains(exitGreenPatch),
+    "scheduled exit target and entire 48x48 green patch lie inside captured exit button");
+Assert(observedRetryButton.Contains(fixedRetry) && !observedRetryButton.Contains(fixedExit) &&
+       !observedExitButton.Contains(fixedRetry),
+    "exit and retry click positions stay in different buttons");
+Assert(AbyssResultLayout.FixedButtonCenter(true, new Size(815, 920)) == new Point(255, 874) &&
        AbyssResultLayout.FixedButtonCenter(false, new Size(815, 920)) == new Point(408, 856),
     "fixed centers scale independently for real 815x920 game-client capture");
 bool refusedInvalidAspect = false;
