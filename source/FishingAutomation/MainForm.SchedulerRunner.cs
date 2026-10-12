@@ -11,7 +11,20 @@ public sealed partial class MainForm
     // No new worker is authorized to press keys while another mode owns them.
     private async Task StartSchedulerAsync()
     {
-        if (AnyRunning || _schedulerPage is null) return;
+        if (_schedulerPage is null)
+        {
+            _log.Write("[스케줄러] 시작 차단: UI 초기화가 완료되지 않았습니다.");
+            SetStatus("스케줄러 UI 초기화 필요", Color.DarkOrange);
+            return;
+        }
+        if (AnyRunning)
+        {
+            string reason = "시작 차단: 다른 작업/준비가 진행 중입니다. F10으로 정지한 뒤 다시 시도하세요.";
+            _log.Write("[스케줄러] " + reason);
+            _schedulerPage.ReportStartFeedback(reason);
+            SetStatus(reason, Color.DarkOrange);
+            return;
+        }
 
         bool runCrafting = _schedulerPage.UseCrafting;
         bool runAltering = _schedulerPage.UseAltering;
@@ -19,12 +32,18 @@ public sealed partial class MainForm
 
         if (!runCrafting && !runAltering)
         {
-            SetStatus("스케줄러: 제작 또는 가공을 선택하세요.", Color.DarkOrange);
+            const string reason = "시작 차단: 작업 계획에서 제작 또는 가공을 선택하세요.";
+            _log.Write("[스케줄러] " + reason);
+            _schedulerPage.ReportStartFeedback(reason);
+            SetStatus(reason, Color.DarkOrange);
             return;
         }
         if (runAbyss && !runAltering)
         {
-            SetStatus("어비스 병행은 가공 대기와 함께 사용해야 합니다.", Color.DarkOrange);
+            const string reason = "시작 차단: 어비스 병행은 가공 작업을 함께 선택해야 합니다.";
+            _log.Write("[스케줄러] " + reason);
+            _schedulerPage.ReportStartFeedback(reason);
+            SetStatus(reason, Color.DarkOrange);
             return;
         }
 
@@ -44,8 +63,10 @@ public sealed partial class MainForm
         }
         catch (Exception ex)
         {
+            string reason = "시작 차단: " + ex.Message;
             _log.Write("[스케줄러] 작업 설정 확인 실패: " + ex.Message);
-            SetStatus("스케줄러 설정 확인 필요", Color.DarkOrange);
+            _schedulerPage.ReportStartFeedback(reason);
+            SetStatus(reason, Color.DarkOrange);
             return;
         }
 

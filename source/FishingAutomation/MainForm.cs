@@ -300,21 +300,70 @@ public sealed partial class MainForm : Form
 
     private void StartSelected()
     {
+        // All visible start buttons and F9 pass through this same observable path.
+        // Previously a scheduler preflight exception updated only the hidden
+        // _statusValue and appeared as if neither button nor F9 was connected.
+        string mode = SelectedMode;
+        _log.Write($"[UI 시작 요청] 모드={mode} · 화면={_productionPageMode ?? "홈"} · " +
+            $"실행중={AnyRunning} · 초기화중={_starting} · 재개확인={_resumeUiBusy}");
+
         if (AnyRunning)
         {
-            SetStatus($"{_activeMode} 실행 중", Blue);
-            _log.Write($"이미 {_activeMode} 모드가 실행 중입니다. 먼저 F10으로 정지하세요.");
+            string reason = "시작 차단: 이미 실행 중이거나 작업 준비 중입니다. F10으로 정지 후 다시 시도하세요.";
+            _log.Write("[UI] " + reason);
+            SetStatus(reason, Color.DarkOrange);
+            if (mode == "스케줄러") _schedulerPage?.ReportStartFeedback(reason);
             return;
         }
 
-        if (SelectedMode == "낚시") StartFishing();
-        else if (SelectedMode == "던전") _ = StartScenarioAsync("던전", "dungeon");
-        else if (SelectedMode == "페카 심층") _ = StartScenarioAsync("페카 심층", "dungeon");
-        else if (SelectedMode == "스케줄러") _ = StartSchedulerAsync();
-        else if (SelectedMode == "가공") _ = StartAlteringAsync();
-        else if (SelectedMode == "채집") _ = StartGatheringAsync();
-        else if (SelectedMode == "제작") _ = StartCraftingAsync();
-        else _ = StartScenarioAsync("어비스", "abyss");
+        try
+        {
+            // Confirm immediately, before any slow CLI query or async preflight.
+            SetStatus($"{DisplayModeName(mode)} 시작 요청 접수 · 설정 확인 중", Blue);
+            if (mode == "낚시") StartFishing();
+            else if (mode == "던전") ObserveStartTask(StartScenarioAsync("던전", "dungeon"), mode);
+            else if (mode == "페카 심층") ObserveStartTask(StartScenarioAsync("페카 심층", "dungeon"), mode);
+            else if (mode == "스케줄러") ObserveStartTask(StartSchedulerAsync(), mode);
+            else if (mode == "가공") ObserveStartTask(StartAlteringAsync(), mode);
+            else if (mode == "채집") ObserveStartTask(StartGatheringAsync(), mode);
+            else if (mode == "제작") ObserveStartTask(StartCraftingAsync(), mode);
+            else ObserveStartTask(StartScenarioAsync("어비스", "abyss"), mode);
+        }
+        catch (Exception ex)
+        {
+            string reason = "시작 차단: " + ex.Message;
+            _log.Write("[UI] " + reason);
+            SetStatus(reason, Color.Salmon);
+            if (mode == "스케줄러") _schedulerPage?.ReportStartFeedback(reason);
+        }
+    }
+
+    // Async Task failures that happen before the first await do not escape a
+    // synchronous StartSelected() caller. Discarding the returned Task used to
+    // produce a completely silent 'F9/button does nothing' for missing plans.
+    private void ObserveStartTask(Task task, string mode)
+    {
+        _ = ObserveStartTaskAsync(task, mode);
+    }
+
+    private async Task ObserveStartTaskAsync(Task task, string mode)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Write($"[UI 시작 요청] {mode} 취소 · 후속 입력 없음");
+        }
+        catch (Exception ex)
+        {
+            string reason = $"{DisplayModeName(mode)} 시작 실패: {ex.Message}";
+            _runError = ex.Message;
+            _log.Write("[UI 시작 오류] " + reason);
+            SetStatus(reason, Color.Salmon);
+            if (mode == "스케줄러") _schedulerPage?.ReportStartFeedback(reason);
+        }
     }
 
     private void StartFishing()
@@ -759,7 +808,8 @@ public sealed partial class MainForm : Form
     {
         base.OnHandleCreated(e);
         FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_TEST, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F8);
-        FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_START, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F9);
+        if (!FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_START, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F9))
+            _log.Write("[UI] F9 전역 단축키 등록 실패(다른 프로그램 점유 가능) · 화면 시작 버튼으로 시도하세요.");
         FishingAutomation.NativeMethods.RegisterHotKey(Handle, HOTKEY_STOP, FishingAutomation.NativeMethods.MOD_NOREPEAT, FishingAutomation.NativeMethods.VK_F10);
     }
 
@@ -809,6 +859,8 @@ public sealed partial class MainForm : Form
 
             try
             {
+                _log.Write("[UI 클릭 오류] " + actionName + ": " + ex.Message);
+                if (SelectedMode == "스케줄러") _schedulerPage?.ReportStartFeedback("UI 오류: " + ex.Message);
                 _statusValue.Text = $"UI 오류: {ex.Message}";
                 _statusValue.ForeColor = Color.Salmon;
                 _miniStatus.Text = "UI 오류 · ui-crash.log 확인";

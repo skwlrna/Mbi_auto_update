@@ -412,7 +412,10 @@ public sealed partial class MainForm
                 _owner._schedulerPage.Visible = production && _owner._productionPageMode == "스케줄러";
                 foreach (var (control, bounds) in _positions)
                 {
-                    if (control is ProductionPage || control is CraftingPage || control is SchedulerPage || control == _owner._logView || control == _owner._logToggle || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
+                    // The fixed bottom "자동 실행 시작" remains interactive on every
+                    // production/scheduler page. Previously it was hidden while the
+                    // painted dashboard still suggested a start control existed.
+                    if (control is ProductionPage || control is CraftingPage || control is SchedulerPage || control == _owner._logView || control == _owner._logToggle || control == _owner._mainActionButton || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
                     if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !production;
                 }
                 if (_owner._logExpanded) _owner._logView.BringToFront();
