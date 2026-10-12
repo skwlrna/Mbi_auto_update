@@ -29,6 +29,43 @@ internal static class Program
             void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
             void Menu(string name) => controls.OfType<Button>().Single(x => x.Text == name && !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
+            // Real V3.1.88 report: neither the visible start button nor F9
+            // appeared to do anything when scheduler lacked a chosen recipe.
+            // Assert that both routes now show a persistent actionable reason.
+            var scheduler = controls.Single(x => x.Name == "SchedulerPage");
+            Menu("스케줄러"); Pump();
+            Check(scheduler.Visible, "scheduler page is visible after selecting sidebar");
+            var schedulerStart = All(scheduler).OfType<Button>()
+                .Single(x => x.Text.Contains("스케줄러 시작", StringComparison.Ordinal));
+            var schedulerStatus = All(scheduler).OfType<Label>()
+                .Single(x => x.AccessibleName == "스케줄러 실행 안내");
+            Check(schedulerStart.Enabled, "scheduler start remains clickable to explain missing plan");
+            schedulerStart.PerformClick(); Pump();
+            Check(schedulerStatus.Text.Contains("시작 차단:") &&
+                  schedulerStatus.Text.Contains("가공") &&
+                  schedulerStatus.ForeColor == Color.DarkOrange,
+                "button explains missing altering selection visibly, not only in hidden logs");
+            var firstFeedback = schedulerStatus.Text;
+            scheduler.GetType().GetMethod("RefreshSnapshot",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+                .Invoke(scheduler, null);
+            Check(schedulerStatus.Text == firstFeedback,
+                "scheduler feedback persists through regular UI refresh");
+            typeof(MainForm).GetMethod("StartSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(form, null);
+            Check(schedulerStatus.Text.Contains("시작 차단:"),
+                "F9 uses the same visible no-plan feedback as mouse click");
+            Check(fake.Actions.Count == 0, "rejected start sends no game commands");
+            typeof(MainForm).GetField("_starting", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(form, true);
+            typeof(MainForm).GetMethod("StartSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(form, null);
+            Check(schedulerStatus.Text.Contains("이미 실행 중이거나 작업 준비"),
+                "busy start is visibly rejected rather than silently ignored");
+            typeof(MainForm).GetField("_starting", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(form, false);
+            Menu("홈"); Pump();
+
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
             Check(!All(gathering).Any(x => x.Visible), "home to altering does not require gathering first");
