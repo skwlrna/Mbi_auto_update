@@ -50,7 +50,7 @@ internal static class Program
         frameC["other"]=icon with {Score=.88};
         Check(!StrictLootPolicy.IsUnambiguousWinner("winner",frameA,frameB,frameC),"strict loot ambiguous similar icon rejected");
         var clock=Stopwatch.StartNew();await RetryClickDelay.WaitAsync(default);
-        Check(clock.ElapsedMilliseconds>=995,"retry cannot proceed immediately (one second wait)");
+        Check(clock.ElapsedMilliseconds>=4995,"retry cannot proceed immediately (five second wait)");
         using var cts=new CancellationTokenSource(40);bool reachedClick=false,cancelled=false;
         try{await RetryClickDelay.WaitAsync(cts.Token);reachedClick=true;}catch(OperationCanceledException){cancelled=true;}
         Check(cancelled&&!reachedClick,"stop during retry delay prevents continuation");
