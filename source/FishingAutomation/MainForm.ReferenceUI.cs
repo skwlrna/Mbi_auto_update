@@ -233,11 +233,10 @@ public sealed partial class MainForm
                 UpdateAbyssDungeonPickerVisibility();
             }, "log", "nav");
             AddButton("설정", new(16, 549, 200, 54), () => ShowMenu(
-                new[] { "텔레그램 알림", "오류 전송", "업데이트 확인" }, i =>
+                new[] { "텔레그램 알림", "오류 전송" }, i =>
                 {
                     if (i == 0) owner.ShowTelegramSettings();
-                    else if (i == 1) owner.ShowErrorUploadSettings();
-                    else _ = owner.CheckForUpdatesAsync(true);
+                    else owner.ShowErrorUploadSettings();
                 }, 228, 549), "list", "nav");
             _modeTabs.Add(AddButton("낚시", new(276, 190, 210, 62), () => SelectMode(0), "fish", "mode-tab"));
             _modeTabs.Add(AddButton("던전", new(496, 190, 210, 62), () => SelectMode(1), "swords", "mode-tab"));
@@ -247,7 +246,7 @@ public sealed partial class MainForm
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
             AddButton("현재 모드 선택", new(935, 190, 42, 62), ShowModeMenu, "chevron", "chrome");
             AddButton("던전 선택", new(932, 284, 42, 58), ShowDungeonMenu, "chevron", "chrome");
-            owner._updateButton = AddButton("업데이트 확인", new(1190, 884, 206, 36), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
+            owner._updateButton = AddButton("업데이트 확인", new(1163, 800, 228, 43), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
             for (int i = 0; i < 3; i++)
             {
                 int index = i;
@@ -440,6 +439,7 @@ public sealed partial class MainForm
                 }
                 _owner._mainActionButton.Visible = !_showHome || _owner.AnyRunning;
                 _owner._logToggle.Visible = !_showHome;
+                _owner._updateButton.Visible = _showHome;
                 if (_owner._logExpanded) _owner._logView.BringToFront();
             }
             // Each WinForms owner-drawn button keeps its own paint surface.
