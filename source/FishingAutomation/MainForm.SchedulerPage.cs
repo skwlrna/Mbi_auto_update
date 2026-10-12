@@ -243,7 +243,8 @@ public sealed partial class MainForm
                     // tabs share the available width, and captions never ellipsize.
                     int tabHeight = Math.Max(_tabs.Font.Height + 12, (int)MathF.Round(49f * layoutScale));
                     int tabWidth = Math.Max(95, (_tabs.ClientSize.Width - 8) / 4);
-                    _tabs.ItemSize = new Size(tabWidth, tabHeight);
+                    var desiredTabs = new Size(tabWidth, tabHeight);
+                    if (_tabs.ItemSize != desiredTabs) _tabs.ItemSize = desiredTabs;
                     _tabs.Invalidate();
                 }
                 finally
@@ -255,12 +256,19 @@ public sealed partial class MainForm
             Resize += (_, _) => FitPage();
             VisibleChanged += (_, _) => FitPage();
             DpiChangedAfterParent += (_, _) => FitPage();
+            bool resizingTabs = false;
             _tabs.Resize += (_, _) => { if (!fitting) FitTabWidth(); };
             void FitTabWidth()
             {
-                if (_tabs.TabCount > 0 && _tabs.ClientSize.Width > 0)
-                    _tabs.ItemSize = new Size(Math.Max(95, (_tabs.ClientSize.Width - 8) / _tabs.TabCount),
-                        _tabs.ItemSize.Height);
+                if (resizingTabs || _tabs.TabCount == 0 || _tabs.ClientSize.Width <= 0) return;
+                var desired = new Size(Math.Max(95, (_tabs.ClientSize.Width - 8) / _tabs.TabCount),
+                    _tabs.ItemSize.Height);
+                if (_tabs.ItemSize == desired) return;
+                // TabControl.ItemSize itself fires Resize on Windows.
+                // Prevent an infinite loop while the native tab adjusts its bounds.
+                resizingTabs = true;
+                try { _tabs.ItemSize = desired; }
+                finally { resizingTabs = false; }
             }
             FitPage();
             RefreshSnapshot();
