@@ -1,0 +1,181 @@
+name: Build Unified UI + Scheduler Windows Test Package
+
+on:
+  push:
+    branches: ['feature/unified-scheduler-ui-v1']
+    paths:
+      - '.github/workflows/preview-unified-scheduler-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unified-ui-test-package-20261012
+  cancel-in-progress: false
+
+jobs:
+  publish-preview:
+    runs-on: windows-latest
+    env:
+      TEST_TAG: V3.1.86-UI-Scheduler-TEST-20261012
+      PACKAGE_NAME: MabiAuto_V3.1.86_UI_Scheduler_TEST_Windows.zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Verify preview branch and avoid stable-release overwrite
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:GITHUB_REF -ne 'refs/heads/feature/unified-scheduler-ui-v1') { throw 'Preview must build from unified UI feature branch' }
+          if ((git status --porcelain).Length -gt 0) { throw 'Working tree not clean' }
+          if (-not (Test-Path 'source/FishingAutomation/MainForm.SchedulerPage.cs')) { throw 'Unified Scheduler UI missing' }
+          if (-not (Test-Path 'source/FishingAutomation/MainForm.SchedulerRunner.cs')) { throw 'Unified Scheduler runner missing' }
+          if (-not (Test-Path 'source/FishingAutomation/dungeon/AbyssResultLayout.cs')) { throw 'Fixed-button validation missing' }
+
+      - name: Build and scheduler regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'WinForms app build failed' }
+          dotnet run --project tests/combined-scheduler/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Unified Scheduler regressions failed' }
+
+      - name: Publish self-contained Windows executables
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'App restore failed' }
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Watchdog restore failed' }
+          New-Item -ItemType Directory -Force artifacts/app,artifacts/watchdog | Out-Null
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/app
+          if ($LASTEXITCODE -ne 0) { throw 'App publish failed' }
+          dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
+          if ($LASTEXITCODE -ne 0) { throw 'Watchdog publish failed' }
+          if (-not (Test-Path artifacts/app/FishingAutomation.exe)) { throw 'WinForms EXE missing' }
+          if (-not (Test-Path artifacts/watchdog/MacroWatchdog.exe)) { throw 'Macro Watchdog EXE missing' }
+
+      - name: Windows app launch smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path artifacts/app/FishingAutomation.exe).Path
+          $p=Start-Process $exe -WorkingDirectory (Resolve-Path artifacts/app).Path -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            $p.Refresh()
+            if ($p.HasExited) { throw "App exited during smoke test: $($p.ExitCode)" }
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Process MacroWatchdog -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Package preview without changing stable updater
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg=Join-Path $PWD 'artifacts/package'
+          $rel=Join-Path $pkg 'release'
+          $tools=Join-Path $pkg 'tools'
+          $compat=Join-Path $pkg 'FishingAutomation'
+          New-Item -ItemType Directory -Force $rel,$tools,$compat | Out-Null
+          Copy-Item artifacts/app/* $rel -Recurse -Force
+          Copy-Item source/FishingAutomation/interception.dll (Join-Path $rel 'interception.dll') -Force
+          Copy-Item artifacts/watchdog/MacroWatchdog.exe (Join-Path $rel 'MacroWatchdog.exe') -Force
+          Copy-Item source/tools/ApplyUpdate.ps1 (Join-Path $tools 'ApplyUpdate.ps1') -Force
+          Copy-Item source/tools/RollbackPrevious.ps1 (Join-Path $tools 'RollbackPrevious.ps1') -Force
+          Copy-Item source/ROLLBACK_PREVIOUS.cmd (Join-Path $pkg 'ROLLBACK_PREVIOUS.cmd') -Force
+          Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
+          Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
+          'Compatibility folder for updater.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
+          (git rev-parse HEAD).Trim() | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          @'
+          Mabi Auto - Unified UI + Scheduler WINDOWS TEST
+          This package is a TEST PREVIEW, not the stable automatic update.
+          VersionInfo remains V3.1.86 in this preview to avoid altering release migration.
+          Keep your working V3.1.86 installation intact.
+
+          TEST:
+          1) Extract the entire ZIP to a NEW folder, not over the installed release.
+          2) Run START.cmd. The main UI includes scheduler and the original modes.
+          3) Choose crafting, altering and optionally Abyss; check recipe search and F9/F10.
+          4) For first game trial, test each module separately and monitor the log.
+          5) Abyss left exit and middle retry use candidate fixed positions
+             (800x1000: 165,930 and 400,930); verify on actual Windows client.
+          6) Processing supervisor is paused while Abyss owns input, not server jobs.
+          7) After the verified outside HUD, processing status is re-read.
+          8) A network restart/recovery without outside confirmation forbids processing resume.
+          9) If a test fails, keep the log and any anomaly debug captures;
+             press F10 and report where/what happened.
+
+          This GitHub prerelease is NOT offered by the regular in-app auto-updater.
+          '@ | Set-Content (Join-Path $pkg 'TEST_README.txt') -Encoding UTF8
+          $required=@(
+            'release/FishingAutomation.exe',
+            'release/MacroWatchdog.exe',
+            'release/interception.dll',
+            'release/abyss/config/scenario.json',
+            'release/abyss/config/targets.json',
+            'release/abyss/templates/loot_v173/loot_hallucination_stone.png',
+            'START.cmd','TEST_README.txt','BUILD_COMMIT.txt',
+            'tools/ApplyUpdate.ps1','tools/RollbackPrevious.ps1'
+          )
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path $pkg $name))) { throw "Missing preview asset: $name" }
+          }
+          $zip=Join-Path $PWD ("artifacts/" + $env:PACKAGE_NAME)
+          Compress-Archive -Path (Join-Path $pkg '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+          if ((Get-Item $zip).Length -lt 10000000) { throw 'Preview package unexpectedly small' }
+          Add-Type -AssemblyName System.IO.Compression
+          $file=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names=@($file.Entries | ForEach-Object FullName)
+            foreach ($name in $required) {
+              if ($name -notin $names) { throw "ZIP entry missing: $name" }
+            }
+          } finally { $file.Dispose() }
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:PACKAGE_NAME" | Set-Content "$zip.sha256" -Encoding ASCII
+          Write-Host "Preview SHA256: $hash"
+
+      - name: Keep verified preview ZIP in workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MabiAuto-V3.1.86-UnifiedUI-Scheduler-TEST-Windows
+          path: |
+            artifacts/MabiAuto_V3.1.86_UI_Scheduler_TEST_Windows.zip
+            artifacts/MabiAuto_V3.1.86_UI_Scheduler_TEST_Windows.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish as GitHub prerelease (never stable auto-update)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $existing=gh release view $env:TEST_TAG --json url 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'Preview tag already published; do not overwrite binary' }
+          $notes=@'
+          **Windows testing build**, not a stable auto-update. All features in PR #164, including the native scheduler UI and the updated Abyss/processing handoff, are included.
+
+          Download the Windows ZIP, extract to a **separate folder**, and run START.cmd. Do **not** overwrite the stable installation while testing. In-game F9 starts; F10 stops.
+
+          Stable release V3.1.86 remains unchanged. This prerelease is ignored by the installed automatic updater.
+
+          Tests are automated; live Windows game UI confirmation is still needed for Abyss coordinates and outside-HUD return. Please report the log and debug captures if an anomaly appears.
+          '@
+          $notePath=Join-Path $PWD 'artifacts/RELEASE_TEST_NOTES.md'
+          $notes | Set-Content $notePath -Encoding UTF8
+          gh release create $env:TEST_TAG "artifacts/$env:PACKAGE_NAME" "artifacts/$env:PACKAGE_NAME.sha256" --target "$env:GITHUB_SHA" --prerelease --title 'Mabi Auto V3.1.86 UI + Scheduler Windows TEST' --notes-file $notePath
+          if ($LASTEXITCODE -ne 0) { throw 'Preview prerelease creation failed' }
+          $v=gh release view $env:TEST_TAG --json isPrerelease,assets,url | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $v.isPrerelease) { throw 'Preview release verification failed' }
+          if ($env:PACKAGE_NAME -notin $v.assets.name) { throw 'ZIP missing in prerelease' }
+          Write-Host "PREVIEW READY: $($v.url)"

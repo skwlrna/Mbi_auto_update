@@ -74,6 +74,37 @@ internal sealed partial class ScenarioEngine
         return samples == 0 ? 0 : green / (double)samples;
     }
 
+    // Result-row recognition is not enough to authorize an arbitrary screen
+    // coordinate: verify the actual fixed click patch is green on both frames.
+    // A 48x48 patch includes the green background even under white button text.
+    private static bool HasAbyssFixedButtonGreen(Bitmap frame, Point click)
+    {
+        const int radius = 24;
+        var square = new Rectangle(click.X - radius, click.Y - radius, radius * 2, radius * 2);
+        if (!new Rectangle(Point.Empty, frame.Size).Contains(square))
+            return false;
+        return GetGreenButtonRatio(frame, square) >= 0.25;
+    }
+
+    private Point ConfirmAbyssFixedButtonClick(Bitmap frame, bool exit)
+    {
+        var point = AbyssResultLayout.FixedButtonCenter(exit, frame.Size);
+        var required = ScaleAbyssResultRoi(exit ? AbyssExitButtonRoi : AbyssRetryButtonRoi, frame.Size);
+        if (!required.Contains(point) || !HasAbyssFixedButtonGreen(frame, point))
+            throw new InvalidOperationException(
+                "어비스 결과 버튼 고정좌표의 초록색/버튼 영역 검증 실패. 클릭하지 않고 안전 정지합니다.");
+        return point;
+    }
+
+    private void VerifyAbyssClickClientGeometry(nint hwnd, Size frameSize)
+    {
+        var rect = WindowTools.GetClientScreenRect(hwnd);
+        if (rect.Size != frameSize)
+            throw new InvalidOperationException(
+                $"어비스 결과 클릭 전 창 크기 변동 감지: 캡처={frameSize.Width}x{frameSize.Height}, " +
+                $"현재={rect.Width}x{rect.Height}. 오클릭 방지를 위해 안전 정지합니다.");
+    }
+
     // V0161_ABYSS_RESULT_ASPECT_092: real client captures can be ~815x920 (aspect ~0.886).
     private bool TryDetectAbyssResultButtonRow(Bitmap frame, out Rectangle retryRoi)
     {
@@ -346,12 +377,27 @@ internal sealed partial class ScenarioEngine
                 var freshRetry = await DetectAbyssResultRetryAsync(fresh, ct);
                 if (!freshRetry.Found || !freshRetry.Bounds.IntersectsWith(retry.Bounds))
                 { previous = DetectionResult.NotFound; continue; }
-                retry = freshRetry;
+                // One more post-loot independent frame. The position used for
+                // input comes only from the canonical middle-button center;
+                // neither OCR glyph bounds nor wide green-region center.
+                await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+                using var confirmedFrame = await CaptureGameWindowAsync(ct);
+                var confirmedRetry = await DetectAbyssResultRetryAsync(confirmedFrame, ct);
+                if (!confirmedRetry.Found || !confirmedRetry.Bounds.IntersectsWith(freshRetry.Bounds))
+                { previous = DetectionResult.NotFound; continue; }
+
+                var firstClick = ConfirmAbyssFixedButtonClick(fresh, exit: false);
+                var click = ConfirmAbyssFixedButtonClick(confirmedFrame, exit: false);
+                if (firstClick != click)
+                    throw new InvalidOperationException("어비스 다시 하기 확인 중 게임 창 크기가 변했습니다.");
+
+                ct.ThrowIfCancellationRequested();
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
+                VerifyAbyssClickClientGeometry(_hwnd, confirmedFrame.Size);
                 NativeMethods.SetForegroundWindow(_hwnd);
-                Log?.Invoke($"[어비스] 아래 중앙 다시 하기 2회 연속 확인 -> 다시 하기만 클릭 @ {retry.Center} source={retry.ReadText} safe={AbyssRetrySafeRoi}");
-                DiagnosticObserveClick("abyss_result_retry", retry.Center);
-                _input.ClickClientPoint(_hwnd, retry.Center);
+                Log?.Invoke($"[어비스] 결과 2회 재확인 + 초록 버튼 중앙 2회 검증 -> 고정좌표 다시 하기 1회 클릭 @ {click}");
+                DiagnosticObserveClick("abyss_result_retry_fixed", click);
+                _input.ClickClientPoint(_hwnd, click);
                 _inventoryNextRoundClicked = true;
                 AbyssTransitionTo(AbyssFlowState.RetryClicked, "가운데 다시 하기 클릭 완료");
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);

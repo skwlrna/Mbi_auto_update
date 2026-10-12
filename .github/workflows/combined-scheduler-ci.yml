@@ -1,0 +1,46 @@
+name: Abyss + Altering Scheduler Validation
+
+on:
+  push:
+    branches: ['feature/unified-scheduler-ui-v1']
+    paths:
+      - 'source/FishingAutomation/**'
+      - 'tests/**'
+      - '.github/workflows/combined-scheduler-ci.yml'
+  pull_request:
+    paths:
+      - 'source/FishingAutomation/**'
+      - 'tests/**'
+      - '.github/workflows/combined-scheduler-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-regressions:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build main program
+        shell: pwsh
+        run: dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
+      - name: Combined schedule policy and handoff tests
+        shell: pwsh
+        run: dotnet run --project tests/combined-scheduler/Regression.csproj -c Release -r win-x64
+      - name: Existing altering regression
+        shell: pwsh
+        run: dotnet run --project tests/altering/Regression.csproj -c Release
+      - name: Existing N02 resume and F05 ledger regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'N02 failed' }
+          dotnet run --project tests/f05-consumption/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'F05 failed' }
+      - name: Existing crafting regression
+        shell: pwsh
+        run: dotnet run --project tests/crafting/Regression.csproj -c Release

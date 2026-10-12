@@ -17,6 +17,15 @@ public sealed partial class MainForm
             return;
 
         bool isResume = resumeDirectory is not null;
+        // Snapshot once before awaits; F7 cannot change it while this batch runs.
+        bool combinedAbyss = _combinedAlteringRequested;
+        long minimumAbyssWaitSeconds = combinedAbyss
+            ? _schedulerPage.MinimumAbyssWaitSeconds
+            : AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds;
+        // Snapshot all WinForms selections on the F9/UI thread.
+        // A coordinator worker must not read ComboBox controls.
+        string combinedAbyssDungeonName = SelectedAbyssDungeon;
+        string combinedAbyssTargetId = SelectedAbyssTargetId;
         bool completed = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
@@ -432,6 +441,26 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
+            // The existing coordinator remains the sole owner of every receipt,
+            // registration, material acquisition and on-disk journal.
+            // In combined mode it lends control to Abyss ONLY at a pure idle
+            // boundary, and blocks until Abyss has exited to the outside HUD.
+            Func<CancellationToken, Task>? idleAbyssRound = combinedAbyss
+                ? async coordinatorToken =>
+                {
+                    coordinatorToken.ThrowIfCancellationRequested();
+                    // Leaving a facility invalidates physical onsite proof.
+                    // The next normal processing operation must re-prove travel.
+                    // Reuse the existing zero-Spirit-Wings guarded field-exit
+                    // used by gathering. It closes only positively identified
+                    // recipe/facility/hub UI and never blindly clicks unknown UI.
+                    await screen.ExitToFieldAsync(coordinatorToken);
+                    laneState.InvalidateOnsite("병행 어비스 이동 · 이전 가공시설 현장권한 무효화");
+                    await RunCombinedAbyssRoundAsync(coordinatorToken,
+                        combinedAbyssDungeonName, combinedAbyssTargetId);
+                }
+                : null;
+
             // Keep durable filesystem IO off the hotkey/UI thread. F10 only
             // cancels the run token; no callback waits for checkpoint persistence.
             await Task.Run(() => coordinator.RunAsync(
@@ -460,7 +489,9 @@ public sealed partial class MainForm
                 rawAlteringData.WorksAsync,
                 Task.Delay,
                 token,
-                preparePlan: PreparePlanMaterialsAsync), token);
+                preparePlan: PreparePlanMaterialsAsync,
+                onIdleAbyssRound: idleAbyssRound,
+                minimumAbyssWaitSeconds: minimumAbyssWaitSeconds), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;

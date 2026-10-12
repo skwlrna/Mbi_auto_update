@@ -21,6 +21,38 @@ internal sealed class MultiAlteringWaitWatchdog
     private readonly Dictionary<string, Checkpoint> _last = new(StringComparer.Ordinal);
     private readonly TimeSpan _threshold;
     private readonly Func<DateTimeOffset> _now;
+    private DateTimeOffset? _pauseStartedAt;
+
+    // Only the scheduler's own stall clock pauses. Production remains active
+    // on the server. Preserve the seconds already accrued before leaving, so
+    // returning from an arbitrarily long Abyss run does not create a false
+    // two-minute "stalled facility" alarm.
+    internal void PauseForAbyss()
+    {
+        if (_pauseStartedAt.HasValue)
+            throw new InvalidOperationException("다중가공 정체 감시가 이미 일시정지 상태입니다.");
+        _pauseStartedAt = _now();
+    }
+
+    internal void ResumeAfterAbyssExit()
+    {
+        if (!_pauseStartedAt.HasValue)
+            throw new InvalidOperationException("일시정지하지 않은 가공 정체 감시를 재개할 수 없습니다.");
+
+        TimeSpan paused = _now() - _pauseStartedAt.Value;
+        if (paused < TimeSpan.Zero)
+            throw new InvalidOperationException("가공 정체 감시 시간 역행 감지 · 안전 정지");
+
+        foreach (string facility in _last.Keys.ToArray())
+        {
+            Checkpoint checkpoint = _last[facility];
+            _last[facility] = checkpoint with
+            {
+                LastProgressAt = checkpoint.LastProgressAt + paused
+            };
+        }
+        _pauseStartedAt = null;
+    }
 
     internal MultiAlteringWaitWatchdog(
         TimeSpan threshold,
@@ -39,6 +71,8 @@ internal sealed class MultiAlteringWaitWatchdog
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(facility);
         ArgumentNullException.ThrowIfNull(works);
+        if (_pauseStartedAt.HasValue)
+            throw new InvalidOperationException("어비스 진행 중 가공 정체 감시/입력 상태를 조회할 수 없습니다.");
 
         string shape = string.Join("|",
             works.OrderBy(x => x.DisplayName, StringComparer.Ordinal)
@@ -132,7 +166,9 @@ internal sealed class MultiAlteringCoordinator
         Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
         Func<TimeSpan, CancellationToken, Task> delay,
         CancellationToken ct,
-        Func<AlteringPlan, CancellationToken, Task>? preparePlan = null)
+        Func<AlteringPlan, CancellationToken, Task>? preparePlan = null,
+        Func<CancellationToken, Task>? onIdleAbyssRound = null,
+        long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -439,6 +475,24 @@ internal sealed class MultiAlteringCoordinator
             Log?.Invoke(
                 $"[다중가공] 병렬 대기 · 진행/대기 {runningSlots}건 · 완료 누적 {completedSlots}건 · " +
                 $"다음 확인 약 {Math.Clamp(waitSeconds, 1, 30)}초 · 배치 전체 완료 전 이동 없음");
+
+            // No crafting, receipt, or movement is in flight here. This callback
+            // owns all input until the abyss has EXITED to the verified outside HUD.
+            // Immediately re-query works afterwards; never act on stale observations.
+            if (onIdleAbyssRound is not null &&
+                AbyssAlteringSchedulePolicy.CanRun(active, minimumAbyssWaitSeconds))
+            {
+                Log?.Invoke($"[병행] 모든 진행 중 가공 {minimumAbyssWaitSeconds}초 이상 남음 -> 가공 감시 일시정지 · 어비스에 입력권 양도");
+                // Suspend only manager/watchdog clock. A different-length
+                // dungeon is fine: no scheduler countdown can end the Abyss.
+                idleWatchdog.PauseForAbyss();
+                await onIdleAbyssRound(ct); // MUST verify outside HUD before returning
+                ct.ThrowIfCancellationRequested();
+                // Never resume processing on exit failure/F10 cancellation.
+                idleWatchdog.ResumeAfterAbyssExit();
+                Log?.Invoke("[병행] 던전 밖 복귀 확정 -> 가공 감시 재개 · 실제 서버 가공 대기열 즉시 재조회");
+                continue;
+            }
 
             await delay(
                 TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 1, 30)),

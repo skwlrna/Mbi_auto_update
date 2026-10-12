@@ -54,6 +54,8 @@ public sealed partial class MainForm : Form
     private string? _activeMode;
     private bool _starting;
     private bool _cancelStart;
+    // Disabled by default; the ordinary abyss and processing entry points are unchanged.
+    private bool _combinedAlteringRequested;
 
     private static readonly Color WindowBg = Color.FromArgb(4, 22, 38);
     private static readonly Color PanelBg = Color.FromArgb(9, 34, 58);
@@ -222,7 +224,7 @@ public sealed partial class MainForm : Form
         _ => "abyss_dungeon_hallucination_anchorage"
     };
     private bool DungeonRunning => _dungeonTask is { IsCompleted: false };
-    private bool AnyRunning => _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
+    private bool AnyRunning => _schedulerRunning || _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
 
     private void UpdateAbyssSelectorVisibility()
     {
@@ -308,6 +310,7 @@ public sealed partial class MainForm : Form
         if (SelectedMode == "낚시") StartFishing();
         else if (SelectedMode == "던전") _ = StartScenarioAsync("던전", "dungeon");
         else if (SelectedMode == "페카 심층") _ = StartScenarioAsync("페카 심층", "dungeon");
+        else if (SelectedMode == "스케줄러") _ = StartSchedulerAsync();
         else if (SelectedMode == "가공") _ = StartAlteringAsync();
         else if (SelectedMode == "채집") _ = StartGatheringAsync();
         else if (SelectedMode == "제작") _ = StartCraftingAsync();
@@ -551,6 +554,11 @@ public sealed partial class MainForm : Form
     private void StopSelected()
     {
         if (_starting) _cancelStart = true;
+        if (_schedulerRunning && _schedulerCts is { IsCancellationRequested: false })
+        {
+            _log.Write("[스케줄러] F10 전체 중단 · 다음 작업으로 넘기지 않습니다.");
+            _schedulerCts.Cancel();
+        }
         if (_multiAlteringRunning && _multiAlteringCts is not null && !_multiAlteringCts.IsCancellationRequested)
         {
             _log.Write("[다중가공] 정지 요청(F10) · 현재 품목 정지 후 다음 품목 시작 금지");
@@ -578,6 +586,7 @@ public sealed partial class MainForm : Form
     private void StopAll()
     {
         _cancelStart = true;
+        if (_schedulerCts is { IsCancellationRequested: false }) _schedulerCts.Cancel();
         if (_multiAlteringCts is not null && !_multiAlteringCts.IsCancellationRequested) _multiAlteringCts.Cancel();
         if (_fishingBot.IsRunning) _fishingBot.Stop();
         if (_dungeonCts is not null && !_dungeonCts.IsCancellationRequested) _dungeonCts.Cancel();
@@ -619,7 +628,11 @@ public sealed partial class MainForm : Form
             int count = WindowTools.EnumerateVisibleWindows().Count;
             string readyText = SelectedMode == "어비스"
                 ? $"어비스 준비 완료 · {SelectedAbyssDungeon}"
-                : $"{DisplayModeName(SelectedMode)} 준비 완료";
+                : SelectedMode == "가공"
+                    ? "자동 가공 준비 · 단독 실행"
+                    : SelectedMode == "스케줄러"
+                        ? "스케줄러 준비 · 작업 계획 탭에서 구성"
+                        : $"{DisplayModeName(SelectedMode)} 준비 완료";
             SetStatus(count > 0 ? readyText : "게임 창 확인 필요", count > 0 ? Green : Color.DarkOrange);
         }
     }
