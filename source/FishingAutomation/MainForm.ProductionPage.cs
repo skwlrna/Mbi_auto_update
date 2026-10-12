@@ -154,7 +154,7 @@ public sealed partial class MainForm
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
-                Padding = new Padding(14, 6, 14, 10), Margin = Padding.Empty, BackColor = WindowBg
+                Padding = new Padding(18, 10, 18, 14), Margin = Padding.Empty, BackColor = WindowBg
             };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -165,7 +165,7 @@ public sealed partial class MainForm
             header.Controls.Add(owner.SectionTitle(AccessibleName, 26), 0, 0);
             header.Controls.Add(new Label
             {
-                Text = altering ? "품목과 목표 수량을 담으면 시설별로 병렬 실행하고, 같은 시설 품목은 7칸에 섞어 가공합니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
+                Text = altering ? "품목과 추가 생산량을 설정하세요. 시설별 작업을 관리하고, 같은 시설 품목은 순서대로 가공합니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
                 Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft
             }, 0, 1);
             root.Controls.Add(header, 0, 0);
@@ -187,14 +187,14 @@ public sealed partial class MainForm
                 Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
                 Margin = new Padding(0, 0, 0, 10), BackColor = Color.Transparent, AccessibleName = "생산 2열 본문"
             };
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
             var leftCard = new LauncherCard
             {
                 Padding = new Padding(16, 10, 16, 10), Margin = new Padding(0, 0, 9, 0),
                 AccessibleName = altering ? "가공 품목 영역" : "채집 품목 영역"
             };
-            int leftRows = altering ? 6 : 4;
+            int leftRows = altering ? 4 : 3;
             var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = leftRows, Margin = Padding.Empty, BackColor = Color.Transparent };
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
@@ -219,22 +219,20 @@ public sealed partial class MainForm
             left.Controls.Add(BuildLabeledField("품목 검색", _search, "production-field"), 0, row++);
             left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             left.Controls.Add(BuildListArea(altering ? "가공 품목" : "채집 품목"), 0, row++);
-            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
-            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"), 0, row++);
-            if (altering)
-            {
-                left.RowStyles.Add(new RowStyle(SizeType.Absolute, 128));
-                left.Controls.Add(BuildAlteringQueueArea(), 0, row++);
-            }
             leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
 
             var right = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = Padding.Empty,
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = altering ? 3 : 2, Margin = Padding.Empty,
                 BackColor = Color.Transparent, AccessibleName = "실행 상태"
             };
-            right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = Padding.Empty };
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
+            right.RowStyles.Add(new RowStyle(altering ? SizeType.Absolute : SizeType.Percent, altering ? 320 : 100));
+            if (altering) right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var goalCard = new LauncherCard { Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 10) };
+            goalCard.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"));
+            right.Controls.Add(goalCard, 0, 0);
+            var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = new Padding(0, 0, 0, 10) };
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -251,12 +249,18 @@ public sealed partial class MainForm
                 label.AutoEllipsis = true; label.BackColor = Color.Transparent; label.Margin = Padding.Empty;
             }
             _percentage.TextAlign = ContentAlignment.MiddleRight;
-            _progressText.ForeColor = _percentage.ForeColor = Color.FromArgb(36, 195, 255);
+            _progressText.ForeColor = _percentage.ForeColor = Color.FromArgb(96, 165, 250);
             _progress.Dock = DockStyle.Fill; _progress.Margin = new Padding(0, 3, 0, 3); _progress.Paint += (_, e) => DrawProgress(e.Graphics);
             status.Controls.Add(_state, 0, 1); status.Controls.Add(_condition, 0, 2); status.Controls.Add(progressLine, 0, 3);
             status.Controls.Add(_progress, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_collection, 0, 6);
             status.Controls.Add(_character, 0, 7); status.Controls.Add(_cli, 0, 8);
-            statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
+            statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 1);
+            if (altering)
+            {
+                var queueCard = new LauncherCard { Padding = new Padding(12, 8, 12, 8), Margin = Padding.Empty };
+                queueCard.Controls.Add(BuildAlteringQueueArea());
+                right.Controls.Add(queueCard, 0, 2);
+            }
             body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
             // Keep the original page and controls. Altering alone gains ONE
@@ -294,15 +298,15 @@ public sealed partial class MainForm
             var rows = metrics.SelectMany(m => m.Control is TableLayoutPanel t ? t.RowStyles.Cast<RowStyle>().Where(x => x.SizeType == SizeType.Absolute).Select(x => (Style: x, Size: x.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
             var columns = metrics.SelectMany(m => m.Control is TableLayoutPanel t ? t.ColumnStyles.Cast<ColumnStyle>().Where(x => x.SizeType == SizeType.Absolute).Select(x => (Style: x, Size: x.Width)) : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
             var scaledFonts = new List<Font>(); var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
-            float lastScale = -1; int lastDpi = -1; bool fitting = false;
+            float lastScale = -1, lastFontScale = -1; int lastDpi = -1; bool fitting = false;
             Disposed += (_, _) => { foreach (var font in scaledFonts) font.Dispose(); };
             void FitPage()
             {
                 if (fitting || ClientSize.Width < 1 || ClientSize.Height < 1) return;
                 float scale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
                 float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
-                if (Math.Abs(scale - lastScale) < .001f && DeviceDpi == lastDpi) return;
-                lastScale = scale; lastDpi = DeviceDpi; fitting = true; _layoutScale = scale; root.SuspendLayout();
+                if (Math.Abs(scale - lastScale) < .00001f && Math.Abs(fontScale - lastFontScale) < .00001f && DeviceDpi == lastDpi) return;
+                lastScale = scale; lastFontScale = fontScale; lastDpi = DeviceDpi; fitting = true; _layoutScale = scale; root.SuspendLayout();
                 foreach (var metric in metrics)
                 {
                     float size = Math.Max(metric.Size >= 18 ? 13f : 12f, MathF.Round(metric.Size * fontScale));
@@ -317,7 +321,7 @@ public sealed partial class MainForm
                 foreach (var field in Descendants(root).Where(c => c.Tag is string tag && tag == "production-field")) LayoutField(field);
                 root.ResumeLayout(true); fitting = false;
             }
-            Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
+            Resize += (_, _) => FitPage(); VisibleChanged += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
             _search.TextChanged += (_, _) => Filter(); Items.SelectedIndexChanged += (_, _) => SelectionChanged(); Quantity.ValueChanged += (_, _) => SelectionChanged();
             Facility.SelectedIndexChanged += (_, _) => { UpdateFacilityTabs(); Filter(); };
             Owned.Text = "—"; UpdateExecution();
@@ -445,7 +449,7 @@ public sealed partial class MainForm
             };
             header.Controls.Add(new Label
             {
-                Text = "다중가공 작업 목록",
+                Text = "다중가공 목록",
                 Dock = DockStyle.Fill,
                 ForeColor = TitleText,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -591,8 +595,8 @@ public sealed partial class MainForm
                 e.Graphics.Clear(SurfaceColor(Parent));
                 var bounds = new RectangleF(1, 1, Width-2, Height-2);
                 using var shape = Rounded(bounds, 12);
-                using var fill = new LinearGradientBrush(bounds, Color.FromArgb(7, 35, 61), CardBg2, 60f);
-                using var border = new Pen(Color.FromArgb(21, 77, 116));
+                using var fill = new SolidBrush(CardBg);
+                using var border = new Pen(Line);
                 e.Graphics.FillPath(fill, shape); e.Graphics.DrawPath(border, shape);
             }
         }
@@ -607,7 +611,7 @@ public sealed partial class MainForm
             if (_percent > 0)
             {
                 using var filled = Rounded(new RectangleF(0, 0, Math.Max(8, bounds.Width*_percent/100f), bounds.Height), 7);
-                using var fill = new LinearGradientBrush(bounds, Color.FromArgb(25, 209, 255), Accent, 90f);
+                using var fill = new SolidBrush(Accent);
                 graphics.FillPath(fill, filled);
             }
         }
@@ -685,9 +689,8 @@ public sealed partial class MainForm
                 var bounds = new RectangleF(1, 1, Width-2, Height-2);
                 using var shape = Rounded(bounds, 10);
                 bool primary = Enabled && BackColor == Accent;
-                using var fill = new LinearGradientBrush(bounds, primary ? Color.FromArgb(4, 165, 255) : CardBg,
-                    primary ? Color.FromArgb(0, 86, 226) : CardBg2, 90f);
-                using var border = new Pen(primary ? Color.FromArgb(0, 207, 255) : Line, primary ? 1.8f : 1f);
+                using var fill = new SolidBrush(primary ? Accent : CardBg2);
+                using var border = new Pen(primary ? Accent : Line, 1f);
                 e.Graphics.FillPath(fill, shape); e.Graphics.DrawPath(border, shape);
                 TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, Enabled ? ForeColor : Muted,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);

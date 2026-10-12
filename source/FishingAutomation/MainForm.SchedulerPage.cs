@@ -35,7 +35,28 @@ public sealed partial class MainForm
 
         private void ClearStartFeedback() => _lastStartFeedback = null;
         private readonly Button _start;
-        private readonly TabControl _tabs = new();
+        private readonly TabControl _tabs = new FluentTabControl();
+
+        // Native tabs keep keyboard and accessibility behavior; only their exposed
+        // system-colored frame is repainted to match the surrounding dark surface.
+        private sealed class FluentTabControl : TabControl
+        {
+            protected override void WndProc(ref Message m)
+            {
+                base.WndProc(ref m);
+                if (m.Msg is not (0x000F or 0x0317 or 0x0318) || TabCount == 0) return;
+                if (m.Msg != 0x000F && m.WParam == IntPtr.Zero) return;
+                using var graphics = m.Msg == 0x000F
+                    ? Graphics.FromHwnd(Handle) : Graphics.FromHdc(m.WParam);
+                var lastTab = GetTabRect(TabCount - 1);
+                using var surface = new SolidBrush(WindowBg);
+                graphics.FillRectangle(surface, lastTab.Right + 2, 0,
+                    Math.Max(0, Width - lastTab.Right - 2), lastTab.Bottom);
+                using var frame = new Pen(WindowBg, 4);
+                graphics.DrawRectangle(frame, 1, lastTab.Bottom + 2,
+                    Math.Max(1, Width - 3), Math.Max(1, Height - lastTab.Bottom - 4));
+            }
+        }
 
         internal bool UseAltering => _alters.Checked;
         internal bool UseCrafting => _crafts.Checked;
@@ -61,17 +82,19 @@ public sealed partial class MainForm
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
-                BackColor = WindowBg, Padding = new Padding(12, 6, 12, 8)
+                BackColor = WindowBg, Padding = new Padding(18, 10, 18, 14)
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 92));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
-            header.Controls.Add(owner.SectionTitle("통합 스케줄러", 25), 0, 0);
-            header.Controls.Add(Txt("가공 · 제작 · 어비스를 하나의 입력권으로 순차 관리합니다. 상세 제법/음식 검색은 기존 화면 그대로 사용합니다.", Muted, 12), 0, 1);
+            var heading = owner.SectionTitle("통합 스케줄러", 20);
+            heading.Font = new Font("맑은 고딕", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
+            header.Controls.Add(heading, 0, 0);
+            header.Controls.Add(Txt("제작 · 가공을 순서대로 실행하고, 가공 대기 중 어비스를 진행합니다. 각 작업의 설정을 먼저 확인하세요.", Muted, 12), 0, 1);
             root.Controls.Add(header, 0, 0);
 
             foreach (var summary in new[] { _alteringSummary, _craftingSummary, _abyssSummary })
@@ -87,12 +110,12 @@ public sealed partial class MainForm
             _tabs.Font = new Font("맑은 고딕", 10f, FontStyle.Bold);
             _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             _tabs.SizeMode = TabSizeMode.Fixed;
-            _tabs.ItemSize = new Size(144, 39);
+            _tabs.ItemSize = new Size(152, 43);
             _tabs.DrawItem += (_, e) =>
             {
                 if (e.Index < 0) return;
                 bool selected = _tabs.SelectedIndex == e.Index;
-                using var fill = new SolidBrush(selected ? PanelBg : WindowBg);
+                using var fill = new SolidBrush(selected ? AccentSoft : CardBg);
                 using var edge = new Pen(selected ? Blue : Border);
                 e.Graphics.FillRectangle(fill, e.Bounds);
                 e.Graphics.DrawRectangle(edge, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
@@ -174,7 +197,8 @@ public sealed partial class MainForm
                 Font = new Font("맑은 고딕", 11f, FontStyle.Bold),
                 Cursor = Cursors.Hand, Margin = new Padding(4)
             };
-            button.FlatAppearance.BorderColor = Border;
+            button.FlatAppearance.BorderColor = primary ? Blue : Border;
+            button.FlatAppearance.MouseOverBackColor = AccentSoft;
             button.Click += (_, _) => run();
             return button;
         }
@@ -210,11 +234,35 @@ public sealed partial class MainForm
             LayoutCheck(_crafts, "1. 제작  ·  선택한 음식 / 아이템 목표 수량까지 작업", layout, 1);
             LayoutCheck(_alters, "2. 다중가공  ·  시설별 다중 작업 등록 / 수령 / 재료 해결", layout, 2);
             LayoutCheck(_abyss, "3. 어비스  ·  가공 대기 중 한 판 실행 후 퇴장 검증", layout, 3);
-            layout.Controls.Add(Txt("실행 순서 : 제작 완료 → 가공 등록 → 가공 대기 중 어비스 1판 → 가공 복귀", TitleText, 12), 0, 4);
+            layout.Controls.Add(BuildSequencePreview(), 0, 4);
             layout.Controls.Add(Txt("제작은 현 단계에서 먼저 끝내는 방식입니다. 제작 중 어비스로 전환하지 않습니다.", Muted, 11), 0, 5);
             layout.Controls.Add(Txt("각 탭에서 가공·제작·어비스 설정 확인 후 F9로 시작하세요. F10은 모든 단계의 중단 요청입니다.", Muted, 11), 0, 6);
             tab.Controls.Add(layout);
             return tab;
+        }
+
+        // Read-only preview of the existing scheduler order; no execution state is owned here.
+        private static Control BuildSequencePreview()
+        {
+            var flow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1,
+                Margin = new Padding(0, 6, 0, 6), BackColor = WindowBg,
+                AccessibleName = "스케줄러 실행 순서"
+            };
+            string[] steps = { "1  제작 완료", "2  가공 등록", "3  대기 중 어비스", "4  가공 복귀" };
+            for (int i = 0; i < steps.Length; i++)
+            {
+                flow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+                flow.Controls.Add(new Label
+                {
+                    Text = steps[i], Dock = DockStyle.Fill, BackColor = AccentSoft,
+                    ForeColor = TitleText, TextAlign = ContentAlignment.MiddleCenter,
+                    Font = new Font("맑은 고딕", 10f, FontStyle.Bold),
+                    Margin = new Padding(3), AutoEllipsis = true
+                }, i, 0);
+            }
+            return flow;
         }
 
         private static void LayoutCheck(CheckBox cb, string caption, TableLayoutPanel table, int row)

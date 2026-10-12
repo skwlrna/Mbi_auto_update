@@ -102,7 +102,7 @@ public sealed partial class MainForm
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
-                Padding = new Padding(14, 6, 14, 10), Margin = Padding.Empty, BackColor = WindowBg
+                Padding = new Padding(18, 10, 18, 14), Margin = Padding.Empty, BackColor = WindowBg
             };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -124,12 +124,12 @@ public sealed partial class MainForm
                 Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
                 Margin = new Padding(0, 0, 0, 10), BackColor = Color.Transparent, AccessibleName = "제작 2열 본문"
             };
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
             var leftCard = Card(); leftCard.Padding = new Padding(16, 10, 16, 10); leftCard.Margin = new Padding(0, 0, 9, 0); leftCard.AccessibleName = "제작 품목 영역";
-            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, BackColor = Color.Transparent };
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty, BackColor = Color.Transparent };
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
             settingsHeading.Controls.Add(new Label { Text = "제작 설정", Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft });
@@ -139,15 +139,18 @@ public sealed partial class MainForm
             left.Controls.Add(settingsHeading, 0, 0);
             left.Controls.Add(BuildLabeledField("품목 검색", _search, "crafting-field"), 0, 1);
             left.Controls.Add(BuildListArea("제작 품목"), 0, 2);
-            left.Controls.Add(BuildLabeledField("목표 수량", Quantity, "crafting-field"), 0, 3);
             leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
 
             var right = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = Padding.Empty,
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
                 BackColor = Color.Transparent, AccessibleName = "제작 실행 상태"
             };
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
             right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var goalCard = Card(); goalCard.Padding = new Padding(14, 8, 14, 8); goalCard.Margin = new Padding(0, 0, 0, 10);
+            goalCard.Controls.Add(BuildLabeledField("목표 수량", Quantity, "crafting-field"));
+            right.Controls.Add(goalCard, 0, 0);
 
             var statusCard = Card(); statusCard.Padding = new Padding(14, 10, 14, 10); statusCard.Margin = Padding.Empty;
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
@@ -166,11 +169,11 @@ public sealed partial class MainForm
                 label.Dock = DockStyle.Fill; label.ForeColor = TitleText; label.TextAlign = ContentAlignment.MiddleLeft;
                 label.AutoEllipsis = true; label.BackColor = Color.Transparent; label.Margin = Padding.Empty;
             }
-            _percentage.TextAlign = ContentAlignment.MiddleRight; _progress.ForeColor = _percentage.ForeColor = Color.FromArgb(36, 195, 255);
+            _percentage.TextAlign = ContentAlignment.MiddleRight; _progress.ForeColor = _percentage.ForeColor = Color.FromArgb(96, 165, 250);
             _progressBar.Dock = DockStyle.Fill; _progressBar.Margin = new Padding(0, 3, 0, 3); _progressBar.Paint += (_, e) => DrawProgress(e.Graphics);
             status.Controls.Add(_state, 0, 1); status.Controls.Add(_stage, 0, 2); status.Controls.Add(progressLine, 0, 3);
             status.Controls.Add(_progressBar, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_errors, 0, 6); status.Controls.Add(_detail, 0, 7);
-            statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 0);
+            statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 1);
             body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
             var actions = new TableLayoutPanel
@@ -195,15 +198,15 @@ public sealed partial class MainForm
             var rows = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table ? table.RowStyles.Cast<RowStyle>().Where(style => style.SizeType == SizeType.Absolute).Select(style => (Style: style, Size: style.Height)) : Enumerable.Empty<(RowStyle Style, float Size)>()).ToArray();
             var columns = metrics.SelectMany(metric => metric.Control is TableLayoutPanel table ? table.ColumnStyles.Cast<ColumnStyle>().Where(style => style.SizeType == SizeType.Absolute).Select(style => (Style: style, Size: style.Width)) : Enumerable.Empty<(ColumnStyle Style, float Size)>()).ToArray();
             var scaledFonts = new List<Font>(); var fontCache = new Dictionary<(string Family, float Size, FontStyle Style), Font>();
-            float lastScale = -1; int lastDpi = -1; bool fitting = false;
+            float lastScale = -1, lastFontScale = -1; int lastDpi = -1; bool fitting = false;
             Disposed += (_, _) => { foreach (var font in scaledFonts) font.Dispose(); };
             void FitPage()
             {
                 if (fitting || ClientSize.Width < 1 || ClientSize.Height < 1) return;
                 float scale = Math.Min(ClientSize.Width / 1004f, ClientSize.Height / 711f);
                 float fontScale = Math.Min(ClientSize.Width / 1212f, ClientSize.Height / 858f);
-                if (Math.Abs(scale - lastScale) < .001f && DeviceDpi == lastDpi) return;
-                lastScale = scale; lastDpi = DeviceDpi; fitting = true; _layoutScale = scale; root.SuspendLayout();
+                if (Math.Abs(scale - lastScale) < .00001f && Math.Abs(fontScale - lastFontScale) < .00001f && DeviceDpi == lastDpi) return;
+                lastScale = scale; lastFontScale = fontScale; lastDpi = DeviceDpi; fitting = true; _layoutScale = scale; root.SuspendLayout();
                 foreach (var metric in metrics)
                 {
                     float size = Math.Max(metric.Size >= 18 ? 13f : 12f, MathF.Round(metric.Size * fontScale));
@@ -217,7 +220,7 @@ public sealed partial class MainForm
                 foreach (var field in Descendants(root).Where(control => control.Tag is string tag && tag == "crafting-field")) LayoutField(field);
                 root.ResumeLayout(true); fitting = false;
             }
-            Resize += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
+            Resize += (_, _) => FitPage(); VisibleChanged += (_, _) => FitPage(); DpiChangedAfterParent += (_, _) => FitPage(); FitPage();
             _search.TextChanged += (_, _) => Filter(); Items.SelectedIndexChanged += (_, _) => SelectionChanged();
             Quantity.ValueChanged += (_, _) => SelectionChanged(); UpdateExecution();
         }
@@ -245,9 +248,8 @@ public sealed partial class MainForm
                 e.Graphics.Clear(SurfaceColor(Parent));
                 var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
                 using var shape = Rounded(bounds, 12);
-                using var fill = new LinearGradientBrush(
-                    bounds, Color.FromArgb(7, 35, 61), CardBg2, 60f);
-                using var border = new Pen(Color.FromArgb(21, 77, 116));
+                using var fill = new SolidBrush(CardBg);
+                using var border = new Pen(Line);
                 e.Graphics.FillPath(fill, shape);
                 e.Graphics.DrawPath(border, shape);
             }
@@ -299,13 +301,9 @@ public sealed partial class MainForm
                 var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
                 using var shape = Rounded(bounds, 10);
                 bool primary = Enabled && BackColor == Accent;
-                using var fill = new LinearGradientBrush(
-                    bounds,
-                    primary ? Color.FromArgb(4, 165, 255) : CardBg,
-                    primary ? Color.FromArgb(0, 86, 226) : CardBg2,
-                    90f);
+                using var fill = new SolidBrush(primary ? Accent : CardBg2);
                 using var border = new Pen(
-                    primary ? Color.FromArgb(0, 207, 255) : Line,
+                    primary ? Accent : Line,
                     primary ? 1.8f : 1f);
                 e.Graphics.FillPath(fill, shape);
                 e.Graphics.DrawPath(border, shape);
@@ -375,7 +373,7 @@ public sealed partial class MainForm
             if (_percent > 0)
             {
                 using var filled = Rounded(new RectangleF(0, 0, Math.Max(8, bounds.Width * _percent / 100f), bounds.Height), 7);
-                using var fill = new LinearGradientBrush(bounds, Color.FromArgb(25, 209, 255), Accent, 90f); graphics.FillPath(fill, filled);
+                using var fill = new SolidBrush(Accent); graphics.FillPath(fill, filled);
             }
         }
 

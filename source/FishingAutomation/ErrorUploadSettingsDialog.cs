@@ -31,7 +31,7 @@ internal sealed class ErrorUploadSettingsDialog : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ClientSize = new Size(610, 465);
-        BackColor = Color.FromArgb(3, 28, 49);
+        BackColor = Color.FromArgb(32, 37, 45);
         ForeColor = Color.White;
         Font = new Font("맑은 고딕", 9.5f);
         ShowInTaskbar = false;
@@ -45,7 +45,7 @@ internal sealed class ErrorUploadSettingsDialog : Form
         Controls.Add(new Label
         {
             Text = "오류/자동복구 경고 발생 시 summary.json, 최근 로그, 게임 스크린샷을 비공개 GitHub 저장소로 전송합니다.",
-            Location = new Point(26, 55), Size = new Size(555, 42), ForeColor = Color.FromArgb(188, 211, 233)
+            Location = new Point(26, 55), Size = new Size(555, 42), ForeColor = Color.FromArgb(166, 177, 193)
         });
 
         _enabled.Text = "에러 자동 전송 사용";
@@ -84,7 +84,7 @@ internal sealed class ErrorUploadSettingsDialog : Form
         _result.Location = new Point(170, 365); _result.Size = new Size(405, 44); _result.TextAlign = ContentAlignment.MiddleLeft; _result.AutoEllipsis = true;
         Controls.Add(_result);
 
-        var save = MakeButton("저장", new Rectangle(383, 415, 92, 36), Color.FromArgb(0, 122, 190));
+        var save = MakeButton("저장", new Rectangle(383, 415, 92, 36), Color.FromArgb(59, 130, 246));
         save.DialogResult = DialogResult.OK;
         var cancel = MakeButton("취소", new Rectangle(485, 415, 92, 36), Color.FromArgb(20, 52, 78));
         cancel.DialogResult = DialogResult.Cancel;
@@ -96,7 +96,7 @@ internal sealed class ErrorUploadSettingsDialog : Form
     {
         Controls.Add(new Label { Text = caption, Location = new Point(30, y), Size = new Size(140, 30), TextAlign = ContentAlignment.MiddleLeft });
         box.Location = new Point(176, y); box.Size = new Size(400, 30); box.BorderStyle = BorderStyle.FixedSingle;
-        box.BackColor = Color.FromArgb(0, 17, 32); box.ForeColor = Color.White;
+        box.BackColor = Color.FromArgb(38, 44, 53); box.ForeColor = Color.White;
         Controls.Add(box);
     }
 

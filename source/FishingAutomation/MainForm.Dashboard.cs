@@ -53,13 +53,13 @@ public sealed partial class MainForm
     private string? _runError;
     private string _recentDetectText = "대기 중";
 
-    private static readonly Color NavBg = Color.FromArgb(5, 18, 33);
-    private static readonly Color CardBg = Color.FromArgb(10, 29, 50);
-    private static readonly Color CardBg2 = Color.FromArgb(8, 25, 43);
-    private static readonly Color Accent = Color.FromArgb(26, 139, 255);
-    private static readonly Color AccentSoft = Color.FromArgb(14, 72, 126);
-    private static readonly Color Muted = Color.FromArgb(143, 171, 201);
-    private static readonly Color Line = Color.FromArgb(23, 58, 91);
+    private static readonly Color NavBg = Color.FromArgb(25, 29, 35);
+    private static readonly Color CardBg = Color.FromArgb(32, 37, 45);
+    private static readonly Color CardBg2 = Color.FromArgb(38, 44, 53);
+    private static readonly Color Accent = Color.FromArgb(59, 130, 246);
+    private static readonly Color AccentSoft = Color.FromArgb(38, 61, 91);
+    private static readonly Color Muted = Color.FromArgb(166, 177, 193);
+    private static readonly Color Line = Color.FromArgb(61, 69, 82);
 
     private Button SmallButton(string caption, Action action)
     {
