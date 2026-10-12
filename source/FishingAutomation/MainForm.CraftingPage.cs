@@ -169,7 +169,7 @@ public sealed partial class MainForm
                 label.Dock = DockStyle.Fill; label.ForeColor = TitleText; label.TextAlign = ContentAlignment.MiddleLeft;
                 label.AutoEllipsis = true; label.BackColor = Color.Transparent; label.Margin = Padding.Empty;
             }
-            _percentage.TextAlign = ContentAlignment.MiddleRight; _progress.ForeColor = _percentage.ForeColor = Color.FromArgb(96, 165, 250);
+            _percentage.TextAlign = ContentAlignment.MiddleRight; _progress.ForeColor = _percentage.ForeColor = Blue;
             _progressBar.Dock = DockStyle.Fill; _progressBar.Margin = new Padding(0, 3, 0, 3); _progressBar.Paint += (_, e) => DrawProgress(e.Graphics);
             status.Controls.Add(_state, 0, 1); status.Controls.Add(_stage, 0, 2); status.Controls.Add(progressLine, 0, 3);
             status.Controls.Add(_progressBar, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_errors, 0, 6); status.Controls.Add(_detail, 0, 7);
@@ -182,7 +182,7 @@ public sealed partial class MainForm
                 Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "제작 하단 시작 정지"
             };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent;
+            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent; _start.ForeColor = Color.White;
             _stop = Button("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "제작 정지";
             actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
