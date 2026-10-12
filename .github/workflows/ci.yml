@@ -60,12 +60,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.1\.90"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.1\.91"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.1\.90</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3190-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.1\.90"')) {
+          if ($p -notmatch '<Version>3\.1\.91</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3191-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.1\.91"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -264,8 +264,13 @@ jobs:
           if($state -match 'class ProductionDashboard'){throw 'separate production overlay must stay removed'}
           $layout = Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw
           if($layout -match 'new ProductionDashboard\(this\)'){throw 'separate production dashboard is still attached'}
-          foreach($text in @('자동 가공','자동 채집','제작','작업 대상','진행 수량')){
+          foreach($text in @('자동 가공','자동 채집','제작','작업 대상')){
             if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
+          }
+          # V3.1.91 shows quantities in the production workspace, not the home summary.
+          $productionPage = Get-Content source/FishingAutomation/MainForm.ProductionPage.cs -Raw
+          foreach($text in @('목표 수량','진행 수량')){
+            if($productionPage -notmatch [regex]::Escape($text)){throw "production quantity UI missing: $text"}
           }
           if($layout -notmatch 'AddButton\("자동 가공",[\s\S]*?SelectMode\(4\)'){throw 'home to automatic altering one-click route missing'}
           if($layout -notmatch 'AddButton\("자동 채집",[\s\S]*?SelectMode\(5\)'){throw 'home to automatic gathering one-click route missing'}
@@ -279,6 +284,9 @@ jobs:
           if($dashboard -notmatch '자동 채집 설정 / 시작'){throw 'gathering action caption missing'}
           if($dashboard -notmatch '제작 설정 / 시작'){throw 'crafting action caption missing'}
           $craftPage = Get-Content source/FishingAutomation/MainForm.CraftingPage.cs -Raw
+          foreach($text in @('목표 수량','진행 수량')){
+            if($craftPage -notmatch [regex]::Escape($text)){throw "crafting quantity UI missing: $text"}
+          }
           if($craftPage -match '제작 분류 탭|제작 아이템|제작 음식|BuildCategoryTabs|SetCategory'){throw 'crafting item/food category tabs must stay removed'}
           if($craftPage -notmatch '전체 제작 품목을 한 목록에서 검색'){throw 'crafting search-only guidance missing'}
           if($craftPage -notmatch 'var visible = _choices'){throw 'crafting search must filter the full catalog'}

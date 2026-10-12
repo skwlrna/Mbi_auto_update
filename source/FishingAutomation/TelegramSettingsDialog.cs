@@ -17,13 +17,13 @@ internal sealed class TelegramSettingsDialog : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(480, 300);
-        BackColor = Color.FromArgb(2, 18, 34);
-        ForeColor = Color.FromArgb(225, 238, 252);
+        BackColor = Color.FromArgb(21, 24, 29);
+        ForeColor = Color.FromArgb(238, 242, 248);
         Font = new Font("맑은 고딕", 10f);
         ShowInTaskbar = false;
 
-        var border = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Color.FromArgb(0, 190, 255) };
-        var body = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(3, 28, 49) };
+        var border = new Panel { Dock = DockStyle.Fill, Padding = new Padding(1), BackColor = Color.FromArgb(61, 69, 82) };
+        var body = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(32, 37, 45) };
         border.Controls.Add(body);
         Controls.Add(border);
 
@@ -33,7 +33,7 @@ internal sealed class TelegramSettingsDialog : Form
             Font = new Font("맑은 고딕", 17f, FontStyle.Bold), ForeColor = Color.White,
             TextAlign = ContentAlignment.MiddleLeft
         };
-        var close = CreateButton("×", new Rectangle(426, 12, 38, 38), Color.FromArgb(8, 39, 65));
+        var close = CreateButton("×", new Rectangle(426, 12, 38, 38), Color.FromArgb(38, 44, 53));
         close.Font = new Font("Segoe UI", 18f, FontStyle.Regular);
         close.DialogResult = DialogResult.Cancel;
 
@@ -45,9 +45,9 @@ internal sealed class TelegramSettingsDialog : Form
         _chatId.Text = current.ChatId;
         _token.UseSystemPasswordChar = true;
 
-        var save = CreateButton("저장", new Rectangle(246, 231, 98, 45), Color.FromArgb(0, 122, 190));
+        var save = CreateButton("저장", new Rectangle(246, 231, 98, 45), Color.FromArgb(59, 130, 246));
         save.DialogResult = DialogResult.OK;
-        var cancel = CreateButton("취소", new Rectangle(354, 231, 98, 45), Color.FromArgb(8, 39, 65));
+        var cancel = CreateButton("취소", new Rectangle(354, 231, 98, 45), Color.FromArgb(38, 44, 53));
         cancel.DialogResult = DialogResult.Cancel;
         body.Controls.Add(save);
         body.Controls.Add(cancel);
@@ -60,12 +60,12 @@ internal sealed class TelegramSettingsDialog : Form
         parent.Controls.Add(new Label
         {
             Text = caption, Location = new Point(26, y), Size = new Size(100, 32),
-            ForeColor = Color.FromArgb(205, 222, 240), TextAlign = ContentAlignment.MiddleLeft
+            ForeColor = Color.FromArgb(166, 177, 193), TextAlign = ContentAlignment.MiddleLeft
         });
         box.Location = new Point(126, y);
         box.Size = new Size(326, 32);
         box.BorderStyle = BorderStyle.FixedSingle;
-        box.BackColor = Color.FromArgb(0, 17, 32);
+        box.BackColor = Color.FromArgb(38, 44, 53);
         box.ForeColor = Color.White;
         parent.Controls.Add(box);
     }
