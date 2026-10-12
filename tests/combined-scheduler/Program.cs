@@ -78,6 +78,41 @@ longWatch.ResumeAfterAbyssExit();
 longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
 Assert(true, "Abyss duration never becomes manager stall time after return");
 
+// A non-repeating scenario can return without finishing after network restart,
+// Timeout Smart Recovery, or RestartCycleException. Such a return is NOT proof
+// that the character left Abyss.
+bool silentRestartBlocked = false;
+try
+{
+    ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+        scheduledResultExit: true, outsideHudVerified: false, CancellationToken.None);
+}
+catch (InvalidOperationException ex)
+{
+    silentRestartBlocked = ex.Message.Contains("던전 밖 HUD 확인 기록이 없습니다");
+}
+Assert(silentRestartBlocked,
+    "silent scheduled restart/reconnect/recovery return cannot release processing");
+ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+    scheduledResultExit: true, outsideHudVerified: true, CancellationToken.None);
+Assert(true, "only verified outside HUD allows scheduled return");
+ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+    scheduledResultExit: false, outsideHudVerified: false, CancellationToken.None);
+Assert(true, "ordinary unscheduled Abyss unaffected by scheduler proof");
+using (var stopAfterExit = new CancellationTokenSource())
+{
+    stopAfterExit.Cancel();
+    bool canceledEvenWithProof = false;
+    try
+    {
+        ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+            scheduledResultExit: true, outsideHudVerified: true, stopAfterExit.Token);
+    }
+    catch (OperationCanceledException) { canceledEvenWithProof = true; }
+    Assert(canceledEvenWithProof,
+        "F10 always prevents processing even after outside HUD proof");
+}
+
 // Run the real coordinator with pure fake data: the input owner never overlaps.
 var plan = new AlteringPlan("가죽 가공 시설", "가죽", 1, 1, false);
 var simulatedWorks = new List<AlteringWork> { Work(200) };
@@ -139,6 +174,46 @@ catch (InvalidOperationException ex) when (ex.Message == "Unverified exit")
 }
 Assert(caughtExitFailure && callsAfterFailure == 0,
     "failed abyss exit stops before any further processing action");
+
+// Regression for the real bug: previously a scheduled non-repeat Abyss engine
+// could silently complete after a network restart. The callback must reject
+// this and the manager must never read fresh processing jobs or press a key.
+int readsAfterSilentReturn = 0;
+int registrationsAfterSilentReturn = 0;
+bool silentReturnStoppedCoordinator = false;
+try
+{
+    var coordinatorAfterSilentReturn = new MultiAlteringCoordinator();
+    using var timeoutAfterSilentReturn = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    await coordinatorAfterSilentReturn.RunAsync(
+        new[] { plan },
+        (_, _, _) =>
+        {
+            registrationsAfterSilentReturn++;
+            return Task.FromResult(false);
+        },
+        _ =>
+        {
+            readsAfterSilentReturn++;
+            return Task.FromResult<IReadOnlyList<AlteringWork>>(new[] { Work(300) });
+        },
+        (_, _) => throw new Exception("Unexpected delay after unverified recovery"),
+        timeoutAfterSilentReturn.Token,
+        onIdleAbyssRound: token =>
+        {
+            ScheduledAbyssReturnPolicy.RequireVerifiedOutside(
+                scheduledResultExit: true, outsideHudVerified: false, token);
+            return Task.CompletedTask;
+        });
+}
+catch (InvalidOperationException ex) when (
+    ex.Message.Contains("던전 밖 HUD 확인 기록이 없습니다"))
+{
+    silentReturnStoppedCoordinator = true;
+}
+Assert(silentReturnStoppedCoordinator && readsAfterSilentReturn > 0 &&
+       readsAfterSilentReturn < 4 && registrationsAfterSilentReturn == 0,
+    "failed scheduled return blocks subsequent processing polling and registration");
 
 // Cancellation during the handoff also forbids subsequent input.
 int callsAfterCancel = 0;
