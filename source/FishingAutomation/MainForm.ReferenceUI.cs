@@ -239,12 +239,6 @@ public sealed partial class MainForm
             _modeTabs.Add(AddButton("낚시", new(276, 190, 210, 62), () => SelectMode(0), "fish", "mode-tab"));
             _modeTabs.Add(AddButton("던전", new(496, 190, 210, 62), () => SelectMode(1), "swords", "mode-tab"));
             _modeTabs.Add(AddButton("어비스", new(716, 190, 210, 62), () => SelectMode(2), "abyss", "mode-tab"));
-            // Legacy direct shortcuts retained for existing start/menu regression contracts;
-            // the actual UI exposes these commands in the production menu above.
-            var legacyAltering = AddButton("자동 가공", new(16, 1100, 200, 54), () => SelectMode(4), "game", "nav");
-            var legacyCrafting = AddButton("제작", new(16, 1160, 200, 54), () => SelectMode(6), "game", "nav");
-            var legacyGathering = AddButton("자동 채집", new(16, 1220, 200, 54), () => SelectMode(5), "leaf", "nav");
-            legacyAltering.Visible = legacyCrafting.Visible = legacyGathering.Visible = false;
             AddButton("미니 모드", new(16, 991, 200, 46), () => owner.ToggleMini(true), "", "quiet");
 
             // Mode and dungeon selectors have native keyboard-focusable buttons and menus.
@@ -427,8 +421,6 @@ public sealed partial class MainForm
             {
                 bool production = ShouldShowProductionPage;
                 foreach (var tab in _modeTabs) tab.Visible = !_showHome && !production;
-                foreach (var (control, bounds) in _positions)
-                    if (bounds.Y >= 1100) control.Visible = false;
                 _owner._alteringPage.Visible = production && _owner._productionPageMode == "가공";
                 _owner._gatheringPage.Visible = production && _owner._productionPageMode == "채집";
                 _owner._craftingPage.Visible = production && _owner._productionPageMode == "제작";
