@@ -29,6 +29,15 @@ internal static class Program
             void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
             void Menu(string name)
             {
+                if (name is "낚시" or "던전" or "어비스")
+                {
+                    // Enter the automation workspace first; modes are its three
+                    // visible tabs, not independent top-level sidebar entries.
+                    controls.OfType<Button>().Single(x => x.Text == "자동화 실행").PerformClick();
+                    Pump();
+                    controls.OfType<Button>().Single(x => x.Text == name).PerformClick();
+                    return;
+                }
                 if (name is "자동 가공" or "자동 채집" or "제작")
                 {
                     // The clean-white navigation intentionally groups these three modes.
