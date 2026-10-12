@@ -69,8 +69,22 @@ internal static class AbyssResultLayout
 /// or a completed Smart Recovery as proof that it may touch processing.
 /// Only an independently verified outside HUD can release that input lease.
 /// </summary>
+internal enum AbyssRecoveryResultAction
+{
+    RetryDungeon,
+    ExitForProcessing
+}
+
 internal static class ScheduledAbyssReturnPolicy
 {
+    // A discovered result screen must NEVER send "다시 하기" when a
+    // processing coordinator owns the scheduled run. The coordinator may
+    // regain input only after LEFT exit + independently proven outside HUD.
+    internal static AbyssRecoveryResultAction RecoveryResultAction(bool scheduledResultExit)
+        => scheduledResultExit
+            ? AbyssRecoveryResultAction.ExitForProcessing
+            : AbyssRecoveryResultAction.RetryDungeon;
+
     internal static void RequireVerifiedOutside(
         bool scheduledResultExit,
         bool outsideHudVerified,
