@@ -62,3 +62,24 @@ internal static class AbyssResultLayout
         return ordered && rowTop < rowBottom;
     }
 }
+
+
+/// <summary>
+/// The scheduler must not treat an ordinary RunAsync return, a network reset,
+/// or a completed Smart Recovery as proof that it may touch processing.
+/// Only an independently verified outside HUD can release that input lease.
+/// </summary>
+internal static class ScheduledAbyssReturnPolicy
+{
+    internal static void RequireVerifiedOutside(
+        bool scheduledResultExit,
+        bool outsideHudVerified,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (scheduledResultExit && !outsideHudVerified)
+            throw new InvalidOperationException(
+                "병행 어비스 종료/재접속/복구 후 던전 밖 HUD 확인 기록이 없습니다. " +
+                "가공 입력권 반환 금지 · 현재 게임 화면 확인 후 이어하기가 필요합니다.");
+    }
+}
