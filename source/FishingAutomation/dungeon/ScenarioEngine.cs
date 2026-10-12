@@ -122,6 +122,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         int recoveryFailures = 0;
         int repeatedRecoveryStep = -1;
         int repeatedRecoveryCount = 0;
+        int scheduledRecoveryCycles = 0;
+        const int MaxScheduledRecoveryCycles = 6;
 
         do
         {
@@ -162,6 +164,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
             catch (RestartCycleException)
             {
+                if (_scheduledResultExit) scheduledRecoveryCycles++;
                 recoveryFailures = 0;
                 repeatedRecoveryStep = -1;
                 repeatedRecoveryCount = 0;
@@ -202,6 +205,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                     if (recovered)
                     {
+                        if (_scheduledResultExit) scheduledRecoveryCycles++;
                         if (IsAbyss)
                         {
                             if (repeatedRecoveryStep == _resumeStepIndex) repeatedRecoveryCount++;
@@ -249,6 +253,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                 if (networkCycleRestart)
                 {
+                    if (_scheduledResultExit) scheduledRecoveryCycles++;
                     if (_networkRestartRequested) CompleteNetworkRestartRequest("자동복구 중 재접속 완료");
                     else _resumeStepIndex = 0;
                     continue;
@@ -256,7 +261,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _settings.AutoRecoveryDelaySeconds)), ct);
             }
-        } while (_scenario.Repeat && !ct.IsCancellationRequested);
+        } while (!ct.IsCancellationRequested && AbyssMenuEntryPolicy.ShouldRunAnotherCycle(
+            _scenario.Repeat, _scheduledResultExit, _scheduledOutsideExitVerified,
+            scheduledRecoveryCycles, MaxScheduledRecoveryCycles));
+
+        if (_scheduledResultExit && !_scheduledOutsideExitVerified &&
+            scheduledRecoveryCycles >= MaxScheduledRecoveryCycles)
+            throw new InvalidOperationException(
+                "병행 어비스 자동복구 반복 한도 도달 -> 던전 밖 미확인, 가공 입력권 반환 금지");
     }
 
     private int FindDungeonStepIndex(string targetId)
@@ -334,7 +346,12 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     {
         bool abyss = string.Equals(new DirectoryInfo(_baseDir).Name, "abyss", StringComparison.OrdinalIgnoreCase);
         if (abyss)
+        {
+            if (_currentStepIndex <= FindDungeonStepIndex("abyss_enter") &&
+                !_abyssCombatStartedAt.HasValue)
+                return await TryRecoverAbyssEntryScreenAsync(ct);
             return await TryAbyssInternalRecoveryAsync(ct);
+        }
 
         try
         {
@@ -871,6 +888,19 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             AbyssEnterCombatClearWait("5단계 전투 종료/클리어 화면 대기 시작");
             await StartAbyssCombatClockAsync(ct);
             CommitInventoryLootRetry();
+        }
+
+        // Dedicated menu preflight: opening the ESC menu is not required when
+        // the processing handoff already left the menu visible.
+        if (IsAbyss && step.Target.Equals("abyss_menu", StringComparison.OrdinalIgnoreCase))
+        {
+            await ExecuteAbyssMenuOpenStepAsync(step, ct);
+            return;
+        }
+        if (IsAbyss && step.Target.Equals("abyss_icon", StringComparison.OrdinalIgnoreCase))
+        {
+            await ExecuteAbyssMenuIconStepAsync(step, ct);
+            return;
         }
 
         if (IsAbyss && step.Target == "abyss_result_retry")
