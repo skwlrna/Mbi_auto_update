@@ -13,6 +13,35 @@ static AlteringWork Work(long seconds, bool completed = false)
     => new("가죽", "가죽 가공 시설",
         completed ? "Completed" : "InProgress", completed, seconds);
 
+// Regression for 2026-10-12 V3.1.87 live report: the game menu was
+// visibly open, but step 1 searched only the CLOSED-menu ESC template
+// until it timed out. Two independent frames of the Abyss item in the
+// correct right-side menu must bypass the ESC click.
+var menuA = new DetectionResult(true, new Rectangle(495, 315, 64, 68), 0.91, null);
+var menuB = new DetectionResult(true, new Rectangle(497, 316, 64, 68), 0.90, null);
+Assert(AbyssMenuEntryPolicy.IconEvidence(menuA.Bounds) &&
+       AbyssMenuEntryPolicy.Stable(menuA, menuB),
+    "already-open menu: two stable Abyss-icon frames skip ESC and advance");
+Assert(!AbyssMenuEntryPolicy.Stable(DetectionResult.NotFound, menuA),
+    "one menu frame cannot authorize skip or click");
+Assert(!AbyssMenuEntryPolicy.Stable(menuA,
+       new DetectionResult(true, new Rectangle(170, 315, 64, 68), 0.97, null)),
+    "similar icon in field or wrong screen must not authorize menu click");
+Assert(!AbyssMenuEntryPolicy.Stable(menuA,
+       new DetectionResult(true, new Rectangle(489, 440, 64, 68), 0.99, null)),
+    "other rows in the open menu are not Abyss");
+Assert(AbyssMenuEntryPolicy.ContextEvidence(new Rectangle(498, 575, 48, 18)) &&
+       !AbyssMenuEntryPolicy.ContextEvidence(new Rectangle(498, 360, 48, 18)),
+    "OCR fallback requires independent Guild label below Abyss in menu");
+Assert(AbyssMenuEntryPolicy.ShouldRunAnotherCycle(false, true, false, 1, 6),
+    "non-repeating scheduled Abyss continues after verified entry recovery");
+Assert(!AbyssMenuEntryPolicy.ShouldRunAnotherCycle(false, true, true, 1, 6),
+    "verified outside HUD ends scheduled dungeon without restart");
+Assert(!AbyssMenuEntryPolicy.ShouldRunAnotherCycle(false, true, false, 6, 6),
+    "bounded recovery prevents endless scheduled menu retries");
+Assert(!AbyssMenuEntryPolicy.ShouldRunAnotherCycle(false, false, false, 1, 6),
+    "ordinary non-repeat mode never inherits scheduler-specific retry behavior");
+
 Assert(!AbyssAlteringSchedulePolicy.CanRun(Array.Empty<AlteringWork>()),
     "no work: never enter abyss");
 Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(89) }),
