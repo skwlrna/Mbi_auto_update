@@ -35,9 +35,10 @@ public sealed partial class MainForm
 
         private void ClearStartFeedback() => _lastStartFeedback = null;
         private readonly TabControl _tabs = new();
+        private int _hoveredTab = -1;
 
-        // Keep the native tab painter; manually overpainting its window frame
-        // erased inactive tab labels until hover refreshed the screen.
+        // Keep the native tab frame, but owner-draw each of the four tab captions
+        // so a selected tab is visibly different from pointer hover.
         internal bool UseAltering => _alters.Checked;
         internal bool UseCrafting => _crafts.Checked;
         internal bool UseAbyss => _abyss.Checked;
@@ -96,13 +97,45 @@ public sealed partial class MainForm
             {
                 if (e.Index < 0) return;
                 bool selected = _tabs.SelectedIndex == e.Index;
-                using var fill = new SolidBrush(selected ? AccentSoft : CardBg2);
-                using var edge = new Pen(selected ? Blue : Border, selected ? 2f : 1f);
-                e.Graphics.FillRectangle(fill, e.Bounds);
-                e.Graphics.DrawRectangle(edge, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
-                TextRenderer.DrawText(e.Graphics, _tabs.TabPages[e.Index].Text, _tabs.Font,
-                    e.Bounds, selected ? Color.FromArgb(22, 58, 112) : TitleText,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                bool hovered = !selected && _hoveredTab == e.Index;
+                Rectangle tabBounds = Rectangle.Inflate(e.Bounds, -2, -2);
+                using var fill = new SolidBrush(selected ? AccentSoft :
+                    hovered ? Color.FromArgb(241, 246, 255) : CardBg);
+                using var edge = new Pen(selected ? Blue :
+                    hovered ? Color.FromArgb(156, 181, 219) : Border, selected ? 2f : 1f);
+                e.Graphics.FillRectangle(fill, tabBounds);
+                e.Graphics.DrawRectangle(edge, tabBounds.X, tabBounds.Y,
+                    tabBounds.Width - 1, tabBounds.Height - 1);
+                if (selected)
+                {
+                    using var accent = new SolidBrush(Blue);
+                    e.Graphics.FillRectangle(accent, tabBounds.X + 3,
+                        tabBounds.Bottom - 5, Math.Max(1, tabBounds.Width - 6), 4);
+                }
+                using var font = new Font(_tabs.Font, selected ? FontStyle.Bold : FontStyle.Regular);
+                TextRenderer.DrawText(e.Graphics, _tabs.TabPages[e.Index].Text, font,
+                    tabBounds, selected ? Color.FromArgb(22, 58, 112) : TitleText,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            };
+            _tabs.MouseMove += (_, e) =>
+            {
+                int hovered = -1;
+                for (int index = 0; index < _tabs.TabCount; index++)
+                {
+                    if (!_tabs.GetTabRect(index).Contains(e.Location)) continue;
+                    hovered = index;
+                    break;
+                }
+                if (hovered == _hoveredTab) return;
+                _hoveredTab = hovered;
+                _tabs.Invalidate();
+            };
+            _tabs.MouseLeave += (_, _) =>
+            {
+                if (_hoveredTab == -1) return;
+                _hoveredTab = -1;
+                _tabs.Invalidate();
             };
             _tabs.Padding = new Point(16, 8);
             _tabs.Appearance = TabAppearance.Normal;
