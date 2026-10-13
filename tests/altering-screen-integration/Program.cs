@@ -318,35 +318,60 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, true),
         "V3.1.77 F9 K re-entry 2/4->3/4 waits, 3/4->3/4 passes within 2s only without modal/menu");
 
+    // V3.2.0 14:16:48 production capture: Home/End fail while K/I are
+    // stable. 2/4 alone remains vetoed; two frames of K+I PLUS separately
+    // verified gold minimap and teal skill disc may authorize the field path.
+    Check(CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, true, true, false, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, true, true, true, false, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            false, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, false, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, false, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, true, false, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, true, true, true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+            true, true, true, true, true, true, false, true),
+        "V3.2.0 K/I + independent gold/teal field requires BOTH consecutive frames; modal/menu veto");
     var enter = ScreenCalls("EnterFacilityAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
           Has(enter, "CanAuthorizeManagedKEntry") &&
           Has(enter, "IsManagedKReentryWithinLimit") &&
           Has(enter, "StartNew") &&
-          !Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "CanAuthorizeManagedKFieldFallback") &&
           Has(enter, "RequireManagedIdleAsync") &&
           Has(enter, "Capture"),
-        "V3.1.75 compiled F9 K has no minimap-gold pixel veto; template re-entry and fresh CLI idle guard");
+        "V3.2.0 K re-entry uses template path or guarded 2-frame K/I + minimap+skill visual; idle still required");
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
-    // V3.1.75: the 18:30 live world capture (V3.1.74) had no old
-    // minimap-gold match and stopped before K. The production Enter method
-    // MUST use 3/4 grayscale Abyss HUD templates only AFTER the first K.
-    // Two fresh frames, a real popup veto and CLI idle remain required.
+    // Earlier live captures had an unreliable minimap-only pixel gate;
+    // V3.2.0 never uses it by itself: two stable K+I template matches and
+    // independent field visual are BOTH mandatory after the first K.
+    // First entry is unchanged; the 3/4 route is unchanged.
+    // A fresh popup veto and CLI idle remain required before any K input.
     Check(!Has(enter, "HasFixedFacilityHeaderVisual") &&
           Has(enter, "TapFresh") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
           Has(enter, "CanAuthorizeManagedKEntry") &&
-          !Has(enter, "HasManagedKEntryFieldHudVisual") &&
+          Has(enter, "HasManagedKEntryFieldHudVisual") &&
           Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "RequireManagedIdleAsync"),
-        "V3.1.75 first F9 field K bypasses old gold/teal test; later K uses 3/4 Abyss HUD and modal/CLI safety");
+        "V3.2.0 first entry unchanged; re-entry field path requires pixel+template corroboration and CLI safety");
     var matchAbyssHud = ScreenCalls("DetectManagedWorldHudTemplates", 1);
     Check(Count(matchAbyssHud, "FindTemplate") == 4 &&
           !Has(matchAbyssHud, "HasManagedKEntryFieldHudVisual") &&
-          Has(ScreenCalls("CanAuthorizeManagedKEntry", 5), "get_Item1") == false,
-        "V3.1.75 compiled F9 re-entry checks four fixed Abyss HUD templates, not old minimap colour");
+          Has(ScreenCalls("CanAuthorizeManagedKEntry", 5), "get_Item1") == false &&
+          Has(ScreenCalls("CanAuthorizeManagedKFieldFallback", 8), "get_Item1") == false,
+        "V3.2.0 the four template thresholds remain independent of the field-only supplemental gate");
     Check(CallBoolean(screen, "CanAuthorizeManagedKEntry",
             true, 0, 0, false, false) &&
           !CallBoolean(screen, "CanAuthorizeManagedKEntry",
@@ -767,7 +792,8 @@ try
             "V3.1.69 slate dialog without positive green confirm stays blocked");
     }
 
-    // Legacy synthetic gold/teal detector diagnostic, no longer used by F9 K input.
+    // Synthetic gold/teal field evidence now supplements (never replaces)
+    // the two-frame K+I image template check on a managed K re-entry.
     // V3.1.71 manager F9 K menu: actual 06:15 field is green foliage
     // with a gold upper-right minimap and teal bottom-left K skill HUD.
     // The legacy generic green detector may see the foliage as a modal;
