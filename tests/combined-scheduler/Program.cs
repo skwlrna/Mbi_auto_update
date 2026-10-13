@@ -339,4 +339,29 @@ try { _ = AbyssResultLayout.FixedButtonCenter(false, Size.Empty); }
 catch (InvalidOperationException) { refusedMissingClient = true; }
 Assert(refusedMissingClient, "missing client geometry blocks fixed click");
 
+
+// Scheduler resume path must reuse the durable manual-resume gate, not sneak a
+// new F9 ledger under an "이어하기" label. This is a source wiring contract;
+// the Windows workflow also builds the real MainForm implementation.
+string schedulerRunner = File.ReadAllText(
+    Path.Combine(Directory.GetCurrentDirectory(),
+        "source/FishingAutomation/MainForm.SchedulerRunner.cs"));
+string schedulerResume = File.ReadAllText(
+    Path.Combine(Directory.GetCurrentDirectory(),
+        "source/FishingAutomation/MainForm.SchedulerResume.cs"));
+Assert(schedulerRunner.Contains("ChooseSchedulerMultiAlteringAsync(") &&
+       schedulerRunner.Contains("resume?.Directory, resume?.BatchId") &&
+       schedulerRunner.Contains("resume?.ConfirmedSingleCharacter ?? false"),
+    "scheduler forwards verified batch identity and character consent to multi-altering");
+Assert(schedulerResume.Contains("MultiAlteringRecentResume.Latest(root)") &&
+       schedulerResume.Contains("MultiAlteringRecentResume.VerifyAsync(") &&
+       schedulerResume.Contains("DialogResult.Yes") &&
+       schedulerResume.Contains("DialogResult.Cancel"),
+    "scheduler requires explicit fresh/resume/cancel and verified latest manifest");
+Assert(schedulerResume.Contains("token.ThrowIfCancellationRequested()") &&
+       schedulerResume.Contains("craftingSelected") &&
+       schedulerRunner.IndexOf("ChooseSchedulerMultiAlteringAsync(", StringComparison.Ordinal) <
+       schedulerRunner.IndexOf("await StartCraftingAsync();", StringComparison.Ordinal),
+    "F10 and user cancel block crafting, and crafting restarts only after resume selection");
+
 Console.WriteLine("Combined scheduler regressions passed.");

@@ -57,8 +57,9 @@ public sealed partial class MainForm
             if (runAltering)
             {
                 var queued = _alteringPage.QueuedAlteringPlans;
-                alteringPlans = queued.Count > 0 ? queued : new[] { SelectedAlteringPlan() };
-                foreach (var plan in alteringPlans) plan.Validate();
+                // A saved batch may be resumed even when the current UI queue
+                // is empty. Validate the selected *execution* plan after choice.
+                alteringPlans = queued.Count > 0 ? queued : Array.Empty<AlteringPlan>();
             }
         }
         catch (Exception ex)
@@ -83,6 +84,31 @@ public sealed partial class MainForm
 
         try
         {
+            SchedulerAlteringResumeSelection? resume = null;
+            if (runAltering)
+            {
+                // Decide BEFORE any crafting input: the saved batch is never
+                // silently replaced by a fresh F9 ledger.
+                var choice = await ChooseSchedulerMultiAlteringAsync(
+                    alteringPlans, runCrafting, token);
+                token.ThrowIfCancellationRequested();
+                if (choice.Cancelled)
+                {
+                    _log.Write("[스케줄러] 가공 실행 선택 취소 · 제작/가공/어비스 입력 없음");
+                    SetStatus("스케줄러 시작 취소", Color.DarkOrange);
+                    return;
+                }
+                resume = choice.Resume;
+                if (resume is not null)
+                    alteringPlans = resume.Plans;
+                else if (alteringPlans.Count == 0)
+                    alteringPlans = new[] { SelectedAlteringPlan() };
+                foreach (var plan in alteringPlans) plan.Validate();
+                _log.Write(resume is null
+                    ? "[스케줄러] 신규 다중가공 선택 · 기존 장부 자동 복원 없음"
+                    : "[스케줄러] 저장 다중가공 이어하기 선택 · 배치 " + resume.BatchId);
+            }
+
             if (runCrafting)
             {
                 token.ThrowIfCancellationRequested();
@@ -117,7 +143,9 @@ public sealed partial class MainForm
                     (runAbyss ? " · 가공 대기 중 어비스 1판씩" : ""));
                 // This call waits for coordinator completion and exclusively
                 // owns registration, collection, durable ledger and idle Abyss.
-                await StartMultiAlteringAsync(alteringPlans);
+                await StartMultiAlteringAsync(
+                    alteringPlans, resume?.Directory, resume?.BatchId,
+                    resume?.ConfirmedSingleCharacter ?? false);
                 token.ThrowIfCancellationRequested();
                 if (_runError is not null)
                     throw new InvalidOperationException("다중가공이 안전 정지했습니다: " + _runError);
