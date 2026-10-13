@@ -23,8 +23,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private bool _repeatOcrFreeRecipe;
     private string? _selectedFixedRecipeKey;
     // Per-F9 AlteringScreen: first K is explicitly started in the ordinary field.
-    // After that first real K input, any later unknown->K navigation must
-    // positively match Abyss HUD templates on two fresh frames.
+    // After that first real K input, later unknown->K navigation must
+    // positively match either 3/4 Abyss HUD templates on two fresh frames
+    // or K+I templates PLUS independent minimap + life-skill HUD evidence.
+    // Both routes keep fresh modal/menu checks and CLI idle before any key.
     private bool _managedKInputIssued;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
     private static readonly Rectangle Header = new(0, 15, 450, 110);
@@ -880,27 +882,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // First F9 entry has a known ordinary-field start. After a
-                    // real K was sent, reuse the Abyss Home/End/K/I templates,
-                    // but allow up to 2 seconds for the HUD to settle after
-                    // Esc (21:09:58 live screenshot: 2/4 -> 3/4 in 180ms).
-                    // Require TWO CONSECUTIVE >=3/4 observations, not merely
-                    // one good frame or a lowered threshold. A true modal or
-                    // newly opened processing menu always overrides the HUD.
+                    // First F9 entry has a known ordinary-field start. Re-entry
+                    // keeps the old 3/4-in-two-frames HUD rule. The 14:16:48
+                    // V3.1.99 live field had K/I=0.969/0.910 yet Home/End=0.37/0.39,
+                    // so also accept two consecutive K+I plus the independent
+                    // minimap-rim and lower-left life-skill HUD visual. Neither
+                    // path relaxes the popup/menu veto or last-moment CLI idle.
+                    // Limit remains 2 seconds; no unverified extra K is sent.
                     bool firstEntry = !_managedKInputIssued;
                     var previousHud = firstEntry
-                        ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외")
+                        ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false)
                         : DetectManagedWorldHudTemplates(frame);
+                    bool previousField = !firstEntry && HasManagedKEntryFieldHudVisual(frame);
                     var started = Stopwatch.StartNew();
                     int samples = 1;
                     bool menuAppeared = false;
+                    bool fieldFallbackAuthorized = false;
                     while (true)
                     {
                         await Task.Delay(180, ct);
                         using var freshField = Capture(ct);
                         var currentHud = firstEntry
-                            ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외")
+                            ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false)
                             : DetectManagedWorldHudTemplates(freshField);
+                        bool currentField = !firstEntry && HasManagedKEntryFieldHudVisual(freshField);
                         samples++;
                         bool actualModal = HasManagedKEntryBlockingModal(freshField);
                         bool unexpectedMenu = HasFixedProcessingHubVisual(freshField) ||
@@ -910,6 +915,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"경로={(firstEntry ? "최초 필드 시작" : "중간 재진입")} · " +
                             $"HUD={previousHud.Matched}/4 → {currentHud.Matched}/4 · " +
                             $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
+                            $"필드독립증거={previousField}→{currentField} · " +
+                            $"K/I={previousHud.KFound}/{previousHud.IFound}→{currentHud.KFound}/{currentHud.IFound} · " +
                             $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
                             $"재확인={samples}프레임/{started.Elapsed.TotalSeconds:F1}초");
 
@@ -925,24 +932,51 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             break;
                         }
 
-                        // Initial K still requires the fresh modal/menu check,
-                        // but not a HUD score. For re-entry, both the previous
-                        // and the fresh frame must independently score >=3/4.
-                        bool verified = CanAuthorizeManagedKEntry(
+                        // Each successful route must be consecutive across TWO
+                        // actual frames. A 2/4 score alone is never authorization.
+                        bool templateAuthorized = CanAuthorizeManagedKEntry(
                             firstEntry, previousHud.Matched, currentHud.Matched,
                             actualModal, unexpectedMenu);
+                        bool fieldAuthorized = !firstEntry &&
+                            CanAuthorizeManagedKFieldFallback(
+                                previousHud.KFound, previousHud.IFound,
+                                currentHud.KFound, currentHud.IFound,
+                                previousField, currentField, actualModal, unexpectedMenu);
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
-                        if (firstEntry || (verified && withinLimit))
+                        if (firstEntry || ((templateAuthorized || fieldAuthorized) && withinLimit))
+                        {
+                            fieldFallbackAuthorized = fieldAuthorized && !templateAuthorized;
+                            if (fieldFallbackAuthorized)
+                                Log?.Invoke("[자동 가공] K 재진입 필드 보조 인증 · K/I + 미니맵 금색 테두리 + 생활 스킬 K · 연속 2프레임 · 입력 전 최종 재검증");
                             break;
+                        }
 
                         if (!withinLimit)
                             Fail(freshField,
-                                "관리 가공 K 재진입 HUD 이미지 3/4·2프레임 " +
-                                "2초 내 연속 확인 실패 · 입력 없이 정지");
+                                "관리 가공 K 재진입 HUD 3/4 연속 2프레임 및 " +
+                                "K/I+미니맵+생활스킬 독립 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
                         previousHud = currentHud;
+                        previousField = currentField;
                     }
                     if (menuAppeared)
                         continue;
+                    if (fieldFallbackAuthorized)
+                    {
+                        // A last fresh frame guards against a popup or menu that
+                        // appeared after the consecutive field observations.
+                        // Do not promote stale screenshot evidence into input.
+                        using var finalField = Capture(ct);
+                        var finalHud = DetectManagedWorldHudTemplates(finalField);
+                        bool finalModal = HasManagedKEntryBlockingModal(finalField);
+                        bool finalMenu = HasFixedProcessingHubVisual(finalField) ||
+                                         HasManagedProcessingBottomTabVisual(finalField);
+                        bool finalFieldVisual = HasManagedKEntryFieldHudVisual(finalField);
+                        if (!CanAuthorizeManagedKFieldFallback(
+                                finalHud.KFound, finalHud.IFound,
+                                finalHud.KFound, finalHud.IFound,
+                                finalFieldVisual, finalFieldVisual, finalModal, finalMenu))
+                            Fail(finalField, "관리 가공 K 재진입 입력 직전 필드/메뉴/팝업 재확인 실패 · 입력 없이 정지");
+                    }
                 }
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
                 _ui.TapFresh(0x25, ct);
@@ -1796,6 +1830,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         => !popupVisible && !processingMenuVisible &&
            (firstEntry || (firstHudMatches >= 3 && secondHudMatches >= 3));
 
+    // V3.2.0: the fallback does not relax the standard 3/4 threshold.
+    // K and I must BOTH match and the field minimap/K-disc pixels must BOTH
+    // match on two consecutive frames, while modal/menu remain absent.
+    // Caller separately checks fresh CLI idle immediately before input.
+    internal static bool CanAuthorizeManagedKFieldFallback(
+        bool previousK, bool previousI, bool currentK, bool currentI,
+        bool previousField, bool currentField,
+        bool popupVisible, bool processingMenuVisible)
+        => !popupVisible && !processingMenuVisible &&
+           previousK && previousI && currentK && currentI &&
+           previousField && currentField;
+
     // Bounded visual stabilization after Esc; clock runs continuously from
     // the first unknown-field frame and is never reset on weak HUD matches.
     internal static readonly TimeSpan ManagedKReentryHudTimeout = TimeSpan.FromSeconds(2);
@@ -1803,15 +1849,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     internal static bool IsManagedKReentryWithinLimit(TimeSpan elapsed)
         => elapsed >= TimeSpan.Zero && elapsed < ManagedKReentryHudTimeout;
 
-    // V3.1.75: F9 re-entry uses the SAME four 800x1000 grayscale, multi-scale
+    // V3.2.0: keep the SAME four 800x1000 grayscale, multi-scale
     // template assets/thresholds/ROIs as Abyss outside confirmation.
     // These HUD icons also appear INSIDE Abyss, so they are never proof by
     // themselves: caller must first rule out processing menus/popup and
-    // independently verify the CLI idle state. At least 3/4 on TWO frames.
-    private (int Matched, string Scores) DetectManagedWorldHudTemplates(Bitmap frame)
+    // independently verify the CLI idle state. Standard route remains >=3/4
+    // on TWO frames. The field fallback also requires K+I and separate visual proof.
+    private (int Matched, string Scores, bool KFound, bool IFound) DetectManagedWorldHudTemplates(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000)
-            return (0, "크기 불일치");
+            return (0, "크기 불일치", false, false);
 
         var home = _ui.FindTemplate(frame, new Rectangle(590, 20, 150, 130),
             "abyss/templates/outside_home_v75.png", 0.76);
@@ -1824,7 +1871,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         int matched = (home.Found ? 1 : 0) + (end.Found ? 1 : 0) +
                       (k.Found ? 1 : 0) + (i.Found ? 1 : 0);
         return (matched,
-            $"Home={home.Score:0.000}, End={end.Score:0.000}, K={k.Score:0.000}, I={i.Score:0.000}");
+            $"Home={home.Score:0.000}, End={end.Score:0.000}, K={k.Score:0.000}, I={i.Score:0.000}",
+            k.Found, i.Found);
     }
 
     // Positive ordinary-world evidence for the managed unknown->K route.
