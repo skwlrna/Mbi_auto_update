@@ -15,6 +15,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private readonly string _baseDir;
     private readonly bool _scheduledResultExit;
     private bool _scheduledOutsideExitVerified;
+    // An explicit, visually verified LEFT result exit is required before
+    // acknowledging an optional post-exit mission reward panel.
+    private bool _scheduledExitClicked;
+    private bool _scheduledMissionConfirmationClicked;
     internal bool ScheduledOutsideExitVerified => _scheduledResultExit && _scheduledOutsideExitVerified;
 
     // Invoked exclusively AFTER an actual 3-frame outside-HUD proof, with
@@ -406,6 +410,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         int clearGoneConsecutive = 0;
         int outsideConsecutive = 0;
         bool outsideCheckArmed = false;
+        var exitPendingRecovery = Stopwatch.StartNew();
 
         Log?.Invoke("[어비스 자동복구] 상태 기반 복구 시작: 전투 대기 -> 클리어 터치 -> 보물상자 확인 -> 나가기 -> 퇴장 후 던전 밖 HUD 확인");
 
@@ -413,6 +418,37 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
+
+            // Never mistake the wide, single-button 협동 미션 완료 panel for
+            // the usual three-button result row. After a verified exit click,
+            // only the mission confirmation or 3-frame field HUD is allowed.
+            if (_scheduledResultExit && _scheduledExitClicked)
+            {
+                outsideCheckArmed = true;
+                if (await TryAcknowledgeScheduledMissionCompleteAsync(frame, ct))
+                {
+                    outsideConsecutive = 0;
+                    Log?.Invoke("[병행 복구] 미션 완료 확인 입력 후 실제 필드 복귀 재검증");
+                    continue;
+                }
+                if (await DetectAbyssOutsideWorkflowAsync(frame, ct, exitConfirmed: true))
+                {
+                    if (++outsideConsecutive >= 3)
+                    {
+                        RecordScheduledOutsideExit("복구: 미션 확인/나가기 후 HUD 연속 3회");
+                        _resumeStepIndex = 0;
+                        return true;
+                    }
+                }
+                else outsideConsecutive = 0;
+
+                if (exitPendingRecovery.Elapsed >= TimeSpan.FromSeconds(90))
+                    throw new TimeoutException(
+                        "병행 어비스 나가기 후 미션 확인/필드 HUD 복구 90초 초과 · 다른 버튼 입력 없이 정지");
+                await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+                continue;
+            }
+
             if ((await DetectAbyssResultRetryAsync(frame, ct)).Found)
             {
                 if (ScheduledAbyssReturnPolicy.RecoveryResultAction(_scheduledResultExit) ==
@@ -1490,6 +1526,15 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
+            // The live 2026-10-13 capture shows a separate full-screen
+            // "협동 미션 완료" reward panel AFTER clicking 나가기.
+            // A one-time, guarded 확인 click is needed before field HUD returns.
+            if (await TryAcknowledgeScheduledMissionCompleteAsync(frame, ct))
+            {
+                outsideConsecutive = 0;
+                sw.Restart(); // Grant the field transition its own timeout.
+                continue;
+            }
             if (await DetectAbyssOutsideWorkflowAsync(frame, ct, exitConfirmed: true))
             {
                 outsideConsecutive++;

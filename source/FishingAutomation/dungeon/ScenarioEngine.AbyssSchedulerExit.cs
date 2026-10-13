@@ -84,6 +84,7 @@ internal sealed partial class ScenarioEngine
                 Log?.Invoke($"[병행] 결과 2회 + 나가기 문구 2회 + 고정 초록 버튼 2회 확인 -> 왼쪽 나가기 1회 클릭 @ {click}");
                 DiagnosticObserveClick("abyss_scheduler_exit_fixed", click);
                 _input.ClickClientPoint(_hwnd, click);
+                _scheduledExitClicked = true;
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
                 await WaitForAbyssHomeAfterNormalExitAsync(ct);
                 Log?.Invoke("[병행] 던전 밖 HUD 3회 확인 -> 가공 관리자로 제어권 반환");

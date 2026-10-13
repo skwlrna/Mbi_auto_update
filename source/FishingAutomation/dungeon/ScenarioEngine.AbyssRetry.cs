@@ -166,6 +166,15 @@ internal sealed partial class ScenarioEngine
             return DetectionResult.NotFound;
         }
 
+        // A post-exit 협동 미션 완료 panel also contains a green bottom row.
+        // The old 3-region green test incorrectly classified its ONE long
+        // 확인 button as three result buttons. Never admit that screen here.
+        if (AbyssMissionCompletePolicy.HasVisualEvidence(frame))
+        {
+            _lastAbyssResultDiagnostic = "post-exit mission completion panel, not result retry";
+            return DetectionResult.NotFound;
+        }
+
         // V0160_ABYSS_RESULT_MULTI_SIGNAL
         // Signal A: exact retry OCR inside the fixed safe ROI.
         _abyssResultOcr ??= new OcrRecognizer();

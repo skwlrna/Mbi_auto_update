@@ -364,4 +364,69 @@ Assert(schedulerResume.Contains("token.ThrowIfCancellationRequested()") &&
        schedulerRunner.IndexOf("await StartCraftingAsync();", StringComparison.Ordinal),
     "F10 and user cancel block crafting, and crafting restarts only after resume selection");
 
+
+// 2026-10-13 21:24 V3.2.1 live failure: a single long green 확인
+// button remains under 협동 미션 완료 after the validated LEFT exit.
+// The previous three-green-region detector must not treat the one
+// continuous button as the ordinary 3-button retry result screen.
+using (var missionFrame = new Bitmap(800, 1000))
+using (var g = Graphics.FromImage(missionFrame))
+{
+    g.Clear(Color.FromArgb(12, 23, 29));
+    using var green = new SolidBrush(Color.FromArgb(14, 176, 120));
+    using var gold = new SolidBrush(Color.FromArgb(230, 182, 66));
+    g.FillRectangle(green, 176, 922, 448, 56);
+    g.FillRectangle(gold, 340, 110, 120, 115);
+    Assert(AbyssMissionCompletePolicy.HasVisualEvidence(missionFrame),
+        "long single confirm button + gold mission title accepts post-exit panel evidence");
+    Assert(AbyssMissionCompletePolicy.ConfirmCenter(missionFrame.Size) == new Point(400, 950),
+        "post-exit mission confirm uses fixed center of ONE green button");
+
+    using var threeButtons = new Bitmap(800, 1000);
+    using var three = Graphics.FromImage(threeButtons);
+    three.Clear(Color.Black);
+    three.FillRectangle(gold, 340, 110, 120, 115);
+    three.FillRectangle(green, 180, 922, 140, 56);
+    three.FillRectangle(green, 330, 922, 140, 56);
+    three.FillRectangle(green, 480, 922, 140, 56);
+    Assert(!AbyssMissionCompletePolicy.HasVisualEvidence(threeButtons),
+        "three-button result layout rejected even with gold backdrop");
+
+    g.FillRectangle(Brushes.Black, 340, 110, 120, 115);
+    Assert(!AbyssMissionCompletePolicy.HasVisualEvidence(missionFrame),
+        "green generic confirm alone must not authorize mission panel");
+}
+Assert(AbyssMissionCompletePolicy.IsStableTextEvidence(
+        new Rectangle(337, 326, 97, 16), new Rectangle(339, 326, 95, 16),
+        new Rectangle(381, 939, 41, 20), new Rectangle(382, 940, 39, 18),
+        new Size(800, 1000), new Size(800, 1000), giftHeading: true),
+    "two frames must agree on exact gift heading and exact 확인 label");
+Assert(!AbyssMissionCompletePolicy.IsStableTextEvidence(
+        new Rectangle(337, 326, 97, 16), Rectangle.Empty,
+        new Rectangle(381, 939, 41, 20), new Rectangle(382, 940, 39, 18),
+        new Size(800, 1000), new Size(800, 1000), giftHeading: true),
+    "missing heading on second frame forbids confirmation click");
+Assert(!AbyssMissionCompletePolicy.IsStableTextEvidence(
+        new Rectangle(337, 326, 97, 16), new Rectangle(339, 326, 95, 16),
+        new Rectangle(381, 939, 41, 20), Rectangle.Empty,
+        new Size(800, 1000), new Size(800, 1000), giftHeading: true),
+    "missing button label on second frame forbids confirmation click");
+bool badMissionAspectBlocked = false;
+try { _ = AbyssMissionCompletePolicy.ConfirmCenter(new Size(706, 1536)); }
+catch (InvalidOperationException) { badMissionAspectBlocked = true; }
+Assert(badMissionAspectBlocked, "mission confirm never clicks invalid client aspect");
+
+string scheduleExitSource = File.ReadAllText(Path.Combine(
+    Directory.GetCurrentDirectory(), "source/FishingAutomation/dungeon/ScenarioEngine.AbyssSchedulerExit.cs"));
+string sceneSource = File.ReadAllText(Path.Combine(
+    Directory.GetCurrentDirectory(), "source/FishingAutomation/dungeon/ScenarioEngine.cs"));
+string sceneMissionSource = File.ReadAllText(Path.Combine(
+    Directory.GetCurrentDirectory(), "source/FishingAutomation/dungeon/ScenarioEngine.AbyssMissionComplete.cs"));
+Assert(scheduleExitSource.Contains("_scheduledExitClicked = true") &&
+       sceneSource.Contains("TryAcknowledgeScheduledMissionCompleteAsync(frame, ct)") &&
+       sceneMissionSource.Contains("VerifyAbyssClickClientGeometry") &&
+       sceneMissionSource.Contains("_scheduledMissionConfirmationClicked = true") &&
+       sceneMissionSource.Contains("FindCompactLabelAsync"),
+    "post-exit mission confirm is one-shot, OCR-checked and guarded by exit proof");
+
 Console.WriteLine("Combined scheduler regressions passed.");
