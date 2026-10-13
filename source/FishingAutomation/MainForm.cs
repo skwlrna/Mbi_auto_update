@@ -58,6 +58,7 @@ public sealed partial class MainForm : Form
     private bool _combinedAlteringRequested;
 
     private static readonly Color WindowBg = Color.FromArgb(246, 248, 252);
+    private static readonly Color WindowFrame = Color.FromArgb(98, 121, 150);
     private static readonly Color PanelBg = Color.White;
     private static readonly Color Border = Color.FromArgb(223, 230, 240);
     private static readonly Color TitleText = Color.FromArgb(23, 32, 51);
@@ -85,14 +86,22 @@ public sealed partial class MainForm : Form
         ClientSize = new Size((int)(1448 * uiScale), (int)(1086 * uiScale));
         MinimumSize = new Size(Math.Min(940, area.Width), Math.Min(700, area.Height));
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = WindowBg;
+        // A real 2px frame on the borderless form: the docked content fills only
+        // inside the padding, so the outline surrounds the title, sidebar and body.
+        BackColor = WindowFrame;
         Font = new Font("맑은 고딕", 8.5f);
         FormBorderStyle = FormBorderStyle.None;
         MaximizedBounds = area;
         DoubleBuffered = true;
         MaximizeBox = true;
         AutoScaleMode = AutoScaleMode.None; // The reference dashboard scales its controls and fonts together.
-        Padding = new Padding(0);
+        Padding = new Padding(2);
+        // A maximized window should remain flush with the screen work area.
+        Resize += (_, _) =>
+        {
+            var desired = WindowState == FormWindowState.Maximized ? Padding.Empty : new Padding(2);
+            if (Padding != desired) Padding = desired;
+        };
 
         BuildLayout();
 
