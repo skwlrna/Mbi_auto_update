@@ -37,8 +37,9 @@ public sealed partial class MainForm
         private readonly TabControl _tabs = new();
         private int _hoveredTab = -1;
 
-        // Keep the native tab frame, but owner-draw each of the four tab captions
-        // so a selected tab is visibly different from pointer hover.
+        // The real WinForms TabControl remains the page/keyboard navigator, but
+        // its native header dividers and dark connecting line must be covered by
+        // one opaque painted card strip above the content.
         internal bool UseAltering => _alters.Checked;
         internal bool UseCrafting => _crafts.Checked;
         internal bool UseAbyss => _abyss.Checked;
@@ -93,6 +94,99 @@ public sealed partial class MainForm
             _tabs.SizeMode = TabSizeMode.Fixed;
             _tabs.HotTrack = false; // Hover must never imply selection or enablement.
             _tabs.ItemSize = new Size(152, 49);
+
+            // WinForms draws native dark separators OUTSIDE DrawItem bounds,
+            // including gaps between owner-drawn cards. Keep the real TabControl
+            // underneath for page layout / keyboard switching, and put an opaque,
+            // buffered card strip in front of its entire native header + seam.
+            var tabHost = new Panel { Dock = DockStyle.Fill, BackColor = WindowBg };
+            var tabHeader = new BufferedTabHeader
+            {
+                Name = "SchedulerTabCardHeader",
+                AccessibleName = "스케줄러 카드 헤더",
+                BackColor = WindowBg,
+                TabStop = false,
+                Cursor = Cursors.Hand
+            };
+
+            void InvalidateTabHeader() { tabHeader.Invalidate(); _tabs.Invalidate(); }
+
+            void FitTabHeader()
+            {
+                if (_tabs.TabCount == 0 || tabHost.ClientSize.Width <= 0) return;
+                // GetTabRect includes the actual DPI-scaled native button height.
+                // Cover an additional six pixels so the dark native horizontal
+                // separator at the beginning of the page is not exposed.
+                int bottom = Math.Max(_tabs.GetTabRect(0).Bottom + 6,
+                    _tabs.DisplayRectangle.Top + 6);
+                var headerBounds = new Rectangle(0, 0, tabHost.ClientSize.Width,
+                    Math.Min(tabHost.ClientSize.Height, bottom));
+                if (tabHeader.Bounds != headerBounds) tabHeader.Bounds = headerBounds;
+                tabHeader.BringToFront();
+                tabHeader.Invalidate();
+            }
+
+            tabHeader.Paint += (_, e) =>
+            {
+                if (_tabs.TabCount == 0) return;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                for (int index = 0; index < _tabs.TabCount; index++)
+                {
+                    Rectangle rect = _tabs.GetTabRect(index);
+                    var card = new RectangleF(rect.X + 4, rect.Y + 3,
+                        Math.Max(1, rect.Width - 8), Math.Max(1, rect.Height - 6));
+                    bool selected = _tabs.SelectedIndex == index;
+                    bool hovered = !selected && _hoveredTab == index;
+                    using var shape = RoundedTabCard(card, 7);
+                    using (var fill = new SolidBrush(selected ? AccentSoft :
+                        hovered ? CardBg2 : CardBg))
+                        e.Graphics.FillPath(fill, shape);
+                    using (var edge = new Pen(selected ? Blue : Border,
+                        selected ? 1.7f : 1f))
+                        e.Graphics.DrawPath(edge, shape);
+                    using var font = new Font(_tabs.Font,
+                        selected ? FontStyle.Bold : FontStyle.Regular);
+                    TextRenderer.DrawText(e.Graphics, _tabs.TabPages[index].Text, font,
+                        Rectangle.Round(card), selected ? Blue : TitleText,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                        TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+                }
+            };
+            tabHeader.MouseMove += (_, e) =>
+            {
+                int hovered = -1;
+                for (int index = 0; index < _tabs.TabCount; index++)
+                {
+                    if (!_tabs.GetTabRect(index).Contains(e.Location)) continue;
+                    hovered = index;
+                    break;
+                }
+                if (_hoveredTab == hovered) return;
+                _hoveredTab = hovered;
+                InvalidateTabHeader();
+            };
+            tabHeader.MouseLeave += (_, _) =>
+            {
+                if (_hoveredTab == -1) return;
+                _hoveredTab = -1;
+                InvalidateTabHeader();
+            };
+            tabHeader.MouseDown += (_, e) =>
+            {
+                if (e.Button != MouseButtons.Left) return;
+                for (int index = 0; index < _tabs.TabCount; index++)
+                {
+                    if (!_tabs.GetTabRect(index).Contains(e.Location)) continue;
+                    _tabs.SelectedIndex = index;
+                    _tabs.Focus();
+                    return;
+                }
+            };
+            tabHost.Controls.Add(_tabs);
+            tabHost.Controls.Add(tabHeader);
+            tabHeader.BringToFront();
+            tabHost.SizeChanged += (_, _) => FitTabHeader();
+
             _tabs.DrawItem += (_, e) =>
             {
                 if (e.Index < 0) return;
@@ -131,13 +225,13 @@ public sealed partial class MainForm
                 }
                 if (hovered == _hoveredTab) return;
                 _hoveredTab = hovered;
-                _tabs.Invalidate();
+                InvalidateTabHeader();
             };
             _tabs.MouseLeave += (_, _) =>
             {
                 if (_hoveredTab == -1) return;
                 _hoveredTab = -1;
-                _tabs.Invalidate();
+                InvalidateTabHeader();
             };
             _tabs.Padding = new Point(16, 8);
             _tabs.Appearance = TabAppearance.Normal;
@@ -154,8 +248,12 @@ public sealed partial class MainForm
             _tabs.TabPages.Add(MakeAltering());
             _tabs.TabPages.Add(MakeCrafting());
             _tabs.TabPages.Add(MakeAbyss());
-            _tabs.SelectedIndexChanged += (_, _) => { _tabs.Invalidate(); RefreshSnapshot(); };
-            root.Controls.Add(_tabs, 0, 1);
+            _tabs.SelectedIndexChanged += (_, _) =>
+            {
+                InvalidateTabHeader();
+                RefreshSnapshot();
+            };
+            root.Controls.Add(tabHost, 0, 1);
 
             // The shared full-width button below the page already starts/stops the
             // selected scheduler. Keep one visible action instead of two F9 buttons.
@@ -280,7 +378,8 @@ public sealed partial class MainForm
                     int tabWidth = Math.Max(95, (_tabs.ClientSize.Width - 8) / 4);
                     var desiredTabs = new Size(tabWidth, tabHeight);
                     if (_tabs.ItemSize != desiredTabs) _tabs.ItemSize = desiredTabs;
-                    _tabs.Invalidate();
+                    FitTabHeader();
+                    InvalidateTabHeader();
                 }
                 finally
                 {
@@ -292,7 +391,11 @@ public sealed partial class MainForm
             VisibleChanged += (_, _) => FitPage();
             DpiChangedAfterParent += (_, _) => FitPage();
             bool resizingTabs = false;
-            _tabs.Resize += (_, _) => { if (!fitting) FitTabWidth(); };
+            _tabs.Resize += (_, _) =>
+            {
+                if (!fitting) FitTabWidth();
+                FitTabHeader();
+            };
             void FitTabWidth()
             {
                 if (resizingTabs || _tabs.TabCount == 0 || _tabs.ClientSize.Width <= 0) return;
@@ -304,9 +407,17 @@ public sealed partial class MainForm
                 resizingTabs = true;
                 try { _tabs.ItemSize = desired; }
                 finally { resizingTabs = false; }
+                FitTabHeader();
             }
             FitPage();
             RefreshSnapshot();
+        }
+
+        private sealed class BufferedTabHeader : Panel
+        {
+            internal BufferedTabHeader() =>
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer, true);
         }
 
         private sealed record SchedulerMetric(
