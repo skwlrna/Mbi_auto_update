@@ -98,23 +98,25 @@ public sealed partial class MainForm
                 if (e.Index < 0) return;
                 bool selected = _tabs.SelectedIndex == e.Index;
                 bool hovered = !selected && _hoveredTab == e.Index;
-                Rectangle tabBounds = Rectangle.Inflate(e.Bounds, -2, -2);
-                using var fill = new SolidBrush(selected ? AccentSoft :
-                    hovered ? Color.FromArgb(241, 246, 255) : CardBg);
-                using var edge = new Pen(selected ? Blue :
-                    hovered ? Color.FromArgb(156, 181, 219) : Border, selected ? 2f : 1f);
-                e.Graphics.FillRectangle(fill, tabBounds);
-                e.Graphics.DrawRectangle(edge, tabBounds.X, tabBounds.Y,
-                    tabBounds.Width - 1, tabBounds.Height - 1);
-                if (selected)
-                {
-                    using var accent = new SolidBrush(Blue);
-                    e.Graphics.FillRectangle(accent, tabBounds.X + 3,
-                        tabBounds.Bottom - 5, Math.Max(1, tabBounds.Width - 6), 4);
-                }
-                using var font = new Font(_tabs.Font, selected ? FontStyle.Bold : FontStyle.Regular);
+                // The same rounded white / pale-blue selection cards as the
+                // 낚시 · 던전 · 어비스 mode buttons. The native tab page stays
+                // in place, preserving keyboard navigation and all four pages.
+                var card = new RectangleF(e.Bounds.X + 4, e.Bounds.Y + 3,
+                    Math.Max(1, e.Bounds.Width - 8), Math.Max(1, e.Bounds.Height - 6));
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var canvas = new SolidBrush(WindowBg))
+                    e.Graphics.FillRectangle(canvas, e.Bounds);
+                using var shape = RoundedTabCard(card, 7);
+                using (var fill = new SolidBrush(selected ? AccentSoft :
+                    hovered ? CardBg2 : CardBg))
+                    e.Graphics.FillPath(fill, shape);
+                using (var edge = new Pen(selected ? Blue : Border,
+                    selected ? 1.7f : 1f))
+                    e.Graphics.DrawPath(edge, shape);
+                using var font = new Font(_tabs.Font,
+                    selected ? FontStyle.Bold : FontStyle.Regular);
                 TextRenderer.DrawText(e.Graphics, _tabs.TabPages[e.Index].Text, font,
-                    tabBounds, selected ? Color.FromArgb(22, 58, 112) : TitleText,
+                    Rectangle.Round(card), selected ? Blue : TitleText,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
                     TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
             };
@@ -359,6 +361,20 @@ public sealed partial class MainForm
                 BackColor = WindowBg, Padding = new Padding(10), AutoScroll = true
             };
             return table;
+        }
+
+        // Keep these exact proportions aligned with ReferenceButton mode-tab
+        // (rounded 7px corners, 1.7px blue selected stroke).
+        private static GraphicsPath RoundedTabCard(RectangleF bounds, float radius)
+        {
+            float diameter = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+            var path = new GraphicsPath();
+            path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            return path;
         }
 
         private static TabPage Tab(string title)
