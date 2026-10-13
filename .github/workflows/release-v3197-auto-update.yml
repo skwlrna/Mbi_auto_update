@@ -46,7 +46,7 @@ jobs:
           if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($remote)){throw 'main unavailable'}
           if((($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main moved since CI; abort'}
           $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if($u -notmatch 'CurrentVersion = "V3\.1\.96"'){
+          if($u -notmatch 'CurrentVersion = "V3\.1\.97"'){
             "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
             Write-Host 'Not V3.1.97 any more; skip'
             exit 0
@@ -123,7 +123,7 @@ jobs:
           Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
           Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
           'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
-          'MABI AUTO V3.1.97 - Abyss retry waits 5 seconds before guarded single click; previous UI retained' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          'MABI AUTO V3.1.97 - Window frame, titlebar hover and scheduler tab selection improvements; V3.1.96 game automation retained' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
           $required=@(
             'release/FishingAutomation.exe','release/MacroWatchdog.exe',
             'release/abyss/config/targets.json','release/abyss/config/scenario.json',
