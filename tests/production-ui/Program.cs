@@ -83,6 +83,28 @@ internal static class Program
             var schedulerStatus = All(scheduler).OfType<Label>()
                 .Single(x => x.AccessibleName == "스케줄러 실행 안내");
             var schedulerTabs = All(scheduler).OfType<TabControl>().Single();
+            var schedulerCardHeader = All(scheduler).OfType<Panel>()
+                .Single(x => x.AccessibleName == "스케줄러 카드 헤더");
+            var firstNativeTab = schedulerTabs.GetTabRect(0);
+            Check(ReferenceEquals(schedulerCardHeader.Parent, schedulerTabs.Parent) &&
+                  schedulerCardHeader.Parent!.Controls.GetChildIndex(schedulerCardHeader) <
+                      schedulerCardHeader.Parent.Controls.GetChildIndex(schedulerTabs) &&
+                  schedulerCardHeader.BackColor == Color.FromArgb(246, 248, 252) &&
+                  schedulerCardHeader.Width == schedulerTabs.Width &&
+                  schedulerCardHeader.Height >= firstNativeTab.Bottom + 5,
+                "opaque card header covers native tab separators and the dark horizontal seam");
+            var fourthCard = schedulerTabs.GetTabRect(3);
+            typeof(Control).GetMethod("OnMouseDown", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(schedulerCardHeader, new object[] {
+                    new MouseEventArgs(MouseButtons.Left, 1,
+                        fourthCard.X + fourthCard.Width / 2,
+                        fourthCard.Y + fourthCard.Height / 2, 0)
+                });
+            Pump();
+            Check(schedulerTabs.SelectedIndex == 3 &&
+                  schedulerTabs.SelectedTab?.Text == "어비스 설정",
+                "clicking the visible custom card header opens the correct native tab page");
+            schedulerTabs.SelectedIndex = 0; Pump();
             Check(schedulerTabs.DrawMode == TabDrawMode.OwnerDrawFixed &&
                   schedulerTabs.TabPages.Cast<TabPage>().Select(tab => tab.Text)
                       .SequenceEqual(new[] { "작업 계획", "가공 상세", "제작 상세", "어비스 설정" }),
