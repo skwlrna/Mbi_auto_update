@@ -792,12 +792,17 @@ jobs:
               $managerEntry -notmatch 'previousHud = currentHud' -or
               $managerEntry -notmatch 'Task.Delay\(180, ct\)' -or
               $screen -notmatch 'ManagedKReentryHudTimeout = TimeSpan.FromSeconds\(2\)' -or
-              $managerEntry -match 'HasManagedKEntryFieldHudVisual' -or
+              $managerEntry -notmatch 'HasManagedKEntryFieldHudVisual' -or
+              $managerEntry -notmatch 'CanAuthorizeManagedKFieldFallback' -or
+              $managerEntry -notmatch 'fieldFallbackAuthorized' -or
+              $managerEntry -notmatch 'finalFieldVisual' -or
+              $managerEntry -notmatch 'RequireManagedIdleAsync' -or
+              $screen -notmatch 'CanAuthorizeManagedKFieldFallback' -or
               $screen -notmatch 'abyss/templates/outside_home_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_end_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_k_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_i_v75.png') {
-              throw 'V3.1.77 F9 K must recheck two consecutive 3/4 HUD frames for up to 2s with modal/menu/CLI safety'
+              throw 'V3.2.0 F9 K requires consecutive 3/4 HUD or guarded K/I+field evidence, with modal/menu veto and fresh CLI idle before input'
           }
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or
