@@ -410,10 +410,12 @@ public sealed partial class MainForm
         {
             var button = new ReferenceButton(this, icon, kind)
             {
-                Text = text, AccessibleName = text, Cursor = Cursors.Hand, TabStop = true,
+                Text = text, AccessibleName = text, Cursor = Cursors.Hand,
+                TabStop = kind != "chrome",
                 BackColor = CardBg, ForeColor = TitleText,
                 FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false
             };
+            if (kind == "chrome") button.FlatAppearance.BorderSize = 0;
             button.Click += (_, _) => _owner.SafeUiAction(text, action);
             Controls.Add(button);
             _positions.Add((button, bounds));
