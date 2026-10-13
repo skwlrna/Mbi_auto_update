@@ -19,7 +19,15 @@ internal static class Program
             using var form = new MainForm(log => connector = new MabinogiMobileCli(log, true, fake.Query, fake.Action)
                 { RunFilteredQuery = (a, ct) => fake.Query(a[0], ct) });
             form.Show(); Pump();
+            Check(form.FormBorderStyle == FormBorderStyle.None &&
+                  form.Padding.All == 2 && form.BackColor == Color.FromArgb(98, 121, 150),
+                "borderless app frame paints a 2px outline around all normal pages");
             var controls = All(form).ToArray();
+            var captionButtons = controls.OfType<Button>().Where(x =>
+                x.Text is "최소화" or "최대화 / 복원" or "닫기").ToArray();
+            Check(captionButtons.Length == 3 && captionButtons.All(x =>
+                x.FlatStyle == FlatStyle.Flat && x.FlatAppearance.BorderSize == 0 && !x.TabStop),
+                "custom caption buttons suppress native borders and keyboard focus rectangles");
             var gathering = controls.Single(x => x.Name == "GatheringPage");
             var altering = controls.Single(x => x.Name == "AlteringPage");
             var crafting = controls.Single(x => x.Name == "CraftingPage");
@@ -80,6 +88,25 @@ internal static class Program
                   schedulerTabs.Font.Size == Math.Max(12f, MathF.Round(17f * InitialSchedulerFontScale())) &&
                   !schedulerTabs.HotTrack,
                 "scheduler tab font uses exact production resize formula with no hover activation");
+            var initialTab = schedulerTabs.SelectedIndex;
+            var secondTabRect = schedulerTabs.GetTabRect(1);
+            typeof(Control).GetMethod("OnMouseMove", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(schedulerTabs, new object[] {
+                    new MouseEventArgs(MouseButtons.None, 0,
+                        secondTabRect.X + secondTabRect.Width / 2,
+                        secondTabRect.Y + secondTabRect.Height / 2, 0)
+                });
+            Check(Field<int>(scheduler, "_hoveredTab") == 1 && schedulerTabs.SelectedIndex == initialTab,
+                "scheduler hover highlights only its box without changing selection");
+            typeof(Control).GetMethod("OnMouseLeave", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(schedulerTabs, new object[] { EventArgs.Empty });
+            Check(Field<int>(scheduler, "_hoveredTab") == -1 &&
+                  schedulerTabs.SelectedIndex == initialTab,
+                "scheduler tab hover clears on exit while selected tab remains active");
+            schedulerTabs.SelectedIndex = 2; Pump();
+            Check(schedulerTabs.SelectedTab?.Text == "제작 상세",
+                "clicking scheduler tab changes the persistent selected destination");
+            schedulerTabs.SelectedIndex = initialTab; Pump();
             Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
                   x.Text.StartsWith("2. ") || x.Text.StartsWith("3. ")).All(x =>
                   x.Font.Size == Math.Max(13f, MathF.Round(18f * InitialSchedulerFontScale())) &&

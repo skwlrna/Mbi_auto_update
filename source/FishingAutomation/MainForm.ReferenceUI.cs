@@ -410,10 +410,12 @@ public sealed partial class MainForm
         {
             var button = new ReferenceButton(this, icon, kind)
             {
-                Text = text, AccessibleName = text, Cursor = Cursors.Hand, TabStop = true,
+                Text = text, AccessibleName = text, Cursor = Cursors.Hand,
+                TabStop = kind != "chrome",
                 BackColor = CardBg, ForeColor = TitleText,
                 FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false
             };
+            if (kind == "chrome") button.FlatAppearance.BorderSize = 0;
             button.Click += (_, _) => _owner.SafeUiAction(text, action);
             Controls.Add(button);
             _positions.Add((button, bounds));
@@ -835,6 +837,16 @@ public sealed partial class MainForm
             {
                 _ui = ui; _icon = icon; _kind = kind;
                 SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                if (kind == "chrome")
+                {
+                    // Do not let native Button focus/border visuals masquerade as hover.
+                    FlatStyle = FlatStyle.Flat;
+                    FlatAppearance.BorderSize = 0;
+                    FlatAppearance.MouseOverBackColor = NavBg;
+                    FlatAppearance.MouseDownBackColor = NavBg;
+                    UseVisualStyleBackColor = false;
+                    TabStop = false;
+                }
             }
             protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
             protected override void OnMouseLeave(EventArgs e) { _hover = _pressed = false; Invalidate(); base.OnMouseLeave(e); }
@@ -848,6 +860,26 @@ public sealed partial class MainForm
                 float sx = _ui.ScaleX, sy = _ui.ScaleY;
                 g.ScaleTransform(sx, sy);
                 float w = Width / sx, h = Height / sy;
+                if (_kind == "chrome")
+                {
+                    // Normal is completely flat. Only actual pointer hover/press
+                    // paints a box; Close uses the familiar red hover feedback.
+                    bool hot = Enabled && (_hover || _pressed);
+                    bool close = _icon == "close";
+                    Color surface = !hot ? NavBg : close
+                        ? (_pressed ? Color.FromArgb(178, 34, 47) : Color.FromArgb(220, 53, 69))
+                        : (_pressed ? Color.FromArgb(213, 225, 240) : Color.FromArgb(236, 241, 248));
+                    using (var background = new SolidBrush(surface))
+                        g.FillRectangle(background, 0, 0, w, h);
+                    if (hot && !close)
+                    {
+                        using var outline = new Pen(Color.FromArgb(177, 192, 211), 1);
+                        g.DrawRectangle(outline, 0.5f, 0.5f, Math.Max(1, w - 1), Math.Max(1, h - 1));
+                    }
+                    Color iconColor = !Enabled ? Muted : hot && close ? Color.White : TitleText;
+                    _ui.Icon(g, _icon, new((w - 24) / 2, (h - 24) / 2, 24, 24), iconColor);
+                    return;
+                }
                 bool selected = _kind == "choose" && Tag is int index && index == _ui._owner._abyssDungeon.SelectedIndex;
                 bool action = _kind == "action";
                 bool nav = _kind.StartsWith("nav");
@@ -857,17 +889,15 @@ public sealed partial class MainForm
                 bool modeSelected = _kind == "mode-tab" && Text == _ui.EffectiveMode;
                 bool strong = action || selected || navSelected || modeSelected;
                 // Unselected WORKSPACE entries retain visible card backgrounds and borders.
-                bool bare = _kind == "chrome";
                 Color top = navSelected || modeSelected ? AccentSoft : action ? Accent : CardBg;
                 Color bottom = top;
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }
                 if (_pressed) top = action ? Color.FromArgb(29, 93, 209) : (navSelected || modeSelected ? AccentSoft : CardBg2);
                 else if (_hover && !navSelected && !modeSelected) top = action ? Color.FromArgb(29, 93, 209) : CardBg2;
                 if (!Enabled) { top = bottom = CardBg2; }
-                using (var baseFill = new SolidBrush(nav ? NavBg : _kind == "chrome" ? CardBg : WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
+                using (var baseFill = new SolidBrush(nav ? NavBg : WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
                 var r = new RectangleF(1, 1, Math.Max(1, w - 2), Math.Max(1, h - 2));
                 using var shape = Round(r, action ? 11 : 7);
-                if (!bare || _hover)
                 {
                     using var fill = new SolidBrush(top);
                     g.FillPath(fill, shape);
@@ -880,11 +910,6 @@ public sealed partial class MainForm
                     }
                 }
                 Color fg = !Enabled ? Muted : action ? Color.White : navSelected || modeSelected ? Blue : TitleText;
-                if (_kind == "chrome")
-                {
-                    _ui.Icon(g, _icon, new((w - 24) / 2, (h - 24) / 2, 24, 24), fg);
-                }
-                else
                 {
                     string caption = Text.TrimStart('●', '○', '▶', '■', '▤', ' ');
                     float font = action ? 19 : nav ? 19 : _kind == "mode-tab" ? 19 : _kind == "log" ? 19 : _kind == "quiet" && w < 150 ? 14 : 18;
