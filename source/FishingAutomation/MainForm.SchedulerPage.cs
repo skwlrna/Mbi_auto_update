@@ -574,7 +574,7 @@ public sealed partial class MainForm
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.Controls.Add(Txt("가공 상세 · 원본 작업 목록 연결", TitleText, 17, true), 0, 0);
             layout.Controls.Add(_alteringSummary, 0, 1);
-            layout.Controls.Add(Txt("시설별 검색·목표 수량·다중가공 등록 및 이어하기는 기존 가공 화면에서 관리합니다.", Muted, 16), 0, 2);
+            layout.Controls.Add(Txt("품목 등록·목표 수량은 가공 상세에서 관리합니다. 중단된 다중가공은 스케줄러 시작 시 이어할 수 있습니다.", Muted, 16), 0, 2);
             layout.Controls.Add(ActionButton("가공 상세 화면에서 품목 검색 / 다중 작업 편집", () => _owner.OpenSchedulerDetail(4), true), 0, 3);
             layout.Controls.Add(Txt("품목을 추가하고 스케줄러로 돌아오면 등록 목록이 유지됩니다.", Muted, 16), 0, 4);
             tab.Controls.Add(layout);

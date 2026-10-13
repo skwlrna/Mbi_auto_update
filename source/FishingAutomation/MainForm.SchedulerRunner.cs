@@ -164,6 +164,9 @@ public sealed partial class MainForm
         {
             _runError = ex.Message;
             _log.Write("[스케줄러] 안전 정지: " + ex.Message);
+            // Also update the visible scheduler feedback. Missing fresh plans
+            // are now checked after the resume choice, inside this try block.
+            _schedulerPage.ReportStartFeedback("시작 차단: " + ex.Message);
             SetStatus("스케줄러 오류: " + ex.Message, Color.Salmon);
         }
         finally
