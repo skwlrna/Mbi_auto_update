@@ -28,6 +28,8 @@ internal static class Program
             Check(captionButtons.Length == 3 && captionButtons.All(x =>
                 x.FlatStyle == FlatStyle.Flat && x.FlatAppearance.BorderSize == 0 && !x.TabStop),
                 "custom caption buttons suppress native borders and keyboard focus rectangles");
+            Check(!controls.OfType<Button>().Any(x => x.AccessibleName == "던전 선택"),
+                "fishing, dungeon and abyss cards have no redundant down-chevron control");
             var gathering = controls.Single(x => x.Name == "GatheringPage");
             var altering = controls.Single(x => x.Name == "AlteringPage");
             var crafting = controls.Single(x => x.Name == "CraftingPage");
@@ -81,6 +83,17 @@ internal static class Program
             var schedulerStatus = All(scheduler).OfType<Label>()
                 .Single(x => x.AccessibleName == "스케줄러 실행 안내");
             var schedulerTabs = All(scheduler).OfType<TabControl>().Single();
+            Check(schedulerTabs.DrawMode == TabDrawMode.OwnerDrawFixed &&
+                  schedulerTabs.TabPages.Cast<TabPage>().Select(tab => tab.Text)
+                      .SequenceEqual(new[] { "작업 계획", "가공 상세", "제작 상세", "어비스 설정" }),
+                "scheduler retains four functional owner-drawn mode-style tabs");
+            using (var roundedCard = (System.Drawing.Drawing2D.GraphicsPath)scheduler.GetType()
+                .GetMethod("RoundedTabCard", BindingFlags.NonPublic | BindingFlags.Static)!
+                .Invoke(null, new object[] { new RectangleF(4, 3, 150, 43), 7f })!)
+            {
+                Check(roundedCard.PointCount > 8,
+                    "scheduler header shape uses rounded corners like automation mode cards");
+            }
             float InitialSchedulerFontScale() =>
                 Math.Min(scheduler.Width / 1212f, scheduler.Height / 858f);
             Check(schedulerTabs.TabCount == 4 && schedulerTabs.Font.FontFamily.Name ==

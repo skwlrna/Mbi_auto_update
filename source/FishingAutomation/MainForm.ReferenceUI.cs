@@ -243,8 +243,8 @@ public sealed partial class MainForm
             _modeTabs.Add(AddButton("어비스", new(716, 190, 210, 62), () => SelectMode(2), "abyss", "mode-tab"));
             AddButton("미니 모드", new(16, 991, 200, 46), () => owner.ToggleMini(true), "", "quiet");
 
-            // Only destination selection remains; mode selection is via the visible tabs.
-            AddButton("던전 선택", new(932, 284, 42, 58), ShowDungeonMenu, "chevron", "chrome");
+            // The mode cards have no chevron. Their caption area still opens the
+            // existing destination selector when a dungeon/abyss mode is active.
             owner._updateButton = AddButton("업데이트 확인", new(1163, 800, 228, 43), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
             for (int i = 0; i < 3; i++)
             {
@@ -481,6 +481,15 @@ public sealed partial class MainForm
             if (e.Button != MouseButtons.Left) return;
             float x = e.X / ScaleX, y = e.Y / ScaleY;
             if (y < 65) { _owner.DragReferenceWindow(); return; }
+            // Clicking the painted mode-card heading replaces the old down-arrow
+            // hit target, so removing its icon doesn't remove dungeon selection.
+            if (!_showHome && !ShouldShowProductionPage && !_owner._logExpanded &&
+                x >= 256 && x <= 996 && y >= 273 && y <= 396 &&
+                EffectiveMode is "던전" or "어비스" or "페카 심층")
+            {
+                ShowDungeonMenu();
+                return;
+            }
             if (!_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 1412)
                 SelectDungeon(Math.Clamp((int)((x - 270) / 380), 0, 2));
         }
