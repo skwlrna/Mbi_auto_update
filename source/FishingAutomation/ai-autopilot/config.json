@@ -2,7 +2,7 @@
   "require_clean_repo": true,
   "codex_max_retries": 1,
   "codex_retry_delay_seconds": 300,
-  "max_runs_per_day": 4,
+  "max_runs_per_day": 8,
   "max_changed_files": 8,
   "ollama_fallback_notes_only": true,
   "process_old_events_on_watch_start": false,
