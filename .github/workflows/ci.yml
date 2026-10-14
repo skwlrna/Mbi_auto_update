@@ -77,7 +77,7 @@ jobs:
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
           if ($p -notmatch '<Version>3\.2\.4</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v324-auto-update.yml -Raw
+          $release = Get-Content .github/workflows/release-v325-auto-update.yml -Raw
           if (-not $release.Contains('CurrentVersion = "V3\.2\.4"')) {
             throw 'release workflow eligibility version mismatch'
           }
