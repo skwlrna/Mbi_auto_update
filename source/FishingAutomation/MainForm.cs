@@ -104,11 +104,13 @@ public sealed partial class MainForm : Form
         };
 
         BuildLayout();
+        InitializeAiAutopilot();
 
         Shown += async (_, _) =>
         {
             // UI regression harness supplies an isolated CLI; never contact services.
             if (cliFactory is not null) return;
+            AutoStartAiAutopilot();
             await Task.Delay(1200);
             if (IsDisposed) return;
 
@@ -204,6 +206,7 @@ public sealed partial class MainForm : Form
         FormClosed += (_, _) =>
         {
             _uiTimer.Stop();
+            DisposeAiAutopilot();
             StopAll();
             _watchdog.Dispose();
             _notifier.Dispose();
@@ -272,6 +275,7 @@ public sealed partial class MainForm : Form
         var body = new Panel { Dock = DockStyle.Fill, BackColor = PanelBg, Padding = new Padding(12, 4, 12, 10) };
         body.Controls.Add(_logBox);
         panel.Controls.Add(body);
+        panel.Controls.Add(BuildAiAutopilotPanel());
         panel.Controls.Add(header);
         return panel;
     }
