@@ -89,7 +89,16 @@ internal sealed class AiAutopilotHost : IDisposable
             message.Contains("실행 차단", StringComparison.Ordinal))
             Publish("AI 감시 안전 중지 — 진단 기록 확인");
         else if (message.StartsWith("처리 시작:", StringComparison.Ordinal))
-            Publish("AI 신규 오류 분석·테스트 진행 중");
+        {
+            // Only the generated MCP folder identifier is exposed; no raw evidence.
+            string eventName = message["처리 시작:".Length..].Trim()
+                .Split(' ', '·', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault() ?? "식별 불가";
+            if (eventName.Length > 100 || !eventName.StartsWith("error_", StringComparison.Ordinal) ||
+                eventName.Any(ch => !(char.IsLetterOrDigit(ch) || ch == '_' || ch == '-')))
+                eventName = "식별 불가";
+            Publish("AI 신규 오류 분석·테스트 진행 중 · " + eventName);
+        }
         else if (message.StartsWith("처리 결과:", StringComparison.Ordinal))
         {
             if (message.Contains("tests_passed_review_required", StringComparison.OrdinalIgnoreCase))
