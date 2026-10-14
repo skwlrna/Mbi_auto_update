@@ -92,7 +92,7 @@ internal sealed class AiAutopilotHost : IDisposable
         {
             // Only the generated MCP folder identifier is exposed; no raw evidence.
             string eventName = message["처리 시작:".Length..].Trim()
-                .Split(' ', '·', StringSplitOptions.RemoveEmptyEntries)
+                .Split(new[] { ' ', '·' }, StringSplitOptions.RemoveEmptyEntries)
                 .FirstOrDefault() ?? "식별 불가";
             if (eventName.Length > 100 || !eventName.StartsWith("error_", StringComparison.Ordinal) ||
                 eventName.Any(ch => !(char.IsLetterOrDigit(ch) || ch == '_' || ch == '-')))
