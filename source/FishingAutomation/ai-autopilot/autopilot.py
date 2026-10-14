@@ -221,6 +221,28 @@ def event_id(folder: Path) -> str:
     return hashlib.sha256(str(folder.resolve()).casefold().encode("utf-8")).hexdigest()[:16]
 
 
+def duplicate_signature(folder: Path) -> str | None:
+    """Deduplicate only exactly matching error evidence, not similar game failures.
+
+    Do not merge reports with distinct text: new details may be diagnostically
+    important. Keep the raw MCP folders and a result record for every event.
+    """
+    for name in ("summary.txt", "error.txt"):
+        p = folder / name
+        if not p.is_file() or p.is_symlink():
+            continue
+        try:
+            # Exact text and name, not a fuzzy or timestamp-stripped comparison.
+            if p.stat().st_size > 16384:
+                continue
+            body = p.read_bytes()
+            if len(body) >= 24:
+                return hashlib.sha256(name.encode("utf-8") + b"\\0" + body).hexdigest()
+        except OSError:
+            continue
+    return None
+
+
 def context_for(folder: Path) -> str:
     """Bounded, redacted log excerpts. Screenshots are not uploaded to cloud."""
     allowed_names = ("error.txt", "summary.txt", "trace.txt", "fishing.log", "analysis.md")
@@ -586,6 +608,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
     results_dir = expand(str(c["results_dir"]))
     results_dir.mkdir(parents=True, exist_ok=True)
     statefile = results_dir / "watch-state.json"
+    activityfile = results_dir / "watch-activity.json"
     state = read_json(statefile, {"seen": [], "started": now(), "processed": []})
     seen = set(state.get("seen", []))
     if not single and not c.get("process_old_events_on_watch_start") and not statefile.exists():
@@ -593,45 +616,99 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         state["seen"] = sorted(seen)
         write_json(statefile, state)
         print("기존 오류 폴더는 건너뛰었습니다. 새 오류부터 감시합니다.", flush=True)
+
+    recent_signatures: dict[str, float] = {}
+    last_reported: tuple[str, int] | None = None
+
+    def activity(status: str, active: str | None, pending: int, reason: str = "") -> None:
+        if single:
+            return
+        write_json(activityfile, {
+            "updated": now(), "status": status, "active": active,
+            "pending": pending, "reason": reason,
+            "automatic_merge_deploy": False
+        })
+
     while True:
         try:
             require_legacy_off(c)
         except RuntimeError as exc:
+            activity("safe_stop", None, 0, str(exc))
             print("SAFE STOP:", str(exc), flush=True)
             raise
-        folders = evidence_folders(reports)
+        folders = evidence_folders(reports)  # newest first: never reverse
         if single:
             folders = folders[:1] if latest else [x for x in folders if event_id(x) not in seen]
         else:
-            folders.reverse()  # oldest first
-        for folder in folders:
+            folders = [x for x in folders if event_id(x) not in seen]
+        pending = [x for x in folders if stable(x, int(c["settle_seconds"]))]
+        if not single:
+            activity("watching", None, len(pending))
+            current = ("waiting", len(pending))
+            if current != last_reported:
+                print(f"새 MCP 오류 대기: {len(pending)}건 · 최신 오류 우선 · 동일 증거 중복 제한", flush=True)
+                last_reported = current
+        for folder in pending:
             eid = event_id(folder)
             if eid in seen and not (single and latest):
                 continue
-            if not stable(folder, int(c["settle_seconds"])):
-                continue
-            if len([x for x in state.get("processed", []) if x.get("date") == dt.date.today().isoformat()]) >= int(c["max_runs_per_day"]):
-                print("오늘 처리 한도 도달. 다음 날까지 대기.", flush=True)
+            count_today = len([x for x in state.get("processed", []) if
+                x.get("date") == dt.date.today().isoformat() and
+                x.get("status") != "duplicate_skipped"])
+            if count_today >= int(c["max_runs_per_day"]):
+                activity("daily_limit", None, len(pending), "max_runs_per_day")
+                if last_reported != ("limit", len(pending)):
+                    print(f"오늘 AI 처리 한도 도달({count_today}건). 새 오류 {len(pending)}건은 다음 날 대기.", flush=True)
+                    last_reported = ("limit", len(pending))
                 break
-            print("처리 시작:", folder, flush=True)
+
+            signature = duplicate_signature(folder) if not single else None
+            last_seen = recent_signatures.get(signature) if signature else None
+            if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:
+                reason = "identical_mcp_error_evidence_within_10_minutes"
+                print("중복 오류 건너뜀 (증거 보존):", folder.name, flush=True)
+                result_dir = results_dir / eid
+                result_dir.mkdir(parents=True, exist_ok=True)
+                write_json(result_dir / "result.json", {
+                    "event": folder.name, "event_id": eid,
+                    "started": now(), "ended": now(), "status": "duplicate_skipped",
+                    "reason": reason, "note": "Evidence preserved; no live-game changes."
+                })
+                seen.add(eid)
+                state["seen"] = sorted(seen)
+                state.setdefault("processed", []).append({
+                    "id": eid, "date": dt.date.today().isoformat(),
+                    "status": "duplicate_skipped", "signature": signature
+                })
+                write_json(statefile, state)
+                continue
+
+            # Activity is written before the blocking Codex/test call. Other
+            # processes and the UI can distinguish a busy worker from a dead one.
+            activity("processing", folder.name, len(pending), "isolated_worktree")
+            print(f"처리 시작: {folder.name} · 대기 {max(0, len(pending)-1)}건", flush=True)
             try:
                 result = process(folder, c, retry_cli_error=retry_cli_error)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
             print("처리 결과:", result.get("status"), result.get("reason"), flush=True)
+            if signature:
+                recent_signatures[signature] = folder.stat().st_mtime
             seen.add(eid)
             state["seen"] = sorted(seen)
-            state.setdefault("processed", []).append({"id": eid, "date": dt.date.today().isoformat(),
-                                                       "status": result.get("status")})
+            state.setdefault("processed", []).append({
+                "id": eid, "date": dt.date.today().isoformat(),
+                "status": result.get("status"), "signature": signature
+            })
             write_json(statefile, state)
+            activity("watching", None, max(0, len(pending)-1), str(result.get("status", "")))
             if single:
                 return
         if single:
             print("처리 가능한 오류 폴더가 없습니다.")
             return
         time.sleep(max(10, int(c["poll_seconds"])))
-
 
 class SingletonLock:
     """OS-backed nonblocking advisory lock; released automatically if the process exits."""

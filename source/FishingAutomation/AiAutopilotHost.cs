@@ -82,18 +82,32 @@ internal sealed class AiAutopilotHost : IDisposable
 
     private void Observe(string message)
     {
-        // Never surface raw error logs or tokens into the UI.
+        // Do not surface raw MCP error evidence into the app; only the
+        // watcher's own activity/status lines may be shown.
         if (message.Contains("SAFE STOP", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("BLOCKED", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("실행 차단", StringComparison.Ordinal))
             Publish("AI 감시 안전 중지 — 진단 기록 확인");
+        else if (message.StartsWith("처리 시작:", StringComparison.Ordinal))
+            Publish("AI 신규 오류 분석·테스트 진행 중");
+        else if (message.StartsWith("처리 결과:", StringComparison.Ordinal))
+        {
+            if (message.Contains("tests_passed_review_required", StringComparison.OrdinalIgnoreCase))
+                Publish("자동 테스트 통과 — 게임 검증·승인 필요");
+            else if (message.Contains("blocked", StringComparison.OrdinalIgnoreCase))
+                Publish("분석/수정 차단 — 결과 파일 확인");
+            else
+                Publish("오류 처리 완료 — 결과 파일 확인");
+        }
+        else if (message.StartsWith("오늘 AI 처리 한도 도달", StringComparison.Ordinal))
+            Publish("AI 하루 처리 한도 — 새 오류 대기 중");
+        else if (message.StartsWith("새 MCP 오류 대기:", StringComparison.Ordinal))
+            Publish("AI " + message);
+        else if (message.StartsWith("중복 오류 건너뜀", StringComparison.Ordinal))
+            Publish("중복 오류 증거 보존 — 추가 AI 실행 생략");
         else if (message.Contains("WATCH", StringComparison.OrdinalIgnoreCase) ||
                  message.Contains("기존 오류 폴더는", StringComparison.Ordinal))
             Publish("새 MCP 오류 감시 중");
-        else if (message.Contains("처리 시작", StringComparison.Ordinal))
-            Publish("AI 오류 분석·테스트 진행 중");
-        else if (message.Contains("tests_passed_review_required", StringComparison.OrdinalIgnoreCase))
-            Publish("자동 테스트 통과 — 게임 검증·승인 필요");
     }
 
     internal void Stop()
