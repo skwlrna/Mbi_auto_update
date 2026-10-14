@@ -33,6 +33,7 @@ jobs:
       - name: AI MCP watcher queue regression tests
         shell: pwsh
         run: |
+          $env:PYTHONUTF8 = '1'
           python -m unittest discover -s tests/ai-autopilot -p 'test_*.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'AI watcher queue tests failed' }
 
