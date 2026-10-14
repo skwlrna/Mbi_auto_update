@@ -30,6 +30,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+      - name: AI MCP watcher queue regression tests
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'AI watcher queue tests failed' }
+
       - name: Stability regression tests
         shell: pwsh
         run: dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore
@@ -66,12 +72,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.3"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.4"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.3</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v323-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.3"')) {
+          if ($p -notmatch '<Version>3\.2\.4</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v324-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.4"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
