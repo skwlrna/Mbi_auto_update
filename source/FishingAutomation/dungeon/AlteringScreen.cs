@@ -2644,6 +2644,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             ct) is not null;
     }
 
+    // A confirmed result may overlay a stale or falsely read facility title.
+    // The manager's full receipt, positive modal evidence, and known idle CLI
+    // must ALL agree before the header can be ignored for modal-only handling.
+    private async Task<bool> IsVerifiedManagedCompletionOverlayAsync(
+        Bitmap frame, AlteringPlan plan, bool managedReceipt,
+        int? receiptWorkCountBefore, bool greenConfirm,
+        bool facilityHeaderVisible, bool travelDialogVisible,
+        bool? autoTraveling, CancellationToken ct)
+    {
+        if (!managedReceipt || receiptWorkCountBefore is not > 0 ||
+            !greenConfirm || !facilityHeaderVisible ||
+            travelDialogVisible || autoTraveling != false)
+            return false;
+        int? after = await TryFacilityWorkCountAsync(plan, ct);
+        if (after != 0) return false;
+        bool fixedResult = HasManagedCompletionResultVisual(frame);
+        bool resultTitle = !fixedResult &&
+            await FindAsync(frame, new Rectangle(325, 195, 165, 75),
+                "가공 완료", ct) is not null;
+        return AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+            managedReceipt, after == 0, greenConfirm, fixedResult,
+            resultTitle, travelDialogVisible, autoTraveling);
+    }
+
     private async Task<bool> WaitForReceiptFacilityReturnAsync(
         AlteringPlan plan,
         int? receiptWorkCountBefore,
@@ -2820,16 +2844,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             frame, plan.ScreenTitle, ct) is not null;
         bool travelDialog = await IsFacilityTravelDialogAsync(frame, ct);
         bool? traveling = await TryAutoTravelingAsync(ct);
+        bool provenResultOverlay = facility &&
+            AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+                managedReceipt: true, cliWholeFacilityReceiptConfirmed: verifiedWholeReceipt,
+                greenConfirmVisible: green, fixedRewardResultVisible: visualResult,
+                completionTitleVisible: heading, travelDialogVisible: travelDialog,
+                autoTraveling: traveling);
+        bool facilityForPolicy = facility && !provenResultOverlay;
 
         Log?.Invoke(
             $"[자동 가공] 관리 수령 완료창 검증 · 초록버튼={green} · " +
             $"보상화면고정={visualResult} · 제목OCR={heading} · " +
             $"시설작업={receiptWorkCountBefore?.ToString() ?? "불명"}->{receiptWorkCountAfter?.ToString() ?? "불명"} · " +
-            $"시설창={facility} · 이동팝업={travelDialog} · CLI이동={traveling?.ToString() ?? "불명"}");
+            $"시설창={facility} · 완료팝업겹침확정={provenResultOverlay} · 이동팝업={travelDialog} · CLI이동={traveling?.ToString() ?? "불명"}");
 
         if (!AlteringReceiptPolicy.CanCloseManagedCompletionResult(
                 green, heading, visualResult, verifiedWholeReceipt,
-                facility, travelDialog, traveling))
+                facilityForPolicy, travelDialog, traveling))
             Fail(frame,
                 "관리 수령 완료창 고정 보상구조/OCR/시설 전체 수령/CLI 비이동 증거 부족 · " +
                 "다른 초록 팝업 Space 차단");
@@ -2857,13 +2888,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool greenConfirm = HasBottomConfirmationModal(beforeClose);
             bool travelDialog = await IsFacilityTravelDialogAsync(beforeClose, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
+            bool verifiedOverlay = cliReceiptConfirmed &&
+                await IsVerifiedManagedCompletionOverlayAsync(
+                    beforeClose, plan, managedReceipt, receiptWorkCountBefore,
+                    greenConfirm, facilityVisible, travelDialog, autoTraveling, ct);
+            bool facilityForPolicy = facilityVisible && !verifiedOverlay;
             bool canClose = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
                     managedReceipt, autoTraveling) &&
                 (cliReceiptConfirmed
                     ? AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
-                        greenConfirm, facilityVisible, travelDialog)
+                        greenConfirm, facilityForPolicy, travelDialog)
                     : AlteringReceiptPolicy.CanConfirmCompletion(
-                        greenConfirm, facilityVisible, travelDialog,
+                        greenConfirm, facilityForPolicy, travelDialog,
                         autoTraveling == true));
             if (!canClose)
                 Fail(beforeClose,
@@ -2884,15 +2920,20 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool travelDialog =
                 await IsFacilityTravelDialogAsync(verify, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
+            bool verifiedOverlay = cliReceiptConfirmed &&
+                await IsVerifiedManagedCompletionOverlayAsync(
+                    verify, plan, managedReceipt, receiptWorkCountBefore,
+                    greenConfirm, facilityVisible, travelDialog, autoTraveling, ct);
+            bool facilityForPolicy = facilityVisible && !verifiedOverlay;
 
             bool canRetryClose = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
                     managedReceipt, autoTraveling) &&
                 (cliReceiptConfirmed
                     ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
-                        greenConfirm, facilityVisible, travelDialog)
+                        greenConfirm, facilityForPolicy, travelDialog)
                     : AlteringReceiptPolicy.CanRetryCompletionClose(
                     greenConfirm,
-                    facilityVisible,
+                    facilityForPolicy,
                     travelDialog,
                     autoTraveling == true));
 
@@ -2910,12 +2951,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 bool retryTravelDialog =
                     await IsFacilityTravelDialogAsync(retryFrame, ct);
                 bool? retryAutoTraveling = await TryAutoTravelingAsync(ct);
+                bool retryVerifiedOverlay = cliReceiptConfirmed &&
+                    await IsVerifiedManagedCompletionOverlayAsync(
+                        retryFrame, plan, managedReceipt, receiptWorkCountBefore,
+                        retryGreenConfirm, retryFacilityVisible, retryTravelDialog,
+                        retryAutoTraveling, ct);
+                bool retryFacilityForPolicy = retryFacilityVisible && !retryVerifiedOverlay;
 
                 bool canRetryAgain = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
                         managedReceipt, retryAutoTraveling) &&
                     (cliReceiptConfirmed
                         ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
-                            retryGreenConfirm, retryFacilityVisible, retryTravelDialog)
+                            retryGreenConfirm, retryFacilityForPolicy, retryTravelDialog)
                         : AlteringReceiptPolicy.CanRetryCompletionClose(
                         retryGreenConfirm,
                         retryFacilityVisible,
@@ -2957,15 +3004,20 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool travelDialog =
                 await IsFacilityTravelDialogAsync(closedCheck, ct);
             bool? autoTraveling = await TryAutoTravelingAsync(ct);
+            bool verifiedOverlay = cliReceiptConfirmed &&
+                await IsVerifiedManagedCompletionOverlayAsync(
+                    closedCheck, plan, managedReceipt, receiptWorkCountBefore,
+                    greenConfirm, facilityVisible, travelDialog, autoTraveling, ct);
+            bool facilityForPolicy = facilityVisible && !verifiedOverlay;
 
             bool completionStillVisible = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
                     managedReceipt, autoTraveling) &&
                 (cliReceiptConfirmed
                     ? AlteringReceiptPolicy.CanRetryCliReceiptCompletionClose(
-                        greenConfirm, facilityVisible, travelDialog)
+                        greenConfirm, facilityForPolicy, travelDialog)
                     : AlteringReceiptPolicy.CanRetryCompletionClose(
                     greenConfirm,
-                    facilityVisible,
+                    facilityForPolicy,
                     travelDialog,
                     autoTraveling == true));
 
@@ -3013,10 +3065,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             {
                 _stage.Move(ProductionStage.VerifyInventory, $"{plan.DisplayName} 수령 후 CLI 작업 감소 확인");
 
-                if (facilityVisible)
+                bool travelDialogAfterReceipt =
+                    await IsFacilityTravelDialogAsync(frame, ct);
+                bool? autoTravelAfterReceipt = await TryAutoTravelingAsync(ct);
+                bool verifiedOverlay = await IsVerifiedManagedCompletionOverlayAsync(
+                    frame, plan, managedReceipt, receiptBefore,
+                    greenConfirm, facilityVisible, travelDialogAfterReceipt,
+                    autoTravelAfterReceipt, ct);
+                bool facilityForPolicy = facilityVisible && !verifiedOverlay;
+                Log?.Invoke(
+                    $"[자동 가공][수령 후 재판정] {plan.ScreenTitle} · CLI={receiptBefore}->{receiptNow} · " +
+                    $"시설헤더={facilityVisible} · 초록확인={greenConfirm} · " +
+                    $"완료팝업겹침확정={verifiedOverlay} · 이동창={travelDialogAfterReceipt} · " +
+                    $"CLI이동={autoTravelAfterReceipt?.ToString() ?? "불명"}");
+
+                if (facilityForPolicy)
                 {
-                    // CLI proves the receipt, but not the character's physical
-                    // return. Never trust just one frame of facility header.
+                    // Actual physical return still needs two clean fresh frames.
                     if (await WaitForReceiptFacilityReturnAsync(
                             plan, receiptBefore, managedReceipt, ct))
                         return true;
@@ -3026,13 +3091,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         "CLI 수령 확정 후 시설창 복귀 2프레임/완료창 없음/CLI 비이동을 확인하지 못했습니다.");
                 }
 
-                bool travelDialogAfterReceipt =
-                    await IsFacilityTravelDialogAsync(frame, ct);
-                bool? autoTravelAfterReceipt = await TryAutoTravelingAsync(ct);
-
                 if (!AlteringReceiptPolicy.CanConfirmCliReceiptCompletion(
                         greenConfirm,
-                        facilityVisible,
+                        facilityForPolicy,
                         travelDialogAfterReceipt) ||
                     !AlteringReceiptPolicy.CanSendCompletionCloseSpace(
                         managedReceipt, autoTravelAfterReceipt))

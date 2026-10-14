@@ -9,6 +9,7 @@ public sealed partial class MainForm
     private Button? _aiToggle;
     private CheckBox? _aiStartWithApp;
     private bool _aiInitialized;
+    private string? _lastAiLoggedStatus;
     private static string AiPreferencesPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MabiAuto", "ai-autopilot.json");
@@ -97,6 +98,14 @@ public sealed partial class MainForm
     {
         if (_aiState is not null) _aiState.Text = text + " · 로그 일부 Codex 전송 가능";
         if (_aiToggle is not null) _aiToggle.Text = _aiHost?.IsRunning == true ? "감시 중지" : "AI 감시 시작";
+        // State already passed through AiAutopilotHost's safe/status-only filter.
+        // Persist every real state transition to the ordinary runtime log;
+        // duplicate UI refreshes must not generate duplicate log lines.
+        if (!string.Equals(_lastAiLoggedStatus, text, StringComparison.Ordinal))
+        {
+            _lastAiLoggedStatus = text;
+            _log.Write("[AI 감시] " + text);
+        }
     }
 
     private void AutoStartAiAutopilot()
@@ -105,5 +114,10 @@ public sealed partial class MainForm
             _aiHost.Start();
     }
 
-    private void DisposeAiAutopilot() => _aiHost?.Dispose();
+    private void DisposeAiAutopilot()
+    {
+        if (_aiHost?.IsRunning == true)
+            _log.Write("[AI 감시] 프로그램 종료 · AI 감시와 진행 중인 작업 함께 중지");
+        _aiHost?.Dispose();
+    }
 }

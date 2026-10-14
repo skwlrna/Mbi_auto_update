@@ -187,6 +187,30 @@ Check(!AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 4) &&
       !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, 5) &&
       !AlteringReceiptPolicy.IsProvenReceiptAfterReopen(4, null),
     "reopened facility cannot falsely confirm unchanged/increased/unknown receipt");
+// V3.2.5 05:24 managed receipt: a false/stale facility title may be
+// ignored for modal classification ONLY with whole-lane CLI receipt,
+// positive completion layout/title, and a fresh confirmed idle activity.
+Check(AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, true, true, false, false, false) &&
+      AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, true, false, true, false, false),
+    "05:24 manager full receipt + proven reward/title may disambiguate facility title");
+Check(!AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    false, true, true, true, false, false, false) &&
+      !AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, false, true, true, false, false, false) &&
+      !AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, false, true, false, false, false) &&
+      !AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, true, false, false, false, false) &&
+      !AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, true, true, false, true, false) &&
+      !AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, true, true, false, false, true) &&
+      !AlteringReceiptPolicy.IsVerifiedManagedCompletionOverlay(
+    true, true, true, true, false, false, null),
+    "05:24 unknown/partial CLI, unrelated green popup, travel, or movement veto overlay");
+
 Check(AlteringReceiptPolicy.CanConfirmReceiptFacilityReturn(
         facilityHeaderVisible: true, completionModalVisible: false,
         travelDialogVisible: false, autoTraveling: false),

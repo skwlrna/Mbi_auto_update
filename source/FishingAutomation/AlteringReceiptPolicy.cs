@@ -92,6 +92,23 @@ internal static class AlteringReceiptPolicy
            facilityVisible && onsiteCloseVisible &&
            !anyModalVisible && autoTraveling == false;
 
+    // A post-receipt result may overlay a faint/misread facility header. A
+    // green button or decreased CLI count alone NEVER overrides the facility
+    // veto: manager mode requires an empty facility lane, independent positive
+    // result-layout/title proof, no travel popup, and explicit CLI nonmovement.
+    internal static bool IsVerifiedManagedCompletionOverlay(
+        bool managedReceipt,
+        bool cliWholeFacilityReceiptConfirmed,
+        bool greenConfirmVisible,
+        bool fixedRewardResultVisible,
+        bool completionTitleVisible,
+        bool travelDialogVisible,
+        bool? autoTraveling)
+        => managedReceipt && cliWholeFacilityReceiptConfirmed &&
+           greenConfirmVisible &&
+           (fixedRewardResultVisible || completionTitleVisible) &&
+           !travelDialogVisible && autoTraveling == false;
+
     // A facility title or a lowered CLI work count is not physical location
     // evidence if a result/travel dialog remains, or movement is unresolved.
     // Caller must observe this condition in two consecutive fresh frames.
