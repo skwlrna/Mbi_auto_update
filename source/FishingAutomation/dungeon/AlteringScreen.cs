@@ -2891,7 +2891,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool verifiedOverlay = cliReceiptConfirmed &&
                 await IsVerifiedManagedCompletionOverlayAsync(
                     beforeClose, plan, managedReceipt, receiptWorkCountBefore,
-                    greenConfirm, facilityForPolicy, travelDialog, autoTraveling, ct);
+                    greenConfirm, facilityVisible, travelDialog, autoTraveling, ct);
             bool facilityForPolicy = facilityVisible && !verifiedOverlay;
             bool canClose = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
                     managedReceipt, autoTraveling) &&
@@ -2923,7 +2923,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool verifiedOverlay = cliReceiptConfirmed &&
                 await IsVerifiedManagedCompletionOverlayAsync(
                     verify, plan, managedReceipt, receiptWorkCountBefore,
-                    greenConfirm, facilityForPolicy, travelDialog, autoTraveling, ct);
+                    greenConfirm, facilityVisible, travelDialog, autoTraveling, ct);
             bool facilityForPolicy = facilityVisible && !verifiedOverlay;
 
             bool canRetryClose = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
@@ -2954,7 +2954,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 bool retryVerifiedOverlay = cliReceiptConfirmed &&
                     await IsVerifiedManagedCompletionOverlayAsync(
                         retryFrame, plan, managedReceipt, receiptWorkCountBefore,
-                        retryGreenConfirm, retryFacilityForPolicy, retryTravelDialog,
+                        retryGreenConfirm, retryFacilityVisible, retryTravelDialog,
                         retryAutoTraveling, ct);
                 bool retryFacilityForPolicy = retryFacilityVisible && !retryVerifiedOverlay;
 
@@ -3007,7 +3007,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool verifiedOverlay = cliReceiptConfirmed &&
                 await IsVerifiedManagedCompletionOverlayAsync(
                     closedCheck, plan, managedReceipt, receiptWorkCountBefore,
-                    greenConfirm, facilityForPolicy, travelDialog, autoTraveling, ct);
+                    greenConfirm, facilityVisible, travelDialog, autoTraveling, ct);
             bool facilityForPolicy = facilityVisible && !verifiedOverlay;
 
             bool completionStillVisible = AlteringReceiptPolicy.CanSendCompletionCloseSpace(
