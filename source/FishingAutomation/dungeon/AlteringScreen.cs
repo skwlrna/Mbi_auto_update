@@ -749,6 +749,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         InvalidateForeignFacilityProof(plan.ScreenTitle);
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         const int maxAttempts = 3;
+        int hubCardClicks = 0; // Never repeat an unverified fixed-coordinate click.
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -781,14 +782,40 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                          await IsFacilityTravelDialogAsync(frame, ct)))
                         Fail(frame, "가공 허브 시설 선택 전 확인/이동 팝업 감지 · 입력 차단");
                     await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
-                    // Hub cards use confirmed 800x1000 fixed title rectangles.
-                    // Once the '가공' hub itself is shown, select the known
-                    // facility by its fixed center, not by a fresh OCR hit.
+                    // The live 22:55 failure stayed on the six-card hub after
+                    // THREE identical clicks at (400,261). Never send the same
+                    // unverified input repeatedly. On the second attempt require
+                    // a fresh, unambiguous OCR hit confined to the selected card.
+                    if (!HasFixedProcessingHubVisual(frame))
+                        Fail(frame, "가공 허브 6카드 구조 확인 실패 · 시설 선택 입력 차단");
+                    if (hubCardClicks >= 2)
+                        Fail(frame, "시설 카드 선택 후 화면 전환 2회 실패 · 추가 클릭 없이 안전 정지");
                     Rectangle titleArea = AlteringFacilityLayout.TitleArea(plan.ScreenTitle);
                     Point titleCenter = new(titleArea.Left + titleArea.Width / 2,
                         titleArea.Top + titleArea.Height / 2);
-                    _ui.ClickFresh(titleCenter, ct);
-                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 제목 고정좌표 클릭 ({titleCenter.X},{titleCenter.Y}) · 카드 OCR 없음");
+                    Point click = titleCenter;
+                    if (hubCardClicks > 0)
+                    {
+                        await Task.Delay(180, ct);
+                        using var freshHub = Capture(ct);
+                        if (!HasFixedProcessingHubVisual(freshHub) ||
+                            HasBottomConfirmationModal(freshHub) ||
+                            await IsFacilityTravelDialogAsync(freshHub, ct))
+                            Fail(freshHub, "시설 카드 재시도 전 허브/팝업 새 화면 검증 실패 · 추가 클릭 차단");
+                        var exactTitle = await FindAsync(freshHub,
+                            titleArea, plan.ScreenTitle, ct);
+                        if (exactTitle is null ||
+                            !titleArea.Contains(exactTitle.Value.Center) ||
+                            Math.Abs(exactTitle.Value.Center.X - titleCenter.X) +
+                            Math.Abs(exactTitle.Value.Center.Y - titleCenter.Y) < 16)
+                            Fail(freshHub, "시설 카드 원래 좌표 미반응 · 고유 OCR 대체 좌표 미검증 · 재클릭 없이 정지");
+                        click = exactTitle.Value.Center;
+                    }
+                    await RequireManagedIdleAsync(plan, directive, "시설 카드 클릭 직전 CLI 재검증", ct);
+                    _ui.ClickFresh(click, ct);
+                    hubCardClicks++;
+                    Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 카드 클릭 {hubCardClicks}/2 · 좌표=({click.X},{click.Y}) · " +
+                        (hubCardClicks == 1 ? "고정 카드 중심" : "별도 OCR 정확 일치 + 허브 재확인"));
                     await Task.Delay(550, ct);
 
                     // The chosen facility card was positively clicked in
