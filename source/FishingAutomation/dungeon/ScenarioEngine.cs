@@ -43,7 +43,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     // Keep the strict title+touch path first, then allow a guarded 2-frame title fallback.
     private int _abyssClearTitleFallbackConsecutive;
     private const double AbyssClearTitleFallbackMinScore = 0.68;
-    private const int AbyssClearTitleFallbackRequiredFrames = 2;
+    private const int AbyssClearTitleFallbackRequiredFrames = int.MaxValue; // Disable title-only clicks: a real touch prompt is mandatory.
     private static readonly Rectangle AbyssClearSafeTouch = new(360, 915, 80, 60);
     private bool AbyssClearTitleFallbackPending => _abyssClearTitleFallbackConsecutive > 0;
 
