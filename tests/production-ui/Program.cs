@@ -152,9 +152,9 @@ internal static class Program
                 "global bottom start forwards clicks to visible scheduler feedback");
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:") &&
-                  schedulerStatus.Text.Contains("가공") &&
+                  schedulerStatus.Text.Contains("게임 창 없음") &&
                   schedulerStatus.ForeColor == Color.DarkOrange,
-                "one shared F9 button explains missing altering selection visibly");
+                "one shared F9 button explains preflight game-window veto visibly");
             var firstFeedback = schedulerStatus.Text;
             scheduler.GetType().GetMethod("RefreshSnapshot",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
@@ -163,8 +163,9 @@ internal static class Program
                 "scheduler feedback persists through regular UI refresh");
             typeof(MainForm).GetMethod("StartSelected", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(form, null);
-            Check(schedulerStatus.Text.Contains("시작 차단:"),
-                "F9 uses the same visible no-plan feedback as mouse click");
+            Check(schedulerStatus.Text.Contains("시작 차단:") &&
+                  schedulerStatus.Text.Contains("게임 창 없음"),
+                "F9 uses the same visible game-window preflight feedback as mouse click");
             Check(fake.Actions.Count == 0, "rejected start sends no game commands");
             // A faulted async start task must be observed, logged and surfaced,
             // not silently discarded by the void F9/click dispatch method.
