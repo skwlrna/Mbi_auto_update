@@ -26,7 +26,8 @@ if str(HERE) not in sys.path:
 from supervised_codex import supervised_run
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr
-from error_memory import record_attempt, related_attempts, context_hint
+from error_memory import (record_attempt, related_attempts, context_hint,
+                          failed_fingerprint, patch_fingerprint, classify)
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
                "access is denied", "access denied", "os error 5",
                "code mode is unavailable", "429 too many requests", "503 service unavailable")
@@ -533,6 +534,14 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
 
     def finish(status: str, reason: str) -> dict[str, Any]:
         output.update({"status": status, "reason": redacted(reason), "ended": now()})
+        # Hash only approved candidate source/test bytes. Never persist raw patch.
+        if output.get("changed_files") and output.get("worktree"):
+            try:
+                fp = patch_fingerprint(Path(output["worktree"]), output["changed_files"])
+                if fp:
+                    output["patch_fingerprint"] = fp
+            except (OSError, ValueError, TypeError):
+                pass
         write_json(result_path, output)
         if memory_context is not None:
             try:
@@ -598,6 +607,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
         return finish("blocked", "agent_changed_git_head")
     changed, problems = edited_paths(worktree)
     output["changed_files"] = changed
+    output["learning_classification"] = classify(memory_context or "", changed)
     if not changed:
         return finish("needs_review", "agent_no_patch; see codex-last-1.md")
     if len(changed) > int(c["max_changed_files"]):
@@ -610,6 +620,12 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
             problems.append(f"unsafe_file: {file}")
     if problems:
         return finish("blocked", "; ".join(problems))
+    try:
+        fingerprint = patch_fingerprint(worktree, changed)
+        if fingerprint and failed_fingerprint(expand(str(c["results_dir"])), fingerprint, exclude=eid):
+            return finish("needs_review", "known_failed_candidate_exact_match_no_auto_reuse")
+    except (OSError, ValueError, TypeError):
+        pass  # Memory is advisory; usual source/test safety checks still apply.
     added_tests: list[list[str]] = []
     if c.get("require_regression_test", True):
         added_tests, issue = regression_commands_for(changed, worktree)
@@ -671,6 +687,12 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
                 return finish("blocked", "repair_unauthorized_path: " + file)
     if c.get("require_regression_test", True):
         output["regression_test"]["status"] = "passed"
+    try:
+        current_fp = patch_fingerprint(worktree, changed)
+        if current_fp and failed_fingerprint(expand(str(c["results_dir"])), current_fp, exclude=eid):
+            return finish("needs_review", "known_failed_candidate_after_repair_no_auto_reuse")
+    except (OSError, ValueError, TypeError):
+        pass
     diff = cmd(["git", "diff", "--stat"], worktree)
     output["diff_stat"] = redacted(diff.stdout[-3000:])
     # GitHub network side effect is never authorized by the AI itself.
