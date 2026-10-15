@@ -26,6 +26,7 @@ class AiUiLogContract(unittest.TestCase):
         host = HOST.read_text(encoding="utf-8")
         self.assertIn('message.StartsWith("처리 시작:"', host)
         self.assertIn('eventName.StartsWith("error_"', host)
+        self.assertIn('eventName.StartsWith("runtime_"', host)
         self.assertIn('Publish("AI 신규 오류 분석·테스트 진행 중 · " + eventName)', host)
 
     def test_receipt_visual_veto_remains_fail_closed(self):
