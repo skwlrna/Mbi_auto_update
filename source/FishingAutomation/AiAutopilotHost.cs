@@ -60,7 +60,10 @@ internal sealed class AiAutopilotHost : IDisposable
                 {
                     int code;
                     try { code = child.ExitCode; } catch (InvalidOperationException) { code = -1; }
-                    Publish("AI 감시 종료 (코드 " + code + ") — 안전 검사를 확인하세요.");
+                    if (code != 0 && Status.StartsWith("AI 시작 불가", StringComparison.Ordinal))
+                        Publish(Status + " · 감시 종료");
+                    else
+                        Publish("AI 감시 종료 (코드 " + code + ") — AI 오류 내역에서 상태를 확인하세요.");
                 }
             };
             if (!child.Start())
@@ -84,7 +87,27 @@ internal sealed class AiAutopilotHost : IDisposable
     {
         // Do not surface raw MCP error evidence into the app; only the
         // watcher's own activity/status lines may be shown.
-        if (message.Contains("SAFE STOP", StringComparison.OrdinalIgnoreCase) ||
+        if (message.StartsWith("Git 저장소: MISSING", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · 작업용 소스 폴더가 없습니다 (MabiAutoAI/repo)");
+        else if (message.StartsWith("codex: MISSING", StringComparison.OrdinalIgnoreCase))
+            Publish("AI 시작 불가 · Codex CLI를 설치하고 로그인하세요");
+        else if (message.StartsWith("git: MISSING", StringComparison.OrdinalIgnoreCase))
+            Publish("AI 시작 불가 · Git 프로그램이 필요합니다");
+        else if (message.StartsWith("dotnet: MISSING", StringComparison.OrdinalIgnoreCase))
+            Publish("AI 시작 불가 · .NET 8 SDK가 필요합니다");
+        else if (message.StartsWith("python: MISSING", StringComparison.OrdinalIgnoreCase))
+            Publish("AI 시작 불가 · Python 실행 경로를 확인하세요");
+        else if (message.Contains("Git tracked changes: DIRTY", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · 작업용 소스에 저장하지 않은 변경 사항이 있습니다");
+        else if (message.StartsWith("WATCHER BLOCKED:", StringComparison.Ordinal) ||
+                 message.StartsWith("REVIEW_BLOCKED:", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · 과거 수정안 안전 검사가 필요합니다");
+        else if (message.StartsWith("사전 검사 실패", StringComparison.Ordinal))
+        {
+            if (!Status.StartsWith("AI 시작 불가", StringComparison.Ordinal))
+                Publish("AI 시작 불가 · 필수 도구와 작업 폴더를 확인하세요");
+        }
+        else if (message.Contains("SAFE STOP", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("BLOCKED", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("실행 차단", StringComparison.Ordinal))
             Publish("AI 감시 안전 중지 — 진단 기록 확인");
