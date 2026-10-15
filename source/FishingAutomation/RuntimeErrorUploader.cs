@@ -98,6 +98,9 @@ public sealed class RuntimeErrorUploader
 
     public async Task UploadAlertAsync(RuntimeErrorReport report, bool requestedScreenshot = true)
     {
+        // The AI watcher reads local reports; the optional GitHub uploader is a separate path.
+        // Always retain bounded local evidence even when GitHub upload is disabled.
+        SaveLocalAiEvidence(report);
         var settings = LoadSettings();
         if (!settings.Enabled) return;
         string repo = NormalizeRepository(settings.Repository);
@@ -156,6 +159,49 @@ public sealed class RuntimeErrorUploader
         }
     }
 
+
+    private void SaveLocalAiEvidence(RuntimeErrorReport report)
+    {
+        // No network access, AI invocation, screenshot upload, or game input here.
+        // Created only for explicit runtime alerts. Old errors are not automatically replayed.
+        try
+        {
+            string root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "MabiAutoMCP", "reports");
+            Directory.CreateDirectory(root);
+            string eventName = $"error_{report.Time:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N}";
+            string folder = Path.Combine(root, eventName);
+            Directory.CreateDirectory(folder);
+            string evidence = "오류 유형: " + report.Title + "\n" +
+                "오류 내용: " + report.Detail + "\n" +
+                "실행 모드: " + report.Mode + "\n" +
+                "선택 대상: " + report.SelectedTarget + "\n";
+            File.WriteAllText(Path.Combine(folder, "error.txt"),
+                evidence.Length > 10000 ? evidence[..10000] : evidence, Encoding.UTF8);
+            string recent = ReadRecentLog(200);
+            if (!string.IsNullOrWhiteSpace(recent))
+                File.WriteAllText(Path.Combine(folder, "trace.txt"),
+                    recent.Length > 12000 ? recent[^12000..] : recent, Encoding.UTF8);
+            // Write metadata last, after the evidence, so the dashboard can
+            // display an accurate local timestamp and understandable error text.
+            File.WriteAllText(Path.Combine(folder, "summary.json"),
+                JsonSerializer.Serialize(new
+                {
+                    schema = 1,
+                    timeLocal = report.Time.ToString("O"),
+                    title = report.Title,
+                    detail = report.Detail,
+                    mode = report.Mode,
+                    version = report.Version
+                }), Encoding.UTF8);
+            _log.Write("[AI 오류 수집] PC에 분석용 오류 기록 저장 완료 · " + eventName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _log.Write("[AI 오류 수집] 로컬 기록 실패 · " + ex.GetType().Name);
+        }
+    }
 
     public async Task<string?> UploadVisualTestRunAsync(VisualTestRunReport report)
     {
