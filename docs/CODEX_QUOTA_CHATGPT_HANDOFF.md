@@ -16,7 +16,7 @@ automated game recovery or auto-deployment is added.
   remains; ordinary 429 is **not** interpreted as exhausted credits.
 - Codex remains sandboxed in isolated worktrees; no live game input,
   unreviewed source merge or deployment is authorized.
-- The legacy Autofix-OFF gate, F10 and child-watcher termination on normal
+- The standalone watcher lock, F10 and child-watcher termination on normal
   application close are unchanged.
 
 ## Codex account quota exhausted
