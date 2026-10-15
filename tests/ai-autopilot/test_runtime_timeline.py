@@ -50,6 +50,10 @@ class TimelineTests(unittest.TestCase):
             (new / "error.txt").write_text("채집 중 정지 - no screenshots", encoding="utf-8")
             earlier = time.time() - 160
             later = time.time() - 70
+            for file in old.iterdir():
+                os.utime(file, (earlier, earlier))
+            for file in new.iterdir():
+                os.utime(file, (later, later))
             os.utime(old, (earlier, earlier))
             os.utime(new, (later, later))
             config = {"reports_dir": str(mcp), "runtime_reports_dir": str(local)}
@@ -86,7 +90,7 @@ class TimelineTests(unittest.TestCase):
         self.assertIn("timeLocal", journal)
         self.assertIn("summary.json", journal)
         self.assertIn("error.txt", journal)
-        self.assertLess(uploader.index("AiRuntimeErrorJournal.Record(report, _log)"),
+        self.assertLess(uploader.index("AiRuntimeErrorJournal.Record(report, _log, ReadRecentLog(150))"),
                         uploader.index("if (!settings.Enabled) return;"))
         self.assertIn("child.Kill(entireProcessTree: true)", (APP / "AiAutopilotHost.cs").read_text(encoding="utf-8"))
 
