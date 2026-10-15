@@ -22,6 +22,7 @@ internal sealed class ProductionUiRuntime : IDisposable
     private readonly TemplateMatcher _templates = new(AppContext.BaseDirectory);
     private readonly string _debugDir;
     private readonly string _debugStem;
+    private readonly ProductionEvidenceBuffer _evidence;
     private bool _disposed;
 
     internal ProductionUiRuntime(
@@ -33,6 +34,7 @@ internal sealed class ProductionUiRuntime : IDisposable
         _hwnd = hwnd;
         _debugDir = debugDir;
         _debugStem = string.IsNullOrWhiteSpace(debugStem) ? "production" : debugStem;
+        _evidence = new ProductionEvidenceBuffer(_debugDir, _debugStem);
         _input = new GuardedInputController(
             new InterceptionInput(
                 settings.InterceptionMouseDevice,
@@ -59,6 +61,8 @@ internal sealed class ProductionUiRuntime : IDisposable
         try
         {
             _input.ObserveFrame(_hwnd, frame.Size);
+            try { _evidence.Observe(frame); }
+            catch (Exception) { /* Diagnostics never block normal input. */ }
             return frame;
         }
         catch
@@ -72,24 +76,28 @@ internal sealed class ProductionUiRuntime : IDisposable
     {
         using var frame = Capture(ct);
         _input.TapScanCode(scanCode, ct);
+        _evidence.Note("input", $"scan=0x{scanCode:X2}");
     }
 
     internal void PasteFresh(string text, CancellationToken ct)
     {
         using var frame = Capture(ct);
         _input.PasteText(text, ct);
+        _evidence.Note("input", $"paste_length={text.Length}");
     }
 
     internal void ClickFresh(Point point, CancellationToken ct)
     {
         using var frame = Capture(ct);
         _input.ClickClientPoint(_hwnd, point, ct);
+        _evidence.Note("input", $"click=({point.X},{point.Y})");
     }
 
     internal void DragFresh(Point start, Point end, int durationMs, CancellationToken ct)
     {
         using var frame = Capture(ct);
         _input.DragClientPoint(_hwnd, start, end, durationMs, ct);
+        _evidence.Note("input", $"drag=({start.X},{start.Y})->({end.X},{end.Y})");
     }
 
     internal async Task<DetectionResult?> FindUniqueAsync(
@@ -400,20 +408,25 @@ internal sealed class ProductionUiRuntime : IDisposable
         double requiredRatio = 0.08)
         => MeasureVisualChangeRatio(before, after, roi) >= requiredRatio;
 
+    internal void NoteDiagnostic(string kind, string summary) => _evidence.Note(kind, summary);
+
     internal InvalidOperationException Failure(Bitmap frame, string message)
     {
         Directory.CreateDirectory(_debugDir);
         string path = Path.Combine(
             _debugDir,
             _debugStem + "-last-failure.png");
+        string evidence = _evidence.Save(message);
         try
         {
             frame.Save(path, ImageFormat.Png);
-            return new InvalidOperationException(message + " 진단: " + path);
+            return new InvalidOperationException(message + " 진단: " + path +
+                (evidence.Length > 0 ? " · 시각 증거: " + evidence : ""));
         }
         catch
         {
-            return new InvalidOperationException(message);
+            return new InvalidOperationException(message +
+                (evidence.Length > 0 ? " · 시각 증거: " + evidence : ""));
         }
     }
 
@@ -438,5 +451,6 @@ internal sealed class ProductionUiRuntime : IDisposable
         if (_disposed) return;
         _disposed = true;
         _input.Dispose();
+        _evidence.Dispose();
     }
 }
