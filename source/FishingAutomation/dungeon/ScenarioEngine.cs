@@ -1336,27 +1336,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
             var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
 
-            if (clearTitle.Found)
-                clearTitleConsecutive++;
-            else
-                clearTitleConsecutive = 0;
+            clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
+                clearTitleConsecutive, clearTitle.Found, touch.Found);
 
             if (retryClicks < 1 && sw.Elapsed >= TimeSpan.FromSeconds(2))
             {
-                DetectionResult retryTouch = DetectionResult.NotFound;
-
-                if (touch.Found)
-                {
-                    retryTouch = touch;
-                }
-                else if (clearTitleConsecutive >= 2 && touch.Found && frame.Width == 800 && frame.Height == 1000)
-                {
-                    retryTouch = new DetectionResult(
-                        true,
-                        new Rectangle(360, 915, 80, 60),
-                        clearTitle.Score,
-                        "clear_touch_safe_retry");
-                }
+                var retryTouch = AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive)
+                    ? touch : DetectionResult.NotFound;
 
                 if (retryTouch.Found)
                 {
