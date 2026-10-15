@@ -441,11 +441,15 @@ public sealed partial class MainForm
                     $"[다중가공] {plan.DisplayName} 품목별 선행 채집 완료 · 등록 중 부족 재검증 유지"));
             }
 
+            bool queueFullAtStart = plans.Any(plan =>
+                recipes.Where(x => x.DisplayName == plan.DisplayName)
+                    .ElementAtOrDefault(plan.RecipeOrdinal - 1)?.Reason == "queue_full");
             var coordinator = new MultiAlteringCoordinator(
                 laneState,
                 FacilityLaneOwner.Main,
                 restoreCompleted: batchStore.FinishedPlans,
-                fillInitialVacancies: true);
+                fillInitialVacancies: true,
+                deferOtherLanesWhileQueueFull: queueFullAtStart);
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
