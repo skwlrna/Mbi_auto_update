@@ -277,7 +277,7 @@ def context_for(folder: Path) -> str:
             tail = report.read_text(encoding="utf-8-sig", errors="replace")[-16000:]
         except OSError:
             continue
-        for match in re.finditer(r"시각 증거:\\s*(.+?timeline\\.txt)", tail):
+        for match in re.finditer(r"시각 증거:\s*(.+?timeline\.txt)", tail):
             candidate = Path(match.group(1).strip().strip('"'))
             try:
                 candidate = candidate.resolve(strict=True)
