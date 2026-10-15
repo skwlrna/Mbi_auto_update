@@ -521,4 +521,147 @@ Assert(mainFormSource.Contains("_schedulerMonitor.RequestStop()") &&
        mainFormSource.Contains("_schedulerMonitor.Observe(TimeSpan.FromMinutes(15))"),
     "F10 and application stop update telemetry without changing cancellation ownership");
 
+// Phase 3: retries are authorized ONLY for read-only scheduler queries.
+int readCalls = 0;
+int readAdvisories = 0;
+int readResult = await SchedulerReadOnlyRetry.RunAsync<int>(ct =>
+{
+    readCalls++;
+    return readCalls == 1
+        ? Task.FromException<int>(new TimeoutException("transient mock"))
+        : Task.FromResult(7);
+}, CancellationToken.None, _ => readAdvisories++,
+    (_, _) => Task.CompletedTask);
+Assert(readResult == 7 && readCalls == 2 && readAdvisories == 1,
+    "transient read-only query gets exactly one automatic retry");
+
+int unsafeCalls = 0;
+try
+{
+    await SchedulerReadOnlyRetry.RunAsync<int>(ct =>
+    {
+        unsafeCalls++;
+        return Task.FromException<int>(new InvalidOperationException("state mismatch"));
+    }, CancellationToken.None, delay: (_, _) => Task.CompletedTask);
+    throw new Exception("unsafe data mismatch should have failed closed");
+}
+catch (InvalidOperationException ex) when (ex.Message == "state mismatch") { }
+Assert(unsafeCalls == 1, "verified state mismatch never gets a retry");
+
+int forbiddenHttpCalls = 0;
+try
+{
+    await SchedulerReadOnlyRetry.RunAsync<int>(ct =>
+    {
+        forbiddenHttpCalls++;
+        return Task.FromException<int>(new HttpRequestException(
+            "unauthorized", null, System.Net.HttpStatusCode.Unauthorized));
+    }, CancellationToken.None, delay: (_, _) => Task.CompletedTask);
+    throw new Exception("401 should not retry");
+}
+catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized) { }
+Assert(forbiddenHttpCalls == 1 && SchedulerReadOnlyRetry.IsTransient(
+        new HttpRequestException("503", null, System.Net.HttpStatusCode.ServiceUnavailable)),
+    "HTTP auth failures fail closed while temporary 503 is eligible");
+
+int exhausted = 0;
+try
+{
+    await SchedulerReadOnlyRetry.RunAsync<int>(ct =>
+    {
+        exhausted++;
+        return Task.FromException<int>(new IOException("read unavailable"));
+    }, CancellationToken.None, delay: (_, _) => Task.CompletedTask);
+    throw new Exception("read retry overflow");
+}
+catch (IOException) { }
+Assert(exhausted == 2, "read retry budget is at most two attempts");
+
+using (var stopCts = new CancellationTokenSource())
+{
+    int beforeCancel = 0;
+    stopCts.Cancel();
+    try
+    {
+        await SchedulerReadOnlyRetry.RunAsync<int>(ct =>
+        {
+            beforeCancel++;
+            return Task.FromResult(0);
+        }, stopCts.Token);
+        throw new Exception("cancelled query started");
+    }
+    catch (OperationCanceledException) { }
+    Assert(beforeCancel == 0, "F10 cancellation blocks queries before the first attempt");
+}
+using (var stopCts = new CancellationTokenSource())
+{
+    int callsBeforeDelayCancel = 0;
+    try
+    {
+        await SchedulerReadOnlyRetry.RunAsync<int>(ct =>
+        {
+            callsBeforeDelayCancel++;
+            return Task.FromException<int>(new TimeoutException());
+        }, stopCts.Token, delay: (_, ct) =>
+        {
+            stopCts.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        });
+        throw new Exception("cancelled delay did not stop");
+    }
+    catch (OperationCanceledException) { }
+    Assert(callsBeforeDelayCancel == 1,
+        "F10 during retry delay prevents replay of read-only query");
+}
+
+string recoveryResumeSource = File.ReadAllText(Path.Combine(
+    Directory.GetCurrentDirectory(), "source/FishingAutomation/MainForm.SchedulerResume.cs"));
+Assert(recoveryResumeSource.Contains("SchedulerReadOnlyRetry.RunAsync(") &&
+       recoveryResumeSource.Contains("CaptureForMultiAlteringAsync(") &&
+       recoveryResumeSource.Contains("MultiAlteringRecentResume.VerifyAsync("),
+    "read-only retry is attached to resume preflight without bypassing queue verification");
+Assert(schedulerRunner.Contains("MarkVerifiedBoundary(\"crafting_input_released\")") &&
+       schedulerRunner.Contains("MarkVerifiedBoundary(\"altering_resume_user_verified\")"),
+    "verified handoff and explicit resume consent are observed as checkpoints only");
+
+string recoveryDir = Path.Combine(Path.GetTempPath(),
+    "mabiauto-readonly-recovery-" + Guid.NewGuid().ToString("N"));
+try
+{
+    DateTimeOffset tm = new(2026, 10, 15, 1, 0, 0, TimeSpan.Zero);
+    var recoveryMonitor = new SchedulerRunMonitor(
+        Path.Combine(recoveryDir, "state.json"), () => tm);
+    Assert(recoveryMonitor.TryStart(true, true, false), "recovery snapshot starts empty");
+    recoveryMonitor.MarkVerifiedBoundary("crafting_input_released");
+    using (var snapshot = JsonDocument.Parse(File.ReadAllText(
+        Path.Combine(recoveryDir, "state.json"))))
+    {
+        Assert(snapshot.RootElement.GetProperty("lastVerifiedBoundary").GetString() ==
+                   "crafting_input_released" &&
+               !snapshot.RootElement.GetProperty("automaticGameActionRetry").GetBoolean() &&
+               snapshot.RootElement.GetProperty("resumeRequiresUserConfirmation").GetBoolean(),
+            "verified boundary records evidence only, never authorizes automated game replay");
+    }
+    recoveryMonitor.RequestStop();
+    recoveryMonitor.MarkVerifiedBoundary("altering_resume_user_verified");
+    using (var snapshot = JsonDocument.Parse(File.ReadAllText(
+        Path.Combine(recoveryDir, "state.json"))))
+        Assert(snapshot.RootElement.GetProperty("lastVerifiedBoundary").GetString() ==
+                   "crafting_input_released",
+            "F10 stop prevents adding any further verified boundaries");
+    recoveryMonitor.Finish("cancelled");
+    var fresh = new SchedulerRunMonitor(Path.Combine(recoveryDir, "state.json"), () => tm);
+    Assert(fresh.TryStart(false, true, false), "stale checkpoint is not an auto-resume");
+    using (var snapshot = JsonDocument.Parse(File.ReadAllText(
+        Path.Combine(recoveryDir, "state.json"))))
+        Assert(snapshot.RootElement.GetProperty("lastVerifiedBoundary").GetString() == "none",
+            "new run cannot inherit any old checkpoint authority");
+    fresh.Finish("completed");
+}
+finally
+{
+    try { Directory.Delete(recoveryDir, recursive: true); } catch (IOException) { }
+}
+
 Console.WriteLine("Combined scheduler regressions passed.");

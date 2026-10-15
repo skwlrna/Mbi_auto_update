@@ -116,6 +116,8 @@ public sealed partial class MainForm
                 else if (alteringPlans.Count == 0)
                     alteringPlans = new[] { SelectedAlteringPlan() };
                 foreach (var plan in alteringPlans) plan.Validate();
+                if (resume is not null)
+                    _schedulerMonitor.MarkVerifiedBoundary("altering_resume_user_verified");
                 _log.Write(resume is null
                     ? "[스케줄러] 신규 다중가공 선택 · 기존 장부 자동 복원 없음"
                     : "[스케줄러] 저장 다중가공 이어하기 선택 · 배치 " + resume.BatchId);
@@ -146,6 +148,7 @@ public sealed partial class MainForm
                     throw new InvalidOperationException("제작 입력권 반환을 확인하지 못했습니다. 가공 단계로 넘기지 않습니다.");
                 if (_runError is not null)
                     throw new InvalidOperationException("제작 오류가 발생해 다음 단계로 넘기지 않습니다: " + _runError);
+                _schedulerMonitor.MarkVerifiedBoundary("crafting_input_released");
                 _log.Write("[스케줄러] 제작 완료 확인 · 제작 화면 입력 종료");
             }
 
