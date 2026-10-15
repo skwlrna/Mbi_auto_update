@@ -664,4 +664,107 @@ finally
     try { Directory.Delete(recoveryDir, recursive: true); } catch (IOException) { }
 }
 
+// Phase 5: local-only performance metrics, bounded retention and no game action.
+string perfDir = Path.Combine(Path.GetTempPath(),
+    "mabiauto-scheduler-perf-" + Guid.NewGuid().ToString("N"));
+try
+{
+    DateTimeOffset at = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
+    string statePath = Path.Combine(perfDir, "scheduler-runtime.json");
+    string journalPath = Path.Combine(perfDir, "scheduler-performance.json");
+    var tracker = new SchedulerRunMonitor(statePath, () => at);
+    Assert(tracker.TryStart(false, true, false), "metrics run starts with no live game input");
+    at = at.AddSeconds(3);
+    tracker.Advance("resume_selection");
+    at = at.AddSeconds(6);
+    tracker.Advance("altering");
+
+    // No new progress event: snapshot I/O is throttled to 30 seconds.
+    using (var before = JsonDocument.Parse(File.ReadAllText(statePath)))
+    {
+        string oldHeartbeat = before.RootElement.GetProperty("uiHeartbeatUtc").GetString()!;
+        at = at.AddSeconds(20);
+        tracker.Observe(TimeSpan.FromMinutes(15));
+        using var unchanged = JsonDocument.Parse(File.ReadAllText(statePath));
+        Assert(unchanged.RootElement.GetProperty("uiHeartbeatUtc").GetString() == oldHeartbeat,
+            "unchanged scheduler snapshot avoids redundant disk writes under 30 seconds");
+    }
+    at = at.AddSeconds(10);
+    tracker.Observe(TimeSpan.FromMinutes(15));
+    using (var updated = JsonDocument.Parse(File.ReadAllText(statePath)))
+        Assert(updated.RootElement.GetProperty("phaseElapsedMilliseconds")
+               .GetProperty("altering").GetInt64() == 30000,
+            "snapshot includes accumulated live phase time after 30-second throttle");
+
+    at = at.AddSeconds(90);
+    tracker.Finish("completed");
+    var perf = tracker.LastRun!;
+    Assert(perf.Outcome == "completed" && perf.TotalMilliseconds == 129000 &&
+           perf.PhaseMilliseconds["preparing"] == 3000 &&
+           perf.PhaseMilliseconds["resume_selection"] == 6000 &&
+           perf.PhaseMilliseconds["altering"] == 120000,
+        "phase statistics measure observed time, never game success");
+    Assert(tracker.LastRunSummary.Contains("가공") &&
+           tracker.LastRunSummary.Contains("결과=completed"),
+        "finished scheduler provides a compact local diagnostics summary");
+    using (var saved = JsonDocument.Parse(File.ReadAllText(journalPath)))
+    {
+        Assert(saved.RootElement.GetArrayLength() == 1 &&
+               saved.RootElement[0].GetProperty("outcome").GetString() == "completed",
+            "one completed run is written to the local-only performance journal");
+    }
+
+    Assert(tracker.TryStart(true, false, false), "new run starts only after old run finishes");
+    at = at.AddSeconds(1);
+    tracker.Advance("crafting");
+    at = at.AddSeconds(4);
+    tracker.RequestStop();
+    at = at.AddSeconds(2);
+    tracker.Finish("completed");
+    Assert(tracker.LastRun!.Outcome == "cancelled" &&
+           tracker.LastRun.PhaseMilliseconds["crafting"] == 4000 &&
+           tracker.LastRun.PhaseMilliseconds["stopping"] == 2000,
+        "late worker completion after F10 stays cancelled in performance history");
+
+    // A malformed stats file must not prevent normal scheduler completion.
+    File.WriteAllText(journalPath, "{damaged performance file");
+    Assert(tracker.TryStart(false, true, false),
+        "corrupt telemetry does not affect scheduler start gate");
+    at = at.AddSeconds(2);
+    tracker.Finish("failed");
+    using (var repaired = JsonDocument.Parse(File.ReadAllText(journalPath)))
+        Assert(repaired.RootElement.GetArrayLength() == 1 &&
+               repaired.RootElement[0].GetProperty("outcome").GetString() == "failed",
+            "corrupt local history safely resets to a new bounded record");
+
+    // Bound disk use regardless of the number of historical completed runs.
+    for (int n = 0; n < 35; n++)
+    {
+        Assert(tracker.TryStart(true, false, false),
+            "repeat scheduler run bookkeeping does not block new requested run");
+        at = at.AddSeconds(1);
+        tracker.Finish("completed");
+    }
+    using (var retained = JsonDocument.Parse(File.ReadAllText(journalPath)))
+        Assert(retained.RootElement.GetArrayLength() == 30,
+            "performance journal retains at most 30 compact outcomes");
+    string savedText = File.ReadAllText(journalPath);
+    Assert(!savedText.Contains("characterName", StringComparison.OrdinalIgnoreCase) &&
+           !savedText.Contains("recipe", StringComparison.OrdinalIgnoreCase) &&
+           !savedText.Contains("token", StringComparison.OrdinalIgnoreCase),
+        "performance stats never include recipe, character or token material");
+
+    // The existing journal and snapshot cannot trigger recovery or game input.
+    string monitorCode = File.ReadAllText(Path.Combine(
+        Directory.GetCurrentDirectory(), "source/FishingAutomation/SchedulerRunMonitor.cs"));
+    Assert(monitorCode.Contains("SchedulerPerformanceJournal.Append(") &&
+           monitorCode.Contains("automaticRestart = false") &&
+           monitorCode.Contains("automaticGameActionRetry = false"),
+        "performance journal remains separate from scheduler recovery and game control");
+}
+finally
+{
+    try { Directory.Delete(perfDir, recursive: true); } catch (IOException) { }
+}
+
 Console.WriteLine("Combined scheduler regressions passed.");

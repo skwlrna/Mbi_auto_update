@@ -11,6 +11,9 @@ public sealed class SchedulerRunMonitor
 {
     private readonly object _gate = new();
     private readonly string _path;
+    private readonly string _historyPath;
+    private readonly Dictionary<string, long> _phaseMilliseconds = new(StringComparer.Ordinal);
+    private SchedulerRunPerformance? _lastRun;
     private readonly Func<DateTimeOffset> _clock;
     private bool _running;
     private bool _stopRequested;
@@ -34,11 +37,55 @@ public sealed class SchedulerRunMonitor
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "MabiAuto", "scheduler-runtime.json");
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _historyPath = Path.Combine(Path.GetDirectoryName(_path) ??
+            Environment.CurrentDirectory, "scheduler-performance.json");
     }
 
     public bool IsRunning
     {
         get { lock (_gate) return _running; }
+    }
+
+    public SchedulerRunPerformance? LastRun
+    {
+        get { lock (_gate) return _lastRun; }
+    }
+
+    public string LastRunSummary
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_lastRun is null) return "아직 실행 기록 없음";
+                string metric(string name) =>
+                    _lastRun.PhaseMilliseconds.TryGetValue(name, out long ms)
+                        ? TimeSpan.FromMilliseconds(ms).ToString(@"hh\:mm\:ss") : "—";
+                return $"결과={_lastRun.Outcome} · 총 {TimeSpan.FromMilliseconds(_lastRun.TotalMilliseconds):hh\\:mm\\:ss}" +
+                       $" · 준비/선택 {metric("resume_selection")}" +
+                       $" · 제작 {metric("crafting")} · 전환 {metric("handoff")}" +
+                       $" · 가공 {metric("altering")} · 로컬 통계만 기록";
+            }
+        }
+    }
+
+    private void ClosePhaseLocked(DateTimeOffset at)
+    {
+        long ms = Math.Max(0, Math.Min((long)TimeSpan.FromDays(30).TotalMilliseconds,
+            (long)(at - _phaseAt).TotalMilliseconds));
+        _phaseMilliseconds[_phase] = (_phaseMilliseconds.GetValueOrDefault(_phase)) + ms;
+    }
+
+    private Dictionary<string, long> PhaseSnapshotLocked(DateTimeOffset at)
+    {
+        var snapshot = new Dictionary<string, long>(_phaseMilliseconds, StringComparer.Ordinal);
+        if (_running)
+        {
+            long elapsed = Math.Max(0, Math.Min((long)TimeSpan.FromDays(30).TotalMilliseconds,
+                (long)(at - _phaseAt).TotalMilliseconds));
+            snapshot[_phase] = snapshot.GetValueOrDefault(_phase) + elapsed;
+        }
+        return snapshot;
     }
 
     public string PhaseLabel
@@ -77,6 +124,8 @@ public sealed class SchedulerRunMonitor
             // Flags only: never persist character names, recipes, credentials or screen data.
             _plan = $"crafting={crafting};altering={altering};abyss={abyss}";
             _lastVerifiedBoundary = "none";
+            _lastRun = null;
+            _phaseMilliseconds.Clear();
             _startedAt = _phaseAt = _activityAt = _observedAt = now;
             PersistLocked(now, true);
             return true;
@@ -91,6 +140,7 @@ public sealed class SchedulerRunMonitor
         {
             if (!_running || _stopRequested) return;
             DateTimeOffset now = _clock();
+            ClosePhaseLocked(now);
             _phase = phase;
             _phaseAt = _activityAt = _observedAt = now;
             _advised = false;
@@ -166,8 +216,10 @@ public sealed class SchedulerRunMonitor
         {
             if (!_running || _stopRequested) return;
             _stopRequested = true;
+            DateTimeOffset now = _clock();
+            ClosePhaseLocked(now);
             _phase = "stopping";
-            _phaseAt = _observedAt = _clock();
+            _phaseAt = _observedAt = now;
             PersistLocked(_observedAt, true);
         }
     }
@@ -180,17 +232,26 @@ public sealed class SchedulerRunMonitor
         {
             if (!_running) return;
             DateTimeOffset now = _clock();
+            ClosePhaseLocked(now);
             _outcome = _phase = _stopRequested ? "cancelled" : outcome;
             _phaseAt = _observedAt = now;
             _running = false;
             _advised = false;
+            long elapsed = Math.Max(0, Math.Min((long)TimeSpan.FromDays(30).TotalMilliseconds,
+                (long)(now - _startedAt).TotalMilliseconds));
+            _lastRun = new SchedulerRunPerformance(
+                _runId, Environment.ProcessId, now, _outcome, elapsed,
+                new Dictionary<string, long>(_phaseMilliseconds, StringComparer.Ordinal));
             PersistLocked(now, true);
+            SchedulerPerformanceJournal.Append(_historyPath, _lastRun);
         }
     }
 
     private void PersistLocked(DateTimeOffset now, bool force)
     {
-        if (!force && now >= _writtenAt && now - _writtenAt < TimeSpan.FromSeconds(15))
+        // Reduce unchanged scheduler diagnostic disk writes by half. The
+        // independent MacroWatchdog heartbeat still runs every UI tick.
+        if (!force && now >= _writtenAt && now - _writtenAt < TimeSpan.FromSeconds(30))
             return;
         try
         {
@@ -208,6 +269,8 @@ public sealed class SchedulerRunMonitor
                 outcome = _outcome,
                 planFlags = _plan,
                 lastVerifiedBoundary = _lastVerifiedBoundary,
+                phaseElapsedMilliseconds = PhaseSnapshotLocked(now),
+                performanceHistoryLocalOnly = true,
                 resumeRequiresUserConfirmation = true,
                 automaticGameActionRetry = false,
                 startedUtc = _startedAt,
