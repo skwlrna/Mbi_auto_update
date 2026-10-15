@@ -6,7 +6,7 @@ window is required. Run-time changes are limited to a dedicated Git worktree.
 
 ## Getting started (once per PC)
 
-1. Keep the existing MCP error reporter configured and running. Install Python
+1. The built-in runtime error journal is used automatically; a separate MCP reporter is optional. Install Python
    3.10+, Git, .NET 8 SDK, and Codex CLI, and sign into Codex.
 2. The local source clone must exist at `%USERPROFILE%\MabiAutoAI\repo` and
    the legacy `tools\codex-autofix\autofix.py --status` must say **OFF**.
@@ -26,7 +26,7 @@ window is required. Run-time changes are limited to a dedicated Git worktree.
   GitHub push, binary replacement, game input, or deployment.
 - Existing unverified AI patches fail closed. A new installation without prior
   AI patches can watch *new* reports while leaving deployment disabled.
-- Codex may receive up to bounded, redacted excerpts of MCP error logs. Do not
+- Codex may receive bounded, redacted excerpts of local runtime or optional MCP error logs. Do not
   enable the AI watcher if logs may contain personal or sensitive information.
 - Closing MabiAuto stops the child watcher that MabiAuto launched. Any active
   isolated repair may be interrupted; it is **not** applied to production.
