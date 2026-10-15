@@ -73,12 +73,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.7"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.8"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.7</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v327-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.7"')) {
+          if ($p -notmatch '<Version>3\.2\.8</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v328-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.8"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -1510,6 +1510,12 @@ jobs:
         run: |
           dotnet run --project tests/production-ui/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Production UI regressions failed' }
+
+      - name: V3.2.8 start preflight regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/start-preflight/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.8 start preflight failed' }
 
       - name: Diagnostic-only regression tests
         shell: pwsh
