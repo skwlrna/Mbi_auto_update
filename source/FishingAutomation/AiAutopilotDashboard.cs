@@ -105,6 +105,12 @@ internal sealed class AiAutopilotDashboard : Form
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         resumeCodex.Click += (_, _) => RequestQuotaResume();
+        var retryInterrupted = new Button
+        {
+            Text = "중단 작업 재분석", Dock = DockStyle.Right, Width = 140,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        retryInterrupted.Click += (_, _) => RequestInterruptedRetry();
         var refresh = new Button
         {
             Text = "새로고침", Dock = DockStyle.Right, Width = 105,
@@ -116,6 +122,7 @@ internal sealed class AiAutopilotDashboard : Form
         foot.Controls.Add(refresh);
         foot.Controls.Add(handoff);
         foot.Controls.Add(resumeCodex);
+        foot.Controls.Add(retryInterrupted);
         foot.Controls.Add(reset);
         foot.Controls.Add(recurred);
         foot.Controls.Add(confirmed);
@@ -252,7 +259,8 @@ internal sealed class AiAutopilotDashboard : Form
     private static string StatusText(string status) => status switch
     {
         "tests_passed_review_required" => "코드 테스트 통과",
-        "in_progress" => "AI 분석 중 또는 중단됨",
+        "in_progress" => "AI 분석 중 또는 강제 종료 전 기록",
+        "interrupted_review_required" => "이전 AI 분석 중단 · 재분석 가능",
         "needs_review" => "수정안 검토 필요",
         "tests_failed" => "수정 후 테스트 실패",
         "blocked" => "분석/수정 중단",
@@ -281,6 +289,8 @@ internal sealed class AiAutopilotDashboard : Form
 
     private static string ReasonText(string status, string reason)
     {
+        if (reason.Contains("macro_or_watcher_exited_during_isolated_fix", StringComparison.OrdinalIgnoreCase))
+            return "매크로 또는 AI 종료로 코드 수정이 중간에 중단됨. 이전 작업은 보존됨";
         if (reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase))
             return "Codex 사용량 한도로 중단";
         if (reason.Contains("codex_not_found", StringComparison.OrdinalIgnoreCase))
@@ -304,7 +314,8 @@ internal sealed class AiAutopilotDashboard : Form
     private static string NextStep(string status, string reason, bool running) => status switch
     {
         "tests_passed_review_required" => "수정안을 검토하고 실제 게임에서 확인",
-        "in_progress" => running ? "분석 완료까지 대기" : "중단된 작업 기록 확인",
+        "in_progress" => running ? "현재 분석인지 위의 감시 상태 확인" : "AI 재시작 시 중단 상태 판정",
+        "interrupted_review_required" => running ? "해당 오류 선택 → 중단 작업 재분석" : "AI 감시 시작 → 중단 작업 재분석",
         "needs_review" => "수정안·오류 증거 검토",
         "tests_failed" => "실패한 테스트 기록 확인",
         "blocked" when reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase) =>
@@ -451,6 +462,61 @@ internal sealed class AiAutopilotDashboard : Form
         }
     }
 
+    private void RequestInterruptedRetry()
+    {
+        if (_recent.CurrentRow?.Tag is not ResultItem selected ||
+            !ValidEventId(selected.EventId) || selected.EventId.Length != 16)
+        {
+            MessageBox.Show(this, "중단된 AI 오류를 먼저 선택하세요.");
+            return;
+        }
+        if (!_isWatcherRunning())
+        {
+            MessageBox.Show(this, "AI 감시를 켠 후 재분석할 수 있습니다. 매크로 종료 시 감시도 함께 종료됩니다.");
+            return;
+        }
+        try
+        {
+            string directory = Path.Combine(Root, selected.EventId);
+            string resultPath = Path.Combine(directory, "result.json");
+            if (!string.Equals(selected.FilePath, resultPath, StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(directory) ||
+                (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                return;
+            using var result = ReadBounded(resultPath);
+            if (result is null ||
+                Field(result.RootElement, "event_id", 40) != selected.EventId ||
+                Field(result.RootElement, "status", 64) != "interrupted_review_required")
+            {
+                MessageBox.Show(this, "완전히 중단된 AI 작업만 새 작업 공간에서 재분석할 수 있습니다. 현재 분석 중인 작업은 재시작하지 않습니다.");
+                return;
+            }
+            string request = Path.Combine(Root, "interrupted-retry-request.json");
+            if (File.Exists(request))
+            {
+                MessageBox.Show(this, "기존 재분석 요청이 있습니다. 처리 상태를 먼저 확인하세요.");
+                return;
+            }
+            if (MessageBox.Show(this,
+                "이전에 중단된 수정안은 그대로 보관됩니다. 같은 오류 증거를 새 격리 작업 공간에서 Codex에 다시 보내 분석할까요?\\n" +
+                "Codex 사용량이 발생하며, 실제 게임에 수정안을 자동 적용하지 않습니다.",
+                "AI 재분석 명시적 승인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+                != DialogResult.Yes) return;
+            string temp = request + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new
+            {
+                action = "retry_interrupted_once",
+                event_id = selected.EventId
+            }));
+            File.Move(temp, request, false);
+            MessageBox.Show(this, "재분석을 요청했습니다. 다음 감시 주기에 새 작업 공간으로 처리합니다.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, "재분석 요청을 저장하지 못했습니다. 기존 결과는 그대로 유지됩니다.");
+        }
+    }
+
     private void RequestQuotaResume()
     {
         using var activity = ReadBounded(Path.Combine(Root, "watch-activity.json"));
@@ -576,7 +642,7 @@ internal sealed class AiAutopilotDashboard : Form
                 string status = Field(obj, "status", 64);
                 if (status == "tests_passed_review_required") success++;
                 else if (status is "tests_failed" or "blocked") failed++;
-                else if (status == "needs_review") review++;
+                else if (status is "needs_review" or "interrupted_review_required") review++;
                 else if (status == "in_progress") activeCount++;
                 string eventId = Field(obj, "event_id", 100);
                 if (eventId.Length == 0) eventId = file.Directory?.Name ?? "";
@@ -622,8 +688,9 @@ internal sealed class AiAutopilotDashboard : Form
                     byEvent.TryGetValue(name, out var ai);
                     string aiStatus = ai?.Status ?? "not_started";
                     string status = ai is null ? (running ? "AI 분석 대기" : "AI 분석 대기 · 꺼짐")
-                        : StatusText(aiStatus);
-                    string explanation = ai is { Status: "blocked" or "tests_failed" or "needs_review" }
+                        : (aiStatus == "in_progress" && (!running || active != name)
+                            ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(aiStatus));
+                    string explanation = ai is { Status: "blocked" or "tests_failed" or "needs_review" or "interrupted_review_required" }
                         ? detail + " / " + ReasonText(aiStatus, ai.Reason) : detail;
                     items.Add((occurred, FriendlyError(title.Length > 0 ? title : "오류", detail),
                         explanation, status, NextStep(aiStatus, ai?.Reason ?? "", running),
@@ -639,7 +706,9 @@ internal sealed class AiAutopilotDashboard : Form
                     ? "앱 오류 기록" : "외부 MCP 오류 기록";
                 items.Add((ai.Time, title,
                     ReasonText(ai.Status, ai.Reason) + " · 원본 오류는 PC의 로컬 기록에 보관됨",
-                    StatusText(ai.Status), NextStep(ai.Status, ai.Reason, running),
+                    ai.Status == "in_progress" && (!running || active != ai.EventName)
+                        ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(ai.Status),
+                    NextStep(ai.Status, ai.Reason, running),
                     ai.Url, ai.PrText, ai.FilePath, ai.EventId));
             }
             DateTimeOffset now = DateTimeOffset.Now;
