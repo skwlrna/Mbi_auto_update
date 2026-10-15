@@ -13,6 +13,26 @@ static AlteringWork Work(long seconds, bool completed = false)
     => new("가죽", "가죽 가공 시설",
         completed ? "Completed" : "InProgress", completed, seconds);
 
+ // Live 2026-10-15 20:15 false clear: combat still active, title similarity
+ // 0.693, touch signal 0.520. Neither a title nor a touch alone is enough.
+ int clearFrames = 0;
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, false);
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, false);
+ Assert(!AbyssClearEvidencePolicy.Confirmed(clearFrames) && clearFrames == 0,
+     "live combat title-only frames never authorize a clear touch");
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, false, true);
+ Assert(clearFrames == 0 && !AbyssClearEvidencePolicy.Confirmed(clearFrames),
+     "touch-prompt-like combat image alone cannot end combat");
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, true);
+ Assert(clearFrames == 1 && !AbyssClearEvidencePolicy.Confirmed(clearFrames),
+     "one paired title-and-prompt frame cannot trigger input");
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, false);
+ Assert(clearFrames == 0, "interrupted paired evidence resets clear confirmation");
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, true);
+ clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, true);
+ Assert(AbyssClearEvidencePolicy.Confirmed(clearFrames) && clearFrames == 2,
+     "two fresh paired title-and-prompt frames confirm actual clear");
+
 // Regression for 2026-10-12 V3.1.87 live report: the game menu was
 // visibly open, but step 1 searched only the CLOSED-menu ESC template
 // until it timed out. Two independent frames of the Abyss item in the
