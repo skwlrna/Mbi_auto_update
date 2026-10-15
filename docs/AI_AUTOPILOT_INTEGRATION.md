@@ -1,42 +1,28 @@
-# MabiAuto V3.2.3 — Integrated AI Error Management
+# MabiAuto — Codex AI 자동수정과 시간순 오류 기록
 
-The **Log / Diagnostics** screen now has an **AI Error Management** panel. It
-controls the *existing* Python Autopilot companion directly; no separate CMD
-window is required. Run-time changes are limited to a dedicated Git worktree.
+## 어떻게 작동하나요?
 
-## Getting started (once per PC)
+1. 프로그램 오류 알림이 발생하면 PC의 `%USERPROFILE%\MabiAutoMCP\reports\error_...`에 `error.txt`, `trace.txt`, `summary.json`이 기록됩니다. GitHub 업로드 설정과 독립적으로 기록합니다.
+2. AI 감시가 켜져 있고 환경 검사를 통과하면 **새 오류**를 Codex가 격리된 Git 작업 공간에서 분석합니다.
+3. 수정안을 만들고 빌드 및 허용된 자동 회귀 테스트를 실행합니다.
+4. 테스트 통과 후 사용자가 동의한 경우 GitHub 검토용 Draft PR만 생성합니다. 자동 병합·배포·실게임 실행은 하지 않습니다.
 
-1. Keep the existing MCP error reporter configured and running. Install Python
-   3.10+, Git, .NET 8 SDK, and Codex CLI, and sign into Codex.
-2. The local source clone must exist at `%USERPROFILE%\MabiAutoAI\repo` and
-   the legacy `tools\codex-autofix\autofix.py --status` must say **OFF**.
-3. Open **Log / Diagnostics** in MabiAuto and click **AI Start**.
-4. Enable **Start automatically next time** to start it whenever MabiAuto runs.
-   The preference is stored under `%LOCALAPPDATA%\MabiAuto\ai-autopilot.json`.
-5. The panel displays setup and safe-stop status. Details are saved under
-   `%USERPROFILE%\MabiAutoAI\autopilot-results`.
+## AI 오류 기록 보기
 
-## Safety boundaries
+`AI 자동수정 → 오류 기록 보기`에서 최신 시간순으로 오류가 표시됩니다.
+각 행에 **발생 일시 / 무슨 오류인가요? / AI 처리 상태 / 다음 단계 / GitHub 수정안**이 나옵니다.
+오류를 선택하면 원래 제목과 상세 설명, 중단 사유를 확인할 수 있습니다.
 
-- **Default is OFF**; users must opt in to enabling and persisting auto-start.
-- Each watcher holds an operating-system lock (`autopilot.lock`). If a separate
-  v1.3 watcher is already running, the integrated child exits without starting
-  a duplicate watcher. **Stop standalone v1.3 before using the integrated UI.**
-- Source edits are in isolated Git worktrees. There is NO automatic merging,
-  GitHub push, binary replacement, game input, or deployment.
-- Existing unverified AI patches fail closed. A new installation without prior
-  AI patches can watch *new* reports while leaving deployment disabled.
-- Codex may receive up to bounded, redacted excerpts of MCP error logs. Do not
-  enable the AI watcher if logs may contain personal or sensitive information.
-- Closing MabiAuto stops the child watcher that MabiAuto launched. Any active
-  isolated repair may be interrupted; it is **not** applied to production.
-- This program does **not** install Python, Codex, .NET SDK, MCP, or a Windows
-  service. It controls compatible dependencies already installed on the PC.
-- `tests_passed_review_required` means offline tests passed, not that an error
-  is fixed in the live game. Human and live-game validation remain necessary.
+**AI 분석 기록 없음**은 오류가 로컬 저장됐지만 처리 결과는 없음을 뜻합니다.
+**코드 테스트 통과 · 적용 전**은 오프라인 테스트만 통과했으며 실제 게임의 오류가 해결된 것은 아니라는 뜻입니다.
 
-## Release verification
+## 최초 설정 및 제한
 
-V3.2.3 must pass Windows GitHub Actions compilation and regression tests before
-its release workflow creates binary assets. This integration does not change
-release eligibility safeguards or automatic updater trust checks.
+- Python 3.10+, Git, .NET 8 SDK, Codex CLI 로그인 필요
+- 로컬 Git 저장소: `%USERPROFILE%\MabiAutoAI\repo`
+- AI 분석 결과: `%USERPROFILE%\MabiAutoAI\autopilot-results`
+- 기존 Autofix는 사용하거나 설치할 필요가 없습니다. 구 Autofix의 OFF 확인 조건은 제거했습니다.
+- AI 감시는 운영체제 잠금으로 중복 실행을 막고, 매크로 종료 시 함께 종료합니다.
+- 첫 시작 전에 쌓인 오류는 기본적으로 자동 재분석하지 않습니다.
+- Codex에 전달되는 로그에는 길이 제한 및 기본 민감값 마스킹이 적용됩니다. 스크린샷은 Codex 프롬프트에 자동 첨부되지 않습니다.
+- 검증 없이 실제 앱에 코드 적용·게임 입력·자동 배포하지 않습니다.
