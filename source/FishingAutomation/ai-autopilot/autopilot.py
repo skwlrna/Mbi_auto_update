@@ -119,11 +119,16 @@ def status_check(c: dict[str, Any]) -> bool:
     for desc, val in (("Git 저장소", repo), ("MCP 보고서", reports)):
         present = val.is_dir()
         print(f"{desc}: {'OK' if present else 'MISSING'} / {val}")
-        good &= present
+        if desc == "Git 저장소":
+            good &= present
+            if not present: print("AI 준비 실패: 소스 코드 폴더 없음", flush=True)
+        elif not present:
+            print("오류 기록 폴더는 첫 오류가 발생하면 생성됩니다.", flush=True)
     for executable in ("python", "git", "codex", "dotnet"):
         found = shutil.which(executable)
         print(f"{executable}: {found or 'MISSING'}")
         good &= bool(found)
+        if not found: print("AI 준비 실패: " + executable + " 프로그램 없음", flush=True)
     if repo.is_dir() and shutil.which("git"):
         r = cmd(["git", "rev-parse", "--show-toplevel"], repo)
         git_path = Path(r.stdout.strip()).resolve() if r.returncode == 0 else None
@@ -133,7 +138,7 @@ def status_check(c: dict[str, Any]) -> bool:
         print("Git tracked changes:", "DIRTY" if dirty.stdout.strip() else "CLEAN")
         if c["require_clean_repo"] and dirty.stdout.strip():
             good = False
-            print("주의: 추적 파일에 미커밋 변경이 있어 자동 수정을 시작하지 않습니다.")
+            print("AI 준비 실패: 소스 코드에 미저장 변경이 있어 안전상 시작하지 않습니다.", flush=True)
     print("AI 감시: Codex Autopilot 단독 실행 · 중복 실행 잠금 사용")
     print("자동 병합/배포: 지원하지 않음")
     return bool(good)
