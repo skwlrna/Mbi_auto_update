@@ -43,15 +43,9 @@ internal sealed partial class ScenarioEngine
     {
         // Check the touch prompt before every exit input, including the confirmation.
         // A visible prompt alone must veto an exit even if the title template misses.
-        var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-        if (touch.Found)
-        {
-            _abyssClearTitleFallbackConsecutive = 0;
-            ResetAbyssExitState(true);
-            AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "10분 경계에서 화면 터치 문구 확인");
-            await AdvanceAbyssClearScreenAsync(touch, ct);
-            return true;
-        }
+        // A touch-like combat overlay is not proof of a clear. Confirm the
+        // independent title AND touch prompt across two fresh frames below.
+        // In particular never bypass the paired-evidence policy here.
 
         // The first strong-title frame only arms the fallback and blocks exit input.
         // The second consecutive strong-title frame returns the safe touch rectangle.
