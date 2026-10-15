@@ -50,8 +50,7 @@ class QuotaFallbackTests(unittest.TestCase):
         return folder
 
     def cycle(self, action):
-        with mock.patch.object(agent, "require_legacy_off"), \
-             mock.patch.object(agent, "process", side_effect=action) as invoked, \
+        with mock.patch.object(agent, "process", side_effect=action) as invoked, \
              mock.patch.object(agent.time, "sleep", side_effect=StopAfterCycle):
             with self.assertRaises(StopAfterCycle):
                 agent.poll(self.c)
@@ -66,7 +65,6 @@ class QuotaFallbackTests(unittest.TestCase):
 
     def test_quota_ends_codex_retries_immediately(self):
         with mock.patch.object(agent.shutil, "which", return_value="codex"), \
-             mock.patch.object(agent, "require_legacy_off"), \
              mock.patch.object(agent, "supervised_run", return_value=(
                  1, '{"type":"turn.failed","error":{"message":"usage limit reached"}}',
                  "You've hit your usage limit", None)) as call, \
