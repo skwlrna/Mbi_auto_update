@@ -64,6 +64,42 @@ catch (InvalidOperationException ex) { missingSlotEvidence = ex.Message; }
 Check(missingSlotEvidence.Contains("조회되지 않음", StringComparison.Ordinal),
     "F9 requires fresh read-only slot evidence to authorize queue_full handoff");
 
+var otherFacilityPlan = new AlteringPlan("금속 가공 시설", "철괴", 9, 3, false);
+var otherFacilityRecipe = new AlteringRecipe("철괴", false, 3, "queue_full",
+    Array.Empty<AlteringIngredient>(), "금속 가공 시설");
+// Live CLI reports queue_full for *every* recipe while one 7-slot lane is full.
+// Readiness preflight must allow the selected full lane to drain, without
+// authorizing registration into the other empty lane before the full one clears.
+AlteringQueueStartGuard.EnsureStartable(
+    new[] { deferredPlan, otherFacilityPlan },
+    new[] { fullLaneRecipe, otherFacilityRecipe }, fullLane);
+Check(true, "global queue_full can hand off selected existing full lane even if another selected facility is empty");
+int unexpectedSecondaryRegistration = 0;
+using (var cancelAfterWait = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(
+            deferOtherLanesWhileQueueFull: true).RunAsync(
+            new[] { deferredPlan, otherFacilityPlan },
+            (item, budget, ct) =>
+            {
+                unexpectedSecondaryRegistration++;
+                return Task.FromResult(false);
+            },
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(fullLane),
+            (time, ct) =>
+            {
+                cancelAfterWait.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            }, cancelAfterWait.Token);
+    }
+    catch (OperationCanceledException) when (cancelAfterWait.IsCancellationRequested) { }
+}
+Check(unexpectedSecondaryRegistration == 0,
+    "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
+
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
 var travelIdle = new GatheringActivity(
