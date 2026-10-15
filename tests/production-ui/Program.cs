@@ -256,10 +256,23 @@ internal static class Program
                 .Single(x => x.AccessibleName == "다중가공 작업 추가");
             var clearAlteringQueue = All(altering).OfType<Button>()
                 .Single(x => x.AccessibleName == "다중가공 작업 비우기");
+            var removeAlteringQueue = All(altering).OfType<Button>()
+                .Single(x => x.AccessibleName == "다중가공 작업 삭제");
             var queueFeedback = All(altering).OfType<Label>()
                 .Single(x => x.AccessibleName == "다중가공 작업 추가 안내");
-            Check(alteringQueue.Visible && addAlteringQueue.Visible,
-                "automatic altering exposes a visible multi-altering job queue");
+            Check(alteringQueue.Visible && addAlteringQueue.Visible &&
+                  removeAlteringQueue.Visible && clearAlteringQueue.Visible,
+                "all three multi-altering queue actions are visible");
+            Check(removeAlteringQueue.Enabled && clearAlteringQueue.Enabled,
+                "idle remove/clear can provide feedback even on an empty queue");
+            removeAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0 &&
+                  queueFeedback.Text.Contains("삭제할 작업을 먼저", StringComparison.Ordinal),
+                "remove with no selected queue item shows an actionable reason");
+            clearAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0 &&
+                  queueFeedback.Text.Contains("비울 작업이 없습니다", StringComparison.Ordinal),
+                "clear on an empty queue explains its no-op");
 
             Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "목재+",
                 "default wood facility tab shows only wood recipes");
@@ -291,9 +304,53 @@ internal static class Program
                 "multi-altering queue captures the selected recipe and its own target quantity");
             Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Text.Contains("다중가공 1종", StringComparison.Ordinal),
                 "F9 start clearly switches to multi-altering when queued jobs exist");
+            alteringQueue.SelectedIndex = -1; Pump();
+            Check(removeAlteringQueue.Enabled, "remove remains clickable with nothing selected");
+            removeAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 1 &&
+                  queueFeedback.Text.Contains("삭제할 작업을 먼저", StringComparison.Ordinal),
+                "remove without a selected entry keeps the queue and shows why");
+            ai.SelectedIndex = 0; Pump();
+            addAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 2,
+                "adding an independent recipe keeps both queued entries");
+            alteringQueue.SelectedIndex = 0; Pump();
+            removeAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 1 &&
+                  alteringQueue.Items[0]!.ToString()!.Contains("철괴", StringComparison.Ordinal) &&
+                  queueFeedback.Text.StartsWith("삭제 완료", StringComparison.Ordinal),
+                "remove affects only the selected entry and confirms deletion");
+
+            // Exercise handler-level veto as well as button Enabled: alternate
+            // UI entry points must never edit queues while start owns input.
+            var startingField = typeof(MainForm).GetField("_starting",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var updateAltering = altering.GetType().GetMethod("UpdateExecution",
+                BindingFlags.Instance | BindingFlags.NonPublic)!;
+            startingField.SetValue(form, true);
+            updateAltering.Invoke(altering, null); Pump();
+            Check(!addAlteringQueue.Enabled && !removeAlteringQueue.Enabled &&
+                  !clearAlteringQueue.Enabled,
+                "all three queue buttons are disabled during scheduler start");
+            altering.GetType().GetMethod("AddCurrentAlteringQueue",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(altering, null);
+            altering.GetType().GetMethod("RemoveSelectedAlteringQueue",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(altering, null);
+            altering.GetType().GetMethod("ClearQueuedAlteringPlans",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(altering, null);
+            Check(alteringQueue.Items.Count == 1,
+                "all three guarded handlers refuse queue mutations while starting");
+            startingField.SetValue(form, false);
+            updateAltering.Invoke(altering, null); Pump();
+
             clearAlteringQueue.PerformClick(); Pump();
-            Check(alteringQueue.Items.Count == 0,
-                "multi-altering queue can be cleared before execution");
+            Check(alteringQueue.Items.Count == 0 &&
+                  queueFeedback.Text.StartsWith("비우기 완료", StringComparison.Ordinal),
+                "clear removes all remaining entries and confirms the count");
+            clearAlteringQueue.PerformClick(); Pump();
+            Check(queueFeedback.Text.Contains("비울 작업이 없습니다", StringComparison.Ordinal) &&
+                  fake.Actions.Count == 0,
+                "repeated empty clear still provides feedback without game input");
 
             facilityTabs.Single(x => x.Text == "약품").PerformClick(); Pump();
             Check(ai.Items.Count == 3 &&

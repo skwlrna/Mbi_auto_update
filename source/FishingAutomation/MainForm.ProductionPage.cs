@@ -554,22 +554,41 @@ public sealed partial class MainForm
 
         private void RemoveSelectedAlteringQueue()
         {
-            if (_owner.AnyRunning || _alteringQueue.SelectedIndex < 0)
+            if (!IsAltering) return;
+            if (_owner.AnyRunning || _owner._starting)
+            {
+                ShowQueueFeedback("다른 작업 실행 중에는 목록을 변경할 수 없습니다. F10 정지 후 다시 확인하세요.");
                 return;
+            }
+            if (_alteringQueue.SelectedIndex < 0)
+            {
+                ShowQueueFeedback("삭제할 작업을 먼저 목록에서 선택하세요.");
+                return;
+            }
             string removed = _alteringQueue.SelectedItem?.ToString() ?? "작업";
             _alteringQueue.Items.RemoveAt(_alteringQueue.SelectedIndex);
             _owner._log.Write("[다중가공] 작업 삭제 · " + removed);
+            ShowQueueFeedback("삭제 완료 · " + removed, success: true);
             UpdateExecution();
         }
 
         internal void ClearQueuedAlteringPlans()
         {
-            if (_owner.AnyRunning)
+            if (!IsAltering) return;
+            if (_owner.AnyRunning || _owner._starting)
+            {
+                ShowQueueFeedback("다른 작업 실행 중에는 목록을 비울 수 없습니다. F10 정지 후 다시 확인하세요.");
                 return;
-            if (_alteringQueue.Items.Count == 0)
+            }
+            int count = _alteringQueue.Items.Count;
+            if (count == 0)
+            {
+                ShowQueueFeedback("비울 작업이 없습니다. 먼저 품목을 추가하세요.");
                 return;
+            }
             _alteringQueue.Items.Clear();
-            _owner._log.Write("[다중가공] 작업 목록 비움");
+            _owner._log.Write("[다중가공] 작업 목록 비움 · " + count + "종");
+            ShowQueueFeedback("비우기 완료 · " + count + "종", success: true);
             UpdateExecution();
         }
 
@@ -867,8 +886,11 @@ public sealed partial class MainForm
             // handler explains missing selection/invalid plan instead of a
             // grey, silently non-responsive button. F9 safety is unchanged.
             if (_addQueue is not null) _addQueue.Enabled = !busy;
-            if (_removeQueue is not null) _removeQueue.Enabled = !busy && _alteringQueue.SelectedIndex >= 0;
-            if (_clearQueue is not null) _clearQueue.Enabled = !busy && _alteringQueue.Items.Count > 0;
+            // Let all three idle queue-management buttons explain invalid
+            // preconditions on click. The handlers still forbid any edits while
+            // the scheduler or another worker holds execution ownership.
+            if (_removeQueue is not null) _removeQueue.Enabled = !busy;
+            if (_clearQueue is not null) _clearQueue.Enabled = !busy;
             _alteringQueue.Enabled = !busy;
             bool hasBatch = IsAltering && _alteringQueue.Items.Count > 0;
             _start.Text = hasBatch
