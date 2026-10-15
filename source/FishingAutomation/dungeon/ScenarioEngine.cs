@@ -1282,28 +1282,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
 
             var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-            if (touch.Found)
-            {
-                AbyssTransitionTo(AbyssFlowState.TouchReady, "화면 터치 문구 확인");
-                Log?.Invoke($"[어비스] 화면 터치 문구 확인 -> 해당 위치 클릭 준비 @ {touch.Bounds}");
-                return touch;
-            }
-
             var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
-            if (clearTitle.Found)
+            clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
+                clearTitleConsecutive, clearTitle.Found, touch.Found);
+            if (AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive))
             {
-                clearTitleConsecutive++;
-                if (clearTitleConsecutive >= 2 && touch.Found && frame.Width == 800 && frame.Height == 1000)
-                {
-                    var safeTouch = new Rectangle(360, 915, 80, 60);
-                    AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 타이틀 2회 확인 + 기존 안전 터치 fallback");
-                    Log?.Invoke($"[어비스] 클리어 타이틀 2회 확인 + 터치 문구 미검출 -> 안전 터치 위치 사용 @ {safeTouch}");
-                    return new DetectionResult(true, safeTouch, clearTitle.Score, "clear_touch_safe_fallback");
-                }
-            }
-            else
-            {
-                clearTitleConsecutive = 0;
+                AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 제목+터치 문구 2프레임 확인");
+                Log?.Invoke($"[어비스] 두 신호 2/2 확인 -> 실제 터치 문구 위치 사용 @ {touch.Bounds}");
+                return touch;
             }
 
             // Important: missing clear/touch templates is NOT treated as a successful
