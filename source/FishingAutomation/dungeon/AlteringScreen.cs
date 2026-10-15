@@ -58,7 +58,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         var found = facilityTitle ? await _ui.Ocr.FindAlteringFacilityTitlesAsync(frame, text, ct) :
             await _ui.Ocr.FindAlteringLabelsAsync(frame, roi, text, ct);
-        return found.Count == 1 ? found[0] : null;
+        var unique = found.Count == 1 ? found[0] : (DetectionResult?)null;
+        _ui.NoteDiagnostic("OCR", text + "=" + (unique is not null ? "unique" : "unverified"));
+        return unique;
     }
 
     // A previously confirmed facility uses its FIXED header position, never OCR.
@@ -72,8 +74,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             DetectionResult? fixedHit = HasFixedFacilityHeaderVisual(frame)
                 ? new DetectionResult(true, new Rectangle(14, 42, 155, 45), 1.0, title)
                 : null;
+            _ui.NoteDiagnostic("visual_header", title + "=" + (fixedHit is not null ? "verified" : "missing"));
             return Task.FromResult(fixedHit);
         }
+        _ui.NoteDiagnostic("header_check", title + "=OCR");
         return _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
     }
 
@@ -2612,7 +2616,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             return GatheringQueries.ParseActivity(response).IsAutoTraveling;
         }
 
-        return GatheringQueries.ParseActivity(response).IsAutoTraveling;
+        bool moving = GatheringQueries.ParseActivity(response).IsAutoTraveling;
+        _ui.NoteDiagnostic("CLI", "activity_auto_traveling=" + moving);
+        return moving;
     }
 
     private async Task<bool> IsFacilityTravelDialogAsync(Bitmap frame, CancellationToken ct)
