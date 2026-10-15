@@ -94,7 +94,9 @@ internal sealed class AiAutopilotHost : IDisposable
             string eventName = message["처리 시작:".Length..].Trim()
                 .Split(new[] { ' ', '·' }, StringSplitOptions.RemoveEmptyEntries)
                 .FirstOrDefault() ?? "식별 불가";
-            if (eventName.Length > 100 || !eventName.StartsWith("error_", StringComparison.Ordinal) ||
+            bool knownEvent = eventName.StartsWith("error_", StringComparison.Ordinal) ||
+                eventName.StartsWith("runtime_", StringComparison.Ordinal);
+            if (eventName.Length > 100 || !knownEvent ||
                 eventName.Any(ch => !(char.IsLetterOrDigit(ch) || ch == '_' || ch == '-')))
                 eventName = "식별 불가";
             Publish("AI 신규 오류 분석·테스트 진행 중 · " + eventName);
