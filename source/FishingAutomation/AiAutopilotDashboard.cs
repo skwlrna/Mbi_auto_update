@@ -252,6 +252,22 @@ internal sealed class AiAutopilotDashboard : Form
         _ => "상태 확인 필요"
     };
 
+    private static string FriendlyError(string title, string detail)
+    {
+        if (detail.Contains("어비스", StringComparison.OrdinalIgnoreCase) &&
+            (detail.Contains("퇴장") || detail.Contains("나가기") || detail.Contains("HUD")))
+            return "어비스 퇴장·화면 확인 실패";
+        if (detail.Contains("생활 스킬") && detail.Contains("진행 불가"))
+            return "채집 중 캐릭터 상태 이상";
+        if (detail.Contains("채집") && detail.Contains("수량"))
+            return "채집 수량 확인 오류";
+        if (detail.Contains("재료") && detail.Contains("부족"))
+            return "가공 재료 부족";
+        if (detail.Contains("OCR") || detail.Contains("인식 실패"))
+            return "게임 화면 인식 실패";
+        return title;
+    }
+
     private static DateTimeOffset TimeOf(string value, DateTimeOffset fallback) =>
         DateTimeOffset.TryParse(value, out var parsed) ? parsed : fallback;
 
@@ -601,7 +617,7 @@ internal sealed class AiAutopilotDashboard : Form
                         : StatusText(aiStatus);
                     string explanation = ai is { Status: "blocked" or "tests_failed" or "needs_review" }
                         ? detail + " / " + ReasonText(aiStatus, ai.Reason) : detail;
-                    items.Add((occurred, title.Length > 0 ? title : "오류",
+                    items.Add((occurred, FriendlyError(title.Length > 0 ? title : "오류", detail),
                         explanation, status, NextStep(aiStatus, ai?.Reason ?? "", running),
                         ai?.Url ?? "", ai?.PrText ?? "없음",
                         ai?.FilePath ?? "", ai?.EventId ?? ""));
