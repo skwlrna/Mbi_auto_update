@@ -25,12 +25,18 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Build main program
         shell: pwsh
         run: dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
       - name: Combined schedule policy and handoff tests
         shell: pwsh
         run: dotnet run --project tests/combined-scheduler/Regression.csproj -c Release -r win-x64
+      - name: Scheduler local diagnostics offline tests
+        shell: pwsh
+        run: python -m unittest discover -s tests/ai-autopilot -p 'test_scheduler_diagnostics.py' -v
       - name: Existing altering regression
         shell: pwsh
         run: dotnet run --project tests/altering/Regression.csproj -c Release
