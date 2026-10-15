@@ -9,6 +9,7 @@ public sealed partial class MainForm
     private Button? _aiToggle;
     private CheckBox? _aiStartWithApp;
     private CheckBox? _aiAutoDraftPr;
+    private AiAutopilotDashboard? _aiDashboard;
     private bool _aiInitialized;
     private string? _lastAiLoggedStatus;
     private static string AiPreferencesPath => Path.Combine(
@@ -63,9 +64,16 @@ public sealed partial class MainForm
         dashboard.FlatAppearance.BorderColor = Border;
         dashboard.Click += (_, _) =>
         {
-            using var overview = new AiAutopilotDashboard(
+            if (_aiDashboard is { IsDisposed: false })
+            {
+                _aiDashboard.BringToFront();
+                _aiDashboard.Activate();
+                return;
+            }
+            _aiDashboard = new AiAutopilotDashboard(
                 () => _aiHost?.IsRunning == true, () => _aiHost?.Status ?? "대기 중");
-            overview.ShowDialog(this);
+            _aiDashboard.FormClosed += (_, _) => _aiDashboard = null;
+            _aiDashboard.Show(this); // modeless: F9/F10 and primary controls remain accessible
         };
         _aiState = new Label { Text = "대기 중 · 오류 로그 일부가 Codex로 전송될 수 있음", Dock = DockStyle.Fill,
             AutoEllipsis = true, ForeColor = Color.FromArgb(82, 99, 120),
