@@ -24,6 +24,8 @@ DEFAULT_HOME = Path.home() / "MabiAutoAI"
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 from supervised_codex import supervised_run
+from quota_handoff import (exhausted as codex_quota_exhausted,
+                           pause_record, resume_authorized, handoff_manifest)
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr
 from error_memory import (record_attempt, related_attempts, context_hint,
@@ -403,6 +405,10 @@ def exec_codex(worktree: Path, prompt: str, outdir: Path, c: dict[str, Any], pro
         if terminal:
             return False, terminal  # No automatic retry after stall/hard timeout.
         ok, reason, retry = codex_events(stdout, stderr, last)
+        # Explicit exhausted credits/usage is NOT a temporary 429 retry.
+        # A generic 429 may be rate-limiting and retains the old retry policy.
+        if codex_quota_exhausted(reason, stderr):
+            return False, "codex_quota_exhausted"
         if returncode != 0:
             ok = False
             reason = f"cli_exit_{returncode}: {reason}"
@@ -722,8 +728,25 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         write_json(statefile, state)
         print("기존 오류 폴더는 건너뛰었습니다. 새 오류부터 감시합니다.", flush=True)
 
-    recent_signatures: dict[str, float] = {}
+    # Preserve deduplication across watcher restarts. Older legacy entries
+    # without evidence_mtime remain valid but do not authorize a dedup skip.
+    recent_signatures: dict[str, float] = {
+        item["signature"]: float(item["evidence_mtime"])
+        for item in state.get("processed", [])[-500:]
+        if isinstance(item, dict) and isinstance(item.get("signature"), str)
+        and isinstance(item.get("evidence_mtime"), (int, float))
+    }
     last_reported: tuple[str, int] | None = None
+
+    def category_for(folder: Path) -> str:
+        try:
+            return str(classify(context_for(folder), []).get("suspected_category", "unclassified"))
+        except (OSError, ValueError, TypeError, UnicodeError):
+            return "unclassified"
+
+    def handoff(pending: list[Path], reason: str) -> None:
+        write_json(results_dir / "chatgpt-handoff.json", handoff_manifest(
+            pending, reason, event_id, category_for, state.get("handoff_events", [])))
 
     def activity(status: str, active: str | None, pending: int, reason: str = "", **details: Any) -> None:
         if single:
@@ -747,6 +770,31 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         else:
             folders = [x for x in folders if event_id(x) not in seen]
         pending = [x for x in folders if stable(x, int(c["settle_seconds"]))]
+        # Explicit quota exhaustion persists through process/watch restarts.
+        # Only a user-confirmed request bound to the current random pause ID
+        # permits NEW events to be sent to Codex again.
+        pause = state.get("quota_pause")
+        if not single and isinstance(pause, dict) and pause.get("reason") == "codex_quota_exhausted":
+            request_path = results_dir / "quota-resume-request.json"
+            try:
+                request = read_json(request_path) if request_path.is_file() and not request_path.is_symlink() and request_path.stat().st_size < 2048 else {}
+            except (OSError, ValueError, TypeError):
+                request = {}
+            if resume_authorized(request, pause):
+                state.pop("quota_pause", None)
+                write_json(statefile, state)
+                try: request_path.unlink(missing_ok=True)
+                except OSError: pass
+                print("Codex 사용자 확인 후 감시 재개 · 미처리 새 오류부터 분석", flush=True)
+            else:
+                handoff(pending, "codex_quota_exhausted")
+                activity("quota_paused", None, len(pending), "codex_quota_exhausted",
+                         pause_id=pause.get("id", ""))
+                if last_reported != ("quota", len(pending)):
+                    print(f"Codex 사용량 소진 · 호출 중단 · 대기 {len(pending)}건 · ChatGPT 인계 요약 사용 가능", flush=True)
+                    last_reported = ("quota", len(pending))
+                time.sleep(max(10, int(c["poll_seconds"])))
+                continue
         if not single:
             activity("watching", None, len(pending))
             current = ("waiting", len(pending))
@@ -761,6 +809,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 x.get("date") == dt.date.today().isoformat() and
                 x.get("status") != "duplicate_skipped"])
             if count_today >= int(c["max_runs_per_day"]):
+                handoff([p for p in pending if event_id(p) not in seen], "daily_limit")
                 activity("daily_limit", None, len(pending), "max_runs_per_day")
                 if last_reported != ("limit", len(pending)):
                     print(f"오늘 AI 처리 한도 도달({count_today}건). 새 오류 {len(pending)}건은 다음 날 대기.", flush=True)
@@ -783,7 +832,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 state["seen"] = sorted(seen)
                 state.setdefault("processed", []).append({
                     "id": eid, "date": dt.date.today().isoformat(),
-                    "status": "duplicate_skipped", "signature": signature
+                    "status": "duplicate_skipped", "signature": signature,
+                    "evidence_mtime": folder.stat().st_mtime
                 })
                 write_json(statefile, state)
                 continue
@@ -812,8 +862,26 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             state["seen"] = sorted(seen)
             state.setdefault("processed", []).append({
                 "id": eid, "date": dt.date.today().isoformat(),
-                "status": result.get("status"), "signature": signature
+                "status": result.get("status"), "signature": signature,
+                "evidence_mtime": folder.stat().st_mtime
             })
+            if "codex_quota_exhausted" in str(result.get("reason", "")):
+                # Do not retry the same event's existing blocked worktree.
+                # Keep its evidence, result and opaque ID for manual ChatGPT
+                # handoff. Newly arriving errors remain unprocessed on disk.
+                item = {"event_id": eid, "suspected_category": category_for(folder)}
+                past = state.setdefault("handoff_events", [])
+                if not any(x.get("event_id") == eid for x in past):
+                    past.append(item)
+                state["handoff_events"] = past[-20:]
+                state["quota_pause"] = pause_record()
+                write_json(statefile, state)
+                waiting = [p for p in pending if event_id(p) not in seen]
+                handoff(waiting, "codex_quota_exhausted")
+                activity("quota_paused", None, len(waiting), "codex_quota_exhausted",
+                         pause_id=state["quota_pause"]["id"])
+                print("Codex 사용량 소진 · 추가 호출 중단 · 기존 매크로는 그대로 실행", flush=True)
+                break
             write_json(statefile, state)
             activity("watching", None, max(0, len(pending)-1), str(result.get("status", "")))
             if single:
