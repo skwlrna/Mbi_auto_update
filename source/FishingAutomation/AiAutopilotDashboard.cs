@@ -197,6 +197,7 @@ internal sealed class AiAutopilotDashboard : Form
             {
                 int stored = 0, candidates = 0;
                 if (memory is not null &&
+                    memory.RootElement.ValueKind == JsonValueKind.Object &&
                     memory.RootElement.TryGetProperty("entries", out var entries) &&
                     entries.ValueKind == JsonValueKind.Array)
                 {
