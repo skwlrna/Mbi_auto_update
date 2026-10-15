@@ -82,6 +82,11 @@ def classify(context: str, changed_files: list[str] | None = None) -> dict[str, 
     ]
     category = next((kind for kind, keys in priorities
                      if any(key in lower for key in keys)), "unclassified")
+    # A concrete runtime scheduler tag takes precedence over incidental
+    # receipt/CLI words in a scheduler handoff report. This remains a
+    # *heuristic label*, never evidence that any repair succeeded.
+    if "[스케줄러]" in lower or "[scheduler]" in lower:
+        category = "scheduler_transition"
     paths = " ".join(changed_files or []).lower()
     if "screen.cs" in paths or "vision" in paths or "ocr" in paths:
         scope = "screen_validation"
