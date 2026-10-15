@@ -790,7 +790,21 @@ public sealed partial class MainForm
                 {
                     // Read-only CLI snapshot. Display order is NOT recipe identity.
                     var response = await _owner._cli.GetAlterableItemsAsync(CancellationToken.None);
-                    var recipes = AlteringQueries.ParseRecipes(response);
+                    IReadOnlyList<AlteringRecipe> recipes;
+                    try
+                    {
+                        recipes = AlteringQueries.ParseRecipes(response);
+                    }
+                    catch (Exception)
+                    {
+                        // A changed CLI field type can break parsing before the
+                        // normal catalog summary is available. Retain field names
+                        // only; never persist arbitrary raw response values.
+                        _owner._log.Write("[CLI][가공 제법] 파싱 실패 · " +
+                            AlteringQueries.DescribeCatalogSchema(
+                                response, Array.Empty<AlteringRecipe>()));
+                        throw;
+                    }
                     var counts = recipes.GroupBy(x => x.DisplayName, StringComparer.Ordinal)
                         .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
                     var yields = recipes.GroupBy(x => (x.DisplayName, x.ProducedPerWork))
