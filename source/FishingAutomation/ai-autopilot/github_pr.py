@@ -38,7 +38,7 @@ def trusted_origin(url: str) -> bool:
 
 
 def safe_branch(branch: str) -> bool:
-    return bool(re.fullmatch(r"ai/autopilot-error_[A-Za-z0-9_-]{8,100}", branch))
+    return bool(re.fullmatch(r"ai/autopilot-[0-9a-f]{16}", branch))
 
 
 def run(argv: list[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -53,7 +53,7 @@ def publish_verified_draft_pr(
 ) -> dict[str, str]:
     if not user_opted_in():
         return {"status": "disabled", "reason": "user_opt_in_required"}
-    if not safe_branch(branch) or not re.fullmatch(r"error_[A-Za-z0-9_-]{8,100}", event_id):
+    if not safe_branch(branch) or not re.fullmatch(r"[0-9a-f]{16}", event_id):
         return {"status": "blocked", "reason": "untrusted_branch_or_event"}
     if not changed or len(changed) > 8 or any(not (
         name.startswith("source/") or name.startswith("tests/") or
