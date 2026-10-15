@@ -481,7 +481,7 @@ def mark_interrupted_result(path: Path) -> bool:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 131072:
         return False
     report = read_json(path)
-    if report.get("status") != "in_progress":
+    if not isinstance(report, dict) or report.get("status") != "in_progress":
         return False
     report.update({
         "status": "interrupted_review_required",
@@ -792,6 +792,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         if not single and retry_file.is_file() and not retry_file.is_symlink():
             try:
                 request = (read_json(retry_file) if retry_file.stat().st_size <= 1024 else {})
+                if not isinstance(request, dict):
+                    request = {}
                 requested_id = request.get("event_id")
                 if (request.get("action") == "retry_interrupted_once" and
                     isinstance(requested_id, str) and
@@ -982,9 +984,8 @@ def watch_readiness(c: dict[str, Any]) -> bool:
     except (OSError, subprocess.TimeoutExpired) as exc:
         print("WATCHER WARNING: previous Abyss audit unavailable:", type(exc).__name__)
         return True
-    print(res.stdout.rstrip())
-    if res.stderr.strip():
-        print(redacted(res.stderr[-500:]))
+    if res.returncode == 0:
+        print(res.stdout.rstrip())
     if res.returncode != 0:
         # Do not let ONE historical Abyss patch prevent all new unrelated
         # repairs. The separate per-patch Abyss contract still fails closed
