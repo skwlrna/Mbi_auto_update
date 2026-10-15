@@ -160,6 +160,32 @@ internal static class AlteringFacilityResolver
 /// <summary>Typed read-only data. This module never starts, collects, or cancels work.</summary>
 internal static class AlteringQueries
 {
+    // Schema-only read-only diagnostics. No raw CLI JSON, character identity,
+    // inventory payload, or arbitrary recipe metadata is persisted here.
+    internal static string DescribeCatalogSchema(
+        MabinogiCliResult response, IReadOnlyList<AlteringRecipe> recipes)
+    {
+        var fields = new SortedSet<string>(StringComparer.Ordinal);
+        if (response.Data is JsonElement root &&
+            root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("items", out var items) &&
+            items.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in items.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.Object)
+                    foreach (var property in item.EnumerateObject())
+                        fields.Add(property.Name);
+        }
+        int duplicateNames = recipes.GroupBy(x => x.DisplayName, StringComparer.Ordinal)
+            .Count(g => g.Count() > 1);
+        int ambiguousVariants = recipes.GroupBy(x => (x.DisplayName, x.ProducedPerWork))
+            .Count(g => g.Count() > 1);
+        int blocked = recipes.Count(x => !x.Alterable);
+        return $"get_alterable_items · count={recipes.Count} · blocked={blocked} " +
+            $"· duplicateNames={duplicateNames} · sameYieldVariants={ambiguousVariants} " +
+            $"· fields=[{string.Join(", ", fields.Take(32))}]";
+    }
+
     internal static IReadOnlyList<AlteringRecipe> ParseRecipes(MabinogiCliResult response)
     {
         JsonElement root = RequireData(response);
