@@ -125,11 +125,11 @@ internal sealed class AiAutopilotHost : IDisposable
                 Publish("오류 처리 완료 — 결과 파일 확인");
         }
         else if (message.StartsWith("Codex 사용량 소진", StringComparison.Ordinal))
-            Publish("Codex 사용량 소진 — 추가 호출 일시정지 · ChatGPT 인계 요약 사용 가능");
+            Publish("Codex 사용량 한도 도달 — 추가 호출 중지 · AI 현황에서 ChatGPT로 이어가기");
         else if (message.StartsWith("Codex 사용자 확인 후 감시 재개", StringComparison.Ordinal))
             Publish("Codex 한도 초기화 확인 후 새 오류 감시 재개");
         else if (message.StartsWith("오늘 AI 처리 한도 도달", StringComparison.Ordinal))
-            Publish("AI 하루 처리 한도 — 새 오류 대기 중 · ChatGPT 인계 가능");
+            Publish("이전 AI 일일 제한 상태 발견 — 현재 버전은 실제 Codex 사용량 기준으로 처리");
         else if (message.StartsWith("새 MCP 오류 대기:", StringComparison.Ordinal))
             Publish("AI " + message);
         else if (message.StartsWith("중복 오류 건너뜀", StringComparison.Ordinal))
