@@ -29,6 +29,41 @@ catch (InvalidOperationException ex) { changedYieldError = ex.Message; }
 Check(changedYieldError.Contains("등록 당시와 달라져", StringComparison.Ordinal),
     "F9 blocks an altered recipe identity before session creation");
 
+// 2026-10-15 18:57 live CLI log: ALL 91 recipes were reported
+// Alterable=false, Reason=queue_full. Existing seven-slot queues must be
+// managed by the old wait -> verified receipt -> refill engine, not rejected.
+var fullLaneRecipe = deferredRecipe with { Reason = "queue_full" };
+var fullLane = Enumerable.Range(0, 7)
+    .Select(i => new AlteringWork("이전 목재 작업", deferredPlan.FacilityName,
+        i == 0 ? "Completed" : "InProgress", i == 0, i == 0 ? 0 : 120L))
+    .ToArray();
+AlteringQueueStartGuard.EnsureStartable(
+    new[] { deferredPlan }, new[] { fullLaneRecipe }, fullLane);
+Check(true, "F9 accepts queue_full with exactly seven observed works for existing wait/receipt/refill");
+AlteringQueueStartGuard.EnsureStartable(
+    new[] { deferredPlan }, new[] { fullLaneRecipe },
+    fullLane.Select(x => x with { State = "Completed", IsCompleted = true,
+        RemainingSeconds = 0 }).ToArray());
+Check(true, "F9 accepts queue_full with seven finished works for guarded receipt first");
+string disputedSlots = "";
+try
+{
+    AlteringQueueStartGuard.EnsureStartable(
+        new[] { deferredPlan }, new[] { fullLaneRecipe }, fullLane.Take(6).ToArray());
+}
+catch (InvalidOperationException ex) { disputedSlots = ex.Message; }
+Check(disputedSlots.Contains("6/7칸", StringComparison.Ordinal),
+    "F9 rejects contradictory queue_full for a six-slot facility instead of guessing");
+string missingSlotEvidence = "";
+try
+{
+    AlteringQueueStartGuard.EnsureStartable(
+        new[] { deferredPlan }, new[] { fullLaneRecipe });
+}
+catch (InvalidOperationException ex) { missingSlotEvidence = ex.Message; }
+Check(missingSlotEvidence.Contains("조회되지 않음", StringComparison.Ordinal),
+    "F9 requires fresh read-only slot evidence to authorize queue_full handoff");
+
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
 var travelIdle = new GatheringActivity(
