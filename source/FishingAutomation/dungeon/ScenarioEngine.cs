@@ -1329,7 +1329,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             if (clearTitle.Found)
             {
                 clearTitleConsecutive++;
-                if (clearTitleConsecutive >= 2 && frame.Width == 800 && frame.Height == 1000)
+                if (clearTitleConsecutive >= 2 && touch.Found && frame.Width == 800 && frame.Height == 1000)
                 {
                     var safeTouch = new Rectangle(360, 915, 80, 60);
                     AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 타이틀 2회 확인 + 기존 안전 터치 fallback");
@@ -1399,7 +1399,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 {
                     retryTouch = touch;
                 }
-                else if (clearTitleConsecutive >= 2 && frame.Width == 800 && frame.Height == 1000)
+                else if (clearTitleConsecutive >= 2 && touch.Found && frame.Width == 800 && frame.Height == 1000)
                 {
                     retryTouch = new DetectionResult(
                         true,
