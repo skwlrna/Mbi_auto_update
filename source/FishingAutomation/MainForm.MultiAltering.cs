@@ -88,10 +88,20 @@ public sealed partial class MainForm
                     "다른 캐릭터로 전환하지 않음");
 
             var recipes = await rawAlteringData.RecipesAsync(token);
-            // Deferred queue entries are configuration only. Before opening
-            // the batch store or injecting game input, verify live readiness.
-            AlteringQueueStartGuard.EnsureStartable(plans, recipes);
+            // Observe current game slots before deciding if queue_full is a
+            // true occupied lane or a contradictory CLI readiness report.
+            // Both calls are read-only and occur before session creation/input.
             var currentWorks = await rawAlteringData.WorksAsync(token);
+            if (plans.Any(plan => recipes.Where(x => x.DisplayName == plan.DisplayName)
+                    .ElementAtOrDefault(plan.RecipeOrdinal - 1)?.Reason == "queue_full"))
+            {
+                string laneEvidence = string.Join("; ",
+                    plans.Select(x => x.FacilityName).Distinct(StringComparer.Ordinal).Select(f =>
+                        $"{f} {currentWorks.Count(x => x.FacilityName == f)}/7" +
+                        $" (완료 {currentWorks.Count(x => x.FacilityName == f && x.IsCompleted)})"));
+                _log.Write("[CLI][가공 대기열] queue_full 재검증 · " + laneEvidence);
+            }
+            AlteringQueueStartGuard.EnsureStartable(plans, recipes, currentWorks);
 
             string mainSessionDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
