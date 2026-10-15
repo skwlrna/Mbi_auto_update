@@ -1239,6 +1239,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         // two consecutive frames and then use the already-established safe touch point
         // centered at (400,945).
         bool titleFallbackCandidate =
+            false && // Never turn title-only visual similarity into a game click.
             frame.Width == 800 &&
             frame.Height == 1000 &&
             clearTitle.Found &&
