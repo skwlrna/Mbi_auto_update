@@ -19,6 +19,9 @@ public sealed class SchedulerRunMonitor
     private string _phase = "idle";
     private string _outcome = "idle";
     private string _plan = "";
+    // Diagnostics only. These labels are not permission to resume or replay
+    // any crafting, registration, receipt or game action.
+    private string _lastVerifiedBoundary = "none";
     private DateTimeOffset _startedAt;
     private DateTimeOffset _phaseAt;
     private DateTimeOffset _activityAt;
@@ -73,6 +76,7 @@ public sealed class SchedulerRunMonitor
             _outcome = "running";
             // Flags only: never persist character names, recipes, credentials or screen data.
             _plan = $"crafting={crafting};altering={altering};abyss={abyss}";
+            _lastVerifiedBoundary = "none";
             _startedAt = _phaseAt = _activityAt = _observedAt = now;
             PersistLocked(now, true);
             return true;
@@ -144,6 +148,18 @@ public sealed class SchedulerRunMonitor
         }
     }
 
+    public void MarkVerifiedBoundary(string boundary)
+    {
+        if (boundary is not ("altering_resume_user_verified" or "crafting_input_released"))
+            throw new ArgumentOutOfRangeException(nameof(boundary));
+        lock (_gate)
+        {
+            if (!_running || _stopRequested) return;
+            _lastVerifiedBoundary = boundary;
+            PersistLocked(_clock(), true);
+        }
+    }
+
     public void RequestStop()
     {
         lock (_gate)
@@ -191,6 +207,9 @@ public sealed class SchedulerRunMonitor
                 phase = _phase,
                 outcome = _outcome,
                 planFlags = _plan,
+                lastVerifiedBoundary = _lastVerifiedBoundary,
+                resumeRequiresUserConfirmation = true,
+                automaticGameActionRetry = false,
                 startedUtc = _startedAt,
                 phaseChangedUtc = _phaseAt,
                 lastActivityObservedUtc = _activityAt,

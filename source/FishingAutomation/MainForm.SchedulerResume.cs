@@ -68,11 +68,15 @@ public sealed partial class MainForm
 
         // Read-only preflight. Never create a ledger or touch the game before
         // selection, identity consent, queue/quantity verification and confirm.
-        await CliAutomationGuards.EnsureCapabilitiesAsync(_cli,
-            new[] { "get_my_info", "get_altering_works", "get_items", "get_inventory" },
-            token);
-        var identity = await CliIdentityGuard.CaptureForMultiAlteringAsync(
-            _cli, token, allowLimitedFreshTest: true);
+        // These commands only query CLI capabilities / identity. Retry once
+        // for a recognized transport failure; never replay game inputs.
+        await SchedulerReadOnlyRetry.RunAsync(
+            ct => CliAutomationGuards.EnsureCapabilitiesAsync(_cli,
+                new[] { "get_my_info", "get_altering_works", "get_items", "get_inventory" },
+                ct), token, _log.Write);
+        var identity = await SchedulerReadOnlyRetry.RunAsync(
+            ct => CliIdentityGuard.CaptureForMultiAlteringAsync(
+                _cli, ct, allowLimitedFreshTest: true), token, _log.Write);
         token.ThrowIfCancellationRequested();
 
         bool confirmedSingleCharacter = false;
