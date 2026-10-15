@@ -77,7 +77,9 @@ def supervised_run(argv: list[str], cwd: Path, prompt: str,
                     last_output[0] = time.monotonic()
                     total_chars[0] += len(safe)
                     if total_chars[0] <= 8 * 1024 * 1024:
-                        parts[kind].append(safe)
+                        # Keep original JSONL only in memory for reliable CLI
+                        # event parsing; the persistent file remains scrubbed.
+                        parts[kind].append(line)
                     else:
                         oversized[0] = True
 
