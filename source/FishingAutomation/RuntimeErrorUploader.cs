@@ -98,6 +98,8 @@ public sealed class RuntimeErrorUploader
 
     public async Task UploadAlertAsync(RuntimeErrorReport report, bool requestedScreenshot = true)
     {
+        // Local timeline/Autopilot evidence is independent of optional GitHub uploads.
+        AiRuntimeErrorJournal.Record(report, _log);
         var settings = LoadSettings();
         if (!settings.Enabled) return;
         string repo = NormalizeRepository(settings.Repository);
