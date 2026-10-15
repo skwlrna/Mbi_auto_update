@@ -394,7 +394,7 @@ def exec_codex(worktree: Path, prompt: str, outdir: Path, c: dict[str, Any], pro
                 idle_seconds=int(c["codex_stall_seconds"]),
                 hard_seconds=int(c["codex_timeout_seconds"]),
                 heartbeat_seconds=int(c["codex_heartbeat_seconds"]),
-                on_progress=progress)
+                on_progress=progress, sanitize=redacted)
         except OSError as exc:
             return False, f"codex_launch_{type(exc).__name__}"
         if terminal:
