@@ -33,7 +33,7 @@ class QuotaFallbackTests(unittest.TestCase):
         self.reports.mkdir()
         self.results.mkdir()
         self.c = agent.config()
-        self.c.update({"reports_dir": str(self.reports),
+        self.c.update({"runtime_reports_dir": str(Path(self.tmp.name) / "runtime-reports"), "reports_dir": str(self.reports),
                        "results_dir": str(self.results),
                        "settle_seconds": 1, "poll_seconds": 10,
                        "max_runs_per_day": 8})
@@ -50,7 +50,7 @@ class QuotaFallbackTests(unittest.TestCase):
         return folder
 
     def cycle(self, action):
-        with mock.patch.object(agent, "require_legacy_off"), \
+        with mock.patch.object(agent, "require_isolated_ai_mode"), \
              mock.patch.object(agent, "process", side_effect=action) as invoked, \
              mock.patch.object(agent.time, "sleep", side_effect=StopAfterCycle):
             with self.assertRaises(StopAfterCycle):
@@ -66,7 +66,7 @@ class QuotaFallbackTests(unittest.TestCase):
 
     def test_quota_ends_codex_retries_immediately(self):
         with mock.patch.object(agent.shutil, "which", return_value="codex"), \
-             mock.patch.object(agent, "require_legacy_off"), \
+             mock.patch.object(agent, "require_isolated_ai_mode"), \
              mock.patch.object(agent, "supervised_run", return_value=(
                  1, '{"type":"turn.failed","error":{"message":"usage limit reached"}}',
                  "You've hit your usage limit", None)) as call, \

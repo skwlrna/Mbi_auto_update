@@ -30,7 +30,7 @@ or "CLI" words. This is a heuristic for better related-attempt retrieval,
 - No raw logs or images are added to error memory.
 - Failed/offline-only results never become "game validated" automatically.
 - Explicit user feedback remains required for `resolved` and `recurred`.
-- The existing Autofix-OFF prerequisite, Codex sandboxed worktree, PR draft,
+- The independent Autopilot singleton lock, clean-source prerequisite, Codex sandboxed worktree, PR draft,
   no-push/no-deploy default and test execution allowlist all remain intact.
 - Existing scheduler F10, game input ownership and durable resume/receipt
   confirmation are unchanged.

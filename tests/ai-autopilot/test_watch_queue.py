@@ -35,7 +35,7 @@ class QueueTests(unittest.TestCase):
         self.config = agent.config()
         self.config.update({
             "reports_dir": str(self.reports), "results_dir": str(self.results),
-            "settle_seconds": 1
+            "settle_seconds": 1, "runtime_reports_dir": str(root / "runtime-reports")
         })
         (self.results / "watch-state.json").write_text(
             json.dumps({"seen": [], "processed": []}), encoding="utf-8"
@@ -53,7 +53,7 @@ class QueueTests(unittest.TestCase):
 
     def run_one_cycle(self):
         events = []
-        with mock.patch.object(agent, "require_legacy_off"), \
+        with mock.patch.object(agent, "require_isolated_ai_mode"), \
              mock.patch.object(agent, "process", side_effect=lambda p, c, **k:
                                events.append(p.name) or {"status":"blocked", "reason":"unit-test"}), \
              mock.patch.object(agent.time, "sleep", side_effect=BreakAfterPolling):
@@ -101,7 +101,7 @@ class QueueTests(unittest.TestCase):
         def process_and_check(p, c, **kwargs):
             self.assertEqual(agent.read_json(self.results / "watch-activity.json")["status"], "processing")
             return {"status":"blocked", "reason":"test"}
-        with mock.patch.object(agent, "require_legacy_off"), \
+        with mock.patch.object(agent, "require_isolated_ai_mode"), \
              mock.patch.object(agent, "process", side_effect=process_and_check), \
              mock.patch.object(agent.time, "sleep", side_effect=BreakAfterPolling):
             with self.assertRaises(BreakAfterPolling):
