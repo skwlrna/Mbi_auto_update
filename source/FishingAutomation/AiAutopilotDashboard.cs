@@ -135,7 +135,7 @@ internal sealed class AiAutopilotDashboard : Form
     {
         return element.ValueKind == JsonValueKind.Object &&
                element.TryGetProperty(name, out var value) &&
-               value.TryGetInt32(out int n) ? Math.Clamp(n, 0, 100000) : 0;
+               value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int n) ? Math.Clamp(n, 0, 100000) : 0;
     }
 
     private static JsonDocument? ReadBounded(string path)
