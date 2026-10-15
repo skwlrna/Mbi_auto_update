@@ -39,7 +39,8 @@ def supervised_run(argv: list[str], cwd: Path, prompt: str,
                    stdout_path: Path, stderr_path: Path,
                    idle_seconds: int = 300, hard_seconds: int = 1200,
                    heartbeat_seconds: int = 45,
-                   on_progress: Progress | None = None
+                   on_progress: Progress | None = None,
+                   sanitize: Callable[[str], str] | None = None
                    ) -> tuple[int, str, str, str | None]:
     """Capture Codex output with idle and wall-clock deadlines.
 
@@ -69,14 +70,14 @@ def supervised_run(argv: list[str], cwd: Path, prompt: str,
     def drain(stream, destination: Path, kind: str) -> None:
         with destination.open("w", encoding="utf-8") as output:
             for line in stream:
-                # Raw diagnostic files are local-only. No bytes are forwarded
-                # to a cloud endpoint from this runner.
-                output.write(line)
+                # Scrub secrets and identifying user paths before saving locally.
+                safe = sanitize(line) if sanitize else line
+                output.write(safe)
                 with lock:
                     last_output[0] = time.monotonic()
-                    total_chars[0] += len(line)
+                    total_chars[0] += len(safe)
                     if total_chars[0] <= 8 * 1024 * 1024:
-                        parts[kind].append(line)
+                        parts[kind].append(safe)
                     else:
                         oversized[0] = True
 
