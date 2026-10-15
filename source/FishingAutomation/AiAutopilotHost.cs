@@ -76,7 +76,7 @@ internal sealed class AiAutopilotHost : IDisposable
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            Publish("AI 감시 실행 실패: " + ex.GetType().Name + " — Python 설치·경로 확인");
+            Publish("AI 감시 시작 실패 — Python 설치·경로 확인 (" + ex.GetType().Name + ")");
         }
     }
 
@@ -84,7 +84,16 @@ internal sealed class AiAutopilotHost : IDisposable
     {
         // Do not surface raw MCP error evidence into the app; only the
         // watcher's own activity/status lines may be shown.
-        if (message.Contains("SAFE STOP", StringComparison.OrdinalIgnoreCase) ||
+        if (message.StartsWith("AI 준비 실패: ", StringComparison.Ordinal))
+        {
+            string problem = message["AI 준비 실패: ".Length..].Trim();
+            if (problem is "소스 코드 폴더 없음" or "python 프로그램 없음" or
+                "git 프로그램 없음" or "codex 프로그램 없음" or
+                "dotnet 프로그램 없음" or
+                "소스 코드에 미저장 변경이 있어 안전상 시작하지 않습니다.")
+                Publish("AI 자동수정 시작 불가 — " + problem);
+        }
+        else if (message.Contains("SAFE STOP", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("BLOCKED", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("실행 차단", StringComparison.Ordinal))
             Publish("AI 감시 안전 중지 — 진단 기록 확인");
