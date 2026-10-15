@@ -18,6 +18,7 @@ internal sealed class AiAutopilotDashboard : Form
     private readonly DataGridView _recent;
     private sealed record ResultItem(string Url, string FilePath, string EventId);
     private readonly System.Windows.Forms.Timer _timer;
+    private bool _quotaHandoffOffered;
 
     private static string Root => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -88,7 +89,7 @@ internal sealed class AiAutopilotDashboard : Form
         reset.Click += (_, _) => SubmitGameFeedback("unverified");
         var handoff = new Button
         {
-            Text = "ChatGPT 인계 복사", Dock = DockStyle.Right, Width = 137,
+            Text = "ChatGPT로 이어가기", Dock = DockStyle.Right, Width = 137,
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         handoff.Click += (_, _) => CopyChatGptHandoff();
@@ -327,7 +328,16 @@ internal sealed class AiAutopilotDashboard : Form
         try
         {
             Clipboard.SetText(prompt);
-            MessageBox.Show(this, "원본 로그 없이 작성된 인계 요약을 복사했습니다. ChatGPT 대화에 직접 붙여넣으세요. 필요할 때만 검토한 로그를 추가하세요.");
+            try
+            {
+                Process.Start(new ProcessStartInfo("https://chatgpt.com/")
+                { UseShellExecute = true });
+                MessageBox.Show(this, "안전한 오류 요약을 복사하고 ChatGPT를 열었습니다. 대화에 붙여넣어 전송하세요. 원본 로그와 비밀정보는 자동 전송하지 않습니다.");
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            {
+                MessageBox.Show(this, "오류 요약은 복사됐습니다. ChatGPT를 직접 열어 붙여넣으세요.");
+            }
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
@@ -391,8 +401,22 @@ internal sealed class AiAutopilotDashboard : Form
             " · " + _watcherStatus() +
             "\n마지막 작업: " + (active.Length > 0 ? active : "없음") +
             " · 대기 " + pending + "건" +
-            (activity == "quota_paused" ? " · Codex 사용량 소진: ChatGPT 인계 가능" : "") +
+            (activity == "quota_paused" ? " · Codex 사용량 한도 도달 → ChatGPT 인계 대기" : "") +
             (running ? " · " + activity : " · 이전 상태 기록은 현재 실행 상태가 아님");
+
+        if (running && activity == "quota_paused" && !_quotaHandoffOffered)
+        {
+            // Offer the handoff once per dashboard opening. No automatic
+            // message submission, account introspection, or private log upload.
+            _quotaHandoffOffered = true;
+            if (MessageBox.Show(this,
+                "Codex 사용량 한도에 도달했습니다. 추가 호출은 중지됐고 오류 기록은 보존됩니다.\n" +
+                "ChatGPT에서 계속 검토할까요? 안전한 오류 요약만 복사해 브라우저를 엽니다.",
+                "ChatGPT 인계 준비 완료", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information) == DialogResult.Yes)
+                CopyChatGptHandoff();
+        }
+        if (activity != "quota_paused") _quotaHandoffOffered = false;
 
         try
         {

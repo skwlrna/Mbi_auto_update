@@ -35,7 +35,7 @@ class QueueTests(unittest.TestCase):
         self.config = agent.config()
         self.config.update({
             "reports_dir": str(self.reports), "results_dir": str(self.results),
-            "settle_seconds": 1, "max_runs_per_day": 8
+            "settle_seconds": 1
         })
         (self.results / "watch-state.json").write_text(
             json.dumps({"seen": [], "processed": []}), encoding="utf-8"
@@ -85,16 +85,16 @@ class QueueTests(unittest.TestCase):
         self.error("newer", "K field independent HUD confirmation failed", 60)
         self.assertEqual(len(self.run_one_cycle()), 2)
 
-    def test_daily_quota_remains_bounded(self):
+    def test_local_daily_count_no_longer_blocks_provider_usage(self):
         statefile = self.results / "watch-state.json"
         state = agent.read_json(statefile)
-        state["processed"] = [{"date":agent.dt.date.today().isoformat(), "status":"blocked"}] * 8
+        state["processed"] = [{"date":agent.dt.date.today().isoformat(), "status":"blocked"}] * 80
         agent.write_json(statefile, state)
         self.error("pending", "new unique facility error never ignored", 60)
-        self.assertEqual(self.run_one_cycle(), [])
+        self.assertEqual(self.run_one_cycle(), ["pending"])
         status = agent.read_json(self.results / "watch-activity.json")
-        self.assertEqual(status["status"], "daily_limit")
-        self.assertEqual(status["pending"], 1)
+        self.assertNotEqual(status["status"], "daily_limit")
+        self.assertEqual(status["pending"], 0)
 
     def test_processing_status_written_before_codex_work(self):
         self.error("new", "unique failure full evidence for real event", 60)

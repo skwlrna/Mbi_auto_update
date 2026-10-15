@@ -82,7 +82,7 @@ def config() -> dict[str, Any]:
         "results_dir": str(DEFAULT_HOME / "autopilot-results"),
         "worktrees_dir": str(DEFAULT_HOME / "autopilot-worktrees"),
         "poll_seconds": 20, "settle_seconds": 20,
-        "max_runs_per_day": 4, "codex_timeout_seconds": 1200,
+        "codex_timeout_seconds": 1200,
         "codex_stall_seconds": 300, "codex_heartbeat_seconds": 45,
         "codex_max_retries": 1, "codex_retry_delay_seconds": 300,
         "test_timeout_seconds": 600, "require_clean_repo": True,
@@ -805,17 +805,9 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             eid = event_id(folder)
             if eid in seen and not (single and latest):
                 continue
-            count_today = len([x for x in state.get("processed", []) if
-                x.get("date") == dt.date.today().isoformat() and
-                x.get("status") != "duplicate_skipped"])
-            if count_today >= int(c["max_runs_per_day"]):
-                handoff([p for p in pending if event_id(p) not in seen], "daily_limit")
-                activity("daily_limit", None, len(pending), "max_runs_per_day")
-                if last_reported != ("limit", len(pending)):
-                    print(f"오늘 AI 처리 한도 도달({count_today}건). 새 오류 {len(pending)}건은 다음 날 대기.", flush=True)
-                    last_reported = ("limit", len(pending))
-                break
-
+            # No arbitrary per-day run cap. Codex decides the actual account
+            # quota; the explicit quota error triggers a bounded local ChatGPT
+            # handoff and stops additional Codex calls safely.
             signature = duplicate_signature(folder) if not single else None
             last_seen = recent_signatures.get(signature) if signature else None
             if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:

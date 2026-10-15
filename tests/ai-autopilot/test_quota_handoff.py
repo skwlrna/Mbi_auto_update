@@ -152,22 +152,23 @@ class QuotaFallbackTests(unittest.TestCase):
                          "duplicate_skipped")
         self.assertTrue((second / "error.txt").exists())
 
-    def test_daily_cap_provides_manual_handoff_without_processing(self):
+    def test_daily_count_does_not_block_real_provider_usage(self):
         state = agent.read_json(self.results / "watch-state.json")
         state["processed"] = [{"date":agent.dt.date.today().isoformat(),
-                               "status":"blocked"}] * 8
+                               "status":"blocked"}] * 50
         agent.write_json(self.results / "watch-state.json", state)
         folder = self.error("error_waiting", "scheduler error not yet processed", 60)
-        no_call = self.cycle(lambda *a, **k: self.fail("daily cap called Codex"))
-        no_call.assert_not_called()
-        payload = agent.read_json(self.results / "chatgpt-handoff.json")
-        self.assertEqual(payload["status"], "daily_limit")
-        self.assertEqual(payload["items"][0]["event_id"], agent.event_id(folder))
+        invoked = self.cycle(lambda *a, **k: {"status": "blocked", "reason": "test"})
+        self.assertEqual(invoked.call_count, 1)
+        self.assertIn(agent.event_id(folder),
+                      agent.read_json(self.results / "watch-state.json")["seen"])
+        self.assertFalse((self.results / "chatgpt-handoff.json").exists())
 
     def test_dashboard_only_copies_and_requests_local_resume(self):
         ui = (SCRIPT.parents[1] / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
         host = (SCRIPT.parents[1] / "AiAutopilotHost.cs").read_text(encoding="utf-8")
-        self.assertIn("ChatGPT 인계 복사", ui)
+        self.assertIn("ChatGPT로 이어가기", ui)
+        self.assertIn('ProcessStartInfo("https://chatgpt.com/")', ui)
         self.assertIn("Clipboard.SetText(prompt);", ui)
         self.assertIn("retry_after_user_confirmed_reset", ui)
         self.assertIn("quota_paused", ui)
