@@ -25,6 +25,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 from supervised_codex import supervised_run
 from regression_policy import commands_for as regression_commands_for
+from github_pr import publish_verified_draft_pr
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
                "access is denied", "access denied", "os error 5",
                "code mode is unavailable", "429 too many requests", "503 service unavailable")
@@ -653,7 +654,16 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
         output["regression_test"]["status"] = "passed"
     diff = cmd(["git", "diff", "--stat"], worktree)
     output["diff_stat"] = redacted(diff.stdout[-3000:])
-    return finish("tests_passed_review_required", "No merge/deploy: live-game validation and human approval still required")
+    # GitHub network side effect is never authorized by the AI itself.
+    # Only the host may publish an opt-in draft PR after *all* gates pass.
+    verified = output.get("tests", [])
+    output["pr"] = publish_verified_draft_pr(
+        worktree, branch, eid, changed, result_dir, verified)
+    if output["pr"]["status"] == "draft_created":
+        print("AI 검토용 Draft PR 생성:", output["pr"]["url"], flush=True)
+    elif output["pr"]["status"] == "blocked":
+        print("AI PR 생성 보류:", output["pr"]["reason"], flush=True)
+    return finish("tests_passed_review_required", "No auto merge/deploy: live-game validation and human approval still required")
 
 
 def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cli_error: bool = False) -> None:
