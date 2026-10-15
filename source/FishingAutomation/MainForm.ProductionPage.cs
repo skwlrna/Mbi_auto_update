@@ -20,6 +20,15 @@ public sealed partial class MainForm
     }
 
     private AlteringPlan SelectedAlteringPlan()
+        => CreateSelectedAlteringPlan(requireReady: true);
+
+    // Queue editing does not perform game actions. A CLI readiness flag may
+    // depend on live facility/location state; never confuse it with recipe
+    // identity. Execution is checked independently in StartMultiAlteringAsync.
+    private AlteringPlan SelectedAlteringQueuePlan()
+        => CreateSelectedAlteringPlan(requireReady: false);
+
+    private AlteringPlan CreateSelectedAlteringPlan(bool requireReady)
     {
         if (_alteringPage.Items.SelectedItem is not RecipeChoice choice)
             throw new InvalidOperationException("가공 제법 목록을 불러온 뒤 제법을 선택하세요.");
@@ -38,7 +47,7 @@ public sealed partial class MainForm
 
             // MissingIngredients is stronger evidence than a localized/changed Reason string.
             // If concrete deficits are present, let the recursive resolver handle them.
-            if (choice.Recipe.MissingIngredients.Count == 0)
+            if (requireReady && choice.Recipe.MissingIngredients.Count == 0)
                 throw new InvalidOperationException($"선택한 제법의 가공 조건을 확인하세요. Reason={reason} · Missing={missing}");
         }
 
@@ -527,7 +536,9 @@ public sealed partial class MainForm
 
             try
             {
-                var plan = _owner.SelectedAlteringPlan();
+                var plan = _owner.SelectedAlteringQueuePlan();
+                var recipe = ((RecipeChoice)Items.SelectedItem!).Recipe;
+                bool checkAtStart = !recipe.Alterable && recipe.MissingIngredients.Count == 0;
                 var queued = _alteringQueue.Items.Cast<AlteringQueueChoice>().ToArray();
                 int existing = Array.FindIndex(queued, x =>
                     x.Plan.FacilityName == plan.FacilityName &&
@@ -550,13 +561,19 @@ public sealed partial class MainForm
                         $"[다중가공] 작업 추가 · {plan.ScreenTitle} · {plan.DisplayName} {plan.TargetQuantity:N0}개");
                 }
 
-                ShowQueueFeedback($"추가 완료 · {plan.DisplayName} {plan.TargetQuantity:N0}개", success: true);
+                if (checkAtStart)
+                    ShowQueueFeedback(
+                        $"목록 등록 완료 · {plan.DisplayName} {plan.TargetQuantity:N0}개 · 현재 CLI 가공 조건 미확인 · F9 시작 전 재검증",
+                        success: false);
+                else
+                    ShowQueueFeedback($"추가 완료 · {plan.DisplayName} {plan.TargetQuantity:N0}개", success: true);
                 UpdateExecution();
             }
             catch (Exception ex)
             {
-                // The plan validation is unchanged: unverified recipes cannot
-                // be silently added or executed. Explain the failure in-page.
+                // Identity/quantity validation still rejects ambiguous recipes.
+                // A temporarily unready but identified recipe may be queued for
+                // later verification; never mistake queue editing for approval to run.
                 ShowQueueFeedback("추가 실패 · " + ex.Message);
             }
         }
