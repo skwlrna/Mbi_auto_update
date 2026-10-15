@@ -265,6 +265,41 @@ def context_for(folder: Path) -> str:
                 lines.extend([f"--- BEGIN LOG: {name} ---", value, f"--- END LOG: {name} ---"])
             except OSError as exc:
                 lines.append(f"Cannot read {name}: {type(exc).__name__}")
+    # Local-only UI timelines can be referenced by MCP error text. Read ONLY
+    # the known production diagnostics tree under the current user profile;
+    # never follow arbitrary paths or include raw images in the Codex prompt.
+    visual_lines: list[str] = []
+    for name in allowed_names:
+        report = folder / name
+        if not report.is_file() or report.is_symlink():
+            continue
+        try:
+            tail = report.read_text(encoding="utf-8-sig", errors="replace")[-16000:]
+        except OSError:
+            continue
+        for match in re.finditer(r"시각 증거:\\s*(.+?timeline\\.txt)", tail):
+            candidate = Path(match.group(1).strip().strip('"'))
+            try:
+                candidate = candidate.resolve(strict=True)
+                home = Path.home().resolve()
+                if (not candidate.is_relative_to(home) or
+                    candidate.name != "timeline.txt" or
+                    candidate.parent.parent.name != "visual-evidence" or
+                    candidate.parent.parent.parent.name != "altering" or
+                    candidate.is_symlink() or candidate.stat().st_size > 12000):
+                    continue
+                visual_lines.append(redacted(candidate.read_text(
+                    encoding="utf-8-sig", errors="replace")[:8500]))
+            except (OSError, ValueError):
+                continue
+            if len(visual_lines) >= 1:
+                break
+        if visual_lines:
+            break
+    if visual_lines:
+        lines.extend(["--- BEGIN LOCAL VISUAL/INPUT/CLI OBSERVATIONS ---",
+                      visual_lines[0],
+                      "--- END LOCAL OBSERVATIONS; NO SCREENSHOT BYTES SHARED ---"])
     images = [p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")]
     lines.append("Screenshot filenames (image contents not submitted): " + ", ".join(images[:20]))
     return "\n".join(lines)[:45000]
