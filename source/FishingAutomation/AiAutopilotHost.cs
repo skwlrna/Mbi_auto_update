@@ -99,10 +99,20 @@ internal sealed class AiAutopilotHost : IDisposable
                 eventName = "식별 불가";
             Publish("AI 신규 오류 분석·테스트 진행 중 · " + eventName);
         }
+        else if (message.StartsWith("Codex 진행:", StringComparison.Ordinal))
+        {
+            // The watcher emits numerical progress only; no raw AI output.
+            var safe = message.Length > 95 ? message[..95] : message;
+            Publish("AI " + safe);
+        }
+        else if (message.StartsWith("Codex 정체 감지:", StringComparison.Ordinal))
+            Publish("Codex 정체 감지 — 해당 작업 안전 중단 · 자동 재시작 없음");
         else if (message.StartsWith("처리 결과:", StringComparison.Ordinal))
         {
             if (message.Contains("tests_passed_review_required", StringComparison.OrdinalIgnoreCase))
                 Publish("자동 테스트 통과 — 게임 검증·승인 필요");
+            else if (message.Contains("needs_review", StringComparison.OrdinalIgnoreCase))
+                Publish("AI 수정안 검토 필요 — 회귀 테스트 미작성 또는 근거 부족");
             else if (message.Contains("blocked", StringComparison.OrdinalIgnoreCase))
                 Publish("분석/수정 차단 — 결과 파일 확인");
             else

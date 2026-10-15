@@ -6,5 +6,9 @@
   "max_changed_files": 8,
   "ollama_fallback_notes_only": true,
   "process_old_events_on_watch_start": false,
-  "require_autofix_off": true
+  "require_autofix_off": true,
+  "codex_stall_seconds": 300,
+  "codex_timeout_seconds": 1200,
+  "codex_heartbeat_seconds": 45,
+  "require_regression_test": true
 }
