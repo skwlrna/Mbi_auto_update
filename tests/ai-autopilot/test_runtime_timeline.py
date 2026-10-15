@@ -109,8 +109,8 @@ class TimelineTests(unittest.TestCase):
             class EndCycle(Exception):
                 pass
 
-            with mock.patch.object(agent, "require_isolated_ai_mode"), \\
-                 mock.patch.object(agent, "process", side_effect=record), \\
+            with mock.patch.object(agent, "require_isolated_ai_mode"), \
+                 mock.patch.object(agent, "process", side_effect=record), \
                  mock.patch.object(agent.time, "sleep", side_effect=EndCycle):
                 with self.assertRaises(EndCycle):
                     agent.poll(config)
