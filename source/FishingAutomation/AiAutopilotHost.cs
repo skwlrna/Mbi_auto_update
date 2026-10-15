@@ -107,6 +107,10 @@ internal sealed class AiAutopilotHost : IDisposable
         }
         else if (message.StartsWith("Codex 정체 감지:", StringComparison.Ordinal))
             Publish("Codex 정체 감지 — 해당 작업 안전 중단 · 자동 재시작 없음");
+        else if (message.StartsWith("AI 검토용 Draft PR 생성:", StringComparison.Ordinal))
+            Publish("AI 수정 Draft PR 생성 완료 — AI 현황에서 검토");
+        else if (message.StartsWith("AI PR 생성 보류:", StringComparison.Ordinal))
+            Publish("AI 수정 검증 완료 · GitHub PR 생성 보류 — AI 현황 확인");
         else if (message.StartsWith("처리 결과:", StringComparison.Ordinal))
         {
             if (message.Contains("tests_passed_review_required", StringComparison.OrdinalIgnoreCase))
