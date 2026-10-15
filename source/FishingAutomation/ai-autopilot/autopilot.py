@@ -681,7 +681,9 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
     state = read_json(statefile, {"seen": [], "started": now(), "processed": []})
     seen = set(state.get("seen", []))
     if not single and not c.get("process_old_events_on_watch_start") and not statefile.exists():
-        seen.update(event_id(x) for x in all_evidence_folders(c))
+        # Ignore old external MCP folders on first launch, but process retained
+        # in-app runtime errors that were recorded before the AI watcher started.
+        seen.update(event_id(x) for x in evidence_folders(reports))
         state["seen"] = sorted(seen)
         write_json(statefile, state)
         print("기존 오류 폴더는 건너뛰었습니다. 새 오류부터 감시합니다.", flush=True)
