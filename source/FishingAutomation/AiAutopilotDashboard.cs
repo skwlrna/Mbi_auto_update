@@ -36,7 +36,7 @@ internal sealed class AiAutopilotDashboard : Form
         _watcherStatus = watcherStatus;
         Text = "MabiAuto · AI 오류 시간별 내역";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(840, 550);
+        MinimumSize = new Size(1080, 550);
         ClientSize = new Size(1140, 720);
         BackColor = Color.FromArgb(246, 248, 252);
         Font = new Font("맑은 고딕", 9f);
@@ -664,7 +664,8 @@ internal sealed class AiAutopilotDashboard : Form
                     TimeOf(Field(obj, "started", 70), file.LastWriteTimeUtc),
                     status, reason, IsTrustedPrUrl(url) ? url : "", prText, feedback);
                 analyses.Add(analysis);
-                if (!string.IsNullOrEmpty(eventName)) byEvent[eventName] = analysis;
+                if (!string.IsNullOrEmpty(eventName) && !byEvent.ContainsKey(eventName))
+                    byEvent[eventName] = analysis; // Files are newest first: do not hide a manual reanalysis.
             }
 
             var items = new List<(DateTimeOffset Time, string Title, string Detail,
