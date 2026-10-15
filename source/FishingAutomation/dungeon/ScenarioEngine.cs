@@ -37,15 +37,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private int _currentStepIndex;
     private int _resumeStepIndex;
 
-    // V0172_ABYSS_CLEAR_TITLE_FALLBACK
-    // The real clear screen can show a stable "던전 클리어!" title while the bottom
-    // "화면을 터치해 주세요" template scores below its 0.68 threshold.
-    // Keep the strict title+touch path first, then allow a guarded 2-frame title fallback.
-    private int _abyssClearTitleFallbackConsecutive;
-    private const double AbyssClearTitleFallbackMinScore = 0.68;
-    private const int AbyssClearTitleFallbackRequiredFrames = 2;
-    private static readonly Rectangle AbyssClearSafeTouch = new(360, 915, 80, 60);
-    private bool AbyssClearTitleFallbackPending => _abyssClearTitleFallbackConsecutive > 0;
+    // A clear title alone can appear mid-combat. Never tap on that evidence.
+    // Paired title + touch prompt must persist across two fresh captures.
+    private int _abyssClearPairedEvidenceFrames;
+    private bool AbyssClearPairedEvidencePending => _abyssClearPairedEvidenceFrames > 0;
 
     public event Action<string>? Log;
     public string InputMode => _input.ModeName;
@@ -975,7 +970,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 if (!found.Found)
                 {
                     abyssClearConsecutive = 0;
-                    if (await CheckMonitorsAsync(frame, ct))
+                    if (!AbyssClearPairedEvidencePending && await CheckMonitorsAsync(frame, ct))
                         continue;
                 }
                 else
@@ -1226,53 +1221,25 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         // Preferred path: both independent clear signals are visible in the same frame.
         if (clearTitle.Found && touch.Found)
         {
-            _abyssClearTitleFallbackConsecutive = 0;
+            _abyssClearPairedEvidenceFrames = AbyssClearEvidencePolicy.Next(
+                _abyssClearPairedEvidenceFrames, clearTitle.Found, touch.Found);
+            if (!AbyssClearEvidencePolicy.Confirmed(_abyssClearPairedEvidenceFrames))
+            {
+                Log?.Invoke("[어비스] 클리어 제목+터치 문구 후보 1/2 · 입력 보류, 새 프레임에서 재검증");
+                return DetectionResult.NotFound;
+            }
+            _abyssClearPairedEvidenceFrames = 0;
             ResetAbyssExitState(true);
             AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "클리어 타이틀 + 화면 터치 문구 동시 확인");
             return touch;
         }
 
-        // V0.1.72 fallback:
-        // In real captures the title stayed around 0.69~0.75 while the touch template
-        // fluctuated around 0.48~0.63. Do not lower the global touch threshold.
-        // Instead, on the canonical 800x1000 client require a strong clear title in
-        // two consecutive frames and then use the already-established safe touch point
-        // centered at (400,945).
-        bool titleFallbackCandidate =
-            frame.Width == 800 &&
-            frame.Height == 1000 &&
-            clearTitle.Found &&
-            clearTitle.Score >= AbyssClearTitleFallbackMinScore;
-
-        if (titleFallbackCandidate)
-        {
-            _abyssClearTitleFallbackConsecutive++;
-            if (_abyssClearTitleFallbackConsecutive >= AbyssClearTitleFallbackRequiredFrames)
-            {
-                _abyssClearTitleFallbackConsecutive = 0;
-                ResetAbyssExitState(true);
-                AbyssTransitionTo(
-                    AbyssFlowState.ClearConfirmed,
-                    "클리어 타이틀 강한 신호 2프레임 + 안전 터치 fallback");
-                Log?.Invoke(
-                    $"[어비스] 클리어 타이틀 강한 신호 2/2 확인 " +
-                    $"title={clearTitle.Score:0.000}, touch={touch.Score:0.000} " +
-                    $"-> 안전 터치 위치 사용 @ {AbyssClearSafeTouch}");
-                return new DetectionResult(
-                    true,
-                    AbyssClearSafeTouch,
-                    clearTitle.Score,
-                    "clear_title_2x_safe_fallback");
-            }
-
-            Log?.Invoke(
-                $"[어비스] 클리어 타이틀 강한 신호 1/2 " +
-                $"title={clearTitle.Score:0.000}, touch={touch.Score:0.000} -> 퇴장/모니터 입력 보류");
-        }
-        else
-        {
-            _abyssClearTitleFallbackConsecutive = 0;
-        }
+        // A title-like image while combat is running is not a confirmed clear.
+        // Reset partial evidence; never use the historical fixed-coordinate
+        // title-only touch fallback or mark the fight complete.
+        _abyssClearPairedEvidenceFrames = 0;
+        if (clearTitle.Found && !touch.Found)
+            Log?.Invoke("[어비스] 클리어 제목 유사 신호만 감지 · 화면 터치 금지");
 
         // V0164_ABYSS_CLEAR_LOG_SIMPLIFIED:
         // Suppress ordinary combat similarity noise. This affects logging only.
@@ -1310,28 +1277,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
 
             var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-            if (touch.Found)
-            {
-                AbyssTransitionTo(AbyssFlowState.TouchReady, "화면 터치 문구 확인");
-                Log?.Invoke($"[어비스] 화면 터치 문구 확인 -> 해당 위치 클릭 준비 @ {touch.Bounds}");
-                return touch;
-            }
-
             var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
-            if (clearTitle.Found)
+            clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
+                clearTitleConsecutive, clearTitle.Found, touch.Found);
+            if (AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive))
             {
-                clearTitleConsecutive++;
-                if (clearTitleConsecutive >= 2 && frame.Width == 800 && frame.Height == 1000)
-                {
-                    var safeTouch = new Rectangle(360, 915, 80, 60);
-                    AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 타이틀 2회 확인 + 기존 안전 터치 fallback");
-                    Log?.Invoke($"[어비스] 클리어 타이틀 2회 확인 + 터치 문구 미검출 -> 안전 터치 위치 사용 @ {safeTouch}");
-                    return new DetectionResult(true, safeTouch, clearTitle.Score, "clear_touch_safe_fallback");
-                }
-            }
-            else
-            {
-                clearTitleConsecutive = 0;
+                AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 제목+터치 문구 2프레임 확인");
+                Log?.Invoke($"[어비스] 두 신호 2/2 확인 -> 실제 터치 문구 위치 사용 @ {touch.Bounds}");
+                return touch;
             }
 
             // Important: missing clear/touch templates is NOT treated as a successful
@@ -1378,27 +1331,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
             var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
 
-            if (clearTitle.Found)
-                clearTitleConsecutive++;
-            else
-                clearTitleConsecutive = 0;
+            clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
+                clearTitleConsecutive, clearTitle.Found, touch.Found);
 
             if (retryClicks < 1 && sw.Elapsed >= TimeSpan.FromSeconds(2))
             {
-                DetectionResult retryTouch = DetectionResult.NotFound;
-
-                if (touch.Found)
-                {
-                    retryTouch = touch;
-                }
-                else if (clearTitleConsecutive >= 2 && frame.Width == 800 && frame.Height == 1000)
-                {
-                    retryTouch = new DetectionResult(
-                        true,
-                        new Rectangle(360, 915, 80, 60),
-                        clearTitle.Score,
-                        "clear_touch_safe_retry");
-                }
+                var retryTouch = AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive)
+                    ? touch : DetectionResult.NotFound;
 
                 if (retryTouch.Found)
                 {

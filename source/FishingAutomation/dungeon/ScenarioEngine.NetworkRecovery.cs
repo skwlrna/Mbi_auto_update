@@ -58,7 +58,7 @@ internal sealed partial class ScenarioEngine
         _networkReconnectHandling = false;
         _resumeStepIndex = _networkResumeStep;
         _abyssExitInProgress = false;
-        _abyssClearTitleFallbackConsecutive = 0;
+        _abyssClearPairedEvidenceFrames = 0;
         if (_networkReturnedOutside) _abyssCombatStartedAt = null;
         lock (_abyssFlowStateLock) _abyssFlowState = AbyssFlowState.Unknown;
         // Result counting remains latched if reconnect returned to the same result screen.

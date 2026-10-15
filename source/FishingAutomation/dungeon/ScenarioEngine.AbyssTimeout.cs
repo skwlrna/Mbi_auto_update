@@ -43,15 +43,9 @@ internal sealed partial class ScenarioEngine
     {
         // Check the touch prompt before every exit input, including the confirmation.
         // A visible prompt alone must veto an exit even if the title template misses.
-        var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-        if (touch.Found)
-        {
-            _abyssClearTitleFallbackConsecutive = 0;
-            ResetAbyssExitState(true);
-            AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "10분 경계에서 화면 터치 문구 확인");
-            await AdvanceAbyssClearScreenAsync(touch, ct);
-            return true;
-        }
+        // A touch-like combat overlay is not proof of a clear. Confirm the
+        // independent title AND touch prompt across two fresh frames below.
+        // In particular never bypass the paired-evidence policy here.
 
         // The first strong-title frame only arms the fallback and blocks exit input.
         // The second consecutive strong-title frame returns the safe touch rectangle.
@@ -67,7 +61,7 @@ internal sealed partial class ScenarioEngine
         var result = await DetectAbyssResultRetryAsync(frame, ct);
         if (result.Found)
         {
-            _abyssClearTitleFallbackConsecutive = 0;
+            _abyssClearPairedEvidenceFrames = 0;
             ResetAbyssExitState(true);
             AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "10분 경계에서 실제 결과 화면 확인");
             AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "기존 결과 처리로 연결");
@@ -103,7 +97,7 @@ internal sealed partial class ScenarioEngine
 
                     // One strong clear-title frame is enough to veto this frame's exit input.
                     // The next fresh frame must confirm 2/2 before the safe clear touch is sent.
-                    if (AbyssClearTitleFallbackPending)
+                    if (AbyssClearPairedEvidencePending)
                     {
                         previous = DetectionResult.NotFound;
                         Log?.Invoke("[어비스 타임아웃] 클리어 타이틀 후보 확인 중 -> 퇴장 입력 보류");
