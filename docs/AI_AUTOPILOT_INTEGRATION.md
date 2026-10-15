@@ -1,42 +1,35 @@
-# MabiAuto V3.2.3 — Integrated AI Error Management
+# MabiAuto Codex AI 오류 자동수정 · V3.2.17 이후 검증 안내
 
-The **Log / Diagnostics** screen now has an **AI Error Management** panel. It
-controls the *existing* Python Autopilot companion directly; no separate CMD
-window is required. Run-time changes are limited to a dedicated Git worktree.
+## 자동수정 단계와 안전 조건
 
-## Getting started (once per PC)
+1. 프로그램 오류는 PC `%USERPROFILE%\\MabiAutoAI\\runtime-reports`에 로컬 기록됩니다. 외부 MCP 보고서 폴더도 선택적으로 읽습니다.
+2. 프로그램에서 **AI 분석 시작**을 누르면 Python, Git, Codex CLI, .NET SDK 및 깨끗한 소스 복사본(`%USERPROFILE%\\MabiAutoAI\\repo`)을 확인합니다.
+3. 오류를 읽어 Codex가 별도 Git worktree에서 원인 분석과 코드 수정을 시도합니다.
+4. 소스 빌드와 해당 오류를 재현하는, 기존 프로젝트에 등록된 회귀 테스트가 성공한 경우에만 **코드 테스트 통과**로 표시합니다.
+5. 사용자가 GitHub 수정안 저장을 직접 허용하고 PC에 GitHub CLI 인증이 있으면 **Draft PR**만 생성합니다. 자동 병합, 운영 바이너리 교체, 배포, 실게임 조작은 없습니다.
 
-1. The built-in runtime error journal is used automatically; a separate MCP reporter is optional. Install Python
-   3.10+, Git, .NET 8 SDK, and Codex CLI, and sign into Codex.
-2. The local source clone must exist at `%USERPROFILE%\MabiAutoAI\repo` and
-   the legacy `tools\codex-autofix\autofix.py --status` must say **OFF**.
-3. Open **Log / Diagnostics** in MabiAuto and click **AI Start**.
-4. Enable **Start automatically next time** to start it whenever MabiAuto runs.
-   The preference is stored under `%LOCALAPPDATA%\MabiAuto\ai-autopilot.json`.
-5. The panel displays setup and safe-stop status. Details are saved under
-   `%USERPROFILE%\MabiAutoAI\autopilot-results`.
+## 최근 보강한 안전·회복 기능
 
-## Safety boundaries
+- 기존 Autofix는 사용하지 않으며 실행 여부를 검사하지 않습니다. AI watcher 중복 실행은 OS 단독 잠금으로 막습니다.
+- 이전 어비스 수정안의 정적 검증 실패는 **새 오류 감시 전체를 중지시키지 않고 경고**합니다. 실제 어비스 관련 신규 수정안은 전용 안전 검사를 통과하기 전까지 테스트 성공으로 표시하지 않습니다.
+- Codex 수정 도중 매크로 또는 AI 감시가 종료되면, 다음 AI 감시 시작 시 `이전 AI 분석 중단 · 재분석 가능`으로 표시합니다. **기존 코드 변경·테스트 결과·작업 공간을 재사용하거나 자동 재실행하지 않습니다.**
+- `AI 오류 시간별 내역`에서 중단된 오류를 선택하고 `중단 작업 재분석`을 누르면 새 작업 공간에서 **1회만** 다시 분석할 수 있습니다. 사용자에게 Codex 사용량 발생을 알리고 별도 확인을 받습니다. 같은 작업 재분석을 다시 무한 반복하지 않습니다.
+- 이 과정도 Codex 제공자 사용량 한도 일시정지 및 기존 안전 조건을 준수하며 게임에 자동 적용하지 않습니다.
+- 화면 수정은 제작(`tests/crafting`, `tests/production-ui`)과 가공(`tests/altering`, `tests/altering-screen-integration`)의 전용 회귀 테스트에 연결됩니다. 단지 빌드만 통과하거나 관련 없는 테스트를 고쳐서는 성공으로 인정되지 않습니다.
 
-- **Default is OFF**; users must opt in to enabling and persisting auto-start.
-- Each watcher holds an operating-system lock (`autopilot.lock`). If a separate
-  v1.3 watcher is already running, the integrated child exits without starting
-  a duplicate watcher. **Stop standalone v1.3 before using the integrated UI.**
-- Source edits are in isolated Git worktrees. There is NO automatic merging,
-  GitHub push, binary replacement, game input, or deployment.
-- Existing unverified AI patches fail closed. A new installation without prior
-  AI patches can watch *new* reports while leaving deployment disabled.
-- Codex may receive bounded, redacted excerpts of local runtime or optional MCP error logs. Do not
-  enable the AI watcher if logs may contain personal or sensitive information.
-- Closing MabiAuto stops the child watcher that MabiAuto launched. Any active
-  isolated repair may be interrupted; it is **not** applied to production.
-- This program does **not** install Python, Codex, .NET SDK, MCP, or a Windows
-  service. It controls compatible dependencies already installed on the PC.
-- `tests_passed_review_required` means offline tests passed, not that an error
-  is fixed in the live game. Human and live-game validation remain necessary.
+## PC 준비 상태 확인
 
-## Release verification
+`AI 오류 관리 → AI 분석 시작 → 오류 시간별 내역`에서 현재 상태와 처리 순서를 확인할 수 있습니다.
 
-V3.2.3 must pass Windows GitHub Actions compilation and regression tests before
-its release workflow creates binary assets. This integration does not change
-release eligibility safeguards or automatic updater trust checks.
+- Codex 로그인을 마쳤는지, `python`·`git`·`codex`·`dotnet`이 설치됐는지 확인하세요.
+- 저장소가 없거나 미커밋 변경이 있으면 **AI가 새 수정 작업을 시작하지 않습니다.**
+- 작업 공간이 보관 한도(기본 30개)에 도달하면 다른 오류를 덮어쓰지 않고 중지합니다. 이때는 보관된 분석과 GitHub PR을 먼저 검토하고, 삭제할 작업 공간을 별도로 결정해야 합니다. **자동 삭제는 하지 않습니다.**
+- 최초 실행 시 과거 선택적 MCP 보고서를 자동으로 재생하지 않습니다. 이미 보존된 앱 내 오류 보고서는 첫 실행 때 분석 대상으로 사용할 수 있습니다.
+- 프로그램 종료와 F10의 기존 동작을 유지합니다. 특히 **매크로 프로그램을 종료하면 자식 AI 감시도 종료**됩니다.
+- 로그 일부가 Codex에 전달될 수 있으므로 민감한 정보가 있는 환경에서는 AI 감시를 끄세요. 기본 로그 길이·토큰 마스킹·로컬 스크린샷 미전송 정책은 유지합니다.
+
+## 검증 범위
+
+GitHub Actions의 Windows 빌드, Python 테스트, C# 회귀 테스트는 실제 게임에서 오류가 사라진다는 증거가 아닙니다.
+최초 배포 이후 사용자의 PC에서 `오류 수집 → Codex가 새 오류 처리 시작 → 수정 → 전용 테스트 → 검토용 PR`을 한 번 실제 검증해야 합니다.
+PR 승인·백업·롤백 및 정식 업데이트는 이 실사용 확인 뒤 별도 작업으로 진행합니다.
