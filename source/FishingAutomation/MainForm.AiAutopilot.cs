@@ -8,6 +8,7 @@ public sealed partial class MainForm
     private Label? _aiState;
     private Button? _aiToggle;
     private CheckBox? _aiStartWithApp;
+    private CheckBox? _aiAutoDraftPr;
     private bool _aiInitialized;
     private string? _lastAiLoggedStatus;
     private static string AiPreferencesPath => Path.Combine(
@@ -30,11 +31,49 @@ public sealed partial class MainForm
             Width = 184, ForeColor = TitleText, BackColor = row.BackColor,
             Font = new Font("맑은 고딕", 8f), TextAlign = ContentAlignment.MiddleLeft };
         _aiStartWithApp.CheckedChanged += (_, _) => { if (_aiInitialized) SaveAiPreferences(); };
+        _aiAutoDraftPr = new CheckBox
+        {
+            Text = "검증 후 PR 생성", Dock = DockStyle.Right, Width = 142,
+            ForeColor = TitleText, BackColor = row.BackColor,
+            Font = new Font("맑은 고딕", 8f), TextAlign = ContentAlignment.MiddleLeft
+        };
+        _aiAutoDraftPr.CheckedChanged += (_, _) =>
+        {
+            if (!_aiInitialized) return;
+            if (_aiAutoDraftPr.Checked &&
+                MessageBox.Show(this,
+                    "AI 수정이 모든 테스트를 통과하면 GitHub에 수정 브랜치를 올리고 Draft PR을 자동 생성합니다.\n" +
+                    "자동 병합·배포는 하지 않습니다. GitHub CLI 인증이 필요합니다.\n" +
+                    "이 기능을 켜겠습니까?",
+                    "GitHub PR 자동 생성 동의", MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                _aiAutoDraftPr.Checked = false;
+                return;
+            }
+            SaveAiPreferences();
+        };
+        var dashboard = new Button
+        {
+            Text = "AI 현황", Dock = DockStyle.Right, Width = 84,
+            BackColor = Color.White, ForeColor = TitleText,
+            FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand,
+            Font = new Font("맑은 고딕", 8.5f)
+        };
+        dashboard.FlatAppearance.BorderColor = Border;
+        dashboard.Click += (_, _) =>
+        {
+            using var overview = new AiAutopilotDashboard(
+                () => _aiHost?.IsRunning == true, () => _aiHost?.Status ?? "대기 중");
+            overview.ShowDialog(this);
+        };
         _aiState = new Label { Text = "대기 중 · 오류 로그 일부가 Codex로 전송될 수 있음", Dock = DockStyle.Fill,
             AutoEllipsis = true, ForeColor = Color.FromArgb(82, 99, 120),
             TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 8f) };
         row.Controls.Add(_aiState);
         row.Controls.Add(_aiStartWithApp);
+        row.Controls.Add(_aiAutoDraftPr);
+        row.Controls.Add(dashboard);
         row.Controls.Add(_aiToggle);
         row.Controls.Add(title);
         return row;
@@ -43,6 +82,7 @@ public sealed partial class MainForm
     private sealed class AiPreferences
     {
         public bool StartWithApp { get; set; }
+        public bool AutoCreatePr { get; set; }
     }
 
     private void InitializeAiAutopilot()
@@ -57,13 +97,17 @@ public sealed partial class MainForm
         try
         {
             if (File.Exists(AiPreferencesPath))
-                _aiStartWithApp!.Checked = JsonSerializer.Deserialize<AiPreferences>(
-                    File.ReadAllText(AiPreferencesPath))?.StartWithApp ?? false;
+            {
+                var pref = JsonSerializer.Deserialize<AiPreferences>(File.ReadAllText(AiPreferencesPath));
+                _aiStartWithApp!.Checked = pref?.StartWithApp ?? false;
+                _aiAutoDraftPr!.Checked = pref?.AutoCreatePr ?? false;
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             _log.Write("[AI 관리] 자동 시작 설정을 읽지 못했습니다. 자동 시작은 비활성화됩니다.");
             _aiStartWithApp!.Checked = false;
+            _aiAutoDraftPr!.Checked = false;
         }
         _aiInitialized = true;
         RefreshAiAutopilotControls(_aiHost.Status);
@@ -77,7 +121,8 @@ public sealed partial class MainForm
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, JsonSerializer.Serialize(new AiPreferences
             {
-                StartWithApp = _aiStartWithApp?.Checked ?? false
+                StartWithApp = _aiStartWithApp?.Checked ?? false,
+                AutoCreatePr = _aiAutoDraftPr?.Checked ?? false
             }));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
