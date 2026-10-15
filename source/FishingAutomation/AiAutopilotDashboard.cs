@@ -146,9 +146,17 @@ internal sealed class AiAutopilotDashboard : Form
         _recent.CellDoubleClick += (_, e) =>
         {
             if (e.RowIndex < 0 || e.RowIndex >= _recent.Rows.Count) return;
-            string url = (_recent.Rows[e.RowIndex].Tag as ResultItem)?.Url ?? "";
-            if (!IsTrustedPrUrl(url)) return;
-            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            if (_recent.Rows[e.RowIndex].Tag is not ResultItem item) return;
+            if (!IsTrustedPrUrl(item.Url))
+            {
+                MessageBox.Show(this, "어떤 오류인가요?\n" + item.Title +
+                    "\n\n발생 내용\n" + item.Detail +
+                    "\n\nAI 처리\n" + item.Status +
+                    "\n\n다음 단계\n" + item.Next,
+                    "오류 자세히 보기", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try { Process.Start(new ProcessStartInfo(item.Url) { UseShellExecute = true }); }
             catch (Exception) { /* External browser is optional. */ }
         };
 
