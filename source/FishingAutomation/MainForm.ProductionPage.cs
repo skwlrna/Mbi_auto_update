@@ -127,6 +127,7 @@ public sealed partial class MainForm
         private readonly Button? _resume;
         private readonly ListBox _alteringQueue = new();
         private Button? _addQueue, _removeQueue, _clearQueue;
+        private readonly Label _queueFeedback = new();
         private object[] _choices = Array.Empty<object>();
         private bool _loading, _loaded;
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
@@ -430,16 +431,17 @@ public sealed partial class MainForm
 
         private Control BuildAlteringQueueArea()
         {
-            // Title and management actions need their own rows at small window sizes.
-            // A FlowLayoutPanel alongside the heading previously clipped both.
+            // Title, actions, and actionable feedback each need their own row.
+            // Disabled queue buttons used to look clickable without any reason.
             var layout = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
                 Margin = Padding.Empty, BackColor = Color.Transparent,
                 AccessibleName = "다중가공 작업 목록 영역"
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.Controls.Add(new Label
             {
@@ -467,6 +469,15 @@ public sealed partial class MainForm
             buttons.Controls.Add(_removeQueue, 1, 0);
             buttons.Controls.Add(_clearQueue, 2, 0);
             layout.Controls.Add(buttons, 0, 1);
+            _queueFeedback.AccessibleName = "다중가공 작업 추가 안내";
+            _queueFeedback.Text = "품목과 목표 수량을 선택한 다음 + 추가를 누르세요.";
+            _queueFeedback.Dock = DockStyle.Fill;
+            _queueFeedback.TextAlign = ContentAlignment.MiddleLeft;
+            _queueFeedback.AutoEllipsis = true;
+            _queueFeedback.ForeColor = Muted;
+            _queueFeedback.BackColor = Color.Transparent;
+            _queueFeedback.Margin = new Padding(4, 0, 4, 0);
+            layout.Controls.Add(_queueFeedback, 0, 2);
 
             var surface = new LauncherCard
             {
@@ -474,14 +485,36 @@ public sealed partial class MainForm
                 Padding = new Padding(5), Margin = new Padding(0, 2, 0, 2)
             };
             surface.Controls.Add(_alteringQueue);
-            layout.Controls.Add(surface, 0, 2);
+            layout.Controls.Add(surface, 0, 3);
             return layout;
+        }
+
+        private void ShowQueueFeedback(string message, bool success = false)
+        {
+            // Always visible on the configuration page; not a game action.
+            _queueFeedback.Text = message;
+            _queueFeedback.ForeColor = success ? Green : Color.DarkOrange;
+            _owner._log.Write("[다중가공 설정] " + message);
         }
 
         private void AddCurrentAlteringQueue()
         {
-            if (!IsAltering || _owner.AnyRunning || _loading)
+            if (!IsAltering) return;
+            if (_owner.AnyRunning || _owner._starting)
+            {
+                ShowQueueFeedback("다른 작업 실행 중에는 품목을 추가할 수 없습니다. F10 정지 후 다시 확인하세요.");
                 return;
+            }
+            if (_loading)
+            {
+                ShowQueueFeedback("가공 제법 목록 조회 중입니다. 조회가 끝난 뒤 다시 추가하세요.");
+                return;
+            }
+            if (Items.SelectedItem is not RecipeChoice)
+            {
+                ShowQueueFeedback("추가할 가공 품목을 먼저 선택하세요. 목록이 비어 있다면 새로고침하세요.");
+                return;
+            }
 
             try
             {
@@ -508,11 +541,14 @@ public sealed partial class MainForm
                         $"[다중가공] 작업 추가 · {plan.ScreenTitle} · {plan.DisplayName} {plan.TargetQuantity:N0}개");
                 }
 
+                ShowQueueFeedback($"추가 완료 · {plan.DisplayName} {plan.TargetQuantity:N0}개", success: true);
                 UpdateExecution();
             }
             catch (Exception ex)
             {
-                _owner._log.Write("[다중가공] 작업 추가 실패: " + ex.Message);
+                // The plan validation is unchanged: unverified recipes cannot
+                // be silently added or executed. Explain the failure in-page.
+                ShowQueueFeedback("추가 실패 · " + ex.Message);
             }
         }
 
@@ -826,7 +862,11 @@ public sealed partial class MainForm
             Facility.Enabled = !busy && !_loading;
             foreach (var tab in _facilityTabButtons.Values) tab.Enabled = !busy && !_loading;
             if (_inspect is not null) _inspect.Enabled = !busy && !_loading && SelectedName is not null;
-            if (_addQueue is not null) _addQueue.Enabled = !busy && !_loading && available;
+            // Configuration is a safe read-only UI operation. Allow click
+            // when idle even if recipe readiness is unknown; the guarded
+            // handler explains missing selection/invalid plan instead of a
+            // grey, silently non-responsive button. F9 safety is unchanged.
+            if (_addQueue is not null) _addQueue.Enabled = !busy;
             if (_removeQueue is not null) _removeQueue.Enabled = !busy && _alteringQueue.SelectedIndex >= 0;
             if (_clearQueue is not null) _clearQueue.Enabled = !busy && _alteringQueue.Items.Count > 0;
             _alteringQueue.Enabled = !busy;
