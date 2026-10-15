@@ -16,7 +16,13 @@ internal sealed class AiAutopilotDashboard : Form
     private readonly Label _updated;
     private readonly Label _memory;
     private readonly DataGridView _recent;
-    private sealed record ResultItem(string Url, string FilePath, string EventId);
+    private readonly Label _details;
+    private readonly ComboBox _range;
+    private sealed record ResultItem(string Url, string FilePath, string EventId,
+        string Title, string Detail, string Status, string Next);
+    private sealed record Analysis(string EventName, string EventId, string FilePath,
+        DateTimeOffset Time, string Status, string Reason, string Url, string PrText,
+        string Feedback);
     private readonly System.Windows.Forms.Timer _timer;
     private bool _quotaHandoffOffered;
 
@@ -28,36 +34,36 @@ internal sealed class AiAutopilotDashboard : Form
     {
         _isWatcherRunning = isWatcherRunning;
         _watcherStatus = watcherStatus;
-        Text = "MabiAuto · AI 자동화 현황";
+        Text = "MabiAuto · AI 오류 시간별 내역";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(700, 460);
-        ClientSize = new Size(940, 575);
+        MinimumSize = new Size(840, 550);
+        ClientSize = new Size(1140, 720);
         BackColor = Color.FromArgb(246, 248, 252);
         Font = new Font("맑은 고딕", 9f);
 
         var heading = new Label
         {
-            Text = "AI 자동화 대시보드", Dock = DockStyle.Top, Height = 49,
+            Text = "AI 오류 내역 · 발생 시간순", Dock = DockStyle.Top, Height = 49,
             Font = new Font("맑은 고딕", 14f, FontStyle.Bold),
             ForeColor = Color.FromArgb(23, 32, 51),
             Padding = new Padding(17, 10, 0, 0)
         };
         _overview = new Label
         {
-            Dock = DockStyle.Top, Height = 60, AutoEllipsis = true,
+            Dock = DockStyle.Top, Height = 76, AutoEllipsis = true,
             ForeColor = Color.FromArgb(51, 68, 91),
             Padding = new Padding(18, 6, 12, 0)
         };
         _counts = new Label
         {
-            Dock = DockStyle.Top, Height = 59,
+            Dock = DockStyle.Top, Height = 54,
             ForeColor = Color.FromArgb(23, 32, 51),
             Font = new Font("맑은 고딕", 9.5f, FontStyle.Bold),
             Padding = new Padding(18, 5, 12, 0)
         };
         _memory = new Label
         {
-            Text = "오류 학습 기록: 아직 없음 · 과거 AI 분석이 해결을 증명하지는 않음",
+            Text = "AI가 테스트를 통과해도 실제 게임에서 해결된 것은 아닙니다.",
             Dock = DockStyle.Top, Height = 34,
             ForeColor = Color.FromArgb(70, 89, 112),
             Padding = new Padding(18, 5, 12, 0)
@@ -65,25 +71,25 @@ internal sealed class AiAutopilotDashboard : Form
         var foot = new Panel { Dock = DockStyle.Bottom, Height = 51 };
         _updated = new Label
         {
-            Text = "로컬 기록만 표시 · 자동 병합/배포 없음",
+            Text = "최근 기록을 표시합니다 · 게임에 자동 적용하지 않습니다.",
             Dock = DockStyle.Fill, ForeColor = Color.FromArgb(82, 99, 120),
             TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(18, 0, 0, 0)
         };
         var confirmed = new Button
         {
-            Text = "실게임 해결 확인", Dock = DockStyle.Right, Width = 137,
+            Text = "적용 후 해결 확인", Dock = DockStyle.Right, Width = 137,
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         confirmed.Click += (_, _) => SubmitGameFeedback("resolved");
         var recurred = new Button
         {
-            Text = "실게임 재발 확인", Dock = DockStyle.Right, Width = 137,
+            Text = "적용 후 재발", Dock = DockStyle.Right, Width = 137,
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         recurred.Click += (_, _) => SubmitGameFeedback("recurred");
         var reset = new Button
         {
-            Text = "검증 취소", Dock = DockStyle.Right, Width = 93,
+            Text = "확인 취소", Dock = DockStyle.Right, Width = 93,
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         reset.Click += (_, _) => SubmitGameFeedback("unverified");
@@ -95,7 +101,7 @@ internal sealed class AiAutopilotDashboard : Form
         handoff.Click += (_, _) => CopyChatGptHandoff();
         var resumeCodex = new Button
         {
-            Text = "Codex 한도 재개", Dock = DockStyle.Right, Width = 125,
+            Text = "Codex 재개", Dock = DockStyle.Right, Width = 125,
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         resumeCodex.Click += (_, _) => RequestQuotaResume();
@@ -123,16 +129,20 @@ internal sealed class AiAutopilotDashboard : Form
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
             BackgroundColor = Color.White, GridColor = Color.FromArgb(224, 232, 242)
         };
-        _recent.ColumnHeadersHeight = 34;
-        _recent.RowTemplate.Height = 29;
-        _recent.Columns.Add("event", "오류 ID");
-        _recent.Columns.Add("status", "AI 분석 결과");
-        _recent.Columns.Add("feedback", "실게임 확인(수동)");
-        _recent.Columns.Add("pr", "검토용 GitHub PR");
-        _recent.Columns[0].FillWeight = 150;
-        _recent.Columns[1].FillWeight = 100;
-        _recent.Columns[2].FillWeight = 96;
-        _recent.Columns[3].FillWeight = 135;
+        _recent.ColumnHeadersHeight = 39;
+        _recent.RowTemplate.Height = 35;
+        _recent.Columns.Add("occurred", "발생 날짜·시간");
+        _recent.Columns.Add("title", "어떤 오류?");
+        _recent.Columns.Add("detail", "상세 내용");
+        _recent.Columns.Add("status", "AI가 한 일");
+        _recent.Columns.Add("action", "다음 단계");
+        _recent.Columns.Add("pr", "수정안");
+        _recent.Columns[0].FillWeight = 111;
+        _recent.Columns[1].FillWeight = 130;
+        _recent.Columns[2].FillWeight = 265;
+        _recent.Columns[3].FillWeight = 123;
+        _recent.Columns[4].FillWeight = 151;
+        _recent.Columns[5].FillWeight = 82;
         _recent.CellDoubleClick += (_, e) =>
         {
             if (e.RowIndex < 0 || e.RowIndex >= _recent.Rows.Count) return;
@@ -142,18 +152,51 @@ internal sealed class AiAutopilotDashboard : Form
             catch (Exception) { /* External browser is optional. */ }
         };
 
+        _details = new Label
+        {
+            Text = "오류를 선택하면 원인과 다음에 할 일을 아래에서 볼 수 있습니다.",
+            Dock = DockStyle.Bottom, Height = 90,
+            ForeColor = Color.FromArgb(40, 61, 82),
+            BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
+            Padding = new Padding(15, 7, 10, 6), AutoEllipsis = true
+        };
+        _recent.SelectionChanged += (_, _) =>
+        {
+            if (_recent.CurrentRow?.Tag is ResultItem item)
+                _details.Text = "오류: " + item.Title + "\n내용: " + item.Detail +
+                    "\nAI 처리: " + item.Status + "   |   다음 단계: " + item.Next;
+        };
         var intro = new Label
         {
-            Text = "수정안을 실제로 설치하고 게임에서 재현 검사한 뒤에만 수동 결과를 기록하세요 · PR 더블클릭 가능",
-            Dock = DockStyle.Top, Height = 28, Padding = new Padding(18, 0, 0, 0),
+            Text = "최신 오류가 위에 나옵니다. 한 줄을 누르면 자세히 볼 수 있고, 수정안이 있으면 두 번 눌러 GitHub에서 엽니다.",
+            Dock = DockStyle.Top, Height = 30, Padding = new Padding(18, 0, 0, 0),
             ForeColor = Color.FromArgb(82, 99, 120)
         };
+        var rangeBar = new Panel { Dock = DockStyle.Top, Height = 39 };
+        _range = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = 140,
+            Location = new Point(18, 6), Font = new Font("맑은 고딕", 9f)
+        };
+        _range.Items.AddRange(new object[] { "전체 내역", "오늘", "최근 7일" });
+        _range.SelectedIndex = 0;
+        _range.SelectedIndexChanged += (_, _) => Reload();
+        var explanation = new Label
+        {
+            Text = "발생 시간 기준 · PC에 기록된 오류와 Codex 분석 결과",
+            Location = new Point(175, 8), AutoSize = true,
+            ForeColor = Color.FromArgb(82, 99, 120)
+        };
+        rangeBar.Controls.Add(_range);
+        rangeBar.Controls.Add(explanation);
         Controls.Add(_recent);
+        Controls.Add(_details);
         Controls.Add(intro);
         Controls.Add(foot);
         Controls.Add(_memory);
         Controls.Add(_counts);
         Controls.Add(_overview);
+        Controls.Add(rangeBar);
         Controls.Add(heading);
 
         _timer = new System.Windows.Forms.Timer { Interval = 5000 };
@@ -200,13 +243,52 @@ internal sealed class AiAutopilotDashboard : Form
 
     private static string StatusText(string status) => status switch
     {
-        "tests_passed_review_required" => "테스트 통과 · 검토 필요",
-        "in_progress" => "분석 중 / 미완료",
+        "tests_passed_review_required" => "코드 테스트 통과",
+        "in_progress" => "AI 분석 중 또는 중단됨",
         "needs_review" => "수정안 검토 필요",
-        "tests_failed" => "테스트 실패",
-        "blocked" => "진행 차단",
-        "duplicate_skipped" => "중복 증거 보존",
+        "tests_failed" => "수정 후 테스트 실패",
+        "blocked" => "분석/수정 중단",
+        "duplicate_skipped" => "중복 오류 · 기록 보존",
         _ => "상태 확인 필요"
+    };
+
+    private static DateTimeOffset TimeOf(string value, DateTimeOffset fallback) =>
+        DateTimeOffset.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static string ReasonText(string status, string reason)
+    {
+        if (reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase))
+            return "Codex 사용량 한도로 중단";
+        if (reason.Contains("codex_not_found", StringComparison.OrdinalIgnoreCase))
+            return "Codex 프로그램을 찾지 못함";
+        if (reason.Contains("repo_dirty_or_git_error", StringComparison.OrdinalIgnoreCase))
+            return "작업용 소스에 저장되지 않은 변경 사항이 있음";
+        if (reason.Contains("legacy_autofix", StringComparison.OrdinalIgnoreCase))
+            return "구버전 자동수정 검사로 차단된 과거 기록";
+        if (reason.Contains("regression_test_missing", StringComparison.OrdinalIgnoreCase))
+            return "오류를 확인할 테스트 코드가 부족함";
+        if (reason.Contains("agent_no_patch", StringComparison.OrdinalIgnoreCase))
+            return "AI가 수정할 코드를 찾지 못함";
+        if (reason.Contains("worktree_retention_limit", StringComparison.OrdinalIgnoreCase))
+            return "AI 작업 공간이 가득 참";
+        if (status == "tests_failed") return "코드를 수정했지만 자동 테스트에 실패함";
+        if (status == "blocked") return "AI 분석 또는 안전 검사를 통과하지 못함";
+        if (status == "needs_review") return "검증 근거가 부족하여 사람이 확인해야 함";
+        return "AI 처리 기록";
+    }
+
+    private static string NextStep(string status, string reason, bool running) => status switch
+    {
+        "tests_passed_review_required" => "수정안을 검토하고 실제 게임에서 확인",
+        "in_progress" => running ? "분석 완료까지 대기" : "중단된 작업 기록 확인",
+        "needs_review" => "수정안·오류 증거 검토",
+        "tests_failed" => "실패한 테스트 기록 확인",
+        "blocked" when reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase) =>
+            "사용량 초기화 확인 후 재개",
+        "blocked" => "차단 이유를 확인하고 환경 점검",
+        "duplicate_skipped" => "앞선 동일 오류 분석 기록 확인",
+        "not_started" => running ? "AI가 순서대로 분석 예정" : "AI 감시 시작 필요",
+        _ => "오류 기록 확인"
     };
 
     private static bool ValidEventId(string id)
@@ -397,12 +479,19 @@ internal sealed class AiAutopilotDashboard : Form
                 pending = Number(state.RootElement, "pending");
             }
         }
-        _overview.Text = (running ? "AI 감시 실행 중" : "AI 감시 꺼짐") +
-            " · " + _watcherStatus() +
-            "\n마지막 작업: " + (active.Length > 0 ? active : "없음") +
-            " · 대기 " + pending + "건" +
-            (activity == "quota_paused" ? " · Codex 사용량 한도 도달 → ChatGPT 인계 대기" : "") +
-            (running ? " · " + activity : " · 이전 상태 기록은 현재 실행 상태가 아님");
+        string phase = activity switch
+        {
+            "processing" => "지금 오류를 분석하고 있습니다.",
+            "quota_paused" => "Codex 사용량을 소진해 분석을 멈췄습니다.",
+            "safe_stop" => "안전 검사 문제로 AI가 중지됐습니다.",
+            "watching" => "새 오류가 생기면 분석을 시작합니다.",
+            _ => "AI 상태를 확인하는 중입니다."
+        };
+        _overview.Text = (running ? "● AI 감시 켜짐" : "○ AI 감시 꺼짐") +
+            "  ·  " + (running ? phase : "오류는 기록하지만 Codex가 자동 분석하지 않습니다.") +
+            "\n대기 중인 오류 " + pending + "건  ·  " +
+            (running && active.Length > 0 ? "지금 분석: " + active : "현재 분석 중인 오류 없음") +
+            "\n" + _watcherStatus();
 
         if (running && activity == "quota_paused" && !_quotaHandoffOffered)
         {
@@ -448,52 +537,116 @@ internal sealed class AiAutopilotDashboard : Form
             }
             var files = Directory.Exists(Root)
                 ? Directory.EnumerateDirectories(Root)
-                    .Select(x => Path.Combine(x, "result.json"))
-                    .Where(File.Exists)
-                    .Select(p => new FileInfo(p))
-                    .OrderByDescending(x => x.LastWriteTimeUtc)
+                    .Select(x => Path.Combine(x, "result.json")).Where(File.Exists)
+                    .Select(p => new FileInfo(p)).OrderByDescending(x => x.LastWriteTimeUtc)
                     .Take(250).ToArray()
                 : Array.Empty<FileInfo>();
+            var analyses = new List<Analysis>();
+            var byEvent = new Dictionary<string, Analysis>(StringComparer.OrdinalIgnoreCase);
             int success = 0, failed = 0, review = 0, activeCount = 0;
-            int createdPr = 0;
-            _recent.Rows.Clear();
             foreach (var file in files)
             {
                 using var report = ReadBounded(file.FullName);
                 if (report is null) continue;
-                var root = report.RootElement;
-                string status = Field(root, "status", 64);
+                var obj = report.RootElement;
+                string status = Field(obj, "status", 64);
                 if (status == "tests_passed_review_required") success++;
                 else if (status is "tests_failed" or "blocked") failed++;
                 else if (status == "needs_review") review++;
                 else if (status == "in_progress") activeCount++;
-                string url = "";
-                string prText = "없음";
-                if (root.TryGetProperty("pr", out var pr) && pr.ValueKind == JsonValueKind.Object)
+                string eventId = Field(obj, "event_id", 100);
+                if (eventId.Length == 0) eventId = file.Directory?.Name ?? "";
+                string eventName = Field(obj, "event", 140);
+                string reason = Field(obj, "reason", 500);
+                string url = "", prText = "없음";
+                if (obj.TryGetProperty("pr", out var pr) && pr.ValueKind == JsonValueKind.Object)
                 {
                     url = Field(pr, "url", 150);
                     string stateName = Field(pr, "status", 40);
                     if (stateName == "draft_created" && IsTrustedPrUrl(url))
-                    {
-                        createdPr++;
-                        prText = "Draft PR " + url[(url.LastIndexOf('/') + 1)..];
-                    }
-                    else if (stateName == "blocked") prText = "PR 생성 보류";
-                    else if (stateName == "disabled") prText = "PR 생성 꺼짐";
+                        prText = "PR " + url[(url.LastIndexOf('/') + 1)..];
+                    else if (stateName == "blocked") prText = "저장 보류";
+                    else if (stateName == "disabled") prText = "저장 안 함";
                 }
-                string eventId = Field(root, "event_id", 100);
-                if (eventId.Length == 0) eventId = file.Directory?.Name ?? "기록";
                 string feedback = status == "tests_passed_review_required" && ValidEventId(eventId)
                     ? ManualVerdict(file.DirectoryName ?? "", eventId) : "unverified";
-                int i = _recent.Rows.Add(eventId, StatusText(status), VerdictText(feedback), prText);
-                _recent.Rows[i].Tag = new ResultItem(
-                    IsTrustedPrUrl(url) ? url : "", file.FullName, eventId);
-                if (_recent.Rows.Count >= 35) break;
+                var analysis = new Analysis(eventName, eventId, file.FullName,
+                    TimeOf(Field(obj, "started", 70), file.LastWriteTimeUtc),
+                    status, reason, IsTrustedPrUrl(url) ? url : "", prText, feedback);
+                analyses.Add(analysis);
+                if (!string.IsNullOrEmpty(eventName)) byEvent[eventName] = analysis;
             }
-            _counts.Text = $"자동 테스트 통과 {success}건     실패/차단 {failed}건     검토 필요 {review}건" +
-                $"     미완료 기록 {activeCount}건     생성된 Draft PR {createdPr}건";
-            _updated.Text = "마지막 갱신 " + DateTime.Now.ToString("HH:mm:ss") +
-                " · 로컬 기록 기준 · PR은 승인 전 자동 병합되지 않음";
+
+            var items = new List<(DateTimeOffset Time, string Title, string Detail,
+                string Status, string Next, string Url, string Pr, string File, string Id)>();
+            var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string localRoot = AiRuntimeErrorJournal.Root;
+            if (Directory.Exists(localRoot))
+            {
+                foreach (string folder in Directory.EnumerateDirectories(localRoot)
+                    .OrderByDescending(Directory.GetCreationTimeUtc).Take(250))
+                {
+                    if ((File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0) continue;
+                    using var report = ReadBounded(Path.Combine(folder, "summary.json"));
+                    if (report is null) continue;
+                    var obj = report.RootElement;
+                    string name = Path.GetFileName(folder);
+                    string title = Field(obj, "title", 120);
+                    string detail = Field(obj, "detail", 1500);
+                    DateTimeOffset occurred = TimeOf(Field(obj, "timeLocal", 70),
+                        Directory.GetCreationTimeUtc(folder));
+                    byEvent.TryGetValue(name, out var ai);
+                    string aiStatus = ai?.Status ?? "not_started";
+                    string status = ai is null ? (running ? "AI 분석 대기" : "AI 분석 대기 · 꺼짐")
+                        : StatusText(aiStatus);
+                    string explanation = ai is { Status: "blocked" or "tests_failed" or "needs_review" }
+                        ? detail + " / " + ReasonText(aiStatus, ai.Reason) : detail;
+                    items.Add((occurred, title.Length > 0 ? title : "오류",
+                        explanation, status, NextStep(aiStatus, ai?.Reason ?? "", running),
+                        ai?.Url ?? "", ai?.PrText ?? "없음",
+                        ai?.FilePath ?? "", ai?.EventId ?? ""));
+                    shown.Add(name);
+                }
+            }
+            foreach (var ai in analyses)
+            {
+                if (shown.Contains(ai.EventName)) continue;
+                string title = ai.EventName.StartsWith("runtime_", StringComparison.OrdinalIgnoreCase)
+                    ? "앱 오류 기록" : "외부 MCP 오류 기록";
+                items.Add((ai.Time, title,
+                    ReasonText(ai.Status, ai.Reason) + " · 원본 오류는 PC의 로컬 기록에 보관됨",
+                    StatusText(ai.Status), NextStep(ai.Status, ai.Reason, running),
+                    ai.Url, ai.PrText, ai.FilePath, ai.EventId));
+            }
+            DateTimeOffset now = DateTimeOffset.Now;
+            int rangeIndex = _range.SelectedIndex;
+            var filtered = items
+                .Where(x => rangeIndex switch
+                {
+                    1 => x.Time.ToLocalTime().Date == now.Date,
+                    2 => x.Time >= now.AddDays(-7),
+                    _ => true
+                })
+                .OrderByDescending(x => x.Time).Take(100).ToArray();
+
+            _recent.Rows.Clear();
+            _details.Text = "오류를 선택하면 발생 내용과 AI 처리 상태를 자세히 볼 수 있습니다.";
+            foreach (var item in filtered)
+            {
+                int row = _recent.Rows.Add(
+                    item.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                    item.Title, item.Detail, item.Status, item.Next, item.Pr);
+                _recent.Rows[row].Tag = new ResultItem(item.Url, item.File,
+                    item.Id, item.Title, item.Detail, item.Status, item.Next);
+                _recent.Rows[row].Cells[2].ToolTipText = item.Detail;
+                if (item.Status.Contains("중단") || item.Status.Contains("실패"))
+                    _recent.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(150, 65, 53);
+            }
+            _recent.ClearSelection();
+            _counts.Text = $"오류 기록 {items.Count}건 · AI 테스트 통과 {success}건 · " +
+                $"분석 실패/중단 {failed}건 · 검토 필요 {review}건 · 진행 중 {activeCount}건";
+            _updated.Text = $"마지막 확인 {DateTime.Now:HH:mm:ss} · 현재 화면 {filtered.Length}건 · " +
+                "자동 테스트 성공은 실게임 해결과 다릅니다.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
