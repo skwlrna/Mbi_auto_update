@@ -139,6 +139,7 @@ internal sealed class MultiAlteringCoordinator
     private readonly TimeSpan _idleThreshold;
     private readonly Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? _restoreCompleted;
     private readonly bool _fillInitialVacancies;
+    private readonly bool _deferOtherLanesWhileQueueFull;
 
     internal event Action<string>? Log;
 
@@ -148,7 +149,8 @@ internal sealed class MultiAlteringCoordinator
         Func<DateTimeOffset>? now = null,
         TimeSpan? idleThreshold = null,
         Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null,
-        bool fillInitialVacancies = false)
+        bool fillInitialVacancies = false,
+        bool deferOtherLanesWhileQueueFull = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
@@ -156,6 +158,7 @@ internal sealed class MultiAlteringCoordinator
         _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(2);
         _restoreCompleted = restoreCompleted;
         _fillInitialVacancies = fillInitialVacancies;
+        _deferOtherLanesWhileQueueFull = deferOtherLanesWhileQueueFull;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -289,6 +292,17 @@ internal sealed class MultiAlteringCoordinator
                     .Where(x => x.FacilityName == facility)
                     .ToArray();
                 _laneState?.Observe(facility, facilityWorks, allowShrink: false);
+
+                // Some CLI builds report queue_full for EVERY recipe when one
+                // facility's 7-slot lane is full. Handle the owned full lane's
+                // verified wait/receipt first; don't attempt to register in
+                // another lane before that capacity condition has cleared.
+                if (_deferOtherLanesWhileQueueFull &&
+                    facilityWorks.Length < 7 &&
+                    orderedFacilities.Any(other =>
+                        !string.Equals(other, facility, StringComparison.Ordinal) &&
+                        works.Count(w => w.FacilityName == other) == 7))
+                    continue;
 
                 bool laneReady =
                     facilityWorks.Length == 0 ||
