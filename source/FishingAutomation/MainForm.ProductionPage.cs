@@ -842,10 +842,10 @@ public sealed partial class MainForm
             // batches. The user explicitly selects this run's orders and the
             // middle manager controls every facility and registration.
             // Historical N02/F05 files remain on disk for diagnostics only.
-            Filter();
+            Filter(refuseMissingRecipe: true);
         }
 
-        private void Filter()
+        private void Filter(bool refuseMissingRecipe = false)
         {
             object? previous = Items.SelectedItem;
             IEnumerable<object> visible = _choices;
@@ -878,6 +878,15 @@ public sealed partial class MainForm
             else if (previous is GatheringChoice oldGathering)
                 index = Array.FindIndex(displayed, x =>
                     x is GatheringChoice g && g.Item.DisplayName == oldGathering.Item.DisplayName);
+            if (refuseMissingRecipe && previous is RecipeChoice && index < 0)
+            {
+                // A refreshed CLI response no longer proves the previously chosen
+                // variant. Do not silently switch to another recipe or facility.
+                _owner._log.Write("[CLI][가공 제법] 기존 선택 제법이 새 목록에서 유일하게 확인되지 않아 선택 해제");
+                Items.EndUpdate();
+                SelectionChanged();
+                return;
+            }
             if (index < 0)
                 index = Array.FindIndex(displayed, x => x is RecipeChoice r &&
                     !r.Ambiguous && (r.Recipe.Alterable || r.Recipe.MissingIngredients.Count > 0));
