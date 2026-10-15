@@ -975,7 +975,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 if (!found.Found)
                 {
                     abyssClearConsecutive = 0;
-                    if (await CheckMonitorsAsync(frame, ct))
+                    if (!AbyssClearTitleFallbackPending && await CheckMonitorsAsync(frame, ct))
                         continue;
                 }
                 else
