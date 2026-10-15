@@ -1239,48 +1239,12 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             return touch;
         }
 
-        // V0.1.72 fallback:
-        // In real captures the title stayed around 0.69~0.75 while the touch template
-        // fluctuated around 0.48~0.63. Do not lower the global touch threshold.
-        // Instead, on the canonical 800x1000 client require a strong clear title in
-        // two consecutive frames and then use the already-established safe touch point
-        // centered at (400,945).
-        bool titleFallbackCandidate =
-            false && // Never turn title-only visual similarity into a game click.
-            frame.Width == 800 &&
-            frame.Height == 1000 &&
-            clearTitle.Found &&
-            clearTitle.Score >= AbyssClearTitleFallbackMinScore;
-
-        if (titleFallbackCandidate)
-        {
-            _abyssClearTitleFallbackConsecutive++;
-            if (_abyssClearTitleFallbackConsecutive >= AbyssClearTitleFallbackRequiredFrames)
-            {
-                _abyssClearTitleFallbackConsecutive = 0;
-                ResetAbyssExitState(true);
-                AbyssTransitionTo(
-                    AbyssFlowState.ClearConfirmed,
-                    "클리어 타이틀 강한 신호 2프레임 + 안전 터치 fallback");
-                Log?.Invoke(
-                    $"[어비스] 클리어 타이틀 강한 신호 2/2 확인 " +
-                    $"title={clearTitle.Score:0.000}, touch={touch.Score:0.000} " +
-                    $"-> 안전 터치 위치 사용 @ {AbyssClearSafeTouch}");
-                return new DetectionResult(
-                    true,
-                    AbyssClearSafeTouch,
-                    clearTitle.Score,
-                    "clear_title_2x_safe_fallback");
-            }
-
-            Log?.Invoke(
-                $"[어비스] 클리어 타이틀 강한 신호 1/2 " +
-                $"title={clearTitle.Score:0.000}, touch={touch.Score:0.000} -> 퇴장/모니터 입력 보류");
-        }
-        else
-        {
-            _abyssClearTitleFallbackConsecutive = 0;
-        }
+        // A title-like image while combat is running is not a confirmed clear.
+        // Reset partial evidence; never use the historical fixed-coordinate
+        // title-only touch fallback or mark the fight complete.
+        _abyssClearTitleFallbackConsecutive = 0;
+        if (clearTitle.Found && !touch.Found)
+            Log?.Invoke("[어비스] 클리어 제목 유사 신호만 감지 · 화면 터치 금지");
 
         // V0164_ABYSS_CLEAR_LOG_SIMPLIFIED:
         // Suppress ordinary combat similarity noise. This affects logging only.
