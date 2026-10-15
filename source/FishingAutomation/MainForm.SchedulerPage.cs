@@ -646,7 +646,7 @@ public sealed partial class MainForm
             bool running = _owner._schedulerRunning;
             if (running) ClearStartFeedback();
             _runStatus.Text = running
-                ? "스케줄러 실행 중 · 제작 → 가공 + 어비스 (F10 정지)"
+                ? "스케줄러 실행 중 · " + _owner._schedulerMonitor.PhaseLabel + " (F10 정지)"
                 : _lastStartFeedback ?? ("준비 · " + (_crafts.Checked ? "제작 " : "") +
                   (_alters.Checked ? "가공 " : "") +
                   (_abyss.Checked ? "어비스" : ""));

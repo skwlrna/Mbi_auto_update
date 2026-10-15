@@ -429,4 +429,96 @@ Assert(scheduleExitSource.Contains("_scheduledExitClicked = true") &&
        sceneMissionSource.Contains("FindCompactLabelAsync"),
     "post-exit mission confirm is one-shot, OCR-checked and guarded by exit proof");
 
+// Scheduler supervisory monitor: no new game input, replay or automatic restart.
+// A prior process's diagnostic snapshot is NEVER a durable resume authorization.
+string schedulerStateDir = Path.Combine(Path.GetTempPath(), "mabiauto-scheduler-monitor-" + Guid.NewGuid().ToString("N"));
+string schedulerStateFile = Path.Combine(schedulerStateDir, "state.json");
+try
+{
+    DateTimeOffset monitorClock = new(2026, 10, 15, 0, 0, 0, TimeSpan.Zero);
+    var monitor = new SchedulerRunMonitor(schedulerStateFile, () => monitorClock);
+    Assert(monitor.TryStart(crafting: true, altering: true, abyss: false),
+        "scheduler monitor acquires a first run");
+    Assert(!monitor.TryStart(crafting: true, altering: true, abyss: true),
+        "duplicate scheduler start does not replace the active run");
+    using (var json = JsonDocument.Parse(File.ReadAllText(schedulerStateFile)))
+    {
+        Assert(json.RootElement.GetProperty("running").GetBoolean() &&
+               json.RootElement.GetProperty("phase").GetString() == "preparing" &&
+               json.RootElement.GetProperty("automaticRestart").GetBoolean() == false,
+            "scheduler snapshot is local observational state without automatic restart");
+        Assert(json.RootElement.GetProperty("planFlags").GetString() ==
+               "crafting=True;altering=True;abyss=False",
+            "scheduler snapshot stores only plan flags, no character or recipe");
+    }
+
+    monitor.Advance("resume_selection");
+    monitorClock = monitorClock.AddHours(2); // user may leave a manual resume dialog open
+    Assert(!monitor.Observe(TimeSpan.FromMinutes(15)),
+        "manual resume selection does not trigger a false stall warning");
+    monitor.Advance("crafting");
+    monitorClock = monitorClock.AddMinutes(14);
+    Assert(!monitor.Observe(TimeSpan.FromMinutes(15)),
+        "running craft stage tolerates quiet activity below the advisory threshold");
+    monitorClock = monitorClock.AddMinutes(1);
+    Assert(monitor.Observe(TimeSpan.FromMinutes(15)) &&
+           !monitor.Observe(TimeSpan.FromMinutes(15)) &&
+           monitor.IsRunning,
+        "quiet activity causes one advisory but never cancels or restarts work");
+
+    monitor.ObserveLog("[12:34] [제작] 검증된 제작 화면 진행");
+    monitorClock = monitorClock.AddMinutes(15);
+    Assert(monitor.Observe(TimeSpan.FromMinutes(15)),
+        "new crafting activity resets the advisory window");
+    monitor.Advance("handoff");
+    monitorClock = monitorClock.AddHours(3);
+    Assert(!monitor.Observe(TimeSpan.FromMinutes(15)),
+        "handoff is already bounded by scheduler ownership verification");
+    monitor.Advance("altering");
+    monitor.ObserveLog("[12:35] [다중가공] 배치 수령 완료");
+    monitorClock = monitorClock.AddMinutes(15);
+    Assert(monitor.Observe(TimeSpan.FromMinutes(15)), "altering quiet interval is observable");
+    monitor.RequestStop();
+    Assert(monitor.PhaseLabel == "사용자 정지 처리 중" &&
+           !monitor.Observe(TimeSpan.FromMinutes(15)),
+        "F10 request marks stopping and disables advisory without resuming");
+    monitor.Finish("completed");
+    Assert(!monitor.IsRunning, "monitor releases the run after a stop");
+    using (var json = JsonDocument.Parse(File.ReadAllText(schedulerStateFile)))
+        Assert(json.RootElement.GetProperty("outcome").GetString() == "cancelled" &&
+               !json.RootElement.GetProperty("running").GetBoolean(),
+            "F10 final state is cancelled even if a worker completes late");
+
+    var independentProcess = new SchedulerRunMonitor(schedulerStateFile, () => monitorClock);
+    Assert(!independentProcess.IsRunning,
+        "stale disk snapshot never auto-starts a new scheduler");
+    Assert(independentProcess.TryStart(false, true, false),
+        "new session may start only through explicit TryStart gate");
+    independentProcess.Finish("completed");
+    using (var json = JsonDocument.Parse(File.ReadAllText(schedulerStateFile)))
+        Assert(json.RootElement.GetProperty("outcome").GetString() == "completed",
+            "normal completion is distinct from F10 and crash snapshots");
+
+    // A read-only/unwritable evidence location cannot block an actual run.
+    string fileAsParent = Path.Combine(schedulerStateDir, "not-a-directory");
+    File.WriteAllText(fileAsParent, "occupied");
+    var diskFailure = new SchedulerRunMonitor(Path.Combine(fileAsParent, "state.json"), () => monitorClock);
+    Assert(diskFailure.TryStart(true, false, false), "diagnostic I/O failure does not block execution");
+    diskFailure.Finish("failed");
+}
+finally
+{
+    try { Directory.Delete(schedulerStateDir, recursive: true); } catch (IOException) { }
+}
+Assert(schedulerRunner.Contains("_schedulerMonitor.TryStart(") &&
+       schedulerRunner.Contains("_schedulerMonitor.Finish(schedulerOutcome)") &&
+       schedulerRunner.Contains("ChooseSchedulerMultiAlteringAsync("),
+    "scheduler start guard and cleanup preserve existing resume choice");
+string mainFormSource = File.ReadAllText(Path.Combine(
+    Directory.GetCurrentDirectory(), "source/FishingAutomation/MainForm.cs"));
+Assert(mainFormSource.Contains("_schedulerMonitor.RequestStop()") &&
+       mainFormSource.Contains("_schedulerCts.Cancel()") &&
+       mainFormSource.Contains("_schedulerMonitor.Observe(TimeSpan.FromMinutes(15))"),
+    "F10 and application stop update telemetry without changing cancellation ownership");
+
 Console.WriteLine("Combined scheduler regressions passed.");
