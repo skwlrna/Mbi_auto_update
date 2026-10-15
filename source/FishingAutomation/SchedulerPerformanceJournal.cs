@@ -16,6 +16,11 @@ internal static class SchedulerPerformanceJournal
 {
     private const int MaximumRecords = 30;
     private const int MaximumBytes = 256 * 1024;
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
 
     internal static void Append(string path, SchedulerRunPerformance result)
     {
@@ -34,7 +39,7 @@ internal static class SchedulerPerformanceJournal
                 try
                 {
                     recent = JsonSerializer.Deserialize<List<SchedulerRunPerformance>>(
-                        File.ReadAllText(path)) ?? new();
+                        File.ReadAllText(path), JsonOptions) ?? new();
                 }
                 catch (JsonException)
                 {
@@ -44,13 +49,14 @@ internal static class SchedulerPerformanceJournal
             }
 
             recent = recent.Where(x => x is not null &&
-                                  x.RunId.Length == 32 &&
-                                  x.Outcome is "completed" or "cancelled" or "failed")
+                                  x.RunId?.Length == 32 &&
+                                  (x.Outcome == "completed" ||
+                                   x.Outcome == "cancelled" || x.Outcome == "failed"))
                 .TakeLast(MaximumRecords - 1).ToList();
             recent.RemoveAll(x => x.RunId == result.RunId);
             recent.Add(result);
             string tmp = path + "." + Environment.ProcessId + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(recent));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(recent, JsonOptions));
             File.Move(tmp, path, overwrite: true);
         }
         catch (IOException) { }
