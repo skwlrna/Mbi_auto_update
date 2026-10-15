@@ -19,6 +19,27 @@ REGISTERED_TESTS = frozenset({
 })
 
 
+
+# Critical scheduler source changes require the real combined-scheduler
+# regression suite. An unrelated but registered test cannot authorize a
+# scheduler repair. This list is deliberately narrow; arbitrary code edits
+# must still satisfy the existing allowlist and global regression checks.
+SCHEDULER_TEST = "tests/combined-scheduler/Program.cs"
+SCHEDULER_SOURCES = frozenset({
+    "source/FishingAutomation/SchedulerRunMonitor.cs",
+    "source/FishingAutomation/SchedulerReadOnlyRetry.cs",
+    "source/FishingAutomation/AbyssAlteringSchedulePolicy.cs",
+    "source/FishingAutomation/MultiAlteringDependencyScheduler.cs",
+    "source/FishingAutomation/MainForm.CombinedAltering.cs",
+    "source/FishingAutomation/dungeon/ScenarioEngine.AbyssSchedulerExit.cs",
+})
+
+
+def changes_scheduler_source(path: str) -> bool:
+    return (path in SCHEDULER_SOURCES or
+            path.startswith("source/FishingAutomation/MainForm.Scheduler"))
+
+
 def commands_for(changed: list[str], worktree: Path
                  ) -> tuple[list[list[str]], str | None]:
     modified_tests = [name for name in changed if name.startswith("tests/")
@@ -35,5 +56,7 @@ def commands_for(changed: list[str], worktree: Path
         projects.add(project)
     if not any(name.startswith("source/") for name in changed):
         return [], "production_source_patch_missing"
+    if any(changes_scheduler_source(name) for name in changed) and SCHEDULER_TEST not in modified_tests:
+        return [], "scheduler_regression_test_missing"
     return [["dotnet", "run", "--project", project, "-c", "Release"]
             for project in sorted(projects)], None
