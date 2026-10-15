@@ -14,6 +14,7 @@ internal sealed class AiAutopilotDashboard : Form
     private readonly Label _overview;
     private readonly Label _counts;
     private readonly Label _updated;
+    private readonly Label _memory;
     private readonly DataGridView _recent;
     private readonly System.Windows.Forms.Timer _timer;
 
@@ -50,6 +51,13 @@ internal sealed class AiAutopilotDashboard : Form
             Dock = DockStyle.Top, Height = 59,
             ForeColor = Color.FromArgb(23, 32, 51),
             Font = new Font("맑은 고딕", 9.5f, FontStyle.Bold),
+            Padding = new Padding(18, 5, 12, 0)
+        };
+        _memory = new Label
+        {
+            Text = "오류 학습 기록: 아직 없음 · 과거 AI 분석이 해결을 증명하지는 않음",
+            Dock = DockStyle.Top, Height = 34,
+            ForeColor = Color.FromArgb(70, 89, 112),
             Padding = new Padding(18, 5, 12, 0)
         };
         var foot = new Panel { Dock = DockStyle.Bottom, Height = 51 };
@@ -104,6 +112,7 @@ internal sealed class AiAutopilotDashboard : Form
         Controls.Add(_recent);
         Controls.Add(intro);
         Controls.Add(foot);
+        Controls.Add(_memory);
         Controls.Add(_counts);
         Controls.Add(_overview);
         Controls.Add(heading);
@@ -184,6 +193,25 @@ internal sealed class AiAutopilotDashboard : Form
 
         try
         {
+            using (var memory = ReadBounded(Path.Combine(Root, "error-memory.json")))
+            {
+                int stored = 0, candidates = 0;
+                if (memory is not null &&
+                    memory.RootElement.ValueKind == JsonValueKind.Object &&
+                    memory.RootElement.TryGetProperty("entries", out var entries) &&
+                    entries.ValueKind == JsonValueKind.Array)
+                {
+                    stored = entries.GetArrayLength();
+                    foreach (var item in entries.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.Object &&
+                            item.TryGetProperty("verified_offline_tests", out var passed) &&
+                            passed.ValueKind == JsonValueKind.True) candidates++;
+                    }
+                }
+                _memory.Text = $"AI 오류 이력 {stored}건 (최대 80건) · " +
+                    $"자동 테스트 통과 후보 {candidates}건 · 실게임 해결 확인은 별도";
+            }
             var files = Directory.Exists(Root)
                 ? Directory.EnumerateDirectories(Root)
                     .Select(x => Path.Combine(x, "result.json"))

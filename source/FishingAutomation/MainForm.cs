@@ -331,8 +331,10 @@ public sealed partial class MainForm : Form
 
         try
         {
-            // Confirm immediately, before any slow CLI query or async preflight.
+            // Confirm immediately, then perform read-only F9/button preflight
+            // before invoking any macro-specific inputs or async automation.
             SetStatus($"{DisplayModeName(mode)} 시작 요청 접수 · 설정 확인 중", Blue);
+            if (!RunAutomationStartPreflight(mode)) return;
             if (mode == "낚시") StartFishing();
             else if (mode == "던전") ObserveStartTask(StartScenarioAsync("던전", "dungeon"), mode);
             else if (mode == "페카 심층") ObserveStartTask(StartScenarioAsync("페카 심층", "dungeon"), mode);

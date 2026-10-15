@@ -26,6 +26,7 @@ if str(HERE) not in sys.path:
 from supervised_codex import supervised_run
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr
+from error_memory import record_attempt, related_attempts, context_hint
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
                "access is denied", "access denied", "os error 5",
                "code mode is unavailable", "429 too many requests", "503 service unavailable")
@@ -525,6 +526,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
     output: dict[str, Any] = {"event": folder.name, "event_id": eid, "started": now(),
                               "status": "blocked", "note": "No changes to live game or deployed software."}
 
+    memory_context: str | None = None
     if retry_cli_error:
         output["retry_of"] = original_eid
         output["retry_reason"] = "unsupported_codex_exec_approval_flag"
@@ -532,6 +534,12 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
     def finish(status: str, reason: str) -> dict[str, Any]:
         output.update({"status": status, "reason": redacted(reason), "ended": now()})
         write_json(result_path, output)
+        if memory_context is not None:
+            try:
+                record_attempt(expand(str(c["results_dir"])), eid, memory_context, output)
+            except (OSError, ValueError, TypeError):
+                # Memory is diagnostic-only: no impact on safe stop or verification.
+                pass
         return output
 
     if result_path.exists():
@@ -549,6 +557,17 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
     if git.returncode or (c["require_clean_repo"] and git.stdout.strip()):
         return finish("blocked", "repo_dirty_or_git_error")
     context = context_for(folder)
+    memory_context = context  # Store only hashed features, not original log content.
+    try:
+        related = related_attempts(expand(str(c["results_dir"])), context, exclude=eid)
+    except (OSError, ValueError, TypeError):
+        related = []
+    if related:
+        context += context_hint(related)
+        output["memory_matches"] = [{"event_id": item["event_id"],
+                                      "outcome": item["outcome"],
+                                      "similarity": item["similarity"]} for item in related]
+        print(f"오류 학습 기록: 과거 유사 분석 {len(related)}건 참고 (게임 검증 완료 아님)", flush=True)
     (result_dir / "sanitized-evidence.txt").write_text(context, encoding="utf-8")
     base = cmd(["git", "rev-parse", "HEAD"], repo)
     if base.returncode:
