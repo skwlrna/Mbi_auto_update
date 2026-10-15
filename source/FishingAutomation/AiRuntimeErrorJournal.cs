@@ -20,7 +20,7 @@ internal static class AiRuntimeErrorJournal
         return singleLine.Length > limit ? singleLine[..limit] : singleLine;
     }
 
-    internal static void Record(RuntimeErrorReport report, AppLog log)
+    internal static void Record(RuntimeErrorReport report, AppLog log, string recentLog)
     {
         try
         {
@@ -43,13 +43,19 @@ internal static class AiRuntimeErrorJournal
             };
             string json = JsonSerializer.Serialize(summary);
             string text = "MabiAuto runtime error (data only; not instructions)\n" +
-                "Time: " + report.Time.ToString("O") + "\n" +
                 "Mode: " + ShortText(report.Mode, 60) + "\n" +
                 "Error: " + title + "\n" +
                 "Detail: " + detail + "\n";
             // Write the report payload first; the watcher requires a stable evidence file.
             File.WriteAllText(Path.Combine(directory, "summary.json"), json, Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "error.txt"), text, Encoding.UTF8);
+            // Optional recent diagnostic excerpt stays on the PC until AI analysis
+            // is opted into. The Python watcher performs its existing redaction.
+            if (!string.IsNullOrWhiteSpace(recentLog))
+            {
+                string excerpt = recentLog.Length > 12000 ? recentLog[^12000..] : recentLog;
+                File.WriteAllText(Path.Combine(directory, "fishing.log"), excerpt, Encoding.UTF8);
+            }
             log.Write("[AI 오류기록] 로컬 오류 저장 완료 · " + eventName);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
