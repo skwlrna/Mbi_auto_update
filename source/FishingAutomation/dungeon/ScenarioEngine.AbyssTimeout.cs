@@ -61,7 +61,7 @@ internal sealed partial class ScenarioEngine
         var result = await DetectAbyssResultRetryAsync(frame, ct);
         if (result.Found)
         {
-            _abyssClearTitleFallbackConsecutive = 0;
+            _abyssClearPairedEvidenceFrames = 0;
             ResetAbyssExitState(true);
             AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "10분 경계에서 실제 결과 화면 확인");
             AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "기존 결과 처리로 연결");
@@ -97,7 +97,7 @@ internal sealed partial class ScenarioEngine
 
                     // One strong clear-title frame is enough to veto this frame's exit input.
                     // The next fresh frame must confirm 2/2 before the safe clear touch is sent.
-                    if (AbyssClearTitleFallbackPending)
+                    if (AbyssClearPairedEvidencePending)
                     {
                         previous = DetectionResult.NotFound;
                         Log?.Invoke("[어비스 타임아웃] 클리어 타이틀 후보 확인 중 -> 퇴장 입력 보류");
