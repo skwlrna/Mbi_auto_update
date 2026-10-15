@@ -387,21 +387,25 @@ internal static class Program
                 "selected facility tab and recipe map to the zero-wing altering plan");
             Check(fake.Actions.Count == 0, "production UI performs no CLI action commands while configuring plans");
 
-            // Real report: '+ 추가' looked dead when the CLI recipe state was
-            // unverified (Alterable=false, no concrete missing ingredients).
-            // Keep it clickable for honest feedback, but NEVER register an
-            // unverified plan or issue a game command.
+            // A recipe may be unready before the facility is reached. Queue
+            // configuration must still work; F9 validates fresh CLI readiness
+            // independently before any game input or batch creation.
             fake.UnavailableWood = true;
             InvokeTask(altering, "LoadCatalogAsync", true); Pump();
             ai.SelectedIndex = 0; Pump();
-            Check(addAlteringQueue.Enabled, "unverified recipe does not disable click feedback");
+            Check(addAlteringQueue.Enabled, "unverified recipe keeps queue-edit click enabled");
             addAlteringQueue.PerformClick(); Pump();
-            Check(alteringQueue.Items.Count == 0 &&
-                  queueFeedback.Text.StartsWith("추가 실패", StringComparison.Ordinal),
-                "unsafe unverified recipe is rejected with visible failure reason");
+            Check(alteringQueue.Items.Count == 1 &&
+                  alteringQueue.Items[0]!.ToString()!.Contains("목재+", StringComparison.Ordinal) &&
+                  queueFeedback.Text.Contains("목록 등록 완료", StringComparison.Ordinal) &&
+                  queueFeedback.Text.Contains("F9 시작 전 재검증", StringComparison.Ordinal),
+                "unready but identified recipe can enter queue with explicit F9 recheck warning");
+            Check(fake.Actions.Count == 0, "deferred queue edit cannot issue game commands");
+            clearAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0 && fake.Actions.Count == 0,
+                "deferred queue entry is clearable without game actions");
             Check(!All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
-                "unverified recipe cannot start a real game operation");
-            Check(fake.Actions.Count == 0, "unverified add click never issues game input");
+                "without a queued item the unverified single recipe still cannot start");
             fake.UnavailableWood = false;
             InvokeTask(altering, "LoadCatalogAsync", true); Pump();
 

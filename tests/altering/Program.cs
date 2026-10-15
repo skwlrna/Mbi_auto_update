@@ -4,6 +4,31 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// Deferred queue configuration must not authorize a game operation.
+// F9 checks a fresh CLI recipe snapshot before any screen input.
+var deferredPlan = new AlteringPlan("목재 가공 시설", "목재+", 12, 3, false);
+var deferredRecipe = new AlteringRecipe("목재+", false, 3,
+    "unknown_after_patch", Array.Empty<AlteringIngredient>(), "목재 가공 시설");
+string deferredError = "";
+try { AlteringQueueStartGuard.EnsureStartable(new[] { deferredPlan }, new[] { deferredRecipe }); }
+catch (InvalidOperationException ex) { deferredError = ex.Message; }
+Check(deferredError.Contains("F9 시작을 보류합니다", StringComparison.Ordinal) &&
+      deferredError.Contains("unknown_after_patch", StringComparison.Ordinal),
+    "F9 blocks deferred recipe when latest CLI still reports unavailable without shortages");
+AlteringQueueStartGuard.EnsureStartable(new[] { deferredPlan },
+    new[] { deferredRecipe with { Alterable = true } });
+Check(true, "F9 allows verified recipe after CLI readiness recovers");
+AlteringQueueStartGuard.EnsureStartable(new[] { deferredPlan },
+    new[] { deferredRecipe with { MissingIngredients =
+        new[] { new AlteringIngredient("통나무", 3, 0) } } });
+Check(true, "F9 preserves explicit shortage route for the existing recursive resolver");
+string changedYieldError = "";
+try { AlteringQueueStartGuard.EnsureStartable(new[] { deferredPlan },
+        new[] { deferredRecipe with { ProducedPerWork = 7, Alterable = true } }); }
+catch (InvalidOperationException ex) { changedYieldError = ex.Message; }
+Check(changedYieldError.Contains("등록 당시와 달라져", StringComparison.Ordinal),
+    "F9 blocks an altered recipe identity before session creation");
+
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
 var travelIdle = new GatheringActivity(

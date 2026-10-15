@@ -88,6 +88,9 @@ public sealed partial class MainForm
                     "다른 캐릭터로 전환하지 않음");
 
             var recipes = await rawAlteringData.RecipesAsync(token);
+            // Deferred queue entries are configuration only. Before opening
+            // the batch store or injecting game input, verify live readiness.
+            AlteringQueueStartGuard.EnsureStartable(plans, recipes);
             var currentWorks = await rawAlteringData.WorksAsync(token);
 
             string mainSessionDir = Path.Combine(
