@@ -83,6 +83,11 @@ def publish_verified_draft_pr(
         diff = run(["git", "diff", "--cached", "--name-only", "-z"], worktree, 30)
         if diff.returncode or set(diff.stdout.split("\0")) - {""} != set(changed):
             return {"status": "blocked", "reason": "staged_file_set_mismatch"}
+        patch = run(["git", "diff", "--cached", "--no-ext-diff", "--binary"], worktree, 40)
+        if patch.returncode or len(patch.stdout) > 512000 or (
+            re.search(r"(?i)(?:gh[pousr]_[A-Za-z0-9_]{15,}|sk-[A-Za-z0-9_-]{16,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)", patch.stdout)
+        ):
+            return {"status": "blocked", "reason": "candidate_secret_or_patch_size_guard"}
         committed = run(safe + ["-c", "user.name=MabiAuto AI Review",
                                  "-c", "user.email=mabiauto-ai@users.noreply.github.com",
                                  "commit", "-m", "AI candidate: " + event_id], worktree, 70)
