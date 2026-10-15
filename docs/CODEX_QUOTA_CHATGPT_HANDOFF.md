@@ -1,4 +1,4 @@
-# Codex quota exhaustion → ChatGPT manual handoff (MabiAuto)
+# Codex provider usage exhaustion → ChatGPT user-confirmed handoff (MabiAuto)
 
 This feature reduces unexpected Codex usage during early scheduler rollout.
 It **does not connect a Windows watcher directly to a ChatGPT conversation**.
@@ -38,15 +38,21 @@ sets `quota_pause` in the existing local
    local source paths or MCP report content. The actual total is recorded
    independently.
 
-The `AI 현황 → ChatGPT 인계 복사` button **only copies** this summary to
-the user's Windows clipboard, after a strict shape/enum validation. The
-user pastes it into an existing ChatGPT conversation. ChatGPT can inspect
+The `AI 현황 → ChatGPT로 이어가기` button copies a strictly validated local
+summary to the Windows clipboard and opens https://chatgpt.com/ only after a
+user action. The user pastes it into the intended ChatGPT conversation.
+When the dashboard notices a provider quota pause, it offers this action once.
+The app never sends the conversation or error contents automatically. ChatGPT can inspect
 GitHub and request additional user-reviewed redacted evidence when needed.
 No background ChatGPT task is created; no extra API subscription or API
 billing is silently activated.
 
-**Daily MabiAuto 8-run cap** also creates a local handoff summary for
-unprocessed reports. This cap is distinct from the Codex provider quota.
+**The former local 8-runs-per-day cap is removed.** The watcher processes
+new eligible reports until the Codex service explicitly reports account quota
+exhaustion. The Codex CLI does not provide a reliable account-wide remaining
+balance in this workflow, so the application does **not** invent a token
+threshold or bypass Codex provider limits. The provider response remains the
+authoritative stop condition; event evidence stays queued for ChatGPT review.
 
 ## Codex restart after account reset
 
@@ -63,7 +69,7 @@ remaining unprocessed errors are processed subject to existing limits.
 Offline unit tests in `tests/ai-autopilot/test_quota_handoff.py` cover
 quota phrase detection vs generic HTTP 429, immediate retry suppression,
 persistent pause, new error backlog, strict user-confirmed resume, privacy,
-same-error dedup across watcher restarts and the daily cap. Windows CI
+same-error dedup across watcher restarts and the provider-only cap. Windows CI
 will run these with the existing Python and C# regression suites.
 
 **Limitations:** detecting quota from a CLI message is best effort:
