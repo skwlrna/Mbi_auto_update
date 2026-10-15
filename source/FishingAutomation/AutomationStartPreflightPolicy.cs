@@ -23,7 +23,7 @@ internal static class AutomationStartPreflightPolicy
         else if (!inputReady)
             warnings.Add("입력 장치 확인 필요(모드별 기존 검증 유지)");
 
-        if (mode is "던전" or "어비스" && !scenarioConfigReady)
+        if ((mode is "던전" or "어비스") && !scenarioConfigReady)
             errors.Add("던전/어비스 시나리오 설정 누락");
 
         // OCR/templates can be optional in CLI or fixed-visual routes.
