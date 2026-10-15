@@ -256,6 +256,8 @@ internal static class Program
                 .Single(x => x.AccessibleName == "다중가공 작업 추가");
             var clearAlteringQueue = All(altering).OfType<Button>()
                 .Single(x => x.AccessibleName == "다중가공 작업 비우기");
+            var queueFeedback = All(altering).OfType<Label>()
+                .Single(x => x.AccessibleName == "다중가공 작업 추가 안내");
             Check(alteringQueue.Visible && addAlteringQueue.Visible,
                 "automatic altering exposes a visible multi-altering job queue");
 
@@ -275,6 +277,13 @@ internal static class Program
                 "missing-material recipe remains startable for recursive resolution");
 
             SetQuantity(aq, 11);
+            ai.SelectedIndex = -1; Pump();
+            Check(addAlteringQueue.Enabled, "idle multi-altering add remains clickable without selection");
+            addAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0 &&
+                  queueFeedback.Text.Contains("품목을 먼저 선택", StringComparison.Ordinal),
+                "missing-selection add click explains the reason without running any game action");
+            ai.SelectedIndex = 1; Pump();
             addAlteringQueue.PerformClick(); Pump();
             Check(alteringQueue.Items.Count == 1 &&
                   alteringQueue.Items[0]!.ToString()!.Contains("강철괴", StringComparison.Ordinal) &&
@@ -312,6 +321,25 @@ internal static class Program
                   selectedAlter.TargetQuantity == 5 && !selectedAlter.AllowPaidButton && selectedAlter.MaximumWings == 0,
                 "selected facility tab and recipe map to the zero-wing altering plan");
             Check(fake.Actions.Count == 0, "production UI performs no CLI action commands while configuring plans");
+
+            // Real report: '+ 추가' looked dead when the CLI recipe state was
+            // unverified (Alterable=false, no concrete missing ingredients).
+            // Keep it clickable for honest feedback, but NEVER register an
+            // unverified plan or issue a game command.
+            fake.UnavailableWood = true;
+            InvokeTask(altering, "LoadCatalogAsync", true); Pump();
+            ai.SelectedIndex = 0; Pump();
+            Check(addAlteringQueue.Enabled, "unverified recipe does not disable click feedback");
+            addAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0 &&
+                  queueFeedback.Text.StartsWith("추가 실패", StringComparison.Ordinal),
+                "unsafe unverified recipe is rejected with visible failure reason");
+            Check(!All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
+                "unverified recipe cannot start a real game operation");
+            Check(fake.Actions.Count == 0, "unverified add click never issues game input");
+            fake.UnavailableWood = false;
+            InvokeTask(altering, "LoadCatalogAsync", true); Pump();
+
             foreach (var page in new[] { altering, gathering })
             {
                 Check(!All(page).OfType<ComboBox>().Any(), page.Name + " has no visible execution/status combo boxes");
@@ -471,13 +499,17 @@ internal static class Program
                             .Single(x => x.Text == "다중가공 작업 목록");
                         var queueActions = All(queueLayout).OfType<Button>()
                             .Where(x => x.AccessibleName?.StartsWith("다중가공 작업 ", StringComparison.Ordinal) == true).ToArray();
-                        Check(queueLayout.RowCount == 3 && queueTitle.Width >=
+                        Check(queueLayout.RowCount == 4 && queueTitle.Width >=
                                   TextRenderer.MeasureText(queueTitle.Text, queueTitle.Font).Width - 4,
                             "multi-altering title has dedicated non-clipped row at " + size);
                         Check(queueActions.Length == 3 && queueActions.All(x =>
                                   x.Width >= TextRenderer.MeasureText(x.Text, x.Font).Width + 4 &&
                                   x.Height >= x.Font.Height),
                             "multi-altering action labels fit without truncation at " + size);
+                        Check(queueFeedback.Visible && queueFeedback.Height >= queueFeedback.Font.Height &&
+                              FullyContained(queueFeedback, altering) &&
+                              FullyContained(addAlteringQueue, altering),
+                            "multi-altering add button and explanation stay visible at " + size);
                         Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "생산 관리",
                             "production navigation remains exclusively selected at " + size);
                     }
@@ -525,6 +557,7 @@ internal sealed class FakeCli
 {
     internal readonly List<(string Command,string? Name)> Actions = new();
     internal bool Fail, Gain = true;
+    internal bool UnavailableWood;
     internal bool DuplicateCrafting;
     private bool _gathering;
     private long _logs = 38, _ingots = 12, _wood = 20;
@@ -552,7 +585,7 @@ internal sealed class FakeCli
             }},
             "get_alterable_items" => new {items=new object[]{
                 new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="금속 가공 시설"},
-                new{DisplayName="목재+",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="목재 가공 시설"},
+                new{DisplayName="목재+",Alterable=!UnavailableWood,ProducedPerWork=3,Reason=UnavailableWood ? (string?)"unverified_ui_state" : null,MissingIngredients=Array.Empty<object>(),FacilityName="목재 가공 시설"},
                 new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철 광석",Required=10L,Owned=0L}},FacilityName="금속 가공 시설"},
                 new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철괴",Required=3L,Owned=0L}},FacilityName="금속 가공 시설"},
                 new{DisplayName="새록 버섯 진액",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
