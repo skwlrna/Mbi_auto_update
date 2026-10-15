@@ -24,6 +24,10 @@ public sealed partial class MainForm
         if (_alteringPage.Items.SelectedItem is not RecipeChoice choice)
             throw new InvalidOperationException("가공 제법 목록을 불러온 뒤 제법을 선택하세요.");
 
+        if (choice.Ambiguous)
+            throw new InvalidOperationException(
+                "같은 이름과 1회 생산 수량의 제법이 여러 개라 안전하게 구분할 수 없습니다. CLI 제법 식별 정보를 확인하세요.");
+
         if (!choice.Recipe.Alterable)
         {
             string reason = choice.Recipe.Reason ?? "unknown";
@@ -40,7 +44,7 @@ public sealed partial class MainForm
 
         // Missing ingredients are resolved recursively. Spirit Wings are never authorized.
         return new(_alteringPage.Facility.SelectedItem!.ToString()!, choice.Recipe.DisplayName,
-            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, false);
+            (int)_alteringPage.Quantity.Value, choice.Recipe.ProducedPerWork, false, choice.Ordinal);
     }
 
     private async Task RefreshProductionStateAsync(ProductionPage page)
@@ -90,8 +94,13 @@ public sealed partial class MainForm
 
     private sealed record GatheringChoice(GatherableItem Item)
     { public override string ToString() => Item.DisplayName; }
-    private sealed record RecipeChoice(AlteringRecipe Recipe)
-    { public override string ToString() => Recipe.DisplayName; }
+    // Keep every CLI recipe entry: collapsing by name can silently select the
+    // wrong level/variant after the game's recipe list is reordered.
+    private sealed record RecipeChoice(AlteringRecipe Recipe, int Ordinal, bool Duplicate, bool Ambiguous)
+    {
+        public override string ToString() => Recipe.DisplayName +
+            (Duplicate ? $" (제법 {Ordinal} · 1회 {Recipe.ProducedPerWork}개)" : "");
+    }
     private sealed record AlteringQueueChoice(AlteringPlan Plan)
     {
         public override string ToString()
@@ -779,9 +788,35 @@ public sealed partial class MainForm
             {
                 if (IsAltering)
                 {
-                    _choices = (await new AlteringCliData(_owner._cli).RecipesAsync(CancellationToken.None))
-                        .GroupBy(x => (Facility: RecipeFacility(x), x.DisplayName))
-                        .Select(g => (object)new RecipeChoice(g.First())).ToArray();
+                    // Read-only CLI snapshot. Display order is NOT recipe identity.
+                    var response = await _owner._cli.GetAlterableItemsAsync(CancellationToken.None);
+                    IReadOnlyList<AlteringRecipe> recipes;
+                    try
+                    {
+                        recipes = AlteringQueries.ParseRecipes(response);
+                    }
+                    catch (Exception)
+                    {
+                        // A changed CLI field type can break parsing before the
+                        // normal catalog summary is available. Retain field names
+                        // only; never persist arbitrary raw response values.
+                        _owner._log.Write("[CLI][가공 제법] 파싱 실패 · " +
+                            AlteringQueries.DescribeCatalogSchema(
+                                response, Array.Empty<AlteringRecipe>()));
+                        throw;
+                    }
+                    var counts = recipes.GroupBy(x => x.DisplayName, StringComparer.Ordinal)
+                        .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+                    var yields = recipes.GroupBy(x => (x.DisplayName, x.ProducedPerWork))
+                        .ToDictionary(g => g.Key, g => g.Count());
+                    var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
+                    _choices = recipes.Select(r => (object)new RecipeChoice(
+                        r,
+                        ordinals[r.DisplayName] = ordinals.GetValueOrDefault(r.DisplayName) + 1,
+                        counts[r.DisplayName] > 1,
+                        yields[(r.DisplayName, r.ProducedPerWork)] > 1)).ToArray();
+                    _owner._log.Write("[CLI][가공 제법] " +
+                        AlteringQueries.DescribeCatalogSchema(response, recipes));
                 }
                 else
                 {
@@ -821,12 +856,12 @@ public sealed partial class MainForm
             // batches. The user explicitly selects this run's orders and the
             // middle manager controls every facility and registration.
             // Historical N02/F05 files remain on disk for diagnostics only.
-            Filter();
+            Filter(refuseMissingRecipe: true);
         }
 
-        private void Filter()
+        private void Filter(bool refuseMissingRecipe = false)
         {
-            string? previous = SelectedName;
+            object? previous = Items.SelectedItem;
             IEnumerable<object> visible = _choices;
 
             if (IsAltering && Facility.SelectedItem is string facility)
@@ -839,8 +874,42 @@ public sealed partial class MainForm
             Items.BeginUpdate();
             Items.Items.Clear();
             Items.Items.AddRange(visible.ToArray());
-            int index = Items.Items.Cast<object>().ToList().FindIndex(x => x.ToString() == previous);
-            if (Items.Items.Count > 0) Items.SelectedIndex = Math.Max(0, index);
+            var displayed = Items.Items.Cast<object>().ToArray();
+            int index = -1;
+            if (previous is RecipeChoice oldRecipe)
+            {
+                // Preserve the chosen recipe by its observable variant, not by its
+                // old position or duplicate name. An indistinguishable variant is
+                // never silently substituted during a refresh.
+                var matches = displayed.Select((x, i) => (x, i))
+                    .Where(x => x.x is RecipeChoice r &&
+                        r.Recipe.DisplayName == oldRecipe.Recipe.DisplayName &&
+                        r.Recipe.ProducedPerWork == oldRecipe.Recipe.ProducedPerWork &&
+                        RecipeFacility(r.Recipe) == RecipeFacility(oldRecipe.Recipe))
+                    .ToArray();
+                if (matches.Length == 1) index = matches[0].i;
+            }
+            else if (previous is GatheringChoice oldGathering)
+                index = Array.FindIndex(displayed, x =>
+                    x is GatheringChoice g && g.Item.DisplayName == oldGathering.Item.DisplayName);
+            if (refuseMissingRecipe && previous is RecipeChoice && index < 0)
+            {
+                // A refreshed CLI response no longer proves the previously chosen
+                // variant. Do not silently switch to another recipe or facility.
+                _owner._log.Write("[CLI][가공 제법] 기존 선택 제법이 새 목록에서 유일하게 확인되지 않아 선택 해제");
+                Items.EndUpdate();
+                SelectionChanged();
+                return;
+            }
+            if (index < 0)
+                index = Array.FindIndex(displayed, x => x is RecipeChoice r &&
+                    !r.Ambiguous && (r.Recipe.Alterable || r.Recipe.MissingIngredients.Count > 0));
+            if (index < 0)
+                index = Array.FindIndex(displayed, x => x is RecipeChoice { Ambiguous: false } ||
+                    x is GatheringChoice);
+            // All remaining variants are ambiguous: require an explicit choice,
+            // and refuse to add any of them until identity can be verified.
+            if (index >= 0) Items.SelectedIndex = index;
             Items.EndUpdate();
             SelectionChanged();
         }
@@ -854,11 +923,12 @@ public sealed partial class MainForm
             { _condition.Text = g.Item.ToolOk ? "사용 가능" : "확인 필요"; _condition.ForeColor = g.Item.ToolOk ? Green : Color.Orange; _materials.Text = g.Item.ToolOk ? "선택 품목의 도구 사용 가능" : "채집 도구를 확인하세요"; }
             else if (Items.SelectedItem is RecipeChoice r)
             {
-                _condition.Text = r.Recipe.Alterable ? "가능" : r.Recipe.MissingIngredients.Count > 0 ? "재료 부족" : "확인 필요";
+                _condition.Text = r.Ambiguous ? "제법 구분 필요" :
+                    r.Recipe.Alterable ? "가능" : r.Recipe.MissingIngredients.Count > 0 ? "재료 부족" : "확인 필요";
                 _condition.ForeColor = r.Recipe.Alterable ? Green : Color.Orange;
                 string facility = Facility.SelectedItem?.ToString() ?? FacilityUiOrder[0];
                 var previewPlan = new AlteringPlan(
-                    facility, r.Recipe.DisplayName, (int)Quantity.Value, r.Recipe.ProducedPerWork, false);
+                    facility, r.Recipe.DisplayName, (int)Quantity.Value, r.Recipe.ProducedPerWork, false, r.Ordinal);
                 _materials.Text = AlteringMaterialEstimate.Describe(previewPlan, r.Recipe) +
                     $" · 1회 {r.Recipe.ProducedPerWork}개";
             }
@@ -873,7 +943,8 @@ public sealed partial class MainForm
             bool available = Items.SelectedItem switch
             {
                 GatheringChoice { Item.ToolOk: true } => true,
-                RecipeChoice r => r.Recipe.Alterable || r.Recipe.MissingIngredients.Count > 0,
+                RecipeChoice r => !r.Ambiguous &&
+                    (r.Recipe.Alterable || r.Recipe.MissingIngredients.Count > 0),
                 _ => false
             };
             foreach (var field in new Control[] { Items, Quantity, _reload }) field.Enabled = !busy && !_loading;
