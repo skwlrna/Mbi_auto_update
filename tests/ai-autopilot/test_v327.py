@@ -82,7 +82,7 @@ class DraftPrSafetyTests(unittest.TestCase):
             self.assertEqual(result["url"],
                              "https://github.com/skwlrna/Mbi_auto_update/pull/123")
             self.assertTrue(any("--draft" in x and "--repo" in x for x in calls))
-            self.assertTrue(any("push" in x and "refs/heads/" + BRANCH in x for x in calls))
+            self.assertTrue(any("push" in x and any(token.endswith("refs/heads/" + BRANCH) for token in x) for x in calls))
             self.assertFalse(any("merge" in x or "release" in x for x in calls))
 
     def test_draft_refuses_mismatched_remote(self):
