@@ -71,6 +71,16 @@ public sealed partial class MainForm
             return;
         }
 
+        // Defensive guard for a second start arriving through a different UI entry.
+        // No game input, ledger mutation or worker start may occur on rejection.
+        if (!_schedulerMonitor.TryStart(runCrafting, runAltering, runAbyss))
+        {
+            const string reason = "시작 차단: 스케줄러가 이미 실행 중입니다.";
+            _log.Write("[스케줄러] " + reason);
+            _schedulerPage.ReportStartFeedback(reason);
+            return;
+        }
+
         _schedulerCts?.Dispose();
         _schedulerCts = new CancellationTokenSource();
         var token = _schedulerCts.Token;
@@ -82,11 +92,13 @@ public sealed partial class MainForm
             (runAltering ? (runAbyss ? "다중가공 + 대기 중 어비스" : "다중가공") : "제작 단독") +
             " · F10 전체 중지");
 
+        string schedulerOutcome = "cancelled";
         try
         {
             SchedulerAlteringResumeSelection? resume = null;
             if (runAltering)
             {
+                _schedulerMonitor.Advance("resume_selection");
                 // Decide BEFORE any crafting input: the saved batch is never
                 // silently replaced by a fresh F9 ledger.
                 var choice = await ChooseSchedulerMultiAlteringAsync(
@@ -112,6 +124,7 @@ public sealed partial class MainForm
             if (runCrafting)
             {
                 token.ThrowIfCancellationRequested();
+                _schedulerMonitor.Advance("crafting");
                 _log.Write("[스케줄러] 1단계 제작 시작 · 기존 전체 음식/아이템 검색에서 선택한 품목 사용");
                 _dungeonTask = null;
                 await StartCraftingAsync();
@@ -120,6 +133,7 @@ public sealed partial class MainForm
                     throw new InvalidOperationException("제작 작업이 시작되지 않았습니다. 후속 가공/어비스를 실행하지 않습니다.");
 
                 await craftingTask;
+                _schedulerMonitor.Advance("handoff");
                 // The existing Crafting runner dispatches UI completion through
                 // the UI synchronization context. Wait until it releases ownership.
                 for (int i = 0; _activeMode == "제작" && i < 100; i++)
@@ -139,6 +153,7 @@ public sealed partial class MainForm
             {
                 token.ThrowIfCancellationRequested();
                 _combinedAlteringRequested = runAbyss;
+                _schedulerMonitor.Advance("altering");
                 _log.Write("[스케줄러] 2단계 다중가공 시작" +
                     (runAbyss ? " · 가공 대기 중 어비스 1판씩" : ""));
                 // This call waits for coordinator completion and exclusively
@@ -152,16 +167,19 @@ public sealed partial class MainForm
             }
 
             token.ThrowIfCancellationRequested();
+            schedulerOutcome = "completed";
             _log.Write("[스케줄러] 선택한 단계 종료 · 새로운 작업 자동 시작 없음");
             SetStatus("스케줄러 작업 종료", Green);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
+            schedulerOutcome = "cancelled";
             _log.Write("[스케줄러] F10 정지 · 후속 단계 실행 차단 · 기존 작업 기록 보존");
             SetStatus("스케줄러 중단", Color.DarkOrange);
         }
         catch (Exception ex)
         {
+            schedulerOutcome = "failed";
             _runError = ex.Message;
             _log.Write("[스케줄러] 안전 정지: " + ex.Message);
             // Also update the visible scheduler feedback. Missing fresh plans
@@ -171,6 +189,7 @@ public sealed partial class MainForm
         }
         finally
         {
+            _schedulerMonitor.Finish(schedulerOutcome);
             _combinedAlteringRequested = false;
             _schedulerRunning = false;
             // A stopped child retains its own durable ledger; we only drop

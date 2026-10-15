@@ -15,6 +15,7 @@ public sealed partial class MainForm : Form
     private readonly TelegramNotifier _notifier;
     private readonly RuntimeErrorUploader _errorUploader;
     private readonly WatchdogClient _watchdog;
+    private readonly SchedulerRunMonitor _schedulerMonitor = new();
     private DateTime _lastFishingProgressAt = DateTime.Now;
     private bool _fishingStallAlerted;
     private string _lastFishingStatus = "준비";
@@ -146,6 +147,7 @@ public sealed partial class MainForm : Form
 
         _log.Line += s => Ui(() =>
         {
+            _schedulerMonitor.ObserveLog(s);
             _logBox.AppendText(s + Environment.NewLine);
             if (_logBox.TextLength > 35000) _logBox.Text = _logBox.Text[^22000..];
             _logBox.SelectionStart = _logBox.TextLength;
@@ -196,6 +198,10 @@ public sealed partial class MainForm : Form
         _uiTimer.Tick += (_, _) =>
         {
             _watchdog.Touch();
+            // The UI heartbeat and sub-worker processing watchdog already exist.
+            // This is advisory only: no automatic restart or F10 on quiet work.
+            if (_schedulerMonitor.Observe(TimeSpan.FromMinutes(15)))
+                _log.Write("[스케줄러 상태] 15분간 새 작업 활동 로그를 확인하지 못했습니다. 정상 대기 여부를 확인하세요. 자동 중단/재시작 없음.");
             CheckAlertHealth();
             CheckAutoStop();
             UpdateStats();
@@ -236,7 +242,7 @@ public sealed partial class MainForm : Form
         _ => "abyss_dungeon_hallucination_anchorage"
     };
     private bool DungeonRunning => _dungeonTask is { IsCompleted: false };
-    private bool AnyRunning => _schedulerRunning || _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
+    private bool AnyRunning => _schedulerRunning || _schedulerMonitor.IsRunning || _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
 
     private void UpdateAbyssSelectorVisibility()
     {
@@ -621,6 +627,7 @@ public sealed partial class MainForm : Form
         if (_schedulerRunning && _schedulerCts is { IsCancellationRequested: false })
         {
             _log.Write("[스케줄러] F10 전체 중단 · 다음 작업으로 넘기지 않습니다.");
+            _schedulerMonitor.RequestStop();
             _schedulerCts.Cancel();
         }
         if (_multiAlteringRunning && _multiAlteringCts is not null && !_multiAlteringCts.IsCancellationRequested)
@@ -650,6 +657,7 @@ public sealed partial class MainForm : Form
     private void StopAll()
     {
         _cancelStart = true;
+        _schedulerMonitor.RequestStop();
         if (_schedulerCts is { IsCancellationRequested: false }) _schedulerCts.Cancel();
         if (_multiAlteringCts is not null && !_multiAlteringCts.IsCancellationRequested) _multiAlteringCts.Cancel();
         if (_fishingBot.IsRunning) _fishingBot.Stop();
