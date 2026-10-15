@@ -126,9 +126,9 @@ public sealed partial class MainForm
                 SetStatus(mode + " " + result.Summary, Color.DarkOrange);
             return true;
         }
-        SetStatus("시작 전 점검 차단: " + result.Summary, Color.Firebrick);
+        SetStatus("시작 차단: 시작 전 환경점검 · " + result.Summary, Color.Firebrick);
         if (mode == "스케줄러")
-            _schedulerPage?.ReportStartFeedback("시작 전 점검 차단: " + result.Summary);
+            _schedulerPage?.ReportStartFeedback("시작 차단: 시작 전 환경점검 · " + result.Summary);
         return false;
     }
 
