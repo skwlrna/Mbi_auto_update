@@ -498,7 +498,7 @@ internal sealed class AiAutopilotDashboard : Form
                 return;
             }
             if (MessageBox.Show(this,
-                "이전에 중단된 수정안은 그대로 보관됩니다. 같은 오류 증거를 새 격리 작업 공간에서 Codex에 다시 보내 분석할까요?\\n" +
+                "이전에 중단된 수정안은 그대로 보관됩니다. 같은 오류 증거를 새 격리 작업 공간에서 Codex에 다시 보내 분석할까요?\n" +
                 "Codex 사용량이 발생하며, 실제 게임에 수정안을 자동 적용하지 않습니다.",
                 "AI 재분석 명시적 승인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
                 != DialogResult.Yes) return;
