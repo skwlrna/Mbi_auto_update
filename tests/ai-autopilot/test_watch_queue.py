@@ -53,8 +53,7 @@ class QueueTests(unittest.TestCase):
 
     def run_one_cycle(self):
         events = []
-        with mock.patch.object(agent, "require_legacy_off"), \
-             mock.patch.object(agent, "process", side_effect=lambda p, c, **k:
+        with mock.patch.object(agent, "process", side_effect=lambda p, c, **k:
                                events.append(p.name) or {"status":"blocked", "reason":"unit-test"}), \
              mock.patch.object(agent.time, "sleep", side_effect=BreakAfterPolling):
             with self.assertRaises(BreakAfterPolling):
@@ -101,8 +100,7 @@ class QueueTests(unittest.TestCase):
         def process_and_check(p, c, **kwargs):
             self.assertEqual(agent.read_json(self.results / "watch-activity.json")["status"], "processing")
             return {"status":"blocked", "reason":"test"}
-        with mock.patch.object(agent, "require_legacy_off"), \
-             mock.patch.object(agent, "process", side_effect=process_and_check), \
+        with mock.patch.object(agent, "process", side_effect=process_and_check), \
              mock.patch.object(agent.time, "sleep", side_effect=BreakAfterPolling):
             with self.assertRaises(BreakAfterPolling):
                 agent.poll(self.config)
