@@ -20,7 +20,7 @@ public sealed partial class MainForm
     {
         var row = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = Color.FromArgb(245, 248, 253),
             Padding = new Padding(12, 6, 12, 6) };
-        var title = new Label { Text = "AI 오류 관리", Dock = DockStyle.Left, Width = 110,
+        var title = new Label { Text = "AI 자동수정", Dock = DockStyle.Left, Width = 110,
             TextAlign = ContentAlignment.MiddleLeft, ForeColor = TitleText,
             Font = new Font("맑은 고딕", 9f, FontStyle.Bold) };
         _aiToggle = new Button { Text = "AI 감시 시작", Dock = DockStyle.Right, Width = 105,
@@ -34,7 +34,7 @@ public sealed partial class MainForm
         _aiStartWithApp.CheckedChanged += (_, _) => { if (_aiInitialized) SaveAiPreferences(); };
         _aiAutoDraftPr = new CheckBox
         {
-            Text = "검증 후 PR 생성", Dock = DockStyle.Right, Width = 142,
+            Text = "테스트 통과 후 수정안 등록", Dock = DockStyle.Right, Width = 188,
             ForeColor = TitleText, BackColor = row.BackColor,
             Font = new Font("맑은 고딕", 8f), TextAlign = ContentAlignment.MiddleLeft
         };
@@ -56,7 +56,7 @@ public sealed partial class MainForm
         };
         var dashboard = new Button
         {
-            Text = "AI 현황", Dock = DockStyle.Right, Width = 84,
+            Text = "오류 기록 보기", Dock = DockStyle.Right, Width = 110,
             BackColor = Color.White, ForeColor = TitleText,
             FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand,
             Font = new Font("맑은 고딕", 8.5f)
@@ -75,7 +75,7 @@ public sealed partial class MainForm
             _aiDashboard.FormClosed += (_, _) => _aiDashboard = null;
             _aiDashboard.Show(this); // modeless: F9/F10 and primary controls remain accessible
         };
-        _aiState = new Label { Text = "대기 중 · 오류 로그 일부가 Codex로 전송될 수 있음", Dock = DockStyle.Fill,
+        _aiState = new Label { Text = "AI 감시가 꺼져 있습니다 · 시작하면 새 오류부터 분석합니다", Dock = DockStyle.Fill,
             AutoEllipsis = true, ForeColor = Color.FromArgb(82, 99, 120),
             TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 8f) };
         row.Controls.Add(_aiState);
@@ -149,7 +149,7 @@ public sealed partial class MainForm
 
     private void RefreshAiAutopilotControls(string text)
     {
-        if (_aiState is not null) _aiState.Text = text + " · 로그 일부 Codex 전송 가능";
+        if (_aiState is not null) _aiState.Text = text;
         if (_aiToggle is not null) _aiToggle.Text = _aiHost?.IsRunning == true ? "감시 중지" : "AI 감시 시작";
         // State already passed through AiAutopilotHost's safe/status-only filter.
         // Persist every real state transition to the ordinary runtime log;
