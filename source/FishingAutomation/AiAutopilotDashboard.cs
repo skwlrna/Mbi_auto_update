@@ -94,7 +94,7 @@ internal sealed class AiAutopilotDashboard : Form
         reset.Click += (_, _) => SubmitGameFeedback("unverified");
         var handoff = new Button
         {
-            Text = "한도 초과 시 ChatGPT", Dock = DockStyle.Right, Width = 137,
+            Text = "ChatGPT로 이어가기 (한도)", Dock = DockStyle.Right, Width = 137,
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         handoff.Click += (_, _) => CopyChatGptHandoff();
