@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "source" / "FishingAutomation"
@@ -75,6 +76,45 @@ class TimelineTests(unittest.TestCase):
                 "runtime_reports_dir": str(local),
             })
             self.assertEqual([p.name for p in found], [report.name])
+
+    def test_first_start_processes_local_runtime_errors_not_legacy_mcp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mcp, local, results = (root / "reports", root / "runtime-reports", root / "results")
+            for directory in (mcp, local, results):
+                directory.mkdir()
+            existing_mcp = mcp / "error_old"
+            retained_runtime = local / "runtime_20261016_051737_000_abcd1234"
+            for directory, content in (
+                (existing_mcp, "old optional MCP report"),
+                (retained_runtime, "new app runtime failure"),
+            ):
+                directory.mkdir()
+                evidence = directory / "error.txt"
+                evidence.write_text(content, encoding="utf-8")
+                before = time.time() - 90
+                os.utime(evidence, (before, before))
+                os.utime(directory, (before, before))
+
+            config = agent.config()
+            config.update({
+                "reports_dir": str(mcp), "runtime_reports_dir": str(local),
+                "results_dir": str(results), "settle_seconds": 1,
+            })
+            processed = []
+            def record(folder, *_args, **_kwargs):
+                processed.append(folder.name)
+                return {"status": "blocked", "reason": "offline-test"}
+
+            class EndCycle(Exception):
+                pass
+
+            with mock.patch.object(agent, "require_isolated_ai_mode"), \\
+                 mock.patch.object(agent, "process", side_effect=record), \\
+                 mock.patch.object(agent.time, "sleep", side_effect=EndCycle):
+                with self.assertRaises(EndCycle):
+                    agent.poll(config)
+            self.assertEqual(processed, [retained_runtime.name])
 
     def test_ui_shows_time_specific_errors_and_next_step(self):
         dashboard = (APP / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
