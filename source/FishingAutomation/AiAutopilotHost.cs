@@ -60,7 +60,8 @@ internal sealed class AiAutopilotHost : IDisposable
                 {
                     int code;
                     try { code = child.ExitCode; } catch (InvalidOperationException) { code = -1; }
-                    Publish("AI 감시 종료 (코드 " + code + ") — 안전 검사를 확인하세요.");
+                    if (!Status.StartsWith("AI 자동수정 시작 불가", StringComparison.Ordinal))
+                        Publish("AI 감시 종료 (코드 " + code + ") — 안전 검사를 확인하세요.");
                 }
             };
             if (!child.Start())
