@@ -7,6 +7,10 @@ from pathlib import Path, PurePosixPath
 
 REGISTERED_TESTS = frozenset({
     "tests/altering/Program.cs",
+    "tests/crafting/Program.cs",
+    "tests/production-ui/Program.cs",
+    "tests/altering-screen-integration/Program.cs",
+    "tests/altering-visual/Program.cs",
     "tests/n02-resume/Program.cs",
     "tests/f05-consumption/Program.cs",
     "tests/combined-scheduler/Program.cs",
@@ -25,6 +29,18 @@ REGISTERED_TESTS = frozenset({
 # scheduler repair. This list is deliberately narrow; arbitrary code edits
 # must still satisfy the existing allowlist and global regression checks.
 SCHEDULER_TEST = "tests/combined-scheduler/Program.cs"
+# A build plus an unrelated registered test is NOT enough to validate
+# edits to actual production screens. Keep the mapping narrow and specific.
+SCREEN_TESTS = {
+    "source/FishingAutomation/dungeon/CraftingScreen.cs": "tests/production-ui/Program.cs",
+    "source/FishingAutomation/CraftingAutomation.cs": "tests/crafting/Program.cs",
+    "source/FishingAutomation/CraftingHubLayout.cs": "tests/crafting/Program.cs",
+    "source/FishingAutomation/dungeon/AlteringScreen.cs": "tests/altering-screen-integration/Program.cs",
+    "source/FishingAutomation/AlteringRecipeLayout.cs": "tests/altering/Program.cs",
+    "source/FishingAutomation/AlteringFacilityLayout.cs": "tests/altering/Program.cs",
+    "source/FishingAutomation/dungeon/ProductionUiRuntime.cs": "tests/production-ui/Program.cs",
+}
+
 SCHEDULER_SOURCES = frozenset({
     "source/FishingAutomation/SchedulerRunMonitor.cs",
     "source/FishingAutomation/SchedulerReadOnlyRetry.cs",
@@ -58,5 +74,8 @@ def commands_for(changed: list[str], worktree: Path
         return [], "production_source_patch_missing"
     if any(changes_scheduler_source(name) for name in changed) and SCHEDULER_TEST not in modified_tests:
         return [], "scheduler_regression_test_missing"
+    for source, required_test in SCREEN_TESTS.items():
+        if source in changed and required_test not in modified_tests:
+            return [], "production_screen_regression_test_missing:" + required_test
     return [["dotnet", "run", "--project", project, "-c", "Release"]
             for project in sorted(projects)], None
