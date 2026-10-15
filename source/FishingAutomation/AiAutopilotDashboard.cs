@@ -86,6 +86,18 @@ internal sealed class AiAutopilotDashboard : Form
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         reset.Click += (_, _) => SubmitGameFeedback("unverified");
+        var handoff = new Button
+        {
+            Text = "ChatGPT 인계 복사", Dock = DockStyle.Right, Width = 137,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        handoff.Click += (_, _) => CopyChatGptHandoff();
+        var resumeCodex = new Button
+        {
+            Text = "Codex 한도 재개", Dock = DockStyle.Right, Width = 125,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        resumeCodex.Click += (_, _) => RequestQuotaResume();
         var refresh = new Button
         {
             Text = "새로고침", Dock = DockStyle.Right, Width = 105,
@@ -95,6 +107,8 @@ internal sealed class AiAutopilotDashboard : Form
         refresh.Click += (_, _) => Reload();
         foot.Controls.Add(_updated);
         foot.Controls.Add(refresh);
+        foot.Controls.Add(handoff);
+        foot.Controls.Add(resumeCodex);
         foot.Controls.Add(reset);
         foot.Controls.Add(recurred);
         foot.Controls.Add(confirmed);
@@ -266,6 +280,98 @@ internal sealed class AiAutopilotDashboard : Form
         { MessageBox.Show(this, "결과 기록 실패: 로컬 폴더 접근 또는 JSON 오류"); }
     }
 
+    private void CopyChatGptHandoff()
+    {
+        // Clipboard is local and user-initiated. Never copy raw error.txt,
+        // screenshots, token values, result diagnostics or absolute paths.
+        using var manifest = ReadBounded(Path.Combine(Root, "chatgpt-handoff.json"));
+        if (manifest is null || manifest.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            MessageBox.Show(this, "현재 인계할 요약이 없습니다. AI 오류 대기 상태를 확인하세요.");
+            return;
+        }
+        var root = manifest.RootElement;
+        string state = Field(root, "status", 50);
+        if (state is not ("codex_quota_exhausted" or "daily_limit") ||
+            !root.TryGetProperty("includes_raw_logs", out var includesRaw) ||
+            includesRaw.ValueKind != JsonValueKind.False ||
+            !root.TryGetProperty("automatic_chatgpt_upload", out var autoUpload) ||
+            autoUpload.ValueKind != JsonValueKind.False ||
+            !root.TryGetProperty("items", out var entries) || entries.ValueKind != JsonValueKind.Array)
+        {
+            MessageBox.Show(this, "검증된 인계 요약 형식이 아닙니다.");
+            return;
+        }
+        string[] permitted =
+        {
+            "receipt_state", "cli_state", "visual_recognition",
+            "scheduler_transition", "timing_stall", "input_control", "unclassified"
+        };
+        var summaries = new List<string>();
+        foreach (var entry in entries.EnumerateArray().Take(20))
+        {
+            string id = Field(entry, "event_id", 40);
+            if (id.Length != 16 || !id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+                continue;
+            string category = Field(entry, "suspected_category", 50);
+            if (!permitted.Contains(category, StringComparer.Ordinal)) category = "unclassified";
+            summaries.Add("- " + id + " · 추정 분류: " + category);
+        }
+        string prompt = "MabiAuto 스케줄러 오류를 이어서 분석해 주세요.\n" +
+            "GitHub: skwlrna/Mbi_auto_update (현재 main 기준).\n" +
+            "AI 중단 사유: " + state + " · 로컬 대기/검토 " + Number(root, "queued_total") + "건.\n" +
+            string.Join("\n", summaries) +
+            "\n오류 ID는 로컬 증거 식별자입니다. 원본 로그·스크린샷·토큰은 여기에 포함하지 않았습니다." +
+            "\n필요한 경우 민감정보를 제거한 오류 로그나 화면은 사용자에게 따로 요청해 주세요." +
+            "\nAI의 테스트 통과만으로 실게임 해결을 확정하거나 자동 배포하지 마세요.";
+        try
+        {
+            Clipboard.SetText(prompt);
+            MessageBox.Show(this, "원본 로그 없이 작성된 인계 요약을 복사했습니다. ChatGPT 대화에 직접 붙여넣으세요. 필요할 때만 검토한 로그를 추가하세요.");
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            MessageBox.Show(this, "클립보드에 복사하지 못했습니다. 다른 프로그램이 사용 중인지 확인하세요.");
+        }
+    }
+
+    private void RequestQuotaResume()
+    {
+        using var activity = ReadBounded(Path.Combine(Root, "watch-activity.json"));
+        if (activity is null || Field(activity.RootElement, "status") != "quota_paused" ||
+            !_isWatcherRunning())
+        {
+            MessageBox.Show(this, "현재 실행 중인 Codex 한도 일시정지 상태가 아닙니다.");
+            return;
+        }
+        string token = Field(activity.RootElement, "pause_id", 40);
+        if (token.Length != 32 || !token.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+            return;
+        if (MessageBox.Show(this,
+            "Codex 사용량 초기화 또는 크레딧 복구를 직접 확인했습니까?\n" +
+            "확인 시 새 오류 분석을 재개할 수 있으며 Codex 사용량이 발생합니다.\n" +
+            "이전에 차단된 수정안을 자동 재실행하지는 않습니다.",
+            "Codex 호출 재개 확인", MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+        try
+        {
+            string destination = Path.Combine(Root, "quota-resume-request.json");
+            string temp = destination + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new
+            {
+                action = "retry_after_user_confirmed_reset",
+                pause_id = token
+            }));
+            File.Move(temp, destination, true);
+            MessageBox.Show(this, "AI 감시기에 재개 요청을 기록했습니다. 다음 감시 주기에 반영됩니다.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, "Codex 재개 요청 저장에 실패했습니다.");
+        }
+    }
+
     private void Reload()
     {
         if (IsDisposed) return;
@@ -285,6 +391,7 @@ internal sealed class AiAutopilotDashboard : Form
             " · " + _watcherStatus() +
             "\n마지막 작업: " + (active.Length > 0 ? active : "없음") +
             " · 대기 " + pending + "건" +
+            (activity == "quota_paused" ? " · Codex 사용량 소진: ChatGPT 인계 가능" : "") +
             (running ? " · " + activity : " · 이전 상태 기록은 현재 실행 상태가 아님");
 
         try
