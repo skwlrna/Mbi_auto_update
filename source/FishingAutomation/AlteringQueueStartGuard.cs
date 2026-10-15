@@ -32,12 +32,17 @@ internal static class AlteringQueueStartGuard
                 {
                     int occupied = liveWorks?.Count(x =>
                         string.Equals(x.FacilityName, plan.FacilityName, StringComparison.Ordinal)) ?? -1;
-                    if (occupied == 7)
-                        continue;
+                    bool fullSelectedLane = liveWorks is not null &&
+                        plans.Select(p => p.FacilityName)
+                            .Distinct(StringComparer.Ordinal)
+                            .Any(f => liveWorks.Count(w =>
+                                string.Equals(w.FacilityName, f, StringComparison.Ordinal)) == 7);
+                    if (occupied == 7 || fullSelectedLane)
+                        continue; // A full selected lane must drain before another lane registers.
                     throw new InvalidOperationException(
                         $"{plan.DisplayName}: CLI Reason=queue_full 이지만 {plan.FacilityName} " +
                         $"실제 대기열은 {(occupied < 0 ? "조회되지 않음" : $"{occupied}/7칸")}입니다. " +
-                        "제법 상태와 슬롯 수가 일치하지 않아 입력 없이 안전 정지합니다.");
+                        "선택한 시설에 7칸 가득 찬 대기열 증거가 없어 입력 없이 안전 정지합니다.");
                 }
                 throw new InvalidOperationException(
                     $"{plan.DisplayName}: CLI가 현재 가공 불가로 응답하여 F9 시작을 보류합니다. " +
