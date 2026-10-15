@@ -277,15 +277,23 @@ internal static class Program
             Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "목재+",
                 "default wood facility tab shows only wood recipes");
             facilityTabs.Single(x => x.Text == "금속").PerformClick(); Pump();
-            Check(ai.Items.Count == 2 && ai.Items.Cast<object>().All(x => x.ToString() is "철괴" or "강철괴"),
-                "metal facility tab filters recipe list to metal recipes");
+            Check(ai.Items.Count == 3 &&
+                  ai.Items.Cast<object>().Count(x => x.ToString()!.StartsWith("철괴", StringComparison.Ordinal)) == 2 &&
+                  ai.Items.Cast<object>().Any(x => x.ToString() == "강철괴"),
+                "metal facility tab retains both same-name recipe variants");
+            ai.SelectedIndex = 1;
+            var secondIron = Invoke<AlteringPlan>(form, "SelectedAlteringPlan");
+            Check(secondIron.DisplayName == "철괴" && secondIron.RecipeOrdinal == 2 &&
+                  secondIron.ProducedPerWork == 7,
+                "duplicate recipe selection retains its original CLI ordinal and production yield");
             alterSearch.Text = "강철"; Pump();
             Check(ai.Items.Count == 1 && ai.Items[0]!.ToString() == "강철괴",
                 "automatic altering search filters inside the selected facility tab");
             alterSearch.Text = ""; Pump();
-            Check(ai.Items.Count == 2 && ai.Items.Cast<object>().All(x => x.ToString() is "철괴" or "강철괴"),
-                "clearing altering search restores the selected facility list");
-            ai.SelectedIndex = 1;
+            Check(ai.Items.Count == 3 &&
+                  ai.Items.Cast<object>().Count(x => x.ToString()!.StartsWith("철괴", StringComparison.Ordinal)) == 2,
+                "clearing altering search restores both duplicate recipe variants");
+            ai.SelectedIndex = 2;
             Check(All(altering).OfType<Button>().Single(x => x.AccessibleName == "자동 가공 시작").Enabled,
                 "missing-material recipe remains startable for recursive resolution");
 
@@ -296,7 +304,7 @@ internal static class Program
             Check(alteringQueue.Items.Count == 0 &&
                   queueFeedback.Text.Contains("품목을 먼저 선택", StringComparison.Ordinal),
                 "missing-selection add click explains the reason without running any game action");
-            ai.SelectedIndex = 1; Pump();
+            ai.SelectedIndex = 2; Pump();
             addAlteringQueue.PerformClick(); Pump();
             Check(alteringQueue.Items.Count == 1 &&
                   alteringQueue.Items[0]!.ToString()!.Contains("강철괴", StringComparison.Ordinal) &&
@@ -395,6 +403,37 @@ internal static class Program
                 "unverified recipe cannot start a real game operation");
             Check(fake.Actions.Count == 0, "unverified add click never issues game input");
             fake.UnavailableWood = false;
+            InvokeTask(altering, "LoadCatalogAsync", true); Pump();
+
+            // Simulate today's patch reordering two CLI entries with the same
+            // display name. Refresh must preserve the selected *yield* and
+            // recompute the ordinal instead of silently choosing another recipe.
+            facilityTabs.Single(x => x.Text == "금속").PerformClick(); Pump();
+            ai.SelectedIndex = 0; Pump();
+            Check(Invoke<AlteringPlan>(form, "SelectedAlteringPlan").RecipeOrdinal == 1,
+                "baseline metal variant starts at ordinal 1");
+            fake.ReorderMetal = true;
+            InvokeTask(altering, "LoadCatalogAsync", true); Pump();
+            var reordered = Invoke<AlteringPlan>(form, "SelectedAlteringPlan");
+            Check(reordered.DisplayName == "철괴" && reordered.ProducedPerWork == 3 &&
+                  reordered.RecipeOrdinal == 2,
+                "CLI order change preserves the same variant and updates its ordinal");
+            fake.ReorderMetal = false;
+            InvokeTask(altering, "LoadCatalogAsync", true); Pump();
+            Check(Invoke<AlteringPlan>(form, "SelectedAlteringPlan").RecipeOrdinal == 1,
+                "restoring catalog order also restores the matching variant ordinal");
+
+            // Identical name and yield cannot be identified across arbitrary
+            // reorderings with the current CLI contract: fail closed.
+            fake.IndistinguishableMetal = true;
+            InvokeTask(altering, "LoadCatalogAsync", true); Pump();
+            ai.SelectedIndex = 0; Pump();
+            addAlteringQueue.PerformClick(); Pump();
+            Check(alteringQueue.Items.Count == 0 &&
+                  queueFeedback.Text.Contains("안전하게 구분할 수 없습니다", StringComparison.Ordinal) &&
+                  fake.Actions.Count == 0,
+                "indistinguishable recipe variants never enter queue or issue game input");
+            fake.IndistinguishableMetal = false;
             InvokeTask(altering, "LoadCatalogAsync", true); Pump();
 
             foreach (var page in new[] { altering, gathering })
@@ -615,6 +654,7 @@ internal sealed class FakeCli
     internal readonly List<(string Command,string? Name)> Actions = new();
     internal bool Fail, Gain = true;
     internal bool UnavailableWood;
+    internal bool ReorderMetal, IndistinguishableMetal;
     internal bool DuplicateCrafting;
     private bool _gathering;
     private long _logs = 38, _ingots = 12, _wood = 20;
@@ -643,7 +683,7 @@ internal sealed class FakeCli
             "get_alterable_items" => new {items=new object[]{
                 new{DisplayName="철괴",Alterable=true,ProducedPerWork=3,Reason=(string?)null,MissingIngredients=Array.Empty<object>(),FacilityName="금속 가공 시설"},
                 new{DisplayName="목재+",Alterable=!UnavailableWood,ProducedPerWork=3,Reason=UnavailableWood ? (string?)"unverified_ui_state" : null,MissingIngredients=Array.Empty<object>(),FacilityName="목재 가공 시설"},
-                new{DisplayName="철괴",Alterable=false,ProducedPerWork=7,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철 광석",Required=10L,Owned=0L}},FacilityName="금속 가공 시설"},
+                new{DisplayName="철괴",Alterable=false,ProducedPerWork=IndistinguishableMetal ? 3 : 7,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철 광석",Required=10L,Owned=0L}},FacilityName="금속 가공 시설"},
                 new{DisplayName="강철괴",Alterable=false,ProducedPerWork=3,Reason=(string?)"material_shortage_changed",MissingIngredients=new[]{new{DisplayName="철괴",Required=3L,Owned=0L}},FacilityName="금속 가공 시설"},
                 new{DisplayName="새록 버섯 진액",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
                 new{DisplayName="튼튼 버섯 가루",Alterable=true,ProducedPerWork=5,Reason=(string?)null,MissingIngredients=Array.Empty<object>()},
@@ -668,7 +708,16 @@ internal sealed class FakeCli
             "get_activity" => new{IsDead=false,IsReviving=false,IsInCombat=false,IsAutoPlaying=false,IsAutoTraveling=false,IsDialoguePlaying=false,IsWaitingForSelection=false,Dungeon=new{State="NotInDungeon"},Battlefield=new{IsInBattleField=false},Tutorial=new{IsPlaying=false},Scenario=new{IsInScenario=false},Performance=new{IsPlaying=false},Mode=new{IsPlayingMiniGame=false,IsHousingEditMode=false,MainButtonState=_gathering?"Stop":"Compass"},Interaction=new{HasTarget=_gathering,AvailableInteractionType=_gathering?"Gathering":"None",LastRunningInteractionType=_gathering?"Gathering":"None"}},
             _ => throw new Exception("Unexpected query "+command)
         };
-        return Task.FromResult(new CliProcessOutput(0,JsonSerializer.Serialize(data),""));
+        string payload = JsonSerializer.Serialize(data);
+        if (command == "get_alterable_items" && ReorderMetal)
+        {
+            using var parsed = JsonDocument.Parse(payload);
+            var entries = parsed.RootElement.GetProperty("items")
+                .EnumerateArray().Select(x => x.Clone()).ToArray();
+            (entries[0], entries[2]) = (entries[2], entries[0]);
+            payload = JsonSerializer.Serialize(new { items = entries });
+        }
+        return Task.FromResult(new CliProcessOutput(0,payload,""));
     }
     public Task<CliProcessOutput> Action(IReadOnlyList<string> args, CancellationToken ct)
     {
