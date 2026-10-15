@@ -133,7 +133,7 @@ class PipelineReviewTests(unittest.TestCase):
                         [source, required], root)
                     self.assertIsNone(issue)
                     self.assertEqual(commands, [
-                        ["dotnet", "run", "--project", str(Path(required).parent / "Regression.csproj"),
+                        ["dotnet", "run", "--project", (Path(required).parent / "Regression.csproj").as_posix(),
                          "-c", "Release"]])
 
     def test_ui_requests_retry_only_after_human_confirmation(self):
