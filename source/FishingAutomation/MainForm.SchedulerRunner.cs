@@ -193,6 +193,9 @@ public sealed partial class MainForm
         finally
         {
             _schedulerMonitor.Finish(schedulerOutcome);
+            // Measurement only: no additional game input, stage restart, or
+            // automatic retry is ever driven by performance statistics.
+            _log.Write("[스케줄러 통계] " + _schedulerMonitor.LastRunSummary);
             _combinedAlteringRequested = false;
             _schedulerRunning = false;
             // A stopped child retains its own durable ledger; we only drop
