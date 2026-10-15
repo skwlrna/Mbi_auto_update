@@ -167,7 +167,8 @@ class QuotaFallbackTests(unittest.TestCase):
     def test_dashboard_only_copies_and_requests_local_resume(self):
         ui = (SCRIPT.parents[1] / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
         host = (SCRIPT.parents[1] / "AiAutopilotHost.cs").read_text(encoding="utf-8")
-        self.assertIn("ChatGPT 인계 복사", ui)
+        self.assertIn("ChatGPT로 이어가기", ui)
+        self.assertIn('ProcessStartInfo("https://chatgpt.com/")', ui)
         self.assertIn("Clipboard.SetText(prompt);", ui)
         self.assertIn("retry_after_user_confirmed_reset", ui)
         self.assertIn("quota_paused", ui)
