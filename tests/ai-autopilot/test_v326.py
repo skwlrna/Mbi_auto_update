@@ -39,8 +39,7 @@ class WatchdogAndRegressionTests(unittest.TestCase):
             c = agent.config()
             c["codex_max_retries"] = 2
             with mock.patch.object(agent.shutil, "which", return_value="codex.exe"), \
-                 mock.patch.object(agent, "require_legacy_off"), \
-                 mock.patch.object(agent, "supervised_run", return_value=(-1, "", "", "codex_stalled")) as run:
+                     mock.patch.object(agent, "supervised_run", return_value=(-1, "", "", "codex_stalled")) as run:
                 ok, reason = agent.exec_codex(p, "test", p, c)
             self.assertFalse(ok)
             self.assertEqual(reason, "codex_stalled")
