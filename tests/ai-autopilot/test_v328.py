@@ -102,7 +102,7 @@ class ErrorMemoryTests(unittest.TestCase):
 
     def test_autopilot_memory_never_restarts_crashed_work(self):
         agent = (AI / "autopilot.py").read_text(encoding="utf-8")
-        self.assertIn("from error_memory import record_attempt, related_attempts, context_hint", agent)
+        self.assertIn("from error_memory import (record_attempt, related_attempts, context_hint,", agent)
         self.assertIn("memory_context = context", agent)
         self.assertIn("return read_json(result_path)", agent)
         self.assertIn("record_attempt(expand(str(c", agent)
