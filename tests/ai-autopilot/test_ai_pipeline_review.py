@@ -67,7 +67,7 @@ class PipelineReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c, folder, results, eid = self._setup(tmp)
             with mock.patch.object(agent, "process",
-                                   return_value={"status": "blocked", "reason": "unit"}) as process, \\
+                                   return_value={"status": "blocked", "reason": "unit"}) as process, \
                  mock.patch.object(agent.time, "sleep", side_effect=EndPolling):
                 with self.assertRaises(EndPolling):
                     agent.poll(c)
@@ -86,7 +86,7 @@ class PipelineReviewTests(unittest.TestCase):
                 self.assertEqual(agent.read_json(results / eid / "result.json")["status"],
                                  "interrupted_review_required")
                 return {"status": "blocked", "reason": "offline-test"}
-            with mock.patch.object(agent, "process", side_effect=record) as process, \\
+            with mock.patch.object(agent, "process", side_effect=record) as process, \
                  mock.patch.object(agent.time, "sleep", side_effect=EndPolling):
                 with self.assertRaises(EndPolling):
                     agent.poll(c)
@@ -94,7 +94,7 @@ class PipelineReviewTests(unittest.TestCase):
             self.assertFalse(request.exists())
             self.assertEqual(agent.read_json(results / eid / "result.json")["status"],
                              "interrupted_review_required")
-            with mock.patch.object(agent, "process") as repeat, \\
+            with mock.patch.object(agent, "process") as repeat, \
                  mock.patch.object(agent.time, "sleep", side_effect=EndPolling):
                 with self.assertRaises(EndPolling):
                     agent.poll(c)
@@ -106,7 +106,7 @@ class PipelineReviewTests(unittest.TestCase):
             agent.write_json(results / "interrupted-retry-request.json",
                              {"action": "retry_interrupted_once",
                               "event_id": "../unsafe"})
-            with mock.patch.object(agent, "process") as process, \\
+            with mock.patch.object(agent, "process") as process, \
                  mock.patch.object(agent.time, "sleep", side_effect=EndPolling):
                 with self.assertRaises(EndPolling):
                     agent.poll(c)
