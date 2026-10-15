@@ -89,7 +89,8 @@ class WatchdogAndRegressionTests(unittest.TestCase):
         self.assertIn('sampled_pixel_change=', buffer)
         self.assertIn('ImageFormat.Png', buffer)
         self.assertNotIn('HttpClient', buffer)
-        self.assertNotIn('GitHub', buffer)
+        self.assertNotIn('PutFileAsync(', buffer)
+        self.assertNotIn('new HttpClient(', buffer)
 
     def test_visual_context_requires_fixed_ancestor_and_home_directory(self):
         source = (AIPATH / "autopilot.py").read_text(encoding="utf-8")
