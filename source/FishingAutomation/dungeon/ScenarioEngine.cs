@@ -1226,6 +1226,11 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         // Preferred path: both independent clear signals are visible in the same frame.
         if (clearTitle.Found && touch.Found)
         {
+            if (++_abyssClearTitleFallbackConsecutive < 2)
+            {
+                Log?.Invoke("[어비스] 클리어 제목+터치 문구 후보 1/2 · 입력 보류, 새 프레임에서 재검증");
+                return DetectionResult.NotFound;
+            }
             _abyssClearTitleFallbackConsecutive = 0;
             ResetAbyssExitState(true);
             AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "클리어 타이틀 + 화면 터치 문구 동시 확인");
