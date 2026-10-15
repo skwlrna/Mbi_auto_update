@@ -97,7 +97,6 @@ def config() -> dict[str, Any]:
         "ollama_fallback_notes_only": True,
         "ollama_model": "qwen2.5-coder:7b",
         "process_old_events_on_watch_start": False,
-        "require_autofix_off": True,
     }
     defaults.update(c)
     return defaults
@@ -110,69 +109,6 @@ def cmd(argv: list[str], cwd: Path | None = None, timeout: int = 30, input_text:
                           capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=timeout, shell=False, env=env)
 
-
-
-def legacy_autofix_process_scan() -> tuple[bool, str]:
-    """Best-effort Windows process check; fail closed if the process list is unavailable.
-
-    This is detection, not a cross-program mutex. The original Autofix does not
-    honor Autopilot's lock, so it could still start later.
-    """
-    if os.name != "nt":
-        return True, "windows_process_scan_not_applicable"
-    executable = shutil.which("powershell.exe") or shutil.which("powershell")
-    if not executable:
-        return False, "powershell_for_process_check_missing"
-    ps = r"""
-$ErrorActionPreference = 'Stop'
-$active = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.Name -match '^(python|pythonw|py)\.exe$' -and
-    $_.CommandLine -match '(?i)codex-autofix[\\/]autofix\.py' -and
-    $_.CommandLine -match '(?i)--(execute|dry-run)(?:\s|$)'
-})
-if ($active.Count -gt 0) { Write-Output 'BUSY' }
-else { Write-Output 'CLEAR' }
-"""
-    try:
-        found = cmd([executable, "-NoProfile", "-NonInteractive", "-Command", ps], timeout=25)
-    except (OSError, subprocess.TimeoutExpired):
-        return False, "legacy_process_scan_failed"
-    if found.returncode != 0 or found.stdout.strip() not in ("CLEAR", "BUSY"):
-        return False, "legacy_process_scan_unverified"
-    if found.stdout.strip() == "BUSY":
-        return False, "legacy_autofix_process_active"
-    return True, "legacy_process_clear"
-
-
-def legacy_autofix_guard(c: dict[str, Any]) -> tuple[bool, str]:
-    """Require the old tool to explicitly report OFF before any AI work.
-
-    Never trust the presence of a lock file alone or assume a missing old tool
-    means that its task scheduler, configuration, or watcher is off.
-    """
-    if c.get("require_autofix_off") is not True:
-        return False, "autofix_off_guard_disabled_in_config"
-    repo = expand(str(c["repo"]))
-    script = repo / "tools" / "codex-autofix" / "autofix.py"
-    if not script.is_file() or script.is_symlink():
-        return False, "legacy_autofix_status_script_missing"
-    try:
-        result = cmd([sys.executable, "-B", str(script), "--status"], cwd=repo, timeout=20)
-    except (OSError, subprocess.TimeoutExpired):
-        return False, "legacy_autofix_status_probe_failed"
-    if result.returncode != 0 or result.stderr.strip():
-        return False, "legacy_autofix_status_probe_error"
-    # An unexpected message or 'ON' must never be interpreted as OFF.
-    value = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout).strip()
-    if value != "OFF":
-        return False, "legacy_autofix_not_confirmed_off"
-    return legacy_autofix_process_scan()
-
-
-def require_legacy_off(c: dict[str, Any]) -> None:
-    ok, reason = legacy_autofix_guard(c)
-    if not ok:
-        raise RuntimeError("legacy_autofix_conflict_guard: " + reason)
 
 
 def status_check(c: dict[str, Any]) -> bool:
@@ -198,12 +134,7 @@ def status_check(c: dict[str, Any]) -> bool:
         if c["require_clean_repo"] and dirty.stdout.strip():
             good = False
             print("주의: 추적 파일에 미커밋 변경이 있어 자동 수정을 시작하지 않습니다.")
-    # The preflight is read-only, but a successfully observed OFF state only
-    # describes the instant of the check. Re-check before subsequent actions.
-    if repo.is_dir():
-        off, guard_reason = legacy_autofix_guard(c)
-        print("기존 Autofix OFF 검사:", "PASS" if off else "BLOCKED", guard_reason)
-        good &= off
+    print("AI 감시: Codex Autopilot 단독 실행 · 중복 실행 잠금 사용")
     print("자동 병합/배포: 지원하지 않음")
     return bool(good)
 
@@ -382,10 +313,6 @@ def exec_codex(worktree: Path, prompt: str, outdir: Path, c: dict[str, Any], pro
         return False, "codex_not_found"
     attempts = 1 + min(2, max(0, int(c["codex_max_retries"])))
     for attempt in range(attempts):
-        try:
-            require_legacy_off(c)
-        except RuntimeError as exc:
-            return False, str(exc)
         last = outdir / f"codex-last-{attempt+1}.md"
         # codex exec v0.162.1 does not accept top-level '-a never'; do not pass it.
         # The noninteractive exec invocation remains sandboxed in a disposable worktree.
@@ -460,10 +387,6 @@ If the evidence is insufficient, report why and leave files unchanged.
 def test_patch(worktree: Path, outdir: Path, c: dict[str, Any], added_tests: list[list[str]] | None = None) -> tuple[bool, list[dict[str, Any]]]:
     results = []
     for i, argv in enumerate(list(c["test_commands"]) + list(added_tests or []), 1):
-        try:
-            require_legacy_off(c)
-        except RuntimeError as exc:
-            return False, results + [{"test": i, "reason": str(exc)}]
         if not isinstance(argv, list) or not argv or not all(isinstance(v, str) for v in argv):
             return False, results + [{"test": i, "reason": "invalid_command_config"}]
         try:
@@ -495,7 +418,6 @@ def test_patch(worktree: Path, outdir: Path, c: dict[str, Any], added_tests: lis
             return False, results + [{"test": "abyss_source_contract", "ok": False,
                                       "reason": "gate_script_missing"}]
         try:
-            require_legacy_off(c)
             check = cmd([sys.executable, "-B", str(gate), "--worktree", str(worktree)],
                         cwd=worktree, timeout=40)
             detail = redacted((check.stdout + "\n" + check.stderr)[-10000:])
@@ -561,10 +483,6 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
     if result_path.exists():
         return read_json(result_path)
     repo = expand(str(c["repo"]))
-    try:
-        require_legacy_off(c)
-    except RuntimeError as exc:
-        return finish("blocked", str(exc))
     workroot = expand(str(c["worktrees_dir"]))
     workroot.mkdir(parents=True, exist_ok=True)
     if not (folder.is_dir() and repo.is_dir()):
@@ -601,10 +519,6 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
     output.update({"worktree": str(worktree), "branch": branch})
     output.update({"status": "in_progress", "reason": "running_in_isolated_worktree"})
     write_json(result_path, output)  # crash recovery: never duplicate an uncompleted repair
-    try:
-        require_legacy_off(c)
-    except RuntimeError as exc:
-        return finish("blocked", str(exc))
     ok, reason = exec_codex(worktree, prompt_for(context, c), result_dir, c, progress)
     if not ok:
         fallback_notes(c, context, result_dir)
@@ -643,16 +557,10 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
     if not c["test_commands"]:
         return finish("blocked", "no_tests_configured")
     for round_no in range(1, max(1, min(3, int(c["max_fix_rounds"]))) + 1):
-        try:
-            require_legacy_off(c)
-        except RuntimeError as exc:
-            return finish("blocked", str(exc))
         round_dir = result_dir / f"test-round-{round_no}"
         round_dir.mkdir(exist_ok=True)
         passed, tests = test_patch(worktree, round_dir, c, added_tests)
         output.setdefault("test_rounds", []).append({"round": round_no, "passed": passed, "tests": tests})
-        if any(str(x.get("reason", "")).startswith("legacy_autofix_conflict_guard") for x in tests):
-            return finish("blocked", "legacy_autofix_activated_during_tests")
         # Tests themselves must not introduce new unauthorized changes or commits.
         checked_head = cmd(["git", "rev-parse", "HEAD"], worktree)
         after, issues = edited_paths(worktree)
@@ -676,10 +584,6 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
             "Change only previously touched files, no new paths. "
             "Do not rerun or invoke Codex; the outer host will retest.\n"
             "<untrusted-test-output>\n" + "\n".join(failed_logs) + "\n</untrusted-test-output>")
-        try:
-            require_legacy_off(c)
-        except RuntimeError as exc:
-            return finish("blocked", str(exc))
         repaired, reason = exec_codex(worktree, revised_prompt, rerun_dir, c, progress)
         if not repaired:
             return finish("blocked", "codex_repair_round_unverified: " + reason)
@@ -758,12 +662,6 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         })
 
     while True:
-        try:
-            require_legacy_off(c)
-        except RuntimeError as exc:
-            activity("safe_stop", None, 0, str(exc))
-            print("SAFE STOP:", str(exc), flush=True)
-            raise
         folders = evidence_folders(reports)  # newest first: never reverse
         if single:
             folders = folders[:1] if latest else [x for x in folders if event_id(x) not in seen]
