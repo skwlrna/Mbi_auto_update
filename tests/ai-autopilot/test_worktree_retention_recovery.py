@@ -30,6 +30,7 @@ class WorktreeRetentionTest(unittest.TestCase):
         git(self.repo, "init")
         git(self.repo, "config", "user.email", "test@example.invalid")
         git(self.repo, "config", "user.name", "Contract Test")
+        git(self.repo, "remote", "add", "origin", "https://github.com/skwlrna/Mbi_auto_update.git")
         (self.repo / "README").write_text("safe", encoding="utf-8")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-m", "base")
@@ -71,6 +72,19 @@ class WorktreeRetentionTest(unittest.TestCase):
         self.assertEqual(original, self.original.read_bytes())
         self.assertIn("ai/retention-test", git(self.repo, "branch", "--list"))
         self.assertIn("README", __import__("zipfile").ZipFile(archive).namelist())
+
+    def test_legacy_root_registration_is_safe_even_with_different_pinned_repo(self):
+        # Upgrades create a new release snapshot; older worktrees still belong
+        # to the original checkout. The cleanup must use that older owner.
+        new = self.root / "pinned"
+        git(self.repo, "clone", str(self.repo), str(new))
+        git(new, "remote", "set-url", "origin", "https://github.com/skwlrna/Mbi_auto_update.git")
+        c = dict(self.config, repo=str(new), original_repo=str(self.repo))
+        self.assertIn(self.id, retention.report(c)["clean_candidates"])
+        result = retention.archive_clean_one(c, self.id)
+        self.assertEqual(result["status"], "archived", result)
+        self.assertFalse(self.worktree.exists())
+        self.assertTrue((self.root / "archives" / (self.id + ".zip")).exists())
 
     def test_modified_code_protected_even_on_terminal_result(self):
         (self.worktree / "README").write_text("candidate patch")
