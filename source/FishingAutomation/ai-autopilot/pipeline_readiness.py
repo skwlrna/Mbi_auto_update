@@ -4,6 +4,7 @@ Never invoke Codex, the game, GitHub, tests, or any updater. A passing report
 does NOT mean a patch was created or tested. Paths and CLI output stay local.
 """
 from pathlib import Path
+import json
 import shutil
 import subprocess
 from typing import Any
@@ -37,6 +38,26 @@ def readiness(config: dict[str, Any], opted_in: bool = False,
         revision_ok, revision_reason = check_checkout(repo, expected)
     except (OSError, SourceBlocked) as exc:
         revision_reason = str(exc)
+    # The installed watcher may have already created a verified release-pinned
+    # snapshot. Read only the existing attestation and independently recheck
+    # the commit before reporting source as ready. Never auto-clone in preflight.
+    if not revision_ok and expected:
+        record = Path(config.get("results_dir", "")) / "source-alignment.json"
+        try:
+            if record.is_file() and not record.is_symlink() and record.stat().st_size <= 4096:
+                data = json.loads(record.read_text(encoding="utf-8"))
+                candidate = Path(data["selected_repo"]).expanduser().resolve()
+                if (data.get("status") == "verified"
+                        and data.get("expected_release_sha") == expected):
+                    verified, detail = check_checkout(candidate, expected)
+                    if verified:
+                        repo = candidate
+                        source_ok = (repo / "source/FishingAutomation/FishingAutomation.csproj").is_file()
+                        clean = True
+                        revision_ok = True
+                        revision_reason = "verified_pinned_snapshot"
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
     regression_paths = (
         "tests/altering/Regression.csproj",
         "tests/altering-screen-integration/Regression.csproj",
