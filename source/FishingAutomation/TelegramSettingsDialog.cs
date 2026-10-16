@@ -6,9 +6,11 @@ internal sealed class TelegramSettingsDialog : Form
 {
     private readonly TextBox _token = new();
     private readonly TextBox _chatId = new();
+    private readonly CheckBox _aiAlerts = new();
 
     public string BotToken => _token.Text.Trim();
     public string ChatId => _chatId.Text.Trim();
+    public bool AiAutopilotAlertsEnabled => _aiAlerts.Checked;
 
     public TelegramSettingsDialog(NotificationSettings current)
     {
@@ -44,6 +46,12 @@ internal sealed class TelegramSettingsDialog : Form
         _token.Text = current.BotToken;
         _chatId.Text = current.ChatId;
         _token.UseSystemPasswordChar = true;
+        _aiAlerts.Text = "AI 자동수정 시작·성공·실패 알림 (텍스트만)";
+        _aiAlerts.Checked = current.AiAutopilotAlertsEnabled;
+        _aiAlerts.Location = new Point(26, 200);
+        _aiAlerts.Size = new Size(430, 27);
+        _aiAlerts.AutoSize = false;
+        body.Controls.Add(_aiAlerts);
 
         var save = CreateButton("저장", new Rectangle(246, 231, 98, 45), Color.FromArgb(40, 112, 242));
         save.DialogResult = DialogResult.OK;
@@ -91,6 +99,7 @@ public sealed partial class MainForm
         settings.BotToken = dialog.BotToken;
         settings.ChatId = dialog.ChatId;
         settings.Enabled = settings.BotToken.Length > 0 && settings.ChatId.Length > 0;
+        settings.AiAutopilotAlertsEnabled = dialog.AiAutopilotAlertsEnabled;
 
         string runtimePath = Path.Combine(AppContext.BaseDirectory, "notification.json");
         string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });

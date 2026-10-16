@@ -12,6 +12,7 @@ internal sealed class AiAutopilotDashboard : Form
     private readonly Func<bool> _isWatcherRunning;
     private readonly Func<string> _watcherStatus;
     private readonly Label _overview;
+    private readonly Label _pipeline;
     private readonly Label _counts;
     private readonly Label _updated;
     private readonly Label _memory;
@@ -53,6 +54,14 @@ internal sealed class AiAutopilotDashboard : Form
             Dock = DockStyle.Top, Height = 76, AutoEllipsis = true,
             ForeColor = Color.FromArgb(51, 68, 91),
             Padding = new Padding(18, 6, 12, 0)
+        };
+        _pipeline = new Label
+        {
+            Dock = DockStyle.Top, Height = 72, AutoEllipsis = true,
+            ForeColor = Color.FromArgb(40, 61, 82), BackColor = Color.White,
+            Font = new Font("맑은 고딕", 9f),
+            Padding = new Padding(18, 8, 10, 4),
+            Text = "AI 단계별 현황: 오류 대기 중"
         };
         _counts = new Label
         {
@@ -224,6 +233,7 @@ internal sealed class AiAutopilotDashboard : Form
         Controls.Add(foot);
         Controls.Add(_memory);
         Controls.Add(_counts);
+        Controls.Add(_pipeline);
         Controls.Add(_overview);
         Controls.Add(rangeBar);
         Controls.Add(heading);
@@ -703,11 +713,22 @@ internal sealed class AiAutopilotDashboard : Form
         }
     }
 
+    private static string PhaseLabel(string stage) => stage switch
+    {
+        "evidence" => "오류 기록·로그 확인",
+        "codex_edit" => "Codex 원인 분석·로직 수정",
+        "diff_review" => "변경 파일·안전 조건 확인",
+        "regression" => "빌드·회귀 테스트",
+        "repair" => "테스트 실패 후 격리 재수정",
+        "draft" => "수정안 정리·Draft PR 검토",
+        _ => "대기"
+    };
+
     private void Reload()
     {
         if (IsDisposed) return;
         bool running = _isWatcherRunning();
-        string active = "", activity = "기록 없음";
+        string active = "", activity = "기록 없음", currentStep = "", stepStarted = "";
         int pending = 0;
         using (var state = ReadBounded(Path.Combine(Root, "watch-activity.json")))
         {
@@ -716,7 +737,33 @@ internal sealed class AiAutopilotDashboard : Form
                 activity = Field(state.RootElement, "status", 32);
                 active = Field(state.RootElement, "active", 100);
                 pending = Number(state.RootElement, "pending");
+                currentStep = Field(state.RootElement, "phase", 32);
+                stepStarted = Field(state.RootElement, "phase_started", 64);
             }
+        }
+        string[] stages = { "evidence", "codex_edit", "diff_review", "regression", "draft" };
+        if (running && activity == "processing" && stages.Contains(currentStep))
+        {
+            int index = Array.IndexOf(stages, currentStep);
+            string flow = string.Join("  →  ", stages.Select((value, n) =>
+                (n < index ? "✓ " : n == index ? "▶ " : "○ ") + PhaseLabel(value)));
+            string duration = DateTimeOffset.TryParse(stepStarted, out var start)
+                ? $" · 이 단계 {(int)Math.Max(0, (DateTimeOffset.Now - start).TotalSeconds)}초 경과"
+                : "";
+            _pipeline.Text = "현재 단계: " + PhaseLabel(currentStep) + duration +
+                "\n" + flow;
+        }
+        else if (running && activity == "processing" && currentStep == "repair")
+        {
+            string duration = DateTimeOffset.TryParse(stepStarted, out var start)
+                ? $" · {(int)Math.Max(0, (DateTimeOffset.Now - start).TotalSeconds)}초 경과" : "";
+            _pipeline.Text = "현재 단계: 테스트 실패 후 격리 재수정" + duration +
+                "\n기존 테스트 실패 → Codex 재수정 → 다시 빌드·회귀 테스트";
+        }
+        else
+        {
+            _pipeline.Text = "현재 단계: " + (running ? "새 오류 대기 또는 결과 확인" : "AI 감시 꺼짐") +
+                "\n실제 Codex 분석과 로직 수정은 한 작업이며, 완료 전에는 성공으로 표시하지 않습니다.";
         }
         string phase = activity switch
         {

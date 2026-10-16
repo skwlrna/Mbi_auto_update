@@ -16,6 +16,8 @@ public sealed class NotificationSettings
     public int ExitProcedureTimeoutSeconds { get; set; } = 90;
     public int NetworkRetryAlertCount { get; set; } = 3;
     public bool SendScreenshot { get; set; } = true;
+    // Separate opt-in: existing Telegram users do not silently receive AI activity.
+    public bool AiAutopilotAlertsEnabled { get; set; } = false;
     public bool RemoteControlEnabled { get; set; } = true;
 
     public static NotificationSettings Load(string path)
