@@ -13,6 +13,11 @@ static AlteringWork Work(long seconds, bool completed = false)
     => new("가죽", "가죽 가공 시설",
         completed ? "Completed" : "InProgress", completed, seconds);
 
+// The actual October 16 failure was in wood, not the leather test lane.
+static AlteringWork WoodWork(long seconds, bool completed = false)
+    => new("목재", "목재 가공 시설",
+        completed ? "Completed" : "InProgress", completed, seconds);
+
  // Live 2026-10-15 20:15 false clear: combat still active, title similarity
  // 0.693, touch signal 0.520. Neither a title nor a touch alone is enough.
  int clearFrames = 0;
@@ -786,5 +791,101 @@ finally
 {
     try { Directory.Delete(perfDir, recursive: true); } catch (IOException) { }
 }
+
+// Live V3.2.19, 2026-10-16 12:36:46 KST: five Completed jobs
+// in the wood facility were misclassified as a stall after 133 seconds.
+// Deferral lasts only until the next GUARDED manager attempt, not forever.
+DateTimeOffset woodClock = new(2026, 10, 16, 0, 0, 0, TimeSpan.Zero);
+var woodWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => woodClock);
+var woodReady = Enumerable.Repeat(WoodWork(0, true), 5).ToArray();
+woodWatch.Observe("목재 가공 시설", woodReady);
+woodClock = woodClock.AddSeconds(133);
+woodWatch.Observe("목재 가공 시설", woodReady, deferTimeout: true);
+bool woodNoProgressRejected = false;
+try { woodWatch.Observe("목재 가공 시설", woodReady); }
+catch (InvalidOperationException ex)
+{
+    woodNoProgressRejected = ex.Message.Contains("목재 가공 시설") &&
+        ex.Message.Contains("완료 5건") && ex.Message.Contains("133초");
+}
+Assert(woodNoProgressRejected,
+    "wood: one deferred receipt turn retains the original 120s deadline");
+
+// The real coordinator gets a single guarded manager opportunity after
+// 133 active seconds. Completion is a simulated verified manager result;
+// unchanged jobs plus a no-op MUST still stop at the original deadline.
+foreach (bool managerCompletes in new[] { true, false })
+{
+    DateTimeOffset readyClock = new(2026, 10, 16, 0, 0, 0, TimeSpan.Zero);
+    DateTimeOffset initialClock = readyClock;
+    int readyReads = 0;
+    int managerCalls = 0;
+    bool readyStopped = false;
+    try
+    {
+        await new MultiAlteringCoordinator(now: () => readyClock).RunAsync(
+            new[] { new AlteringPlan("목재 가공 시설", "목재", 1, 1, false) },
+            (_, _, _) =>
+            {
+                managerCalls++;
+                if (managerCalls > 2)
+                    throw new Exception("Unbounded completed wood-lane retries");
+                return Task.FromResult(managerCompletes && managerCalls == 2);
+            },
+            _ =>
+            {
+                // The first manager yielded, then another activity aged the
+                // unchanged five completed works to 133 active seconds.
+                if (++readyReads == 5) readyClock = initialClock.AddSeconds(133);
+                return Task.FromResult<IReadOnlyList<AlteringWork>>(woodReady);
+            },
+            (_, _) => throw new Exception("Completed lane must not wait for timer"),
+            CancellationToken.None);
+    }
+    catch (InvalidOperationException ex) when (
+        ex.Message.Contains("다중가공 시설별 정체 감지") &&
+        ex.Message.Contains("목재 가공 시설"))
+    {
+        readyStopped = true;
+    }
+    Assert(readyReads >= 5 && managerCalls == 2 &&
+           readyStopped == !managerCompletes,
+        managerCompletes
+            ? "wood: completed five-slot lane permits one guarded completion"
+            : "wood: unchanged five slots fail closed after manager no-op");
+}
+
+// Partial completion must never permit any receipt: the running job's
+// frozen timer still triggers the original watchdog before manager input.
+DateTimeOffset mixedWoodClock = new(2026, 10, 16, 0, 0, 0, TimeSpan.Zero);
+int mixedWoodManagerCalls = 0;
+bool mixedWoodStopped = false;
+try
+{
+    await new MultiAlteringCoordinator(now: () => mixedWoodClock).RunAsync(
+        new[] { new AlteringPlan("목재 가공 시설", "목재", 1, 1, false) },
+        (_, _, _) =>
+        {
+            mixedWoodManagerCalls++;
+            return Task.FromResult(true);
+        },
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(
+            woodReady.Concat(new[] { WoodWork(500) }).ToArray()),
+        (_, _) =>
+        {
+            mixedWoodClock = mixedWoodClock.AddSeconds(133);
+            return Task.CompletedTask;
+        },
+        CancellationToken.None);
+}
+catch (InvalidOperationException ex) when (
+    ex.Message.Contains("다중가공 시설별 정체 감지") &&
+    ex.Message.Contains("목재 가공 시설"))
+{
+    mixedWoodStopped = true;
+}
+Assert(mixedWoodStopped && mixedWoodManagerCalls == 0,
+    "wood: mixed completed/running lane stops before manager input");
 
 Console.WriteLine("Combined scheduler regressions passed.");
