@@ -473,6 +473,18 @@ def interrupted_retry_id(original_eid: str) -> str:
     return hashlib.sha256(("manual-interrupted-retry-v1:" + original_eid).encode()).hexdigest()[:16]
 
 
+def quota_retry_id(original_eid: str) -> str:
+    """One deterministic, isolated follow-up to an explicitly quota-blocked error."""
+    return hashlib.sha256(("manual-quota-retry-v1:" + original_eid).encode()).hexdigest()[:16]
+
+
+def quota_retry_eligible(original: dict[str, Any], original_eid: str, name: str) -> bool:
+    """Only reanalyse a recorded provider-quota stop, never an arbitrary failure."""
+    return (isinstance(original, dict) and original.get("event_id") == original_eid
+            and original.get("event") == name and original.get("status") == "blocked"
+            and "codex_quota_exhausted" in str(original.get("reason", "")))
+
+
 def mark_interrupted_result(path: Path) -> bool:
     """Call only while holding the singleton watcher lock on startup.
 
@@ -494,11 +506,20 @@ def mark_interrupted_result(path: Path) -> bool:
 
 
 def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
-            progress=None, retry_interrupted: bool = False) -> dict[str, Any]:
+            progress=None, retry_interrupted: bool = False,
+            retry_quota: bool = False) -> dict[str, Any]:
     original_eid = event_id(folder)
     eid = original_eid
-    if retry_cli_error and retry_interrupted:
+    if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota)) > 1:
         return {"status": "blocked", "reason": "conflicting_manual_retry_modes"}
+    if retry_quota:
+        previous = expand(str(c["results_dir"])) / original_eid / "result.json"
+        if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
+            return {"status": "blocked", "reason": "quota_original_missing"}
+        original = read_json(previous)
+        if not quota_retry_eligible(original, original_eid, folder.name):
+            return {"status": "blocked", "reason": "quota_original_not_reviewable"}
+        eid = quota_retry_id(original_eid)
     if retry_interrupted:
         previous = expand(str(c["results_dir"])) / original_eid / "result.json"
         if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
@@ -531,6 +552,9 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
                               "status": "blocked", "note": "No changes to live game or deployed software."}
 
     memory_context: str | None = None
+    if retry_quota:
+        output["retry_of"] = original_eid
+        output["retry_reason"] = "explicit_ui_after_quota_recovery"
     if retry_interrupted:
         output["retry_of"] = original_eid
         output["retry_reason"] = "explicit_ui_interrupted_reanalysis"
@@ -558,7 +582,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         return output
 
     if result_path.exists():
-        if not retry_interrupted:
+        if not retry_interrupted and not retry_quota:
             mark_interrupted_result(result_path)
         return read_json(result_path)
     repo = expand(str(c["repo"]))
@@ -836,8 +860,30 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                     last_reported = ("quota", len(pending))
                 time.sleep(max(10, int(c["poll_seconds"])))
                 continue
+        quota_retry_file = results_dir / "quota-retry-request.json"
+        quota_retry_folder = None
+        if not single and retry_folder is None and not state.get("quota_pause") and (
+                quota_retry_file.is_file() and not quota_retry_file.is_symlink()):
+            try:
+                request = read_json(quota_retry_file) if quota_retry_file.stat().st_size <= 1024 else {}
+                if isinstance(request, dict) and request.get("action") == "retry_quota_blocked_once":
+                    requested_id = request.get("event_id")
+                    if isinstance(requested_id, str) and re.fullmatch(r"[0-9a-f]{16}", requested_id):
+                        candidate = next((p for p in all_evidence_folders(c)
+                                          if event_id(p) == requested_id), None)
+                        previous = results_dir / requested_id / "result.json"
+                        next_path = results_dir / quota_retry_id(requested_id) / "result.json"
+                        if (candidate is not None and stable(candidate, int(c["settle_seconds"]))
+                            and previous.is_file() and not previous.is_symlink()
+                            and previous.stat().st_size <= 131072 and not next_path.exists()
+                            and quota_retry_eligible(read_json(previous), requested_id, candidate.name)):
+                            quota_retry_folder = candidate
+            except (OSError, ValueError, TypeError):
+                pass
         if retry_folder is not None:
             pending = [retry_folder] + [p for p in pending if p != retry_folder]
+        elif quota_retry_folder is not None:
+            pending = [quota_retry_folder] + [p for p in pending if p != quota_retry_folder]
         if not single:
             activity("watching", None, len(pending))
             current = ("waiting", len(pending))
@@ -847,12 +893,13 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         for folder in pending:
             eid = event_id(folder)
             manual_retry = retry_folder is not None and folder == retry_folder
-            if eid in seen and not (single and latest) and not manual_retry:
+            manual_quota = quota_retry_folder is not None and folder == quota_retry_folder
+            if eid in seen and not (single and latest) and not manual_retry and not manual_quota:
                 continue
             # No arbitrary per-day run cap. Codex decides the actual account
             # quota; the explicit quota error triggers a bounded local ChatGPT
             # handoff and stops additional Codex calls safely.
-            signature = duplicate_signature(folder) if not single and not manual_retry else None
+            signature = duplicate_signature(folder) if not single and not manual_retry and not manual_quota else None
             last_seen = recent_signatures.get(signature) if signature else None
             if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:
                 reason = "identical_mcp_error_evidence_within_10_minutes"
@@ -887,14 +934,19 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                         print(f"Codex 진행: {elapsed}초 경과 · 마지막 출력 {silence}초 전", flush=True)
                     else:
                         print(f"Codex 정체 감지: {reason} · {elapsed}초 경과 · 재시작 없음", flush=True)
+                # Simultaneous requests never authorise two replays of one event.
                 result = process(folder, c, retry_cli_error=retry_cli_error,
-                                 progress=on_codex_progress, retry_interrupted=manual_retry)
+                                 progress=on_codex_progress, retry_interrupted=manual_retry,
+                                 retry_quota=manual_quota)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
             print("처리 결과:", result.get("status"), result.get("reason"), flush=True)
             if manual_retry:
                 try: retry_file.unlink(missing_ok=True)
+                except OSError: pass
+            if manual_quota:
+                try: quota_retry_file.unlink(missing_ok=True)
                 except OSError: pass
             if signature:
                 recent_signatures[signature] = folder.stat().st_mtime
