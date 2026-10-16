@@ -531,7 +531,7 @@ internal sealed class AiAutopilotDashboard : Form
             var verified = candidates.EnumerateArray()
                 .Where(x => x.ValueKind == JsonValueKind.String)
                 .Select(x => x.GetString() ?? "")
-                .Where(x => x.Length == 16 && ValidEventId(x)).ToArray();
+                .Where(x => ValidEventId(x)).ToArray();
             int count = Number(inventory.RootElement, "count");
             int limit = Number(inventory.RootElement, "limit");
             if (verified.Length == 0)
