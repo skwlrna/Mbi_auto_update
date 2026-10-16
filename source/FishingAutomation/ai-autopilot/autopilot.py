@@ -29,7 +29,7 @@ from quota_handoff import (exhausted as codex_quota_exhausted,
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr, user_opted_in
 from pipeline_readiness import readiness
-from worktree_retention import report as retention_report, archive_clean_one
+from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
@@ -1013,7 +1013,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 record = read_json(cleanup_request) if cleanup_request.stat().st_size < 1024 else {}
                 if isinstance(record, dict) and record.get("action") == "archive_clean_worktree_once":
                     identity = record.get("event_id")
-                    if isinstance(identity, str) and re.fullmatch(r"[0-9a-f]{16}", identity):
+                    if isinstance(identity, str) and RETENTION_ID.fullmatch(identity):
                         outcome = archive_clean_one(c, identity)
                         print("AI 작업공간 정리:", outcome.get("status"), outcome.get("reason"), flush=True)
             except (OSError, ValueError, TypeError):
