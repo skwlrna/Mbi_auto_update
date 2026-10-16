@@ -485,6 +485,7 @@ def quota_retry_eligible(folder: Path, results_dir: Path, eid: str) -> bool:
     return (isinstance(report, dict) and report.get("event_id") == eid
             and report.get("event") == folder.name
             and report.get("status") == "blocked"
+            and not report.get("retry_of")  # Never chain quota retry jobs.
             and "codex_quota_exhausted" in str(report.get("reason", "")))
 
 
