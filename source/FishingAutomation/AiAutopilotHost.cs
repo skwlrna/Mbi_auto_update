@@ -89,6 +89,8 @@ internal sealed class AiAutopilotHost : IDisposable
         // watcher's own activity/status lines may be shown.
         if (message.StartsWith("Git 저장소: MISSING", StringComparison.Ordinal))
             Publish("AI 시작 불가 · 작업용 소스 폴더가 없습니다 (MabiAutoAI/repo)");
+        else if (message.StartsWith("WATCHER BLOCKED: release_source_alignment", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · 배포 SHA와 작업용 소스 불일치 / 새 스냅샷 검증 실패");
         else if (message.StartsWith("codex: MISSING", StringComparison.OrdinalIgnoreCase))
             Publish("AI 시작 불가 · Codex CLI를 설치하고 로그인하세요");
         else if (message.StartsWith("git: MISSING", StringComparison.OrdinalIgnoreCase))

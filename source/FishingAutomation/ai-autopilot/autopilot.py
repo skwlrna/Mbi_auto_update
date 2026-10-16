@@ -29,6 +29,7 @@ from quota_handoff import (exhausted as codex_quota_exhausted,
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr, user_opted_in
 from pipeline_readiness import readiness
+from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
@@ -416,6 +417,36 @@ If the evidence is insufficient, report why and leave files unchanged.
 <untrusted-log>\n{context}\n</untrusted-log>"""
 
 
+def prepare_dotnet_environment(worktree: Path, outdir: Path,
+                               c: dict[str, Any]) -> tuple[bool, str]:
+    """Host-side bounded NuGet restore before sandboxed Codex runs."""
+    projects = (
+        "source/FishingAutomation/FishingAutomation.csproj",
+        "tests/combined-scheduler/Regression.csproj",
+        "tests/altering/Regression.csproj",
+        "tests/crafting/Regression.csproj",
+    )
+    if not shutil.which("dotnet"):
+        return False, "dotnet_missing"
+    for i, project in enumerate(projects, 1):
+        if not (worktree / project).is_file():
+            return False, "restore_project_missing"
+        argv = ["dotnet", "restore", project]
+        if i == 1:
+            argv += ["-r", "win-x64"]
+        try:
+            require_isolated_ai_mode(c)
+            res = cmd(argv, worktree, timeout=min(180, int(c["test_timeout_seconds"])))
+            detail = redacted((res.stdout + "\n" + res.stderr)[-10000:])
+            (outdir / f"host-nuget-restore-{i}.log").write_text(
+                detail, encoding="utf-8")
+            if res.returncode:
+                return False, f"restore_{i}_exit_{res.returncode}"
+        except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            return False, "restore_" + str(i) + "_" + type(exc).__name__
+    return True, "host_restore_complete"
+
+
 def test_patch(worktree: Path, outdir: Path, c: dict[str, Any], added_tests: list[list[str]] | None = None) -> tuple[bool, list[dict[str, Any]]]:
     results = []
     for i, argv in enumerate(list(c["test_commands"]) + list(added_tests or []), 1):
@@ -588,9 +619,11 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         return read_json(result_path)
     repo = expand(str(c["repo"]))
     try:
+        require_pinned_source(c)
         require_isolated_ai_mode(c)
-    except RuntimeError as exc:
-        return finish("blocked", str(exc))
+    except (SourceBlocked, RuntimeError) as exc:
+        return finish("blocked", "release_source_guard: " + str(exc))
+    output["release_source_sha"] = c["release_source_sha"]
     workroot = expand(str(c["worktrees_dir"]))
     workroot.mkdir(parents=True, exist_ok=True)
     if not (folder.is_dir() and repo.is_dir()):
@@ -615,6 +648,8 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     if base.returncode:
         return finish("blocked", "base_commit_unavailable")
     output["base_commit"] = base.stdout.strip()
+    if output["base_commit"] != c["release_source_sha"]:
+        return finish("blocked", "release_source_mismatch_before_worktree")
     branch = "ai/autopilot-" + eid
     worktree = workroot / eid
     if worktree.exists():
@@ -627,10 +662,17 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     output.update({"worktree": str(worktree), "branch": branch})
     output.update({"status": "in_progress", "reason": "running_in_isolated_worktree"})
     write_json(result_path, output)  # crash recovery: never duplicate an uncompleted repair
+    ready, restore_reason = prepare_dotnet_environment(worktree, result_dir, c)
+    output["codex_test_environment"] = {"ready": ready, "reason": restore_reason}
+    output["codex_internal_tests"] = "not_independently_verified"
+    write_json(result_path, output)
+    if not ready:
+        return finish("blocked", "dotnet_restore_preflight_failed:" + restore_reason)
     try:
+        require_pinned_source(c)
         require_isolated_ai_mode(c)
-    except RuntimeError as exc:
-        return finish("blocked", str(exc))
+    except (SourceBlocked, RuntimeError) as exc:
+        return finish("blocked", "release_source_guard: " + str(exc))
     ok, reason = exec_codex(worktree, prompt_for(context, c), result_dir, c, progress)
     if not ok:
         fallback_notes(c, context, result_dir)
@@ -720,6 +762,10 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
                 return finish("blocked", "repair_unauthorized_path: " + file)
     if c.get("require_regression_test", True):
         output["regression_test"]["status"] = "passed"
+    output["host_offline_tests"] = {
+        "status": "passed", "source_base_commit": output["base_commit"],
+        "scope": "initial_isolated_candidate_only"
+    }
     try:
         current_fp = patch_fingerprint(worktree, changed)
         if current_fp and failed_fingerprint(expand(str(c["results_dir"])), current_fp, exclude=eid):
@@ -731,8 +777,18 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     # GitHub network side effect is never authorized by the AI itself.
     # Only the host may publish an opt-in draft PR after *all* gates pass.
     verified = output.get("tests", [])
+    try:
+        require_pinned_source(c)
+    except SourceBlocked as exc:
+        return finish("blocked", "release_source_changed_before_pr:" + str(exc))
     output["pr"] = publish_verified_draft_pr(
         worktree, branch, eid, changed, result_dir, verified)
+    if output["pr"].get("status") == "draft_created":
+        output["pr_ci"] = {
+            "status": "not_checked",
+            "candidate_head": output["pr"].get("head_sha", ""),
+            "final_head_verified": False, "game_verified": False
+        }
     if output["pr"]["status"] == "draft_created":
         print("AI 검토용 Draft PR 생성:", output["pr"]["url"], flush=True)
     elif output["pr"]["status"] == "blocked":
@@ -1081,6 +1137,20 @@ def main() -> int:
             v = read_json(p)
             print(v.get("started"), v.get("event"), v.get("status"), v.get("reason", ""))
         return 0
+    # Only watch/once modes may prepare new source; read-only modes never clone.
+    try:
+        selected = prepare_source(c)
+        c["repo"] = selected["repo"]
+        c["release_source_sha"] = selected["expected"]
+        write_json(expand(str(c["results_dir"])) / "source-alignment.json", {
+            "status": "verified", "expected_release_sha": selected["expected"],
+            "selected_repo": selected["repo"], "action": selected["action"],
+            "previous_source_issue": selected.get("previous_source_issue", "")})
+        print("AI 배포 소스 기준 일치:", selected["expected"], "·", selected["action"])
+    except (SourceBlocked, OSError, subprocess.TimeoutExpired) as exc:
+        print("WATCHER BLOCKED: release_source_alignment:" +
+              type(exc).__name__ + ":" + str(exc), flush=True)
+        return 2
     if not status_check(c):
         print("사전 검사 실패. config.json 경로 또는 Git 상태를 확인하세요.")
         return 2

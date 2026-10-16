@@ -73,12 +73,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.19"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.20"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.19</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3219-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.19"')) {
+          if ($p -notmatch '<Version>3\.2\.20</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3220-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.20"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -1011,7 +1011,9 @@ jobs:
               $watchCore -notmatch '다중가공 시설별 정체 감지' -or
               $watchCore -notmatch '임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지' -or
               $multiAlter -notmatch 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' -or
-              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed\)' -or
+              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed,\s*deferTimeout: observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)' -or
+              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, afterFacilityWorks\)' -or
+              $watchCore -notmatch 'if \(idle < _threshold \|\| deferTimeout\)' -or
               $multiAlter -notmatch 'idleWatchdog.ConfirmManagerProgress\(facility\)' -or
               $multiAlter -notmatch 'registrationBefore = _laneState\?\.Snapshot\(facility\)' -or
               $multiAlter -notmatch 'registrationAfter = _laneState\?\.Snapshot\(facility\)' -or

@@ -67,7 +67,7 @@ internal sealed class MultiAlteringWaitWatchdog
     // The CLI exposes no stable work IDs. Compare sorted recipe/status shapes
     // and the lowest in-progress countdown; a decreasing countdown is real
     // evidence of progress even if the queue count remains seven.
-    internal void Observe(string facility, IReadOnlyList<AlteringWork> works)
+    internal void Observe(string facility, IReadOnlyList<AlteringWork> works, bool deferTimeout = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(facility);
         ArgumentNullException.ThrowIfNull(works);
@@ -110,7 +110,7 @@ internal sealed class MultiAlteringWaitWatchdog
         }
 
         TimeSpan idle = now - previous.LastProgressAt;
-        if (idle < _threshold)
+        if (idle < _threshold || deferTimeout)
             return;
 
         int completed = works.Count(x => x.IsCompleted);
@@ -268,7 +268,10 @@ internal sealed class MultiAlteringCoordinator
                 var observed = works.Where(x => x.FacilityName == facility).ToArray();
                 try
                 {
-                    idleWatchdog.Observe(facility, observed);
+                    // An all-completed lane needs one guarded manager turn for
+                    // receipt. Do not reset its original stall deadline here.
+                    idleWatchdog.Observe(facility, observed,
+                        deferTimeout: observed.Length > 0 && observed.All(x => x.IsCompleted));
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -427,6 +430,19 @@ internal sealed class MultiAlteringCoordinator
                     }
                     else
                     {
+                        // A no-op manager must still enforce the ORIGINAL deadline.
+                        // Never allow unbounded retries or a read-only CLI to
+                        // authorize receipt, Space, or movement.
+                        try
+                        {
+                            idleWatchdog.Observe(facility, afterFacilityWorks);
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            _laneState?.InvalidateOnsite(
+                                "시설별 대기 정체 · " + facility + " · 화면 재확인 필요");
+                            throw;
+                        }
                         idleSelections++;
                         if (idleSelections >= Math.Max(1, pendingBefore))
                         {

@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 from typing import Any
+from release_source import release_commit, check_checkout, SourceBlocked
 
 STAGES = ("evidence", "source", "codex", "regressions", "draft_pr")
 
@@ -28,6 +29,14 @@ def readiness(config: dict[str, Any], opted_in: bool = False,
                      dirty.returncode == 0 and not dirty.stdout.strip())
         except (OSError, subprocess.TimeoutExpired, ValueError):
             clean = False
+    expected = ""
+    revision_reason = "release_marker_missing"
+    revision_ok = False
+    try:
+        expected = release_commit()
+        revision_ok, revision_reason = check_checkout(repo, expected)
+    except (OSError, SourceBlocked) as exc:
+        revision_reason = str(exc)
     regression_paths = (
         "tests/altering/Regression.csproj",
         "tests/altering-screen-integration/Regression.csproj",
@@ -36,7 +45,7 @@ def readiness(config: dict[str, Any], opted_in: bool = False,
     )
     steps = {
         "evidence": (scripts / "autopilot.py").is_file(),
-        "source": source_ok and clean,
+        "source": source_ok and clean and revision_ok,
         "codex": bool(locate("python") and locate("git") and locate("codex")),
         "regressions": bool(locate("dotnet") and source_ok and
                             all((repo / path).is_file() for path in regression_paths)),
@@ -49,6 +58,10 @@ def readiness(config: dict[str, Any], opted_in: bool = False,
                   else "needs_setup",
         "stages": steps,
         "github_pr_optional": True,
+        "expected_release_sha": expected,
+        "source_revision_verified": revision_ok,
+        "source_revision_reason": revision_reason,
+        "source_sync_requires_watch": not revision_ok,
         "codex_login_verified": False,
         "codex_executed": False,
         "patch_created": False,

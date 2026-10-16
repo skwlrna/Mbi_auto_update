@@ -22,7 +22,7 @@ internal sealed class AiAutopilotDashboard : Form
         string Title, string Detail, string Status, string Next);
     private sealed record Analysis(string EventName, string EventId, string FilePath,
         DateTimeOffset Time, string Status, string Reason, string Url, string PrText,
-        string Feedback);
+        string Feedback, string Provenance);
     private readonly System.Windows.Forms.Timer _timer;
     private bool _quotaHandoffOffered;
 
@@ -63,7 +63,7 @@ internal sealed class AiAutopilotDashboard : Form
         };
         _memory = new Label
         {
-            Text = "AI가 테스트를 통과해도 실제 게임에서 해결된 것은 아닙니다.",
+            Text = "초기 후보 로컬 테스트 ≠ 최종 PR CI ≠ 실게임 해결. 세 단계는 별개입니다.",
             Dock = DockStyle.Top, Height = 34,
             ForeColor = Color.FromArgb(70, 89, 112),
             Padding = new Padding(18, 5, 12, 0)
@@ -272,7 +272,7 @@ internal sealed class AiAutopilotDashboard : Form
 
     private static string StatusText(string status) => status switch
     {
-        "tests_passed_review_required" => "코드 테스트 통과",
+        "tests_passed_review_required" => "초기 후보 로컬 테스트 통과",
         "in_progress" => "AI 분석 중 또는 강제 종료 전 기록",
         "interrupted_review_required" => "이전 AI 분석 중단 · 재분석 가능",
         "needs_review" => "수정안 검토 필요",
@@ -327,7 +327,7 @@ internal sealed class AiAutopilotDashboard : Form
 
     private static string NextStep(string status, string reason, bool running) => status switch
     {
-        "tests_passed_review_required" => "수정안을 검토하고 실제 게임에서 확인",
+        "tests_passed_review_required" => "PR 최종 CI 및 실게임 별도 확인",
         "in_progress" => running ? "현재 분석인지 위의 감시 상태 확인" : "AI 재시작 시 중단 상태 판정",
         "interrupted_review_required" => running ? "해당 오류 선택 → 중단 작업 재분석" : "AI 감시 시작 → 중단 작업 재분석",
         "needs_review" => "수정안·오류 증거 검토",
@@ -807,11 +807,26 @@ internal sealed class AiAutopilotDashboard : Form
                     else if (stateName == "blocked") prText = "저장 보류";
                     else if (stateName == "disabled") prText = "저장 안 함";
                 }
+                string baseCommit = Field(obj, "base_commit", 40);
+                string releaseCommit = Field(obj, "release_source_sha", 40);
+                string sourceLabel = baseCommit.Length == 40
+                    ? baseCommit[..10] : "기록 없음";
+                string expectedLabel = releaseCommit.Length == 40
+                    ? releaseCommit[..10] : "과거 분석 (불명)";
+                string ciLabel = "최종 PR CI는 로컬 기록으로 미검증";
+                if (obj.TryGetProperty("pr_ci", out var ci) && ci.ValueKind == JsonValueKind.Object)
+                {
+                    string ciStatus = Field(ci, "status", 40);
+                    if (ciStatus == "not_checked") ciLabel = "PR CI 별도 확인 필요";
+                }
+                string provenance = " · 로컬 Git " + sourceLabel +
+                    " · 배포 기준 " + expectedLabel + " · " + ciLabel;
                 string feedback = status == "tests_passed_review_required" && ValidEventId(eventId)
                     ? ManualVerdict(file.DirectoryName ?? "", eventId) : "unverified";
                 var analysis = new Analysis(eventName, eventId, file.FullName,
                     TimeOf(Field(obj, "started", 70), file.LastWriteTimeUtc),
-                    status, reason, IsTrustedPrUrl(url) ? url : "", prText, feedback);
+                    status, reason, IsTrustedPrUrl(url) ? url : "", prText,
+                    feedback, provenance);
                 analyses.Add(analysis);
                 if (!string.IsNullOrEmpty(eventName) && !byEvent.ContainsKey(eventName))
                     byEvent[eventName] = analysis; // Files are newest first: do not hide a manual reanalysis.
@@ -842,6 +857,9 @@ internal sealed class AiAutopilotDashboard : Form
                             ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(aiStatus));
                     string explanation = ai is { Status: "blocked" or "tests_failed" or "needs_review" or "interrupted_review_required" }
                         ? detail + " / " + ReasonText(aiStatus, ai.Reason) : detail;
+                    if (aiStatus == "tests_passed_review_required")
+                        explanation += " / 최초 AI 후보만 로컬 테스트됨; PR 최종 커밋 CI·실게임은 별도 검증";
+                    if (ai is not null) explanation += ai.Provenance;
                     items.Add((occurred, FriendlyError(title.Length > 0 ? title : "오류", detail),
                         explanation, status, NextStep(aiStatus, ai?.Reason ?? "", running),
                         ai?.Url ?? "", ai?.PrText ?? "없음",
@@ -855,7 +873,8 @@ internal sealed class AiAutopilotDashboard : Form
                 string title = ai.EventName.StartsWith("runtime_", StringComparison.OrdinalIgnoreCase)
                     ? "앱 오류 기록" : "외부 MCP 오류 기록";
                 items.Add((ai.Time, title,
-                    ReasonText(ai.Status, ai.Reason) + " · 원본 오류는 PC의 로컬 기록에 보관됨",
+                    ReasonText(ai.Status, ai.Reason) + ai.Provenance +
+                    " · 원본 오류는 PC의 로컬 기록에 보관됨",
                     ai.Status == "in_progress" && (!running || active != ai.EventName)
                         ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(ai.Status),
                     NextStep(ai.Status, ai.Reason, running),
@@ -886,10 +905,10 @@ internal sealed class AiAutopilotDashboard : Form
                     _recent.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(150, 65, 53);
             }
             _recent.ClearSelection();
-            _counts.Text = $"오류 기록 {items.Count}건 · AI 테스트 통과 {success}건 · " +
+            _counts.Text = $"오류 기록 {items.Count}건 · 초기 후보 테스트 통과 {success}건 · " +
                 $"분석 실패/중단 {failed}건 · 검토 필요 {review}건 · 진행 중 {activeCount}건";
             _updated.Text = $"마지막 확인 {DateTime.Now:HH:mm:ss} · 현재 화면 {filtered.Length}건 · " +
-                "자동 테스트 성공은 실게임 해결과 다릅니다.";
+                "초기 후보 PASS만으로 최종 PR CI나 실게임 해결을 확정하지 않습니다.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

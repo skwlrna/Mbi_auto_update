@@ -68,6 +68,12 @@ class DraftPrSafetyTests(unittest.TestCase):
                     stdout = "\0".join(CHANGED) + "\0"
                 elif argv[:2] == ["git", "diff"] and "--binary" in argv:
                     stdout = "diff --git a/source/... b/source/...\n"
+                elif argv[-2:] == ["rev-parse", "HEAD^"]:
+                    stdout = "a" * 40 + "\n"
+                elif argv[-3:] == ["ls-remote", "origin", "refs/heads/main"]:
+                    stdout = "a" * 40 + "\trefs/heads/main\n"
+                elif argv[-2:] == ["rev-parse", "HEAD"]:
+                    stdout = "b" * 40 + "\n"
                 elif argv[:3] == ["gh", "pr", "create"]:
                     stdout = "https://github.com/skwlrna/Mbi_auto_update/pull/123\n"
                 else:
