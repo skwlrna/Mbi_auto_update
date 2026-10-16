@@ -123,6 +123,53 @@ class RetentionReplayTest(unittest.TestCase):
             codex.assert_not_called()
             self.assertEqual(json.loads(original.read_text())["reason"], "wrong")
 
+    def test_explicit_once_only_retention_retry_uses_new_result_identity(self):
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            event = runtime / "runtime_20261016_224222_478_a5cce0c9"
+            event.mkdir()
+            (event / "error.txt").write_text("abyss exit HUD unconfirmed")
+            past = time.time() - 300
+            os.utime(event / "error.txt", (past, past))
+            os.utime(event, (past, past))
+            reports, results = root / "mcp", root / "results"
+            reports.mkdir()
+            results.mkdir()
+            c = autopilot.config()
+            c.update({"reports_dir": str(reports), "runtime_reports_dir": str(runtime),
+                      "results_dir": str(results), "settle_seconds": 1,
+                      "worktrees_dir": str(root / "worktrees"), "max_worktrees": 1})
+            eid = autopilot.event_id(event)
+            original = results / eid / "result.json"
+            original.parent.mkdir(parents=True)
+            original.write_text(json.dumps({"event": event.name, "event_id": eid,
+                "status": "blocked", "reason": "worktree_retention_limit_reached"}))
+            original_bytes = original.read_bytes()
+            (results / "watch-state.json").write_text(json.dumps({"seen": [eid],
+                "processed": [{"id": eid, "status": "blocked"}]}))
+            (results / "retention-retry-request.json").write_text(json.dumps({
+                "action": "retry_retention_blocked_once", "event_id": eid}))
+            calls = []
+            class PollDone(Exception):
+                pass
+            with mock.patch.object(autopilot, "require_isolated_ai_mode"), \
+                 mock.patch.object(autopilot, "retention_report", return_value={
+                     "kind": "retention_read_only", "count": 0, "limit": 1,
+                     "clean_candidates": [], "protected_count": 0, "warning": False}), \
+                 mock.patch.object(autopilot, "process", side_effect=lambda folder, cfg, **opts:
+                     calls.append(opts.get("retry_retention")) or {
+                         "status": "blocked", "reason": "fake_no_live_codex"}), \
+                 mock.patch.object(autopilot.time, "sleep", side_effect=PollDone):
+                with self.assertRaises(PollDone):
+                    autopilot.poll(c)
+            self.assertEqual(calls, [True])
+            self.assertFalse((results / "retention-retry-request.json").exists())
+            self.assertEqual(original.read_bytes(), original_bytes)
+            self.assertIn(eid, json.loads((results / "watch-state.json").read_text())["seen"])
+
     def test_preflight_uses_verified_snapshot_without_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
