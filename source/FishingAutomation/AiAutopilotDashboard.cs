@@ -22,7 +22,7 @@ internal sealed class AiAutopilotDashboard : Form
         string Title, string Detail, string Status, string Next);
     private sealed record Analysis(string EventName, string EventId, string FilePath,
         DateTimeOffset Time, string Status, string Reason, string Url, string PrText,
-        string Feedback);
+        string Feedback, string Provenance);
     private readonly System.Windows.Forms.Timer _timer;
     private bool _quotaHandoffOffered;
 
@@ -807,11 +807,26 @@ internal sealed class AiAutopilotDashboard : Form
                     else if (stateName == "blocked") prText = "저장 보류";
                     else if (stateName == "disabled") prText = "저장 안 함";
                 }
+                string baseCommit = Field(obj, "base_commit", 40);
+                string releaseCommit = Field(obj, "release_source_sha", 40);
+                string sourceLabel = baseCommit.Length == 40
+                    ? baseCommit[..10] : "기록 없음";
+                string expectedLabel = releaseCommit.Length == 40
+                    ? releaseCommit[..10] : "과거 분석 (불명)";
+                string ciLabel = "최종 PR CI는 로컬 기록으로 미검증";
+                if (obj.TryGetProperty("pr_ci", out var ci) && ci.ValueKind == JsonValueKind.Object)
+                {
+                    string ciStatus = Field(ci, "status", 40);
+                    if (ciStatus == "not_checked") ciLabel = "PR CI 별도 확인 필요";
+                }
+                string provenance = " · 로컬 Git " + sourceLabel +
+                    " · 배포 기준 " + expectedLabel + " · " + ciLabel;
                 string feedback = status == "tests_passed_review_required" && ValidEventId(eventId)
                     ? ManualVerdict(file.DirectoryName ?? "", eventId) : "unverified";
                 var analysis = new Analysis(eventName, eventId, file.FullName,
                     TimeOf(Field(obj, "started", 70), file.LastWriteTimeUtc),
-                    status, reason, IsTrustedPrUrl(url) ? url : "", prText, feedback);
+                    status, reason, IsTrustedPrUrl(url) ? url : "", prText,
+                    feedback, provenance);
                 analyses.Add(analysis);
                 if (!string.IsNullOrEmpty(eventName) && !byEvent.ContainsKey(eventName))
                     byEvent[eventName] = analysis; // Files are newest first: do not hide a manual reanalysis.
@@ -844,6 +859,7 @@ internal sealed class AiAutopilotDashboard : Form
                         ? detail + " / " + ReasonText(aiStatus, ai.Reason) : detail;
                     if (aiStatus == "tests_passed_review_required")
                         explanation += " / 최초 AI 후보만 로컬 테스트됨; PR 최종 커밋 CI·실게임은 별도 검증";
+                    if (ai is not null) explanation += ai.Provenance;
                     items.Add((occurred, FriendlyError(title.Length > 0 ? title : "오류", detail),
                         explanation, status, NextStep(aiStatus, ai?.Reason ?? "", running),
                         ai?.Url ?? "", ai?.PrText ?? "없음",
@@ -857,7 +873,8 @@ internal sealed class AiAutopilotDashboard : Form
                 string title = ai.EventName.StartsWith("runtime_", StringComparison.OrdinalIgnoreCase)
                     ? "앱 오류 기록" : "외부 MCP 오류 기록";
                 items.Add((ai.Time, title,
-                    ReasonText(ai.Status, ai.Reason) + " · 원본 오류는 PC의 로컬 기록에 보관됨",
+                    ReasonText(ai.Status, ai.Reason) + ai.Provenance +
+                    " · 원본 오류는 PC의 로컬 기록에 보관됨",
                     ai.Status == "in_progress" && (!running || active != ai.EventName)
                         ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(ai.Status),
                     NextStep(ai.Status, ai.Reason, running),
