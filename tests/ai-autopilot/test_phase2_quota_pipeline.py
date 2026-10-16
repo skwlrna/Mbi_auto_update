@@ -118,6 +118,32 @@ class Phase2Tests(unittest.TestCase):
         agent.write_json(other / "result.json", {"status": "blocked"})
         self.assertFalse(agent.quota_retry_eligible(folder, self.results, eid))
 
+    def test_real_process_gate_keeps_old_quota_result_immutable(self):
+        folder = self.add_error()
+        eid = agent.event_id(folder)
+        original = self.results / eid
+        original.mkdir()
+        record = {"event_id": eid, "event": folder.name, "status": "blocked",
+                  "reason": "codex_unverified: codex_quota_exhausted"}
+        agent.write_json(original / "result.json", record)
+        def fake_git(argv, *args, **kwargs):
+            out = "d" * 40 + "\n" if argv[:3] == ["git", "rev-parse", "HEAD"] else ""
+            return subprocess.CompletedProcess(argv, 0, out, "")
+        with mock.patch.object(agent, "cmd", side_effect=fake_git), \
+             mock.patch.object(agent, "exec_codex", return_value=(True, "mock")), \
+             mock.patch.object(agent, "edited_paths", return_value=([], [])), \
+             mock.patch.object(agent, "related_attempts", return_value=[]), \
+             mock.patch.object(agent, "record_attempt"):
+            result = agent.process(folder, self.config, retry_quota=True)
+        self.assertEqual(result["status"], "needs_review")
+        self.assertEqual(result["reason"].split(";")[0], "agent_no_patch")
+        self.assertEqual(result["retry_of"], eid)
+        self.assertEqual(result["event_id"], agent.quota_retry_id(eid))
+        self.assertEqual(agent.read_json(original / "result.json"), record)
+        self.assertTrue((self.results / agent.quota_retry_id(eid) / "result.json").exists())
+        again = agent.process(folder, self.config, retry_quota=True)
+        self.assertEqual(again["reason"], "quota_original_not_reviewable")
+
     def test_quota_job_id_is_distinct_and_stable(self):
         eid = "b" * 16
         new = agent.quota_retry_id(eid)
