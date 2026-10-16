@@ -590,6 +590,16 @@ internal sealed class AiAutopilotDashboard : Form
                 MessageBox.Show(this, "최초 Codex 사용량 한도로 차단된 오류만 한 번 재분석할 수 있습니다.");
                 return;
             }
+            // The Python watcher permits at most one quota retry per original
+            // event. Mirror its stable ID to avoid an unprocessable second request.
+            byte[] hash = System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes("manual-quota-retry-v1:" + selected.EventId));
+            string retryId = Convert.ToHexString(hash)[..16].ToLowerInvariant();
+            if (File.Exists(Path.Combine(Root, retryId, "result.json")))
+            {
+                MessageBox.Show(this, "이 오류는 이미 한 번 재분석했습니다. 새 결과를 확인하세요.");
+                return;
+            }
             string request = Path.Combine(Root, "quota-retry-request.json");
             if (File.Exists(request))
             {
