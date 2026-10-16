@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import zipfile
-from release_source import check_checkout, release_commit, SourceBlocked
+from release_source import check_checkout, release_commit, SourceBlocked, TRUSTED_ORIGINS
 
 IDENTIFIER = re.compile(r"[0-9a-f]{16}\Z")
 TERMINAL = {"blocked", "needs_review", "tests_failed"}
@@ -49,6 +49,43 @@ def _repo(c: dict) -> Path:
     return old
 
 
+def _registrations(c: dict) -> dict[Path, Path]:
+    """Resolve the owning *trusted* Git root, including legacy pre-snapshot runs.
+
+    The pinned release snapshot and old configured repo are separate Git
+    repositories. A worktree must be removed using the repo that registered it.
+    Nothing here rewrites or pulls either repository.
+    """
+    old_default = Path.home() / "MabiAutoAI" / "repo"
+    choices = (_repo(c), Path(c.get("original_repo", old_default)).expanduser(),
+               old_default)
+    owners: dict[Path, Path] = {}
+    visited: set[Path] = set()
+    for candidate in choices:
+        try:
+            if candidate.is_symlink() or not candidate.is_dir():
+                continue
+            resolved = candidate.resolve()
+            if resolved in visited:
+                continue
+            visited.add(resolved)
+            top = _git(resolved, "rev-parse", "--show-toplevel")
+            remote = _git(resolved, "remote", "get-url", "origin")
+            if (top.returncode or remote.returncode
+                    or Path(top.stdout.strip()).resolve() != resolved
+                    or remote.stdout.strip() not in TRUSTED_ORIGINS):
+                continue
+            listed = _git(resolved, "worktree", "list", "--porcelain")
+            if listed.returncode:
+                continue
+            for line in listed.stdout.splitlines():
+                if line.startswith("worktree "):
+                    owners[Path(line[9:]).resolve()] = resolved
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            continue
+    return owners
+
+
 def _existing_report(c: dict, event_id: str) -> dict:
     path = Path(c["results_dir"]).expanduser() / event_id / "result.json"
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 131072:
@@ -60,8 +97,7 @@ def _existing_report(c: dict, event_id: str) -> dict:
         return {}
 
 
-def _eligible(repo: Path, root: Path, folder: Path, c: dict,
-              registered: set[Path]) -> bool:
+def _eligible(folder: Path, c: dict, registered: dict[Path, Path]) -> bool:
     # A missing/foreign worktree, an active job, or a worktree with edits cannot
     # be cleaned automatically or by the opt-in clean-only action.
     if (not IDENTIFIER.fullmatch(folder.name) or folder.is_symlink()
@@ -82,7 +118,6 @@ def _eligible(repo: Path, root: Path, folder: Path, c: dict,
 
 def report(c: dict) -> dict:
     root = Path(c["worktrees_dir"]).expanduser()
-    repo = _repo(c)
     limit = int(c.get("max_worktrees", 30))
     data = {"kind": "retention_read_only", "limit": limit,
             "count": 0, "clean_candidates": [], "protected_count": 0,
@@ -93,19 +128,16 @@ def report(c: dict) -> dict:
     if not root.is_dir():
         return data
     try:
-        listing = _git(repo, "worktree", "list", "--porcelain")
-        registered = ({Path(line[9:]).resolve() for line in listing.stdout.splitlines()
-                       if line.startswith("worktree ")}
-                      if listing.returncode == 0 else set())
+        registered = _registrations(c)
         folders = sorted(p for p in root.iterdir() if p.is_dir())
         data["count"] = len(folders)
         for folder in folders:
-            if _eligible(repo, root, folder, c, registered):
+            if _eligible(folder, c, registered):
                 data["clean_candidates"].append(folder.name)
         data["protected_count"] = len(folders) - len(data["clean_candidates"])
         data["warning"] = len(folders) >= max(0, limit - 3)
-        if listing.returncode != 0:
-            data["error"] = "git_worktree_list_failed"
+        if folders and not registered:
+            data["error"] = "no_trusted_git_worktree_registrations"
     except (OSError, subprocess.TimeoutExpired, ValueError):
         data["error"] = "retention_inventory_unavailable"
     return data
@@ -157,7 +189,10 @@ def archive_clean_one(c: dict, event_id: str) -> dict:
         if event_id not in report(c).get("clean_candidates", []):
             raise ValueError("worktree_changed_during_backup")
         staging.rename(final)
-        removed = _git(_repo(c), "worktree", "remove", "--force", str(folder))
+        owner = _registrations(c).get(folder.resolve())
+        if owner is None:
+            return {"status": "blocked", "reason": "registered_owner_disappeared"}
+        removed = _git(owner, "worktree", "remove", "--force", str(folder))
         if removed.returncode:
             return {"status": "blocked", "reason": "git_worktree_remove_failed_backup_kept"}
         return {"status": "archived", "reason": "verified_backup_then_clean_worktree_removed",
