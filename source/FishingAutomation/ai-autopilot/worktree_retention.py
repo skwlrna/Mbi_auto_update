@@ -14,7 +14,7 @@ import subprocess
 import zipfile
 from release_source import check_checkout, release_commit, SourceBlocked, TRUSTED_ORIGINS
 
-IDENTIFIER = re.compile(r"[0-9a-f]{16}\Z")
+IDENTIFIER = re.compile(r"[0-9a-f]{16}(?:-retry-retention-v1|-retry-cli-arg-v121)?\Z")
 TERMINAL = {"blocked", "needs_review", "tests_failed"}
 ARCHIVE_LIMIT_BYTES = 512 * 1024 * 1024
 
