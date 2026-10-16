@@ -62,7 +62,17 @@ Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slo
 # across slot-wise RunBatch returns, not reset the watch with every loop.
 Match-Required $multiAlter 'class MultiAlteringWaitWatchdog' 'multi coordinator keeps per-facility idle history'
 Match-Required $multiAlter 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' 'whole multi run shares a single watchdog across batches'
-Match-Required $multiAlter 'idleWatchdog.Observe\(facility, observed\)' 'every pending facility is observed before new actions'
+# The V3.2.19 wood-completed fix is intentionally more specific than
+# an unconditional call: only an ALL-completed lane may defer pre-manager
+# timeout, with the original deadline checked again after no verified progress.
+Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, observed,\s*deferTimeout: observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)' 'only a full completed lane may defer timeout for a manager receipt opportunity'
+Match-Required $multiAlter 'if \(idle < _threshold \|\| deferTimeout\)' 'watchdog deferral preserves rather than resets its original deadline'
+Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, afterFacilityWorks\)' 'manager no-op rechecks the same timeout before further processing'
+Match-Required $multiAlter 'if \(works.Count == 0\)' 'empty facility stays idle and clears stale watchdog history'
+$woodSchedulerTests = Read-Source 'tests/combined-scheduler/Program.cs'
+Match-Required $woodSchedulerTests 'wood: one deferred receipt turn retains the original 120s deadline' 'completed wood requires bounded manager receipt opportunity'
+Match-Required $woodSchedulerTests 'wood: unchanged five slots fail closed after manager no-op' 'wood manager no-op cannot bypass timeout'
+Match-Required $woodSchedulerTests 'wood: mixed completed/running lane stops before manager input' 'unfinished wood lane cannot get manager receipt bypass'
 Match-Required $multiAlter 'lowestRunning < previous.LowestRunningSeconds' 'only genuine countdown progress refreshes idle timer'
 Match-Required $multiAlter 'idleWatchdog.ConfirmManagerProgress\(facility\)' 'manager-confirmed registration or completion refreshes progress'
 Match-Required $multiAlter 'registrationBefore = _laneState\?\.Snapshot\(facility\)' 'F9 snapshots real confirmed registration evidence before RunBatch'
