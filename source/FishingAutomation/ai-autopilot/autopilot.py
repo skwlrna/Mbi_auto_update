@@ -468,6 +468,27 @@ def test_patch(worktree: Path, outdir: Path, c: dict[str, Any], added_tests: lis
     return len(results) > 0, results
 
 
+def quota_retry_id(original_eid: str) -> str:
+    """One bounded, separately recorded manual quota recovery attempt."""
+    return hashlib.sha256(("manual-quota-retry-v1:" + original_eid).encode()).hexdigest()[:16]
+
+
+def quota_retry_eligible(folder: Path, results_dir: Path, eid: str) -> bool:
+    """Only a known, provider-quota-blocked event with its original evidence."""
+    source = results_dir / eid / "result.json"
+    new_result = results_dir / quota_retry_id(eid) / "result.json"
+    if (not re.fullmatch(r"[0-9a-f]{16}", eid) or source.is_symlink()
+            or not source.is_file() or source.stat().st_size > 131072
+            or new_result.exists() or new_result.is_symlink()):
+        return False
+    report = read_json(source)
+    return (isinstance(report, dict) and report.get("event_id") == eid
+            and report.get("event") == folder.name
+            and report.get("status") == "blocked"
+            and not report.get("retry_of")  # Never chain quota retry jobs.
+            and "codex_quota_exhausted" in str(report.get("reason", "")))
+
+
 def interrupted_retry_id(original_eid: str) -> str:
     """A distinct, deterministic job key; never reuse the interrupted worktree."""
     return hashlib.sha256(("manual-interrupted-retry-v1:" + original_eid).encode()).hexdigest()[:16]
@@ -494,11 +515,17 @@ def mark_interrupted_result(path: Path) -> bool:
 
 
 def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
-            progress=None, retry_interrupted: bool = False) -> dict[str, Any]:
+            progress=None, retry_interrupted: bool = False,
+            retry_quota: bool = False) -> dict[str, Any]:
     original_eid = event_id(folder)
     eid = original_eid
-    if retry_cli_error and retry_interrupted:
+    if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota)) > 1:
         return {"status": "blocked", "reason": "conflicting_manual_retry_modes"}
+    if retry_quota:
+        results = expand(str(c["results_dir"]))
+        if not quota_retry_eligible(folder, results, original_eid):
+            return {"status": "blocked", "reason": "quota_original_not_reviewable"}
+        eid = quota_retry_id(original_eid)
     if retry_interrupted:
         previous = expand(str(c["results_dir"])) / original_eid / "result.json"
         if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
@@ -531,6 +558,9 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
                               "status": "blocked", "note": "No changes to live game or deployed software."}
 
     memory_context: str | None = None
+    if retry_quota:
+        output["retry_of"] = original_eid
+        output["retry_reason"] = "explicit_ui_post_quota_reanalysis"
     if retry_interrupted:
         output["retry_of"] = original_eid
         output["retry_reason"] = "explicit_ui_interrupted_reanalysis"
@@ -811,6 +841,25 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                             retry_folder = candidate
             except (OSError, ValueError, TypeError):
                 pass
+        # A quota-blocked error is never retried merely because credits return:
+        # require a separate user-approved event request in addition to the
+        # pause-id-bound provider-resume authorization.
+        quota_retry_file = results_dir / "quota-retry-request.json"
+        quota_retry_folder = None
+        if not single and quota_retry_file.is_file() and not quota_retry_file.is_symlink():
+            try:
+                qr = (read_json(quota_retry_file) if quota_retry_file.stat().st_size <= 1024 else {})
+                if isinstance(qr, dict) and qr.get("action") == "retry_quota_once":
+                    qid = qr.get("event_id")
+                    if isinstance(qid, str) and re.fullmatch(r"[0-9a-f]{16}", qid):
+                        candidate = next((p for p in all_evidence_folders(c)
+                                          if event_id(p) == qid), None)
+                        if (candidate is not None and
+                            stable(candidate, int(c["settle_seconds"])) and
+                            quota_retry_eligible(candidate, results_dir, qid)):
+                            quota_retry_folder = candidate
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
         # Explicit quota exhaustion persists through process/watch restarts.
         # Only a user-confirmed request bound to the current random pause ID
         # permits NEW events to be sent to Codex again.
@@ -836,6 +885,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                     last_reported = ("quota", len(pending))
                 time.sleep(max(10, int(c["poll_seconds"])))
                 continue
+        if quota_retry_folder is not None:
+            pending = [quota_retry_folder] + [p for p in pending if p != quota_retry_folder]
         if retry_folder is not None:
             pending = [retry_folder] + [p for p in pending if p != retry_folder]
         if not single:
@@ -847,12 +898,13 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         for folder in pending:
             eid = event_id(folder)
             manual_retry = retry_folder is not None and folder == retry_folder
-            if eid in seen and not (single and latest) and not manual_retry:
+            manual_quota_retry = quota_retry_folder is not None and folder == quota_retry_folder
+            if eid in seen and not (single and latest) and not manual_retry and not manual_quota_retry:
                 continue
             # No arbitrary per-day run cap. Codex decides the actual account
             # quota; the explicit quota error triggers a bounded local ChatGPT
             # handoff and stops additional Codex calls safely.
-            signature = duplicate_signature(folder) if not single and not manual_retry else None
+            signature = duplicate_signature(folder) if not single and not manual_retry and not manual_quota_retry else None
             last_seen = recent_signatures.get(signature) if signature else None
             if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:
                 reason = "identical_mcp_error_evidence_within_10_minutes"
@@ -888,13 +940,17 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                     else:
                         print(f"Codex 정체 감지: {reason} · {elapsed}초 경과 · 재시작 없음", flush=True)
                 result = process(folder, c, retry_cli_error=retry_cli_error,
-                                 progress=on_codex_progress, retry_interrupted=manual_retry)
+                                 progress=on_codex_progress, retry_interrupted=manual_retry,
+                                 retry_quota=manual_quota_retry)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
             print("처리 결과:", result.get("status"), result.get("reason"), flush=True)
             if manual_retry:
                 try: retry_file.unlink(missing_ok=True)
+                except OSError: pass
+            if manual_quota_retry:
+                try: quota_retry_file.unlink(missing_ok=True)
                 except OSError: pass
             if signature:
                 recent_signatures[signature] = folder.stat().st_mtime
@@ -930,6 +986,59 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             print("처리 가능한 오류 폴더가 없습니다.")
             return
         time.sleep(max(10, int(c["poll_seconds"])))
+
+def pipeline_readiness(c: dict[str, Any]) -> tuple[bool, list[str]]:
+    """One-click READ-ONLY local integration preflight, not a live repair test.
+
+    Verifies host prerequisites and auth without launching a Codex agent,
+    publishing a branch, touching the game, or exposing local paths/secrets.
+    """
+    problems: list[str] = []
+    repo = expand(str(c["repo"]))
+    for binary in ("python", "git", "codex", "dotnet"):
+        if not shutil.which(binary):
+            problems.append(binary + "_missing")
+    if not repo.is_dir() or not (repo / ".git").exists():
+        problems.append("source_clone_missing")
+    elif shutil.which("git"):
+        try:
+            status = cmd(["git", "status", "--porcelain", "--untracked-files=no"],
+                         repo, timeout=12)
+            if status.returncode != 0 or status.stdout.strip():
+                problems.append("source_not_clean")
+        except (OSError, subprocess.TimeoutExpired):
+            problems.append("source_git_unavailable")
+    if c.get("require_clean_repo") is not True:
+        problems.append("isolation_guard_disabled")
+    if shutil.which("codex"):
+        try:
+            auth = cmd(["codex", "login", "status"], HERE, timeout=15)
+            if auth.returncode != 0:
+                problems.append("codex_login_required")
+        except (OSError, subprocess.TimeoutExpired):
+            problems.append("codex_login_unknown")
+    if repo.is_dir():
+        for project in ("tests/altering/Regression.csproj",
+                        "tests/crafting/Regression.csproj",
+                        "tests/production-ui/Regression.csproj",
+                        "tests/combined-scheduler/Regression.csproj"):
+            if not (repo / project).is_file():
+                problems.append("regression_suite_missing")
+                break
+    from github_pr import user_opted_in
+    if user_opted_in():
+        if not shutil.which("gh"):
+            problems.append("github_cli_missing")
+        else:
+            try:
+                gh = cmd(["gh", "auth", "status", "--hostname", "github.com"],
+                         HERE, timeout=12)
+                if gh.returncode != 0:
+                    problems.append("github_login_required")
+            except (OSError, subprocess.TimeoutExpired):
+                problems.append("github_login_unknown")
+    return not problems, sorted(set(problems))
+
 
 class SingletonLock:
     """OS-backed nonblocking advisory lock; released automatically if the process exits."""
@@ -999,6 +1108,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="MabiAuto safe AI repair companion")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only environment preflight")
+    mode.add_argument("--pipeline-check", action="store_true",
+                      help="read-only local Codex/CI/PR prerequisites, never run Codex")
     mode.add_argument("--watch", action="store_true", help="watch new MCP error folders")
     mode.add_argument("--once", action="store_true", help="process one pending event")
     mode.add_argument("--status", action="store_true", help="show recent results")
@@ -1011,6 +1122,12 @@ def main() -> int:
     c = config()
     if a.check:
         return 0 if status_check(c) else 2
+    if a.pipeline_check:
+        passed, problems = pipeline_readiness(c)
+        print("PIPELINE_CHECK: " + ("PASS" if passed else "FAIL") +
+              (" | " + ",".join(problems) if problems else " | host_ready_not_live_verified"),
+              flush=True)
+        return 0 if passed else 2
     if a.status:
         d = expand(str(c["results_dir"]))
         for p in sorted(d.glob("*/result.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:8]:
