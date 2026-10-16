@@ -1265,6 +1265,7 @@ def main() -> int:
     # Only watch/once modes may prepare new source; read-only modes never clone.
     try:
         selected = prepare_source(c)
+        c["original_repo"] = c["repo"]
         c["repo"] = selected["repo"]
         c["release_source_sha"] = selected["expected"]
         write_json(expand(str(c["results_dir"])) / "source-alignment.json", {
