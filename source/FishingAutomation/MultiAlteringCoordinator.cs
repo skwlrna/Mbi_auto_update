@@ -85,9 +85,11 @@ internal sealed class MultiAlteringWaitWatchdog
             .DefaultIfEmpty(long.MaxValue)
             .Min();
 
-        // Idle facilities have no active work to time. The owner ledger still
-        // rejects an unexplained queue shrink; an empty wait is not progress.
-        if (works.Count == 0)
+        // Empty or fully completed lanes have no production left to time.
+        // Completed output may wait while another facility owns the input;
+        // the coordinator still checks ownership and receipt evidence before input.
+        // A mixed lane must remain monitored, even when most slots completed.
+        if (works.Count == 0 || works.All(x => x.IsCompleted))
         {
             _last.Remove(facility);
             return;

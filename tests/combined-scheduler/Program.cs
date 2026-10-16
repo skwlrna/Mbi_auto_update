@@ -107,6 +107,33 @@ longWatch.ResumeAfterAbyssExit();
 longWatch.Observe("가죽 가공 시설", new[] { pauseWork });
 Assert(true, "Abyss duration never becomes manager stall time after return");
 
+// Fully completed output is ready for managed receipt, not stalled production.
+// Reproduce the reported five completed slots unchanged across 133 active seconds.
+DateTimeOffset receiptClock = new(2026, 10, 16, 0, 0, 0, TimeSpan.Zero);
+var receiptWatch = new MultiAlteringWaitWatchdog(
+    TimeSpan.FromSeconds(120), () => receiptClock);
+var receiptWorks = Enumerable.Repeat(Work(0, true), 5).ToArray();
+receiptWatch.Observe("가죽 가공 시설", receiptWorks);
+receiptClock = receiptClock.AddSeconds(133);
+bool completedReceiptRejected = false;
+try { receiptWatch.Observe("가죽 가공 시설", receiptWorks); }
+catch (InvalidOperationException) { completedReceiptRejected = true; }
+Assert(!completedReceiptRejected,
+    "five completed slots waiting 133 seconds remain eligible for managed receipt");
+
+// Veto: completed slots must not mask a frozen unfinished job in the same lane.
+var mixedReceiptWorks = receiptWorks.Concat(new[] { Work(45) }).ToArray();
+receiptWatch.Observe("가죽 가공 시설", mixedReceiptWorks);
+receiptClock = receiptClock.AddSeconds(133);
+bool mixedReceiptStopped = false;
+try { receiptWatch.Observe("가죽 가공 시설", mixedReceiptWorks); }
+catch (InvalidOperationException ex)
+{
+    mixedReceiptStopped = ex.Message.Contains("다중가공 시설별 정체 감지");
+}
+Assert(mixedReceiptStopped,
+    "five completed slots plus a frozen unfinished slot still veto processing after 133 seconds");
+
 Assert(ScheduledAbyssReturnPolicy.RecoveryResultAction(true) ==
        AbyssRecoveryResultAction.ExitForProcessing,
     "scheduled recovery result must use LEFT exit, never middle retry");
