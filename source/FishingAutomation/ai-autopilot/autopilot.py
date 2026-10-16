@@ -986,6 +986,59 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             return
         time.sleep(max(10, int(c["poll_seconds"])))
 
+def pipeline_readiness(c: dict[str, Any]) -> tuple[bool, list[str]]:
+    """One-click READ-ONLY local integration preflight, not a live repair test.
+
+    Verifies host prerequisites and auth without launching a Codex agent,
+    publishing a branch, touching the game, or exposing local paths/secrets.
+    """
+    problems: list[str] = []
+    repo = expand(str(c["repo"]))
+    for binary in ("python", "git", "codex", "dotnet"):
+        if not shutil.which(binary):
+            problems.append(binary + "_missing")
+    if not repo.is_dir() or not (repo / ".git").exists():
+        problems.append("source_clone_missing")
+    elif shutil.which("git"):
+        try:
+            status = cmd(["git", "status", "--porcelain", "--untracked-files=no"],
+                         repo, timeout=12)
+            if status.returncode != 0 or status.stdout.strip():
+                problems.append("source_not_clean")
+        except (OSError, subprocess.TimeoutExpired):
+            problems.append("source_git_unavailable")
+    if c.get("require_clean_repo") is not True:
+        problems.append("isolation_guard_disabled")
+    if shutil.which("codex"):
+        try:
+            auth = cmd(["codex", "login", "status"], HERE, timeout=15)
+            if auth.returncode != 0:
+                problems.append("codex_login_required")
+        except (OSError, subprocess.TimeoutExpired):
+            problems.append("codex_login_unknown")
+    if repo.is_dir():
+        for project in ("tests/altering/Regression.csproj",
+                        "tests/crafting/Regression.csproj",
+                        "tests/production-ui/Regression.csproj",
+                        "tests/combined-scheduler/Regression.csproj"):
+            if not (repo / project).is_file():
+                problems.append("regression_suite_missing")
+                break
+    from github_pr import user_opted_in
+    if user_opted_in():
+        if not shutil.which("gh"):
+            problems.append("github_cli_missing")
+        else:
+            try:
+                gh = cmd(["gh", "auth", "status", "--hostname", "github.com"],
+                         HERE, timeout=12)
+                if gh.returncode != 0:
+                    problems.append("github_login_required")
+            except (OSError, subprocess.TimeoutExpired):
+                problems.append("github_login_unknown")
+    return not problems, sorted(set(problems))
+
+
 class SingletonLock:
     """OS-backed nonblocking advisory lock; released automatically if the process exits."""
     def __init__(self, path: Path):
@@ -1054,6 +1107,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="MabiAuto safe AI repair companion")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only environment preflight")
+    mode.add_argument("--pipeline-check", action="store_true",
+                      help="read-only local Codex/CI/PR prerequisites, never run Codex")
     mode.add_argument("--watch", action="store_true", help="watch new MCP error folders")
     mode.add_argument("--once", action="store_true", help="process one pending event")
     mode.add_argument("--status", action="store_true", help="show recent results")
@@ -1066,6 +1121,12 @@ def main() -> int:
     c = config()
     if a.check:
         return 0 if status_check(c) else 2
+    if a.pipeline_check:
+        passed, problems = pipeline_readiness(c)
+        print("PIPELINE_CHECK: " + ("PASS" if passed else "FAIL") +
+              (" | " + ",".join(problems) if problems else " | host_ready_not_live_verified"),
+              flush=True)
+        return 0 if passed else 2
     if a.status:
         d = expand(str(c["results_dir"]))
         for p in sorted(d.glob("*/result.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:8]:
