@@ -1097,7 +1097,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             print(f"처리 시작: {folder.name} · 대기 {max(0, len(pending)-1)}건", flush=True)
             notification_id = (interrupted_retry_id(eid) if manual_retry else
                                quota_retry_id(eid) if manual_quota else
-                               retention_retry_id(eid) if manual_retention else eid)
+                               eid if manual_retention else eid)
             print(f"AI 알림: started {notification_id}", flush=True)
             print(f"AI 단계: {phase_name}", flush=True)
             try:
