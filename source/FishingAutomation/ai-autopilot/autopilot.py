@@ -864,6 +864,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 print("중단된 기록 검사 실패 (자동 재실행 안 함)", flush=True)
     last_reported: tuple[str, int] | None = None
     last_retention_warning: int | None = None
+    last_retention_scan = 0.0
 
     def category_for(folder: Path) -> str:
         try:
@@ -1006,10 +1007,12 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 pass
 
         cleanup_request = results_dir / "retention-clean-request.json"
+        cleaned_or_attempted = False
         if (not single and cleanup_request.is_file()
                 and not cleanup_request.is_symlink()
                 and not state.get("quota_pause")):
             try:
+                cleaned_or_attempted = True
                 record = read_json(cleanup_request) if cleanup_request.stat().st_size < 1024 else {}
                 if isinstance(record, dict) and record.get("action") == "archive_clean_worktree_once":
                     identity = record.get("event_id")
@@ -1022,17 +1025,20 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 try: cleanup_request.unlink(missing_ok=True)
                 except OSError: pass
 
-        # Read-only inventory updated each polling cycle, never auto-deletes.
-        try:
-            inventory = retention_report(c)
-            write_json(results_dir / "worktree-retention.json", inventory)
-            if inventory.get("warning") and inventory.get("count") != last_retention_warning:
-                print("AI 작업공간 보관 경고:", inventory.get("count"), "/", inventory.get("limit"), flush=True)
-                last_retention_warning = inventory.get("count")
-            elif not inventory.get("warning"):
-                last_retention_warning = None
-        except (OSError, ValueError, TypeError):
-            pass
+        # Deep Git status inspection is relatively expensive on Windows:
+        # refresh once per minute and immediately after an approved cleanup.
+        if not single and (cleaned_or_attempted or time.monotonic() - last_retention_scan >= 60):
+            try:
+                inventory = retention_report(c)
+                write_json(results_dir / "worktree-retention.json", inventory)
+                last_retention_scan = time.monotonic()
+                if inventory.get("warning") and inventory.get("count") != last_retention_warning:
+                    print("AI 작업공간 보관 경고:", inventory.get("count"), "/", inventory.get("limit"), flush=True)
+                    last_retention_warning = inventory.get("count")
+                elif not inventory.get("warning"):
+                    last_retention_warning = None
+            except (OSError, ValueError, TypeError):
+                pass
         if retry_folder is not None:
             pending = [retry_folder] + [p for p in pending if p != retry_folder]
         elif quota_retry_folder is not None:
