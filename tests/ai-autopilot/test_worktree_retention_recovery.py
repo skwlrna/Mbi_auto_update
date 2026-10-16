@@ -204,7 +204,7 @@ class RetentionReplayTest(unittest.TestCase):
                 "selected_repo": str(current)}))
             with mock.patch.object(pipeline_readiness, "release_commit", return_value=sha), \
                  mock.patch.object(pipeline_readiness, "check_checkout",
-                                   side_effect=lambda repo, expected: (Path(repo) == current, "verified")), \
+                                   side_effect=lambda repo, expected: (Path(repo).resolve() == current.resolve(), "verified")), \
                  mock.patch.object(pipeline_readiness.shutil, "which", return_value="/usr/bin/test"):
                 result = pipeline_readiness.readiness({"repo": str(old),
                     "results_dir": str(records)}, locate=lambda exe: "/usr/bin/test")
