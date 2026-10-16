@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import zipfile
+from release_source import check_checkout, release_commit, SourceBlocked
 
 IDENTIFIER = re.compile(r"[0-9a-f]{16}\Z")
 TERMINAL = {"blocked", "needs_review", "tests_failed"}
@@ -22,6 +23,30 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
                           text=True, encoding="utf-8", errors="replace",
                           timeout=30, shell=False)
+
+
+def _repo(c: dict) -> Path:
+    # The running watcher may have selected a release-pinned snapshot while
+    # the configured /repo remains on an older commit.
+    old = Path(c["repo"]).expanduser()
+    try:
+        expected = release_commit()
+    except (OSError, SourceBlocked):
+        return old
+    root = Path(c["results_dir"]).expanduser()
+    record = root / "source-alignment.json"
+    if not record.is_file() or record.is_symlink() or record.stat().st_size > 4096:
+        return old
+    try:
+        data = json.loads(record.read_text(encoding="utf-8"))
+        source = Path(data.get("selected_repo", "")).expanduser()
+        if (data.get("status") == "verified"
+                and data.get("expected_release_sha") == expected
+                and check_checkout(source, expected)[0]):
+            return source
+    except (OSError, ValueError, TypeError):
+        pass
+    return old
 
 
 def _existing_report(c: dict, event_id: str) -> dict:
@@ -57,7 +82,7 @@ def _eligible(repo: Path, root: Path, folder: Path, c: dict,
 
 def report(c: dict) -> dict:
     root = Path(c["worktrees_dir"]).expanduser()
-    repo = Path(c["repo"]).expanduser()
+    repo = _repo(c)
     limit = int(c.get("max_worktrees", 30))
     data = {"kind": "retention_read_only", "limit": limit,
             "count": 0, "clean_candidates": [], "protected_count": 0,
@@ -132,7 +157,7 @@ def archive_clean_one(c: dict, event_id: str) -> dict:
         if event_id not in report(c).get("clean_candidates", []):
             raise ValueError("worktree_changed_during_backup")
         staging.rename(final)
-        removed = _git(Path(c["repo"]).expanduser(), "worktree", "remove", "--force", str(folder))
+        removed = _git(_repo(c), "worktree", "remove", "--force", str(folder))
         if removed.returncode:
             return {"status": "blocked", "reason": "git_worktree_remove_failed_backup_kept"}
         return {"status": "archived", "reason": "verified_backup_then_clean_worktree_removed",
