@@ -49,4 +49,4 @@ class ReliablePipelineContract(unittest.TestCase):
     def test_preflight_never_auto_syncs_sources(self):
         agent = (AI / "autopilot.py").read_text(encoding="utf-8")
         self.assertLess(agent.index("if a.pipeline_check:"), agent.index("selected = prepare_source(c)"))
-        self.assertIn("only", "Only watch/once modes may prepare new source")
+        self.assertIn("Only watch/once modes may prepare new source", agent)
