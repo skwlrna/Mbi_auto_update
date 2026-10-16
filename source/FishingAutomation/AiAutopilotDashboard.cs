@@ -1093,10 +1093,22 @@ internal sealed class AiAutopilotDashboard : Form
                     _recent.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(150, 65, 53);
             }
             _recent.ClearSelection();
+            string retentionLabel = "작업공간 상태 미확인";
+            using (var inventory = ReadBounded(Path.Combine(Root, "worktree-retention.json")))
+            {
+                if (inventory is not null && Field(inventory.RootElement, "kind") == "retention_read_only")
+                {
+                    int count = Number(inventory.RootElement, "count");
+                    int limit = Number(inventory.RootElement, "limit");
+                    if (limit > 0)
+                        retentionLabel = "작업공간 " + count + "/" + limit +
+                            (count >= limit ? " · 가득 참" : count >= limit - 3 ? " · 곧 가득 참" : "");
+                }
+            }
             _counts.Text = $"오류 기록 {items.Count}건 · 초기 후보 테스트 통과 {success}건 · " +
                 $"분석 실패/중단 {failed}건 · 검토 필요 {review}건 · 진행 중 {activeCount}건";
             _updated.Text = $"마지막 확인 {DateTime.Now:HH:mm:ss} · 현재 화면 {filtered.Length}건 · " +
-                "초기 후보 PASS만으로 최종 PR CI나 실게임 해결을 확정하지 않습니다.";
+                retentionLabel + " · 초기 후보 PASS는 게임 해결이 아닙니다.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
