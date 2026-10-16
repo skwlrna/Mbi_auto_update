@@ -111,6 +111,12 @@ internal sealed class AiAutopilotDashboard : Form
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retryInterrupted.Click += (_, _) => RequestInterruptedRetry();
+        var retryQuota = new Button
+        {
+            Text = "한도 오류 재분석", Dock = DockStyle.Right, Width = 134,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        retryQuota.Click += (_, _) => RequestQuotaBlockedRetry();
         var refresh = new Button
         {
             Text = "새로고침", Dock = DockStyle.Right, Width = 105,
@@ -123,6 +129,7 @@ internal sealed class AiAutopilotDashboard : Form
         foot.Controls.Add(handoff);
         foot.Controls.Add(resumeCodex);
         foot.Controls.Add(retryInterrupted);
+        foot.Controls.Add(retryQuota);
         foot.Controls.Add(reset);
         foot.Controls.Add(recurred);
         foot.Controls.Add(confirmed);
@@ -202,8 +209,34 @@ internal sealed class AiAutopilotDashboard : Form
             Location = new Point(175, 8), AutoSize = true,
             ForeColor = Color.FromArgb(82, 99, 120)
         };
+        var checkPipeline = new Button
+        {
+            Text = "AI 준비 점검", Dock = DockStyle.Right, Width = 116,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        checkPipeline.Click += async (_, _) =>
+        {
+            checkPipeline.Enabled = false;
+            checkPipeline.Text = "점검 중...";
+            try
+            {
+                string summary = await AiAutopilotHost.CheckPipelineAsync();
+                if (!IsDisposed)
+                    MessageBox.Show(this, summary, "Codex 준비 점검 (읽기 전용)",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                {
+                    checkPipeline.Enabled = true;
+                    checkPipeline.Text = "AI 준비 점검";
+                }
+            }
+        };
         rangeBar.Controls.Add(_range);
         rangeBar.Controls.Add(explanation);
+        rangeBar.Controls.Add(checkPipeline);
         Controls.Add(_recent);
         Controls.Add(_details);
         Controls.Add(intro);
@@ -319,7 +352,8 @@ internal sealed class AiAutopilotDashboard : Form
         "needs_review" => "수정안·오류 증거 검토",
         "tests_failed" => "실패한 테스트 기록 확인",
         "blocked" when reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase) =>
-            "사용량 초기화 확인 후 재개",
+            running ? "Codex 재개 확인 → 해당 오류 선택 → 한도 오류 재분석"
+                    : "AI 감시 시작 → Codex 재개 → 한도 오류 재분석",
         "blocked" => "차단 이유를 확인하고 환경 점검",
         "duplicate_skipped" => "앞선 동일 오류 분석 기록 확인",
         "not_started" => running ? "AI가 순서대로 분석 예정" : "AI 감시 시작 필요",
@@ -514,6 +548,72 @@ internal sealed class AiAutopilotDashboard : Form
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             MessageBox.Show(this, "재분석 요청을 저장하지 못했습니다. 기존 결과는 그대로 유지됩니다.");
+        }
+    }
+
+    private void RequestQuotaBlockedRetry()
+    {
+        if (_recent.CurrentRow?.Tag is not ResultItem selected ||
+            !ValidEventId(selected.EventId) || selected.EventId.Length != 16)
+        {
+            MessageBox.Show(this, "Codex 사용량 한도로 중단된 원본 오류를 선택하세요.");
+            return;
+        }
+        if (!_isWatcherRunning())
+        {
+            MessageBox.Show(this, "AI 감시를 켠 후 한도 오류를 재분석할 수 있습니다.");
+            return;
+        }
+        using (var activity = ReadBounded(Path.Combine(Root, "watch-activity.json")))
+        {
+            if (activity is not null && Field(activity.RootElement, "status") == "quota_paused")
+            {
+                MessageBox.Show(this, "먼저 Codex 사용량 초기화를 확인하고 'Codex 재개'를 진행하세요.");
+                return;
+            }
+        }
+        try
+        {
+            string folder = Path.Combine(Root, selected.EventId);
+            string resultPath = Path.Combine(folder, "result.json");
+            if (!string.Equals(selected.FilePath, resultPath, StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(folder) ||
+                (File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0)
+                return;
+            using var result = ReadBounded(resultPath);
+            if (result is null || Field(result.RootElement, "event_id") != selected.EventId ||
+                Field(result.RootElement, "status") != "blocked" ||
+                !Field(result.RootElement, "reason", 500).Contains(
+                    "codex_quota_exhausted", StringComparison.OrdinalIgnoreCase) ||
+                result.RootElement.TryGetProperty("retry_of", out _))
+            {
+                MessageBox.Show(this, "최초 Codex 사용량 한도로 차단된 오류만 한 번 재분석할 수 있습니다.");
+                return;
+            }
+            string request = Path.Combine(Root, "quota-retry-request.json");
+            if (File.Exists(request))
+            {
+                MessageBox.Show(this, "기존 한도 오류 재분석 요청이 있습니다. 완료를 먼저 확인하세요.");
+                return;
+            }
+            if (MessageBox.Show(this,
+                "이 오류의 기존 차단 기록·작업 공간은 보존합니다. Codex 사용량 복구를 확인했으며, " +
+                "새 격리 작업 공간에서 한 번 더 분석하도록 승인하시겠습니까?\n" +
+                "Codex 사용량이 발생할 수 있지만 게임 적용·병합·배포는 하지 않습니다.",
+                "한도 오류 재분석 승인", MessageBoxButtons.YesNo, MessageBoxIcon.Warning)
+                != DialogResult.Yes) return;
+            string temp = request + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new
+            {
+                action = "retry_quota_once",
+                event_id = selected.EventId
+            }));
+            File.Move(temp, request, false);
+            MessageBox.Show(this, "한도 오류 재분석을 요청했습니다. 다음 감시 주기에 새 격리 작업을 시작합니다.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, "재분석 요청을 기록하지 못했습니다. 기존 오류는 보존됩니다.");
         }
     }
 
