@@ -120,12 +120,17 @@ def report(c: dict) -> dict:
     root = Path(c["worktrees_dir"]).expanduser()
     limit = int(c.get("max_worktrees", 30))
     data = {"kind": "retention_read_only", "limit": limit,
-            "count": 0, "clean_candidates": [], "protected_count": 0,
-            "warning": False}
+            "count": 0, "clean_candidates": [], "archive_ready_candidates": [],
+            "archive_conflicts": [], "protected_count": 0, "warning": False}
     if root.is_symlink():
         data["error"] = "worktree_root_symlink"
         return data
     if not root.is_dir():
+        return data
+    archive_root = Path(c.get("worktree_archives_dir",
+                              str(Path.home() / "MabiAutoAI" / "worktree-archives"))).expanduser()
+    if archive_root.is_symlink():
+        data["error"] = "archive_root_symlink"
         return data
     try:
         registered = _registrations(c)
@@ -134,6 +139,14 @@ def report(c: dict) -> dict:
         for folder in folders:
             if _eligible(folder, c, registered):
                 data["clean_candidates"].append(folder.name)
+                # A pre-existing ZIP or an abandoned partial backup must not
+                # monopolize the one-at-a-time cleanup button. Never overwrite it.
+                archive_files = (archive_root / (folder.name + ".zip"),
+                                 archive_root / (folder.name + ".zip.partial"))
+                if any(p.exists() or p.is_symlink() for p in archive_files):
+                    data["archive_conflicts"].append(folder.name)
+                else:
+                    data["archive_ready_candidates"].append(folder.name)
         data["protected_count"] = len(folders) - len(data["clean_candidates"])
         data["warning"] = len(folders) >= max(0, limit - 3)
         if folders and not registered:
@@ -148,8 +161,8 @@ def archive_clean_one(c: dict, event_id: str) -> dict:
     if not IDENTIFIER.fullmatch(event_id):
         return {"status": "blocked", "reason": "invalid_event_id"}
     snapshot = report(c)
-    if snapshot.get("error") or event_id not in snapshot["clean_candidates"]:
-        return {"status": "blocked", "reason": "not_verified_clean_terminal"}
+    if snapshot.get("error") or event_id not in snapshot["archive_ready_candidates"]:
+        return {"status": "blocked", "reason": "not_verified_clean_terminal_or_archive_conflict"}
     root = Path(c["worktrees_dir"]).expanduser()
     folder = root / event_id
     archive_root = Path(c.get("worktree_archives_dir",
