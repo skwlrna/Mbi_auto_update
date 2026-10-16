@@ -111,6 +111,12 @@ internal sealed class AiAutopilotDashboard : Form
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retryInterrupted.Click += (_, _) => RequestInterruptedRetry();
+        var retryQuota = new Button
+        {
+            Text = "한도 오류 재분석", Dock = DockStyle.Right, Width = 130,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        retryQuota.Click += (_, _) => RequestQuotaRetry();
         var refresh = new Button
         {
             Text = "새로고침", Dock = DockStyle.Right, Width = 105,
@@ -123,6 +129,7 @@ internal sealed class AiAutopilotDashboard : Form
         foot.Controls.Add(handoff);
         foot.Controls.Add(resumeCodex);
         foot.Controls.Add(retryInterrupted);
+        foot.Controls.Add(retryQuota);
         foot.Controls.Add(reset);
         foot.Controls.Add(recurred);
         foot.Controls.Add(confirmed);
@@ -202,6 +209,13 @@ internal sealed class AiAutopilotDashboard : Form
             Location = new Point(175, 8), AutoSize = true,
             ForeColor = Color.FromArgb(82, 99, 120)
         };
+        var checkPipeline = new Button
+        {
+            Text = "AI 사전 점검 (실행 없음)", Dock = DockStyle.Right, Width = 195,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        checkPipeline.Click += async (_, _) => await RequestPipelineCheckAsync();
+        rangeBar.Controls.Add(checkPipeline);
         rangeBar.Controls.Add(_range);
         rangeBar.Controls.Add(explanation);
         Controls.Add(_recent);
@@ -319,7 +333,7 @@ internal sealed class AiAutopilotDashboard : Form
         "needs_review" => "수정안·오류 증거 검토",
         "tests_failed" => "실패한 테스트 기록 확인",
         "blocked" when reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase) =>
-            "사용량 초기화 확인 후 재개",
+            running ? "한도 복구 확인 후 한도 오류 재분석" : "AI 시작 → Codex 재개 → 한도 오류 재분석",
         "blocked" => "차단 이유를 확인하고 환경 점검",
         "duplicate_skipped" => "앞선 동일 오류 분석 기록 확인",
         "not_started" => running ? "AI가 순서대로 분석 예정" : "AI 감시 시작 필요",
@@ -514,6 +528,141 @@ internal sealed class AiAutopilotDashboard : Form
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             MessageBox.Show(this, "재분석 요청을 저장하지 못했습니다. 기존 결과는 그대로 유지됩니다.");
+        }
+    }
+
+    private void RequestQuotaRetry()
+    {
+        if (_recent.CurrentRow?.Tag is not ResultItem selected ||
+            selected.EventId.Length != 16 || !ValidEventId(selected.EventId))
+        {
+            MessageBox.Show(this, "Codex 사용량 한도로 차단됐던 오류를 먼저 선택하세요.");
+            return;
+        }
+        if (!_isWatcherRunning())
+        {
+            MessageBox.Show(this, "AI 감시를 시작하고 Codex 한도가 복구됐는지 확인한 후 사용하세요.");
+            return;
+        }
+        using (var activity = ReadBounded(Path.Combine(Root, "watch-activity.json")))
+        {
+            if (activity is null || Field(activity.RootElement, "status") == "quota_paused")
+            {
+                MessageBox.Show(this, "Codex 사용량 일시정지 중입니다. Codex 재개가 확인된 후 요청하세요.");
+                return;
+            }
+        }
+        try
+        {
+            string directory = Path.Combine(Root, selected.EventId);
+            string source = Path.Combine(directory, "result.json");
+            if (!string.Equals(selected.FilePath, source, StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(directory) ||
+                (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                return;
+            using var report = ReadBounded(source);
+            if (report is null ||
+                Field(report.RootElement, "event_id", 40) != selected.EventId ||
+                Field(report.RootElement, "status", 64) != "blocked" ||
+                !Field(report.RootElement, "reason", 500).Contains("codex_quota_exhausted",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, "사용량 한도로 실제 차단된 원본 오류만 재분석할 수 있습니다.");
+                return;
+            }
+            string request = Path.Combine(Root, "quota-retry-request.json");
+            if (File.Exists(request))
+            {
+                MessageBox.Show(this, "이미 재분석 요청이 대기 중입니다. AI 처리 상태를 확인하세요.");
+                return;
+            }
+            if (MessageBox.Show(this,
+                "Codex 사용량이 실제로 복구됐습니까?\n" +
+                "선택한 오류의 기존 분석·수정 파일은 보존하고 새 격리 작업 공간에서 단 한 번 재분석합니다.\n" +
+                "Codex 사용량이 발생하며 게임 코드에 자동 적용·배포하지 않습니다.",
+                "사용량 복구 후 수동 재분석 승인",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
+            string temp = request + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new
+            {
+                action = "retry_quota_blocked_once", event_id = selected.EventId
+            }));
+            File.Move(temp, request, false);
+            MessageBox.Show(this, "한도 차단 오류 1회 재분석을 요청했습니다. 다음 AI 감시 주기에 처리됩니다.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, "재분석 요청 저장 실패 · 기존 오류 결과는 유지됩니다.");
+        }
+    }
+
+    private async Task RequestPipelineCheckAsync()
+    {
+        string directory = Path.Combine(AppContext.BaseDirectory, "ai-autopilot");
+        string script = Path.Combine(directory, "autopilot.py");
+        if (!File.Exists(script))
+        {
+            MessageBox.Show(this, "AI 모듈이 없습니다. 설치 패키지를 확인하세요.");
+            return;
+        }
+        string python = Environment.GetEnvironmentVariable("MABIAUTO_AI_PYTHON") ?? "python.exe";
+        DateTime started = DateTime.UtcNow;
+        try
+        {
+            int exit = await Task.Run(() =>
+            {
+                var info = new ProcessStartInfo
+                {
+                    FileName = python, WorkingDirectory = directory,
+                    UseShellExecute = false, CreateNoWindow = true,
+                    RedirectStandardOutput = true, RedirectStandardError = true
+                };
+                info.ArgumentList.Add("-B");
+                info.ArgumentList.Add(script);
+                info.ArgumentList.Add("--pipeline-check");
+                info.Environment["PYTHONUTF8"] = "1";
+                using var child = Process.Start(info);
+                if (child is null) return -1;
+                if (child.WaitForExit(25000)) return child.ExitCode;
+                child.Kill(entireProcessTree: true);
+                child.WaitForExit(2000);
+                return -2;
+            });
+            if (IsDisposed) return;
+            string path = Path.Combine(Root, "pipeline-check.json");
+            using var report = ReadBounded(path);
+            if (report is null || File.GetLastWriteTimeUtc(path) < started.AddSeconds(-2) ||
+                Field(report.RootElement, "kind") != "local_readiness_only" ||
+                !report.RootElement.TryGetProperty("stages", out var stages) ||
+                stages.ValueKind != JsonValueKind.Object)
+            {
+                MessageBox.Show(this, "AI 사전 점검 결과를 읽지 못했습니다. Python 및 작업용 소스 경로를 확인하세요.");
+                return;
+            }
+            string[] keys = { "evidence", "source", "codex", "regressions", "draft_pr" };
+            string[] names = { "오류 수집 모듈", "Git 소스 및 깨끗한 상태",
+                "Python·Git·Codex CLI", ".NET과 제작·가공 테스트", "GitHub Draft PR (선택)" };
+            var lines = new List<string>();
+            for (int i = 0; i < keys.Length; i++)
+            {
+                bool pass = stages.TryGetProperty(keys[i], out var value) &&
+                            value.ValueKind == JsonValueKind.True;
+                lines.Add((pass ? "준비" : "확인 필요") + " · " + names[i]);
+            }
+            string prefix = Field(report.RootElement, "result") == "ready_for_manual_trial"
+                ? "사전 준비 점검 통과. 실제 Codex 로그인·수정 성공은 아직 검증되지 않았습니다."
+                : "실제 Codex 테스트 전 필수 환경 준비가 필요합니다.";
+            MessageBox.Show(this, prefix + "\n\n" + string.Join("\n", lines) +
+                "\n\n이 검사는 Codex, 게임, 테스트, GitHub PR을 실제 실행하지 않습니다.",
+                "AI 자동수정 안전 사전 점검", MessageBoxButtons.OK,
+                exit == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or
+                System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            if (!IsDisposed)
+                MessageBox.Show(this, "AI 사전 점검 실행 실패 · Python 경로와 설치 상태를 확인하세요.");
         }
     }
 
