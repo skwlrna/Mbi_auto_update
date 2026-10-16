@@ -177,6 +177,12 @@ internal sealed class AiAutopilotHost : IDisposable
             Publish("AI 감시 유지 · 이전 어비스 수정안은 별도 검토 필요");
         else if (message.StartsWith("중단된 AI 수정 기록 보존", StringComparison.Ordinal))
             Publish("이전 AI 수정 중단 · 오류 시간별 내역에서 재분석 요청 가능");
+        else if (message.StartsWith("AI 작업공간 정리: archived ", StringComparison.Ordinal))
+            Publish("AI 완료 작업공간 1건 ZIP 백업 검증·정리 완료 — 오류·결과 기록 보존");
+        else if (message.StartsWith("AI 작업공간 정리: blocked ", StringComparison.Ordinal))
+            Publish("AI 작업공간 정리 안전 차단 — 보관 폴더 유지 · 현황 확인 필요");
+        else if (message.StartsWith("AI 작업공간 보관 경고:", StringComparison.Ordinal))
+            Publish("AI 작업공간 보관 한도 임박 — 작업공간 안전 정리에서 후보 확인");
         else if (message.StartsWith("Codex 정체 감지:", StringComparison.Ordinal))
             Publish("Codex 정체 감지 — 해당 작업 안전 중단 · 자동 재시작 없음");
         else if (message.StartsWith("AI 검토용 Draft PR 생성:", StringComparison.Ordinal))

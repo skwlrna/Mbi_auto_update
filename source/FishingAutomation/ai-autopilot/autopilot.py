@@ -29,6 +29,7 @@ from quota_handoff import (exhausted as codex_quota_exhausted,
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr, user_opted_in
 from pipeline_readiness import readiness
+from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
@@ -537,9 +538,14 @@ def mark_interrupted_result(path: Path) -> bool:
     return True
 
 
+def retention_retry_id(original: str) -> str:
+    return original + "-retry-retention-v1"
+
+
 def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             progress=None, retry_interrupted: bool = False,
-            retry_quota: bool = False, phase=None) -> dict[str, Any]:
+            retry_quota: bool = False, retry_retention: bool = False,
+            phase=None) -> dict[str, Any]:
     # Only host-authored stage names reach the UI (no raw Codex output).
     def stage(name: str) -> None:
         if phase is not None:
@@ -548,8 +554,19 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     stage("evidence")
     original_eid = event_id(folder)
     eid = original_eid
-    if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota)) > 1:
+    if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota, retry_retention)) > 1:
         return {"status": "blocked", "reason": "conflicting_manual_retry_modes"}
+    if retry_retention:
+        previous = expand(str(c["results_dir"])) / original_eid / "result.json"
+        if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
+            return {"status": "blocked", "reason": "retention_original_missing"}
+        original = read_json(previous)
+        if (original.get("event") != folder.name
+                or original.get("event_id") != original_eid
+                or original.get("status") != "blocked"
+                or original.get("reason") != "worktree_retention_limit_reached"):
+            return {"status": "blocked", "reason": "retention_original_not_reviewable"}
+        eid = retention_retry_id(original_eid)
     if retry_quota:
         previous = expand(str(c["results_dir"])) / original_eid / "result.json"
         if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
@@ -590,6 +607,9 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
                               "status": "blocked", "note": "No changes to live game or deployed software."}
 
     memory_context: str | None = None
+    if retry_retention:
+        output["retry_of"] = original_eid
+        output["retry_reason"] = "explicit_ui_after_retention_cleanup"
     if retry_quota:
         output["retry_of"] = original_eid
         output["retry_reason"] = "explicit_ui_after_quota_recovery"
@@ -620,7 +640,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         return output
 
     if result_path.exists():
-        if not retry_interrupted and not retry_quota:
+        if not retry_interrupted and not retry_quota and not retry_retention:
             mark_interrupted_result(result_path)
         return read_json(result_path)
     repo = expand(str(c["repo"]))
@@ -843,6 +863,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             except (OSError, ValueError, TypeError):
                 print("중단된 기록 검사 실패 (자동 재실행 안 함)", flush=True)
     last_reported: tuple[str, int] | None = None
+    last_retention_warning: int | None = None
+    last_retention_scan = 0.0
 
     def category_for(folder: Path) -> str:
         try:
@@ -948,10 +970,81 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                             quota_retry_folder = candidate
             except (OSError, ValueError, TypeError):
                 pass
+        # Retention is opt-in: select a clean terminal candidate or retry an
+        # explicitly blocked error. Keep old evidence/results immutable.
+        retention_retry_file = results_dir / "retention-retry-request.json"
+        retention_retry_folder = None
+        if (not single and retry_folder is None and quota_retry_folder is None
+                and not state.get("quota_pause")
+                and retention_retry_file.is_file()
+                and not retention_retry_file.is_symlink()):
+            try:
+                request = (read_json(retention_retry_file)
+                           if retention_retry_file.stat().st_size <= 1024 else {})
+                requested_id = request.get("event_id") if isinstance(request, dict) else None
+                if (isinstance(request, dict)
+                        and request.get("action") == "retry_retention_blocked_once"
+                        and isinstance(requested_id, str)
+                        and re.fullmatch(r"[0-9a-f]{16}", requested_id)):
+                    source = results_dir / requested_id / "result.json"
+                    target = results_dir / retention_retry_id(requested_id) / "result.json"
+                    candidate = next((p for p in all_evidence_folders(c)
+                                      if event_id(p) == requested_id), None)
+                    inventory = retention_report(c)
+                    if (candidate is not None
+                            and stable(candidate, int(c["settle_seconds"]))
+                            and not source.is_symlink() and source.is_file()
+                            and source.stat().st_size <= 131072
+                            and not target.exists()
+                            and inventory.get("count", 30) < inventory.get("limit", 30)):
+                        prior = read_json(source)
+                        if (prior.get("status") == "blocked"
+                                and prior.get("reason") == "worktree_retention_limit_reached"
+                                and prior.get("event_id") == requested_id
+                                and prior.get("event") == candidate.name):
+                            retention_retry_folder = candidate
+            except (OSError, ValueError, TypeError):
+                pass
+
+        cleanup_request = results_dir / "retention-clean-request.json"
+        cleaned_or_attempted = False
+        if (not single and cleanup_request.is_file()
+                and not cleanup_request.is_symlink()
+                and not state.get("quota_pause")):
+            try:
+                cleaned_or_attempted = True
+                record = read_json(cleanup_request) if cleanup_request.stat().st_size < 1024 else {}
+                if isinstance(record, dict) and record.get("action") == "archive_clean_worktree_once":
+                    identity = record.get("event_id")
+                    if isinstance(identity, str) and RETENTION_ID.fullmatch(identity):
+                        outcome = archive_clean_one(c, identity)
+                        print("AI 작업공간 정리:", outcome.get("status"), outcome.get("reason"), flush=True)
+            except (OSError, ValueError, TypeError):
+                pass
+            finally:
+                try: cleanup_request.unlink(missing_ok=True)
+                except OSError: pass
+
+        # Deep Git status inspection is relatively expensive on Windows:
+        # refresh once per minute and immediately after an approved cleanup.
+        if not single and (cleaned_or_attempted or time.monotonic() - last_retention_scan >= 60):
+            try:
+                inventory = retention_report(c)
+                write_json(results_dir / "worktree-retention.json", inventory)
+                last_retention_scan = time.monotonic()
+                if inventory.get("warning") and inventory.get("count") != last_retention_warning:
+                    print("AI 작업공간 보관 경고:", inventory.get("count"), "/", inventory.get("limit"), flush=True)
+                    last_retention_warning = inventory.get("count")
+                elif not inventory.get("warning"):
+                    last_retention_warning = None
+            except (OSError, ValueError, TypeError):
+                pass
         if retry_folder is not None:
             pending = [retry_folder] + [p for p in pending if p != retry_folder]
         elif quota_retry_folder is not None:
             pending = [quota_retry_folder] + [p for p in pending if p != quota_retry_folder]
+        elif retention_retry_folder is not None:
+            pending = [retention_retry_folder] + [p for p in pending if p != retention_retry_folder]
         if not single:
             activity("watching", None, len(pending))
             current = ("waiting", len(pending))
@@ -962,12 +1055,13 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             eid = event_id(folder)
             manual_retry = retry_folder is not None and folder == retry_folder
             manual_quota = quota_retry_folder is not None and folder == quota_retry_folder
-            if eid in seen and not (single and latest) and not manual_retry and not manual_quota:
+            manual_retention = retention_retry_folder is not None and folder == retention_retry_folder
+            if eid in seen and not (single and latest) and not manual_retry and not manual_quota and not manual_retention:
                 continue
             # No arbitrary per-day run cap. Codex decides the actual account
             # quota; the explicit quota error triggers a bounded local ChatGPT
             # handoff and stops additional Codex calls safely.
-            signature = duplicate_signature(folder) if not single and not manual_retry and not manual_quota else None
+            signature = duplicate_signature(folder) if not single and not manual_retry and not manual_quota and not manual_retention else None
             last_seen = recent_signatures.get(signature) if signature else None
             if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:
                 reason = "identical_mcp_error_evidence_within_10_minutes"
@@ -1008,7 +1102,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                      phase=phase_name, phase_started=phase_started)
             print(f"처리 시작: {folder.name} · 대기 {max(0, len(pending)-1)}건", flush=True)
             notification_id = (interrupted_retry_id(eid) if manual_retry else
-                               quota_retry_id(eid) if manual_quota else eid)
+                               quota_retry_id(eid) if manual_quota else
+                               eid if manual_retention else eid)
             print(f"AI 알림: started {notification_id}", flush=True)
             print(f"AI 단계: {phase_name}", flush=True)
             try:
@@ -1024,7 +1119,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 # Simultaneous requests never authorise two replays of one event.
                 result = process(folder, c, retry_cli_error=retry_cli_error,
                                  progress=on_codex_progress, retry_interrupted=manual_retry,
-                                 retry_quota=manual_quota, phase=on_phase)
+                                 retry_quota=manual_quota, retry_retention=manual_retention, phase=on_phase)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
@@ -1037,6 +1132,9 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 except OSError: pass
             if manual_quota:
                 try: quota_retry_file.unlink(missing_ok=True)
+                except OSError: pass
+            if manual_retention:
+                try: retention_retry_file.unlink(missing_ok=True)
                 except OSError: pass
             if signature:
                 recent_signatures[signature] = folder.stat().st_mtime
@@ -1173,6 +1271,7 @@ def main() -> int:
     # Only watch/once modes may prepare new source; read-only modes never clone.
     try:
         selected = prepare_source(c)
+        c["original_repo"] = c["repo"]
         c["repo"] = selected["repo"]
         c["release_source_sha"] = selected["expected"]
         write_json(expand(str(c["results_dir"])) / "source-alignment.json", {

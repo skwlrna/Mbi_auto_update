@@ -224,7 +224,21 @@ internal sealed class AiAutopilotDashboard : Form
             BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         checkPipeline.Click += async (_, _) => await RequestPipelineCheckAsync();
+        var retentionCleanup = new Button
+        {
+            Text = "작업공간 안전 정리", Dock = DockStyle.Right, Width = 155,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        retentionCleanup.Click += (_, _) => RequestRetentionCleanup();
+        var retentionRetry = new Button
+        {
+            Text = "공간 한도 재분석", Dock = DockStyle.Right, Width = 145,
+            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        retentionRetry.Click += (_, _) => RequestRetentionRetry();
         rangeBar.Controls.Add(checkPipeline);
+        rangeBar.Controls.Add(retentionCleanup);
+        rangeBar.Controls.Add(retentionRetry);
         rangeBar.Controls.Add(_range);
         rangeBar.Controls.Add(explanation);
         Controls.Add(_recent);
@@ -328,7 +342,7 @@ internal sealed class AiAutopilotDashboard : Form
         if (reason.Contains("agent_no_patch", StringComparison.OrdinalIgnoreCase))
             return "AI가 수정할 코드를 찾지 못함";
         if (reason.Contains("worktree_retention_limit", StringComparison.OrdinalIgnoreCase))
-            return "AI 작업 공간이 가득 참";
+            return "AI 작업 공간이 가득 참 · 기존 자료 보존, 공간 정리 필요";
         if (status == "tests_failed") return "코드를 수정했지만 자동 테스트에 실패함";
         if (status == "blocked") return "AI 분석 또는 안전 검사를 통과하지 못함";
         if (status == "needs_review") return "검증 근거가 부족하여 사람이 확인해야 함";
@@ -342,6 +356,8 @@ internal sealed class AiAutopilotDashboard : Form
         "interrupted_review_required" => running ? "해당 오류 선택 → 중단 작업 재분석" : "AI 감시 시작 → 중단 작업 재분석",
         "needs_review" => "수정안·오류 증거 검토",
         "tests_failed" => "실패한 테스트 기록 확인",
+        "blocked" when reason.Contains("worktree_retention_limit_reached", StringComparison.OrdinalIgnoreCase) =>
+            running ? "안전 정리 후 공간 한도 재분석" : "AI 감시 시작 → 안전 정리 후 재분석",
         "blocked" when reason.Contains("codex_quota_exhausted", StringComparison.OrdinalIgnoreCase) =>
             running ? "한도 복구 확인 후 한도 오류 재분석" : "AI 시작 → Codex 재개 → 한도 오류 재분석",
         "blocked" => "차단 이유를 확인하고 환경 점검",
@@ -355,7 +371,7 @@ internal sealed class AiAutopilotDashboard : Form
         if (id.Length is not (16 or 35)) return false;
         string prefix = id.Length == 16 ? id : id[..16];
         return prefix.All(ch => ch is >= '0' and <= '9' or >= 'a' and <= 'f') &&
-            (id.Length == 16 || id == prefix + "-retry-cli-arg-v121");
+            (id.Length == 16 || (id == prefix + "-retry-cli-arg-v121" || id == prefix + "-retry-retention-v1"));
     }
 
     private static string ManualVerdict(string resultDir, string eventId)
@@ -483,6 +499,131 @@ internal sealed class AiAutopilotDashboard : Form
         catch (System.Runtime.InteropServices.ExternalException)
         {
             MessageBox.Show(this, "클립보드에 복사하지 못했습니다. 다른 프로그램이 사용 중인지 확인하세요.");
+        }
+    }
+
+    private void RequestRetentionCleanup()
+    {
+        if (!_isWatcherRunning())
+        {
+            MessageBox.Show(this, "AI 감시를 켠 후 작업 공간 보관 상태를 확인할 수 있습니다.");
+            return;
+        }
+        try
+        {
+            string activityPath = Path.Combine(Root, "watch-activity.json");
+            using var activity = ReadBounded(activityPath);
+            if (activity is null || Field(activity.RootElement, "status") != "watching")
+            {
+                MessageBox.Show(this, "AI 작업 진행 중에는 정리할 수 없습니다. 작업이 끝날 때까지 기다려 주세요.");
+                return;
+            }
+            string inventoryPath = Path.Combine(Root, "worktree-retention.json");
+            using var inventory = ReadBounded(inventoryPath);
+            if (inventory is null || Field(inventory.RootElement, "kind") != "retention_read_only" ||
+                File.GetLastWriteTimeUtc(inventoryPath) < DateTime.UtcNow.AddMinutes(-2) ||
+                !inventory.RootElement.TryGetProperty("clean_candidates", out var candidates) ||
+                candidates.ValueKind != JsonValueKind.Array)
+            {
+                MessageBox.Show(this, "작업공간 현황이 없습니다. AI 감시를 켜고 잠시 기다린 뒤 다시 확인하세요.");
+                return;
+            }
+            var verified = candidates.EnumerateArray()
+                .Where(x => x.ValueKind == JsonValueKind.String)
+                .Select(x => x.GetString() ?? "")
+                .Where(x => ValidEventId(x)).ToArray();
+            int count = Number(inventory.RootElement, "count");
+            int limit = Number(inventory.RootElement, "limit");
+            if (verified.Length == 0)
+            {
+                MessageBox.Show(this, "보관 공간 " + count + "/" + limit +
+                    " · 안전 정리 가능한 깨끗한 완료 작업이 없습니다. 검토 중인 수정안은 보호합니다. " +
+                    "강제로 삭제하지 말고 작업 폴더와 결과를 별도 검토하세요.");
+                return;
+            }
+            string id = verified[0];
+            if (MessageBox.Show(this, "보관 공간 " + count + "/" + limit +
+                "\n안전 정리 후보 " + verified.Length + "건 중 1건만 처리합니다." +
+                "\n오류 ID: " + id +
+                "\n\nCodex 작업 폴더 전체를 ZIP으로 백업하고 해시 검증한 후, " +
+                "Git에 등록된 깨끗한 완료 작업 폴더만 제거합니다." +
+                "\n원본 오류·수정 결과·Git 브랜치는 유지합니다." +
+                "\n백업 실패나 코드 변경 감지 시 삭제하지 않습니다. 계속할까요?",
+                "작업 공간 1건 정리 승인", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            string request = Path.Combine(Root, "retention-clean-request.json");
+            if (File.Exists(request))
+            {
+                MessageBox.Show(this, "기존 정리 요청이 대기 중입니다. 다음 감시 주기를 기다려 주세요.");
+                return;
+            }
+            File.WriteAllText(request + ".tmp", JsonSerializer.Serialize(new {
+                action = "archive_clean_worktree_once", event_id = id
+            }));
+            File.Move(request + ".tmp", request, false);
+            MessageBox.Show(this, "정리 1건을 요청했습니다. 다음 감시 주기에 재검증·백업 후 처리합니다. " +
+                "결과는 AI 로그 및 작업 공간 현황에서 확인하세요.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, "안전 정리 요청을 저장하지 못했습니다. 원본 작업 공간은 보존됩니다.");
+        }
+    }
+
+    private void RequestRetentionRetry()
+    {
+        if (_recent.CurrentRow?.Tag is not ResultItem selected ||
+            selected.EventId.Length != 16 || !ValidEventId(selected.EventId))
+        {
+            MessageBox.Show(this, "보관 한도로 차단된 오류 행을 먼저 선택하세요.");
+            return;
+        }
+        if (!_isWatcherRunning())
+        {
+            MessageBox.Show(this, "AI 감시를 시작한 뒤 재분석을 요청하세요.");
+            return;
+        }
+        try
+        {
+            string originalPath = Path.Combine(Root, selected.EventId, "result.json");
+            if (!string.Equals(originalPath, selected.FilePath, StringComparison.OrdinalIgnoreCase))
+                return;
+            using var original = ReadBounded(originalPath);
+            using var inventory = ReadBounded(Path.Combine(Root, "worktree-retention.json"));
+            if (original is null || inventory is null ||
+                Field(original.RootElement, "event_id") != selected.EventId ||
+                Field(original.RootElement, "status") != "blocked" ||
+                Field(original.RootElement, "reason") != "worktree_retention_limit_reached")
+            {
+                MessageBox.Show(this, "작업 공간 보관 한도로 차단된 원본 오류에만 사용할 수 있습니다.");
+                return;
+            }
+            if (Number(inventory.RootElement, "count") >= Number(inventory.RootElement, "limit") ||
+                Number(inventory.RootElement, "limit") == 0)
+            {
+                MessageBox.Show(this, "작업 공간 한도가 해소되지 않았습니다. 먼저 안전 정리를 완료하세요.");
+                return;
+            }
+            if (MessageBox.Show(this, "기존 오류 결과는 변경하지 않고 새 작업공간에서 1회 다시 분석합니다." +
+                "\nCodex 사용량이 발생하며, 수정안을 게임에 자동 적용하지 않습니다. 계속할까요?",
+                "공간 한도 오류 1회 재분석", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            string request = Path.Combine(Root, "retention-retry-request.json");
+            if (File.Exists(request) || Directory.Exists(Path.Combine(Root,
+                selected.EventId + "-retry-retention-v1")))
+            {
+                MessageBox.Show(this, "이 오류에 대한 재분석이 이미 요청됐거나 실행됐습니다.");
+                return;
+            }
+            File.WriteAllText(request + ".tmp", JsonSerializer.Serialize(new {
+                action = "retry_retention_blocked_once", event_id = selected.EventId
+            }));
+            File.Move(request + ".tmp", request, false);
+            MessageBox.Show(this, "재분석을 요청했습니다. 다음 AI 감시 주기에 처리합니다.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, "재분석 요청 저장에 실패했습니다. 원본 결과는 보존됩니다.");
         }
     }
 
@@ -952,10 +1093,22 @@ internal sealed class AiAutopilotDashboard : Form
                     _recent.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(150, 65, 53);
             }
             _recent.ClearSelection();
+            string retentionLabel = "작업공간 상태 미확인";
+            using (var inventory = ReadBounded(Path.Combine(Root, "worktree-retention.json")))
+            {
+                if (inventory is not null && Field(inventory.RootElement, "kind") == "retention_read_only")
+                {
+                    int count = Number(inventory.RootElement, "count");
+                    int limit = Number(inventory.RootElement, "limit");
+                    if (limit > 0)
+                        retentionLabel = "작업공간 " + count + "/" + limit +
+                            (count >= limit ? " · 가득 참" : count >= limit - 3 ? " · 곧 가득 참" : "");
+                }
+            }
             _counts.Text = $"오류 기록 {items.Count}건 · 초기 후보 테스트 통과 {success}건 · " +
                 $"분석 실패/중단 {failed}건 · 검토 필요 {review}건 · 진행 중 {activeCount}건";
             _updated.Text = $"마지막 확인 {DateTime.Now:HH:mm:ss} · 현재 화면 {filtered.Length}건 · " +
-                "초기 후보 PASS만으로 최종 PR CI나 실게임 해결을 확정하지 않습니다.";
+                retentionLabel + " · 초기 후보 PASS는 게임 해결이 아닙니다.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
