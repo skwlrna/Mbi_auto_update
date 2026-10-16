@@ -21,6 +21,35 @@ internal sealed class AiAutopilotHost : IDisposable
         }
     }
     internal event Action<string>? StatusChanged;
+    // Sanitized event ID + fixed result category only. No logs or Codex output.
+    internal event Action<string, string>? NotificationRequested;
+    private string _activeStage = "";
+
+    private static string StageLabel(string stage) => stage switch
+    {
+        "evidence" => "오류 기록·로그 확인 중",
+        "codex_edit" => "Codex 원인 분석·로직 수정 중",
+        "diff_review" => "수정 파일·안전 조건 확인 중",
+        "regression" => "빌드·회귀 테스트 중",
+        "repair" => "테스트 실패 후 격리 재수정 중",
+        "draft" => "검증된 수정안 정리 중",
+        _ => ""
+    };
+
+    private void ObserveNotification(string message)
+    {
+        string[] pieces = message["AI 알림: ".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (pieces.Length < 2 || pieces.Length > 3) return;
+        string kind = pieces[0], id = pieces[1];
+        if (id.Length != 16 || !id.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+            return;
+        string category = kind == "started" && pieces.Length == 2 ? "started"
+            : kind == "result" && pieces.Length == 3 ? pieces[2] : "";
+        if (category is not ("started" or "tests_passed_review_required"
+            or "tests_failed" or "needs_review" or "blocked")) return;
+        try { NotificationRequested?.Invoke(category, id); }
+        catch (ObjectDisposedException) { }
+    }
 
     internal void Start()
     {
@@ -113,8 +142,20 @@ internal sealed class AiAutopilotHost : IDisposable
             message.Contains("BLOCKED", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("실행 차단", StringComparison.Ordinal))
             Publish("AI 감시 안전 중지 — 진단 기록 확인");
+        else if (message.StartsWith("AI 알림: ", StringComparison.Ordinal))
+            ObserveNotification(message);
+        else if (message.StartsWith("AI 단계: ", StringComparison.Ordinal))
+        {
+            string label = StageLabel(message["AI 단계: ".Length..].Trim());
+            if (label.Length > 0)
+            {
+                _activeStage = label;
+                Publish("AI " + label);
+            }
+        }
         else if (message.StartsWith("처리 시작:", StringComparison.Ordinal))
         {
+            _activeStage = "";
             // Only the generated MCP folder identifier is exposed; no raw evidence.
             string eventName = message["처리 시작:".Length..].Trim()
                 .Split(new[] { ' ', '·' }, StringSplitOptions.RemoveEmptyEntries)
@@ -130,7 +171,7 @@ internal sealed class AiAutopilotHost : IDisposable
         {
             // The watcher emits numerical progress only; no raw AI output.
             var safe = message.Length > 95 ? message[..95] : message;
-            Publish("AI " + safe);
+            Publish((_activeStage.Length > 0 ? "AI " + _activeStage + " · " : "AI ") + safe);
         }
         else if (message.StartsWith("WATCHER WARNING:", StringComparison.Ordinal))
             Publish("AI 감시 유지 · 이전 어비스 수정안은 별도 검토 필요");
@@ -146,6 +187,7 @@ internal sealed class AiAutopilotHost : IDisposable
             Publish("AI 과거 유사 오류 분석 기록 참고 · 실제 해결 여부 검증 전");
         else if (message.StartsWith("처리 결과:", StringComparison.Ordinal))
         {
+            _activeStage = "";
             if (message.Contains("tests_passed_review_required", StringComparison.OrdinalIgnoreCase))
                 Publish("자동 테스트 통과 — 게임 검증·승인 필요");
             else if (message.Contains("needs_review", StringComparison.OrdinalIgnoreCase))
