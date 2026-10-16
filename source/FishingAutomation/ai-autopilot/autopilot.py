@@ -863,6 +863,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             except (OSError, ValueError, TypeError):
                 print("중단된 기록 검사 실패 (자동 재실행 안 함)", flush=True)
     last_reported: tuple[str, int] | None = None
+    last_retention_warning: int | None = None
 
     def category_for(folder: Path) -> str:
         try:
@@ -1025,8 +1026,11 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         try:
             inventory = retention_report(c)
             write_json(results_dir / "worktree-retention.json", inventory)
-            if inventory.get("warning"):
+            if inventory.get("warning") and inventory.get("count") != last_retention_warning:
                 print("AI 작업공간 보관 경고:", inventory.get("count"), "/", inventory.get("limit"), flush=True)
+                last_retention_warning = inventory.get("count")
+            elif not inventory.get("warning"):
+                last_retention_warning = None
         except (OSError, ValueError, TypeError):
             pass
         if retry_folder is not None:
