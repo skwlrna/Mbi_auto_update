@@ -192,7 +192,7 @@ def archive_clean_one(c: dict, event_id: str) -> dict:
         owner = _registrations(c).get(folder.resolve())
         if owner is None:
             return {"status": "blocked", "reason": "registered_owner_disappeared"}
-        removed = _git(owner, "worktree", "remove", "--force", str(folder))
+        removed = _git(owner, "worktree", "remove", str(folder))
         if removed.returncode:
             return {"status": "blocked", "reason": "git_worktree_remove_failed_backup_kept"}
         return {"status": "archived", "reason": "verified_backup_then_clean_worktree_removed",
