@@ -95,6 +95,14 @@ def publish_verified_draft_pr(
             return {"status": "blocked", "reason": "candidate_commit_failed"}
         if not user_opted_in():
             return {"status": "disabled", "reason": "user_disabled_before_publication"}
+        # Candidate must be based on the currently published main tip.
+        # Never push a PR from an older (or newer) release revision.
+        local_base = run(["git", "rev-parse", "HEAD^"], worktree, 15)
+        remote_base = run(["git", "ls-remote", "origin", "refs/heads/main"], worktree, 35)
+        fields = remote_base.stdout.strip().split()
+        if (local_base.returncode or remote_base.returncode or
+            len(fields) != 2 or fields[0] != local_base.stdout.strip()):
+            return {"status": "blocked", "reason": "pr_base_mismatch_with_current_main"}
         pushed = run(safe + ["push", "origin", "HEAD:refs/heads/" + branch], worktree, 100)
         if pushed.returncode:
             return {"status": "blocked", "reason": "review_branch_push_failed"}
@@ -105,7 +113,9 @@ def publish_verified_draft_pr(
             "### Modified paths\n" + "".join("- " + name + "\n" for name in changed) +
             "\n### Offline verification\n" +
             "".join("- Test " + str(t.get("test", "")) + ": PASS\n" for t in verified_tests) +
-            "\nDRAFT ONLY. Human review and real game testing required; "
+            "\nLocal host tests verify only this initial candidate; final PR "
+            "Windows CI pending and NOT checked by the PC.\n\n"
+            "DRAFT ONLY. Human review and real game testing required; "
             "no automatic merge, release, or live game change.\n",
             encoding="utf-8")
         created = run(["gh", "pr", "create", "--repo", REPOSITORY,
@@ -115,7 +125,10 @@ def publish_verified_draft_pr(
         url = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
         if created.returncode or not PR_URL.fullmatch(url):
             return {"status": "blocked", "reason": "pr_creation_failed_after_branch_push"}
+        candidate = run(["git", "rev-parse", "HEAD"], worktree, 15)
         return {"status": "draft_created", "url": url,
-                "reason": "manual_review_and_merge_required"}
+                "head_sha": candidate.stdout.strip() if candidate.returncode == 0 else "",
+                "ci_status": "not_checked", "game_validated": "false",
+                "reason": "manual_ci_review_and_live_game_required"}
     except (OSError, subprocess.TimeoutExpired):
         return {"status": "blocked", "reason": "github_publish_io_or_timeout"}

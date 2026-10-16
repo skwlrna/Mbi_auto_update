@@ -147,9 +147,11 @@ class ReadOnlyPipeline(unittest.TestCase):
             def fake_exec(cmd, **_kwargs):
                 return subprocess.CompletedProcess(cmd, 0,
                     str(repo) + "\n" if "--show-toplevel" in cmd else "", "")
-            result = pipeline_readiness.readiness(
-                {"repo": str(repo)}, opted_in=True,
-                locate=lambda x: "stub/" + x, execute=fake_exec)
+            with mock.patch.object(pipeline_readiness, "release_commit", return_value="a" * 40), \
+                 mock.patch.object(pipeline_readiness, "check_checkout", return_value=(True, "release_source_verified")):
+                result = pipeline_readiness.readiness(
+                    {"repo": str(repo)}, opted_in=True,
+                    locate=lambda x: "stub/" + x, execute=fake_exec)
             self.assertEqual(result["result"], "ready_for_manual_trial")
             self.assertTrue(all(result["stages"].values()))
             for forbidden in ("codex_executed", "patch_created", "tests_executed",
@@ -231,7 +233,12 @@ class SimulatedPipeline(unittest.TestCase):
                 self.assertTrue(all(t["ok"] for t in tests))
                 return {"status": "draft_created",
                         "url": "https://github.com/skwlrna/Mbi_auto_update/pull/123"}
-            with mock.patch.object(agent, "exec_codex", side_effect=fake_codex), \
+            c["release_source_sha"] = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repo,
+                capture_output=True, text=True, check=True).stdout.strip()
+            with mock.patch.object(agent, "require_pinned_source", return_value=c["release_source_sha"]), \
+                 mock.patch.object(agent, "prepare_dotnet_environment", return_value=(True, "offline_simulated")), \
+                 mock.patch.object(agent, "exec_codex", side_effect=fake_codex), \
                  mock.patch.object(agent, "test_patch", side_effect=fake_tests), \
                  mock.patch.object(agent, "publish_verified_draft_pr", side_effect=fake_pr):
                 result = agent.process(folder, c)
