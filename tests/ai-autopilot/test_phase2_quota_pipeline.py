@@ -91,7 +91,9 @@ class Phase2Tests(unittest.TestCase):
                     "reason": "offline synthetic success, not actual Codex"}
         processed = self.cycle(retry)
         self.assertEqual(processed.call_count, 1)
-        self.assertEqual(attempts, [(folder, True)])
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(agent.event_id(attempts[0][0]), agent.event_id(folder))
+        self.assertIs(attempts[0][1], True)
         self.assertFalse(request.exists())
         self.assertNotIn("quota_pause", agent.read_json(self.results / "watch-state.json"))
         self.assertEqual(agent.read_json(self.results / eid / "result.json")["status"],
