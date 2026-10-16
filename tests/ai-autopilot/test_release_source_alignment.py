@@ -18,6 +18,7 @@ class PinnedSourceTests(TestCase):
             return subprocess.run(["git", *args], cwd=path, check=True,
                                   capture_output=True, text=True, timeout=40)
         git(["init"], upstream)
+        git(["checkout", "-b", "main"], upstream)
         git(["config", "user.name", "Test"], upstream)
         git(["config", "user.email", "test@example.invalid"], upstream)
         f = upstream / "source/FishingAutomation/FishingAutomation.csproj"
