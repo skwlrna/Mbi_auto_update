@@ -1114,6 +1114,63 @@ try
             "fixed free-button confirmation avoids remote-label OCR and false stops");
     }
 
+
+    // 2026-10-17 real GitHub error screenshot: optional storage material
+    // transfer follows the original free-process click. No remote UI input
+    // is sent by this synthetic test. The weekly checkbox is initially OFF.
+    Check(Has(queue, "HandleOptionalMaterialTransferPromptAsync"),
+        "real QueueAsync handles optional material transfer only after registration click");
+    var transferCalls = ScreenCalls("HandleOptionalMaterialTransferPromptAsync", 1);
+    Check(Has(transferCalls, "IsExactMaterialTransferPromptAsync") &&
+          Has(transferCalls, "MaterialTransferCheckboxChanged") &&
+          Has(transferCalls, "MaterialTransferCheckboxLooksSelected") &&
+          Has(transferCalls, "ClickFresh") &&
+          Has(transferCalls, "HasMaterialTransferModalVisual"),
+        "transfer prompt demands exact OCR plus checked-option transition, not a blind Space");
+
+    using (var modal = BlackFrame())
+    using (var afterCheckbox = BlackFrame())
+    using (var otherDialog = BlackFrame())
+    {
+        static void PaintTransferShell(Bitmap frame)
+        {
+            Paint(frame, new Rectangle(175, 640, 450, 334),
+                Color.FromArgb(31, 37, 53));
+            Paint(frame, new Rectangle(404, 889, 191, 54),
+                Color.FromArgb(6, 178, 114));
+            Paint(frame, new Rectangle(300, 837, 29, 27),
+                Color.FromArgb(66, 75, 89));
+        }
+
+        PaintTransferShell(modal);
+        PaintTransferShell(afterCheckbox);
+        PaintTransferShell(otherDialog);
+        Check(!PixelGate("HasMaterialTransferModalVisual", modal),
+            "green travel/confirm button and slate panel cannot prove a material transfer prompt");
+        Paint(modal, new Rectangle(280, 679, 285, 22), Color.White);
+        Paint(modal, new Rectangle(344, 844, 195, 18), Color.White);
+        Check(PixelGate("HasMaterialTransferModalVisual", modal),
+            "material transfer requires independent white heading and weekly label in modal");
+        Check(!PixelGate("MaterialTransferCheckboxLooksSelected", modal),
+            "muted grey weekly checkbox in supplied failure screenshot means unchecked");
+        Paint(afterCheckbox, new Rectangle(280, 679, 285, 22), Color.White);
+        Paint(afterCheckbox, new Rectangle(344, 844, 195, 18), Color.White);
+        Paint(afterCheckbox, new Rectangle(305, 839, 23, 23),
+            Color.FromArgb(10, 177, 155));
+        Check(PixelGate("MaterialTransferCheckboxLooksSelected", afterCheckbox),
+            "bright selected weekly checkbox is never clicked off a second time");
+        Check(CallBoolean(screen, "MaterialTransferCheckboxChanged", modal, afterCheckbox),
+            "one checkbox click must produce observable local pixel state change");
+        Check(!CallBoolean(screen, "MaterialTransferCheckboxChanged", modal, modal),
+            "unchanged checkbox never authorizes modal confirmation");
+        Paint(otherDialog, new Rectangle(280, 679, 285, 22), Color.White);
+        Check(!PixelGate("HasMaterialTransferModalVisual", otherDialog),
+            "unrelated confirmation dialog without weekly label must stay untouched");
+        using var wrongSize = new Bitmap(799, 1000);
+        Check(!PixelGate("HasMaterialTransferModalVisual", wrongSize),
+            "transfer popup input blocked on unknown capture dimensions");
+    }
+
     Console.WriteLine($"PASS L2: {checks} real-screen integration checks (no injected input)");
 }
 catch (Exception error)
