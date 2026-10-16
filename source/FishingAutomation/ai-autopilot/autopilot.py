@@ -539,7 +539,13 @@ def mark_interrupted_result(path: Path) -> bool:
 
 def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             progress=None, retry_interrupted: bool = False,
-            retry_quota: bool = False) -> dict[str, Any]:
+            retry_quota: bool = False, phase=None) -> dict[str, Any]:
+    # Only host-authored stage names reach the UI (no raw Codex output).
+    def stage(name: str) -> None:
+        if phase is not None:
+            phase(name)
+
+    stage("evidence")
     original_eid = event_id(folder)
     eid = original_eid
     if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota)) > 1:
@@ -673,10 +679,12 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         require_isolated_ai_mode(c)
     except (SourceBlocked, RuntimeError) as exc:
         return finish("blocked", "release_source_guard: " + str(exc))
+    stage("codex_edit")
     ok, reason = exec_codex(worktree, prompt_for(context, c), result_dir, c, progress)
     if not ok:
         fallback_notes(c, context, result_dir)
         return finish("blocked", "codex_unverified: " + reason)
+    stage("diff_review")
     final_head = cmd(["git", "rev-parse", "HEAD"], worktree)
     if final_head.returncode or final_head.stdout.strip() != base.stdout.strip():
         return finish("blocked", "agent_changed_git_head")
@@ -717,6 +725,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             return finish("blocked", str(exc))
         round_dir = result_dir / f"test-round-{round_no}"
         round_dir.mkdir(exist_ok=True)
+        stage("regression")
         passed, tests = test_patch(worktree, round_dir, c, added_tests)
         output.setdefault("test_rounds", []).append({"round": round_no, "passed": passed, "tests": tests})
         if any(str(x.get("reason", "")).startswith("isolated_ai_clean_repo_guard_required") for x in tests):
@@ -748,6 +757,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             require_isolated_ai_mode(c)
         except RuntimeError as exc:
             return finish("blocked", str(exc))
+        stage("repair")
         repaired, reason = exec_codex(worktree, revised_prompt, rerun_dir, c, progress)
         if not repaired:
             return finish("blocked", "codex_repair_round_unverified: " + reason)
@@ -776,6 +786,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     output["diff_stat"] = redacted(diff.stdout[-3000:])
     # GitHub network side effect is never authorized by the AI itself.
     # Only the host may publish an opt-in draft PR after *all* gates pass.
+    stage("draft")
     verified = output.get("tests", [])
     try:
         require_pinned_source(c)
@@ -978,14 +989,33 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 write_json(statefile, state)
                 continue
 
-            # Activity is written before the blocking Codex/test call. Other
-            # processes and the UI can distinguish a busy worker from a dead one.
-            activity("processing", folder.name, len(pending), "isolated_worktree")
+            # Codex diagnoses and edits in one invocation; do not fake separate stages.
+            phase_name = "evidence"
+            phase_started = now()
+            safe_phases = {"evidence", "codex_edit", "diff_review",
+                           "regression", "repair", "draft"}
+
+            def on_phase(name: str) -> None:
+                nonlocal phase_name, phase_started
+                if name not in safe_phases or name == phase_name:
+                    return
+                phase_name, phase_started = name, now()
+                activity("processing", folder.name, len(pending), "isolated_worktree",
+                         phase=phase_name, phase_started=phase_started)
+                print(f"AI 단계: {phase_name}", flush=True)
+
+            activity("processing", folder.name, len(pending), "isolated_worktree",
+                     phase=phase_name, phase_started=phase_started)
             print(f"처리 시작: {folder.name} · 대기 {max(0, len(pending)-1)}건", flush=True)
+            notification_id = (interrupted_retry_id(eid) if manual_retry else
+                               quota_retry_id(eid) if manual_quota else eid)
+            print(f"AI 알림: started {notification_id}", flush=True)
+            print(f"AI 단계: {phase_name}", flush=True)
             try:
                 def on_codex_progress(status: str, elapsed: int, silence: int, reason: str) -> None:
                     activity("processing" if status == "running" else "blocked",
                              folder.name, len(pending), reason,
+                             phase=phase_name, phase_started=phase_started,
                              elapsed_seconds=elapsed, silent_seconds=silence)
                     if status == "running":
                         print(f"Codex 진행: {elapsed}초 경과 · 마지막 출력 {silence}초 전", flush=True)
@@ -994,11 +1024,14 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 # Simultaneous requests never authorise two replays of one event.
                 result = process(folder, c, retry_cli_error=retry_cli_error,
                                  progress=on_codex_progress, retry_interrupted=manual_retry,
-                                 retry_quota=manual_quota)
+                                 retry_quota=manual_quota, phase=on_phase)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
             print("처리 결과:", result.get("status"), result.get("reason"), flush=True)
+            terminal = result.get("status")
+            if terminal in ("tests_passed_review_required", "tests_failed", "needs_review", "blocked"):
+                print(f"AI 알림: result {notification_id} {terminal}", flush=True)
             if manual_retry:
                 try: retry_file.unlink(missing_ok=True)
                 except OSError: pass
