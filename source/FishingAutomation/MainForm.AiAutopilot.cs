@@ -12,6 +12,7 @@ public sealed partial class MainForm
     private AiAutopilotDashboard? _aiDashboard;
     private bool _aiInitialized;
     private string? _lastAiLoggedStatus;
+    private readonly HashSet<string> _sentAiAlertKeys = new(StringComparer.Ordinal);
     private static string AiPreferencesPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MabiAuto", "ai-autopilot.json");
@@ -102,6 +103,15 @@ public sealed partial class MainForm
             try { BeginInvoke((Action)(() => RefreshAiAutopilotControls(text))); }
             catch (InvalidOperationException) { }
         };
+        _aiHost.NotificationRequested += (category, eventId) =>
+        {
+            if (IsDisposed || Disposing || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke((Action)(() => _ = SendAiAutopilotAlertAsync(category, eventId)));
+            }
+            catch (InvalidOperationException) { }
+        };
         try
         {
             if (File.Exists(AiPreferencesPath))
@@ -119,6 +129,81 @@ public sealed partial class MainForm
         }
         _aiInitialized = true;
         RefreshAiAutopilotControls(_aiHost.Status);
+    }
+
+    // Read one bounded local result, and map only known machine-readable reasons.
+    // Never send raw logs, paths, screenshots, free-form Codex output or prompts.
+    private static string AiAlertReason(string eventId)
+    {
+        try
+        {
+            string path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "MabiAutoAI", "autopilot-results", eventId, "result.json");
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length < 2 || info.Length > 131072) return "상세 내용은 AI 오류 시간별 내역에서 확인";
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("event_id", out var id) || id.GetString() != eventId ||
+                !root.TryGetProperty("reason", out var value) ||
+                value.ValueKind != JsonValueKind.String)
+                return "상세 내용은 AI 오류 시간별 내역에서 확인";
+            string reason = value.GetString() ?? "";
+            if (reason.Contains("codex_quota_exhausted", StringComparison.Ordinal))
+                return "Codex 사용량 한도로 중단";
+            if (reason.Contains("build_or_regression_test_failed", StringComparison.Ordinal))
+                return "빌드 또는 회귀 테스트 실패";
+            if (reason.Contains("agent_no_patch", StringComparison.Ordinal))
+                return "Codex가 수정 코드를 생성하지 못함";
+            if (reason.Contains("repo_dirty", StringComparison.Ordinal))
+                return "작업용 소스가 변경되어 안전 중단";
+            if (reason.Contains("codex_unverified", StringComparison.Ordinal))
+                return "Codex 실행 또는 검증 실패";
+            if (reason.Contains("release_source", StringComparison.Ordinal))
+                return "배포 기준 소스 검증 실패";
+            if (reason.Contains("regression", StringComparison.Ordinal))
+                return "필수 회귀 테스트 조건 미충족";
+            return "상세 내용은 AI 오류 시간별 내역에서 확인";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or JsonException or ArgumentException or InvalidOperationException)
+        {
+            return "상세 내용은 AI 오류 시간별 내역에서 확인";
+        }
+    }
+
+    private async Task SendAiAutopilotAlertAsync(string category, string eventId)
+    {
+        var settings = _notifier.Settings;
+        if (!settings.Enabled || !settings.AiAutopilotAlertsEnabled ||
+            string.IsNullOrWhiteSpace(settings.BotToken) ||
+            string.IsNullOrWhiteSpace(settings.ChatId)) return;
+
+        string key = category + ":" + eventId;
+        if (!_sentAiAlertKeys.Add(key)) return;
+        // Keep an upper bound: the watcher itself persists event deduplication.
+        if (_sentAiAlertKeys.Count > 512) _sentAiAlertKeys.Clear();
+
+        string title = category switch
+        {
+            "started" => "AI 오류 분석 시작",
+            "tests_passed_review_required" => "AI 코드 테스트 통과 (미적용)",
+            "needs_review" => "AI 수정안 검토 필요",
+            "tests_failed" => "AI 수정 테스트 실패",
+            "blocked" => "AI 분석·수정 중단",
+            _ => ""
+        };
+        if (title.Length == 0) return;
+        string detail = category switch
+        {
+            "started" => "격리된 작업 폴더에서 오류 분석을 시작했습니다.",
+            "tests_passed_review_required" =>
+                "코드 테스트 결과만 통과했습니다. 실제 게임 해결·운영 적용은 확인되지 않았습니다.",
+            _ => AiAlertReason(eventId)
+        };
+        await _notifier.SendAlertAsync(title, "오류 ID: " + eventId +
+            "\n" + detail + "\n진행 내역: MabiAuto → AI 오류 시간별 내역",
+            screenshot: false);
     }
 
     private void SaveAiPreferences()
