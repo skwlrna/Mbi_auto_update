@@ -83,6 +83,59 @@ internal sealed class AiAutopilotHost : IDisposable
         }
     }
 
+    internal static async Task<string> CheckPipelineAsync()
+    {
+        // Read-only helper. Does not start/stop the active watcher or Codex agent.
+        string scriptDir = Path.Combine(AppContext.BaseDirectory, "ai-autopilot");
+        string script = Path.Combine(scriptDir, "autopilot.py");
+        if (!File.Exists(script)) return "AI 모듈이 없습니다. 배포 패키지를 확인하세요.";
+        string python = Environment.GetEnvironmentVariable("MABIAUTO_AI_PYTHON") ?? "python.exe";
+        using var child = new Process();
+        child.StartInfo = new ProcessStartInfo
+        {
+            FileName = python, WorkingDirectory = scriptDir, UseShellExecute = false,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        child.StartInfo.ArgumentList.Add("-B");
+        child.StartInfo.ArgumentList.Add(script);
+        child.StartInfo.ArgumentList.Add("--pipeline-check");
+        child.StartInfo.Environment["PYTHONUTF8"] = "1";
+        try
+        {
+            if (!child.Start()) return "AI 준비 점검을 시작하지 못했습니다.";
+            var outputTask = child.StandardOutput.ReadToEndAsync();
+            var errorTask = child.StandardError.ReadToEndAsync();
+            try { await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(45)); }
+            catch (TimeoutException)
+            {
+                if (!child.HasExited) child.Kill(entireProcessTree: true);
+                return "AI 준비 점검 시간 초과. 실행 중인 AI 감시는 변경하지 않았습니다.";
+            }
+            string output = await outputTask;
+            await errorTask; // Do not disclose local paths, tokens or untrusted stderr.
+            string line = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault(x => x.StartsWith("PIPELINE_CHECK: ", StringComparison.Ordinal)) ?? "";
+            if (line == "PIPELINE_CHECK: PASS | host_ready_not_live_verified" && child.ExitCode == 0)
+                return "PC 준비 점검 통과: Python·Git·Codex 로그인·.NET·필수 테스트가 준비됐습니다.\n" +
+                    "실제 Codex 코드 수정/PR 생성 성공을 증명하는 검사는 아닙니다.";
+            if (line.StartsWith("PIPELINE_CHECK: FAIL | ", StringComparison.Ordinal))
+            {
+                string flags = line["PIPELINE_CHECK: FAIL | ".Length..];
+                if (flags.Length > 280 || flags.Any(x => !(char.IsAsciiLetterLower(x) || x == '_' || x == ',')))
+                    return "점검에 실패했습니다. PC 필수 도구와 로그인 상태를 확인하세요.";
+                return "준비 점검에서 확인할 항목: " + flags.Replace(",", ", ") +
+                    "\nCodex를 실행하거나 게임 화면을 조작하지 않았습니다.";
+            }
+            return "AI 준비 점검에서 확인 가능한 결과를 받지 못했습니다. Python 실행 상태를 확인하세요.";
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or
+                                    InvalidOperationException or IOException)
+        {
+            return "AI 준비 점검 실행 실패: " + ex.GetType().Name + " (Python 경로 확인)";
+        }
+    }
+
     private void Observe(string message)
     {
         // Do not surface raw MCP error evidence into the app; only the
