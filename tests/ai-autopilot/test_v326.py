@@ -68,15 +68,20 @@ class WatchdogAndRegressionTests(unittest.TestCase):
     def test_registered_test_runs_without_arbitrary_script(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            project = root / "tests" / "altering" / "Regression.csproj"
-            project.parent.mkdir(parents=True)
-            project.write_text("<Project/>")
+            for suite in ("altering", "altering-screen-integration"):
+                project = root / "tests" / suite / "Regression.csproj"
+                project.parent.mkdir(parents=True)
+                project.write_text("<Project/>")
             commands, problem = regression_policy.commands_for(
                 ["source/FishingAutomation/dungeon/AlteringScreen.cs",
-                 "tests/altering/Program.cs"], root)
+                 "tests/altering/Program.cs",
+                 "tests/altering-screen-integration/Program.cs"], root)
             self.assertIsNone(problem)
-            self.assertEqual(commands, [["dotnet", "run", "--project",
-                                          "tests/altering/Regression.csproj", "-c", "Release"]])
+            self.assertEqual(commands, [
+                ["dotnet", "run", "--project",
+                 "tests/altering-screen-integration/Regression.csproj", "-c", "Release"],
+                ["dotnet", "run", "--project",
+                 "tests/altering/Regression.csproj", "-c", "Release"]])
 
     def test_visual_evidence_is_local_and_bounded(self):
         runtime = (BASE / "source" / "FishingAutomation" / "dungeon" /

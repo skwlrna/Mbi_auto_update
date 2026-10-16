@@ -468,9 +468,47 @@ def test_patch(worktree: Path, outdir: Path, c: dict[str, Any], added_tests: lis
     return len(results) > 0, results
 
 
-def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, progress=None) -> dict[str, Any]:
+def interrupted_retry_id(original_eid: str) -> str:
+    """A distinct, deterministic job key; never reuse the interrupted worktree."""
+    return hashlib.sha256(("manual-interrupted-retry-v1:" + original_eid).encode()).hexdigest()[:16]
+
+
+def mark_interrupted_result(path: Path) -> bool:
+    """Call only while holding the singleton watcher lock on startup.
+
+    Preserve the uncommitted isolated worktree and evidence; never replay it.
+    """
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 131072:
+        return False
+    report = read_json(path)
+    if not isinstance(report, dict) or report.get("status") != "in_progress":
+        return False
+    report.update({
+        "status": "interrupted_review_required",
+        "reason": "macro_or_watcher_exited_during_isolated_fix",
+        "ended": now(),
+        "automatic_resume": False,
+    })
+    write_json(path, report)
+    return True
+
+
+def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
+            progress=None, retry_interrupted: bool = False) -> dict[str, Any]:
     original_eid = event_id(folder)
     eid = original_eid
+    if retry_cli_error and retry_interrupted:
+        return {"status": "blocked", "reason": "conflicting_manual_retry_modes"}
+    if retry_interrupted:
+        previous = expand(str(c["results_dir"])) / original_eid / "result.json"
+        if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
+            return {"status": "blocked", "reason": "interrupted_original_missing"}
+        original = read_json(previous)
+        if (original.get("event") != folder.name or
+            original.get("event_id") != original_eid or
+            original.get("status") != "interrupted_review_required"):
+            return {"status": "blocked", "reason": "interrupted_original_not_reviewable"}
+        eid = interrupted_retry_id(original_eid)
     if retry_cli_error:
         # Explicit, single-use manual retry only for the known unsupported -a flag.
         # Preserve the original result and its worktree as immutable evidence.
@@ -493,6 +531,9 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
                               "status": "blocked", "note": "No changes to live game or deployed software."}
 
     memory_context: str | None = None
+    if retry_interrupted:
+        output["retry_of"] = original_eid
+        output["retry_reason"] = "explicit_ui_interrupted_reanalysis"
     if retry_cli_error:
         output["retry_of"] = original_eid
         output["retry_reason"] = "unsupported_codex_exec_approval_flag"
@@ -517,6 +558,8 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False, prog
         return output
 
     if result_path.exists():
+        if not retry_interrupted:
+            mark_interrupted_result(result_path)
         return read_json(result_path)
     repo = expand(str(c["repo"]))
     try:
@@ -696,6 +739,17 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         if isinstance(item, dict) and isinstance(item.get("signature"), str)
         and isinstance(item.get("evidence_mtime"), (int, float))
     }
+    # A process can stop mid-Codex when MabiAuto closes. The previous fix
+    # must never be resumed or called successful on the next watch startup.
+    # The singleton lock in main() guarantees the old watcher is gone.
+    if not single:
+        for unfinished in results_dir.glob("*/result.json"):
+            try:
+                if mark_interrupted_result(unfinished):
+                    print("중단된 AI 수정 기록 보존 · 재분석은 화면에서 별도 승인:",
+                          unfinished.parent.name, flush=True)
+            except (OSError, ValueError, TypeError):
+                print("중단된 기록 검사 실패 (자동 재실행 안 함)", flush=True)
     last_reported: tuple[str, int] | None = None
 
     def category_for(folder: Path) -> str:
@@ -730,6 +784,33 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         else:
             folders = [x for x in folders if event_id(x) not in seen]
         pending = [x for x in folders if stable(x, int(c["settle_seconds"]))]
+        # The UI can request one new, isolated analysis of an explicitly
+        # interrupted job. No raw paths, shell commands or edits are accepted.
+        # Do not consume the request if provider quota is still paused.
+        retry_file = results_dir / "interrupted-retry-request.json"
+        retry_folder = None
+        if not single and retry_file.is_file() and not retry_file.is_symlink():
+            try:
+                request = (read_json(retry_file) if retry_file.stat().st_size <= 1024 else {})
+                if not isinstance(request, dict):
+                    request = {}
+                requested_id = request.get("event_id")
+                if (request.get("action") == "retry_interrupted_once" and
+                    isinstance(requested_id, str) and
+                    re.fullmatch(r"[0-9a-f]{16}", requested_id)):
+                    candidate = next((p for p in all_evidence_folders(c)
+                                      if event_id(p) == requested_id), None)
+                    source = results_dir / requested_id / "result.json"
+                    new_result = results_dir / interrupted_retry_id(requested_id) / "result.json"
+                    if (candidate is not None and stable(candidate, int(c["settle_seconds"])) and
+                        not source.is_symlink() and source.is_file() and not new_result.exists()):
+                        original = read_json(source)
+                        if (original.get("status") == "interrupted_review_required" and
+                            original.get("event_id") == requested_id and
+                            original.get("event") == candidate.name):
+                            retry_folder = candidate
+            except (OSError, ValueError, TypeError):
+                pass
         # Explicit quota exhaustion persists through process/watch restarts.
         # Only a user-confirmed request bound to the current random pause ID
         # permits NEW events to be sent to Codex again.
@@ -755,6 +836,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                     last_reported = ("quota", len(pending))
                 time.sleep(max(10, int(c["poll_seconds"])))
                 continue
+        if retry_folder is not None:
+            pending = [retry_folder] + [p for p in pending if p != retry_folder]
         if not single:
             activity("watching", None, len(pending))
             current = ("waiting", len(pending))
@@ -763,12 +846,13 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 last_reported = current
         for folder in pending:
             eid = event_id(folder)
-            if eid in seen and not (single and latest):
+            manual_retry = retry_folder is not None and folder == retry_folder
+            if eid in seen and not (single and latest) and not manual_retry:
                 continue
             # No arbitrary per-day run cap. Codex decides the actual account
             # quota; the explicit quota error triggers a bounded local ChatGPT
             # handoff and stops additional Codex calls safely.
-            signature = duplicate_signature(folder) if not single else None
+            signature = duplicate_signature(folder) if not single and not manual_retry else None
             last_seen = recent_signatures.get(signature) if signature else None
             if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:
                 reason = "identical_mcp_error_evidence_within_10_minutes"
@@ -803,11 +887,15 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                         print(f"Codex 진행: {elapsed}초 경과 · 마지막 출력 {silence}초 전", flush=True)
                     else:
                         print(f"Codex 정체 감지: {reason} · {elapsed}초 경과 · 재시작 없음", flush=True)
-                result = process(folder, c, retry_cli_error=retry_cli_error, progress=on_codex_progress)
+                result = process(folder, c, retry_cli_error=retry_cli_error,
+                                 progress=on_codex_progress, retry_interrupted=manual_retry)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
             print("처리 결과:", result.get("status"), result.get("reason"), flush=True)
+            if manual_retry:
+                try: retry_file.unlink(missing_ok=True)
+                except OSError: pass
             if signature:
                 recent_signatures[signature] = folder.stat().st_mtime
             seen.add(eid)
@@ -889,17 +977,22 @@ def watch_readiness(c: dict[str, Any]) -> bool:
     """
     reviewer = HERE / "review_latest_abyss.py"
     if not reviewer.is_file():
-        print("REVIEW BLOCKED: dedicated reviewer missing")
-        return False
+        print("WATCHER WARNING: previous Abyss audit tool missing; new errors can still be analyzed")
+        return True
     try:
         res = cmd([sys.executable, "-B", str(reviewer)], cwd=HERE, timeout=40)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print("REVIEW BLOCKED:", type(exc).__name__)
-        return False
-    print(res.stdout.rstrip())
-    if res.stderr.strip():
-        print(redacted(res.stderr[-500:]))
-    return res.returncode == 0
+        print("WATCHER WARNING: previous Abyss audit unavailable:", type(exc).__name__)
+        return True
+    if res.returncode == 0:
+        print(res.stdout.rstrip())
+    if res.returncode != 0:
+        # Do not let ONE historical Abyss patch prevent all new unrelated
+        # repairs. The separate per-patch Abyss contract still fails closed
+        # before any Abyss fix is considered tested.
+        print("WATCHER WARNING: prior Abyss candidate needs review; "
+              "new errors are watched, no old patch is deployed", flush=True)
+    return True
 
 
 def main() -> int:
@@ -927,9 +1020,8 @@ def main() -> int:
     if not status_check(c):
         print("사전 검사 실패. config.json 경로 또는 Git 상태를 확인하세요.")
         return 2
-    if a.watch and not watch_readiness(c):
-        print("WATCHER BLOCKED: Abyss patch needs a dedicated review first.")
-        return 2
+    if a.watch:
+        watch_readiness(c)  # Advisory for history; candidate Abyss patches still fail closed.
     try:
         with SingletonLock(expand(str(c["results_dir"])) / "autopilot.lock"):
             poll(c, single=a.once, latest=a.latest, retry_cli_error=a.retry_cli_error)

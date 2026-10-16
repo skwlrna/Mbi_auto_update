@@ -130,6 +130,10 @@ internal sealed class AiAutopilotHost : IDisposable
             var safe = message.Length > 95 ? message[..95] : message;
             Publish("AI " + safe);
         }
+        else if (message.StartsWith("WATCHER WARNING:", StringComparison.Ordinal))
+            Publish("AI 감시 유지 · 이전 어비스 수정안은 별도 검토 필요");
+        else if (message.StartsWith("중단된 AI 수정 기록 보존", StringComparison.Ordinal))
+            Publish("이전 AI 수정 중단 · 오류 시간별 내역에서 재분석 요청 가능");
         else if (message.StartsWith("Codex 정체 감지:", StringComparison.Ordinal))
             Publish("Codex 정체 감지 — 해당 작업 안전 중단 · 자동 재시작 없음");
         else if (message.StartsWith("AI 검토용 Draft PR 생성:", StringComparison.Ordinal))
