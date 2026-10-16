@@ -167,7 +167,7 @@ class Phase2Tests(unittest.TestCase):
             if argv[:3] == ["git", "worktree", "add"]:
                 worktree = Path(argv[5])
                 worktree.mkdir(parents=True)
-                for relative in (source, test):
+                for relative in (source, test, "tests/crafting/Regression.csproj"):
                     dest = worktree / relative
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_text("// offline candidate")
