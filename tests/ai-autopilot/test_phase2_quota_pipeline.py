@@ -73,6 +73,7 @@ class Phase2Tests(unittest.TestCase):
             "status": "blocked", "reason": "codex_unverified: codex_quota_exhausted"})
         self.assertEqual(first.call_count, 1)
         eid = agent.event_id(folder)
+        (self.results / eid).mkdir()
         agent.write_json(self.results / eid / "result.json", {
             "event": folder.name, "event_id": eid, "status": "blocked",
             "reason": "codex_unverified: codex_quota_exhausted"})
