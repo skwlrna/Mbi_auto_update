@@ -27,7 +27,8 @@ from supervised_codex import supervised_run
 from quota_handoff import (exhausted as codex_quota_exhausted,
                            pause_record, resume_authorized, handoff_manifest)
 from regression_policy import commands_for as regression_commands_for
-from github_pr import publish_verified_draft_pr
+from github_pr import publish_verified_draft_pr, user_opted_in
+from pipeline_readiness import readiness
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
@@ -1054,6 +1055,8 @@ def main() -> int:
     mode.add_argument("--watch", action="store_true", help="watch new MCP error folders")
     mode.add_argument("--once", action="store_true", help="process one pending event")
     mode.add_argument("--status", action="store_true", help="show recent results")
+    mode.add_argument("--pipeline-check", action="store_true",
+                      help="write a read-only local prerequisite report; does not launch Codex")
     parser.add_argument("--latest", action="store_true", help="with --once, target latest prior error")
     parser.add_argument("--retry-cli-error", action="store_true",
                         help="with --once --latest, retry known Codex -a error once without deleting history")
@@ -1063,6 +1066,15 @@ def main() -> int:
     c = config()
     if a.check:
         return 0 if status_check(c) else 2
+    if a.pipeline_check:
+        report = readiness(c, opted_in=user_opted_in())
+        result_path = expand(str(c["results_dir"])) / "pipeline-check.json"
+        write_json(result_path, report)
+        for stage, passed in report["stages"].items():
+            print(f"AI 사전 점검 {stage}: {'OK' if passed else 'NOT_READY'}")
+        print("NO CODEX CALL / NO GAME INPUT / NO PATCH / NO DRAFT PR")
+        print("실제 Codex 로그인과 오류 수정·회귀 테스트·PR 생성은 사용자 PC에서 별도 실검증 필요")
+        return 0 if report["result"] == "ready_for_manual_trial" else 2
     if a.status:
         d = expand(str(c["results_dir"]))
         for p in sorted(d.glob("*/result.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:8]:
