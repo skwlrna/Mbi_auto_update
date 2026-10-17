@@ -119,7 +119,8 @@ static class Program
         Test("tiles/center-after-corners", () =>
         {
             var b = Empty();
-            b[0] = b[2] = b[6] = b[8] = WaterwayTile.X;
+            b[0] = b[8] = WaterwayTile.X;
+            b[2] = b[6] = WaterwayTile.O;
             Require(WaterwayTilePlanner.Choose(b, true, true, null) == 4,
                 "center not used");
         });
@@ -131,6 +132,12 @@ static class Program
             b[6] = WaterwayTile.Unknown;
             Require(WaterwayTilePlanner.Choose(b, true, true, null) is null,
                 "partially read board accepted");
+        });
+        Test("tiles/opposite-disabled-if-center-X", () =>
+        {
+            var b = Empty(); b[0] = WaterwayTile.O; b[4] = WaterwayTile.X;
+            Require(WaterwayTilePlanner.Choose(b, true, true, 0) == 2,
+                "opposite diagonal pursued through X center");
         });
         Test("tiles/party-O-contributes-to-win", () =>
         {
@@ -144,16 +151,27 @@ static class Program
             var tracker = new WaterwayBoardTracker();
             var b = Empty();
             Require(tracker.TryObserve(b, Screen()), "initial board rejected");
-            Require(!tracker.ConfirmOwnO(0, Screen()), "standing on a pad counted as O");
+            Require(!tracker.ConfirmOwnO(0, Screen(), selectedPlayerWasMe: true), "standing on a pad counted as O");
             b[0] = WaterwayTile.O;
             Require(tracker.TryObserve(b, Screen(seconds: 1)), "new O rejected");
-            Require(tracker.ConfirmOwnO(0, Screen(seconds: 1)) &&
+            Require(tracker.ConfirmOwnO(0, Screen(seconds: 1), selectedPlayerWasMe: true) &&
                 tracker.LastConfirmedOwnCorner == 0, "confirmed own O not tracked");
             b[0] = WaterwayTile.X;
             Require(!tracker.TryObserve(b, Screen(seconds: 2)), "occupied tile changed without reset");
-            Require(tracker.TryObserve(b, Screen(seconds: 3), verifiedBoardReset: true),
+            Require(tracker.TryObserve(b, Screen(seconds: 3), resetProof: Screen(seconds: 3)),
                 "verified board reset rejected");
             Require(tracker.LastConfirmedOwnCorner is null, "reset retained prior own corner");
+        });
+        Test("board/rejects-old-updates-and-false-own-claim", () =>
+        {
+            var tracker = new WaterwayBoardTracker();
+            var b = Empty();
+            Require(tracker.TryObserve(b, Screen(seconds: 2)), "fresh observation rejected");
+            Require(!tracker.TryObserve(b, Screen(seconds: 1)), "old board replaced newer");
+            b[0] = WaterwayTile.O;
+            Require(tracker.TryObserve(b, Screen(seconds: 3)), "confirmed O rejected");
+            Require(!tracker.ConfirmOwnO(0, Screen(seconds: 3), selectedPlayerWasMe: false),
+                "teammate O falsely claimed as mine");
         });
         Test("board/X-center-invalidates-rule-hypothesis", () =>
         {
@@ -189,6 +207,36 @@ static class Program
             held.Update(WaterwayKeys.A, false, false, false);
             Require(held.Update(WaterwayKeys.A, false, true, false).Release == WaterwayKeys.A,
                 "stale player position kept a key held");
+        });
+        Test("spear/target-and-shield-must-be-observed", () =>
+        {
+            var self = new WaterwayTrackedPlayer("me", new Vector2(0, 20), Screen());
+            var aim = new WaterwayObservedAim("thrower", new Vector2(0, 0), Screen(),
+                "me", "fire", Screen());
+            var matching = new WaterwayObservedShaman("mage1", new Vector2(0, 10), Screen(),
+                "fire", Screen(), true, Screen());
+            var wrong = matching with { ObjectId = "mage2", ShieldElement = "water" };
+            var plan = WaterwaySpearPlanner.TryChoose(self, aim, new[] { wrong, matching },
+                T, TimeSpan.FromSeconds(1), 5, 1);
+            Require(plan is not null && plan.Value.ShamanObjectId == "mage1" &&
+                plan.Value.Target == new Vector2(0, 15), "matching observed target not selected");
+            Require(WaterwaySpearPlanner.TryChoose(self, aim with { AimedObjectId = "partyMember" },
+                new[] { matching }, T, TimeSpan.FromSeconds(1), 5, 1) is null,
+                "another party member's aim caused player movement");
+            Require(WaterwaySpearPlanner.TryChoose(self, aim, new[] { wrong },
+                T, TimeSpan.FromSeconds(1), 5, 1) is null,
+                "wrong shield element accepted");
+            Require(WaterwaySpearPlanner.TryChoose(self, aim, new[] { matching },
+                T.AddSeconds(2), TimeSpan.FromSeconds(1), 5, 1) is null,
+                "stale aim accepted");
+            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+                WaterwaySpearOutcome.SpearLaunched, Screen()), "launch counted as hit");
+            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage2",
+                WaterwaySpearOutcome.ShamanHit, Screen()), "wrong shaman counted as hit");
+            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+                WaterwaySpearOutcome.ShamanHit, Guess()), "inference counted as hit");
+            Require(WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+                WaterwaySpearOutcome.ShamanStaggered, Screen()), "direct stagger rejected");
         });
         Test("assist/H-toggle-only-on-observed-opposite", () =>
         {
