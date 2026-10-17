@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/dungeon/ScatteredWaterwayCore.cs" Link="ScatteredWaterwayCore.cs" />
+    <Compile Include="../../source/FishingAutomation/dungeon/ScatteredWaterwaySpearPlanner.cs" Link="ScatteredWaterwaySpearPlanner.cs" />
   </ItemGroup>
 </Project>
