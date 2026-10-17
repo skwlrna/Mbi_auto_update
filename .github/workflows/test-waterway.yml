@@ -1,0 +1,21 @@
+name: Waterway pure-logic regression
+on:
+  pull_request:
+    paths:
+      - 'source/FishingAutomation/dungeon/ScatteredWaterwayCore.cs'
+      - 'source/FishingAutomation/dungeon/ScatteredWaterwaySpearPlanner.cs'
+      - 'tests/waterway/**'
+      - '.github/workflows/test-waterway.yml'
+  workflow_dispatch:
+
+jobs:
+  waterway-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test pure waterway mechanic logic (no game input)
+        run: dotnet run --project tests/waterway/Regression.csproj -c Release
