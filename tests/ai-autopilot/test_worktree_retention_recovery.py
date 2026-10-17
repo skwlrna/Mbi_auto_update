@@ -86,6 +86,47 @@ class WorktreeRetentionTest(unittest.TestCase):
         self.assertFalse(self.worktree.exists())
         self.assertTrue((self.root / "archives" / (self.id + ".zip")).exists())
 
+    def test_existing_archive_does_not_hide_other_safe_candidate(self):
+        other_id = "abcdef0123456789"
+        other_tree = self.workroot / other_id
+        git(self.repo, "worktree", "add", "-b", "ai/retention-other", str(other_tree))
+        other_report = self.results / other_id / "result.json"
+        other_report.parent.mkdir()
+        other_report.write_text(json.dumps({
+            "event": "second_event", "event_id": other_id, "status": "blocked",
+            "reason": "other_failure", "worktree": str(other_tree)
+        }), encoding="utf-8")
+        archives = self.root / "archives"
+        archives.mkdir()
+        original_archive = archives / (self.id + ".zip")
+        original_archive.write_bytes(b"existing-backup-must-not-be-overwritten")
+
+        snapshot = retention.report(self.config)
+        self.assertEqual(set(snapshot["clean_candidates"]), {self.id, other_id})
+        self.assertEqual(snapshot["archive_ready_candidates"], [other_id])
+        self.assertEqual(snapshot["archive_conflicts"], [self.id])
+        self.assertEqual(retention.archive_clean_one(self.config, self.id)["status"], "blocked")
+        self.assertEqual(original_archive.read_bytes(), b"existing-backup-must-not-be-overwritten")
+
+        result = retention.archive_clean_one(self.config, other_id)
+        self.assertEqual(result["status"], "archived", result)
+        self.assertFalse(other_tree.exists())
+        self.assertTrue(self.worktree.exists())
+        self.assertEqual(original_archive.read_bytes(), b"existing-backup-must-not-be-overwritten")
+
+    def test_partial_archive_blocks_only_that_candidate(self):
+        archives = self.root / "archives"
+        archives.mkdir()
+        partial = archives / (self.id + ".zip.partial")
+        partial.write_bytes(b"recover-manually")
+        snapshot = retention.report(self.config)
+        self.assertEqual(snapshot["clean_candidates"], [self.id])
+        self.assertEqual(snapshot["archive_ready_candidates"], [])
+        self.assertEqual(snapshot["archive_conflicts"], [self.id])
+        self.assertEqual(retention.archive_clean_one(self.config, self.id)["status"], "blocked")
+        self.assertEqual(partial.read_bytes(), b"recover-manually")
+        self.assertTrue(self.worktree.exists())
+
     def test_modified_code_protected_even_on_terminal_result(self):
         (self.worktree / "README").write_text("candidate patch")
         before = self.original.read_bytes()

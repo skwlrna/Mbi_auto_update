@@ -522,7 +522,7 @@ internal sealed class AiAutopilotDashboard : Form
             using var inventory = ReadBounded(inventoryPath);
             if (inventory is null || Field(inventory.RootElement, "kind") != "retention_read_only" ||
                 File.GetLastWriteTimeUtc(inventoryPath) < DateTime.UtcNow.AddMinutes(-2) ||
-                !inventory.RootElement.TryGetProperty("clean_candidates", out var candidates) ||
+                !inventory.RootElement.TryGetProperty("archive_ready_candidates", out var candidates) ||
                 candidates.ValueKind != JsonValueKind.Array)
             {
                 MessageBox.Show(this, "작업공간 현황이 없습니다. AI 감시를 켜고 잠시 기다린 뒤 다시 확인하세요.");
@@ -534,10 +534,14 @@ internal sealed class AiAutopilotDashboard : Form
                 .Where(x => ValidEventId(x)).ToArray();
             int count = Number(inventory.RootElement, "count");
             int limit = Number(inventory.RootElement, "limit");
+            int archiveConflicts = inventory.RootElement.TryGetProperty("archive_conflicts", out var conflicts) &&
+                conflicts.ValueKind == JsonValueKind.Array ? conflicts.GetArrayLength() : 0;
             if (verified.Length == 0)
             {
                 MessageBox.Show(this, "보관 공간 " + count + "/" + limit +
-                    " · 안전 정리 가능한 깨끗한 완료 작업이 없습니다. 검토 중인 수정안은 보호합니다. " +
+                    " · 안전 정리 가능한 새 후보가 없습니다. 검토 중인 수정안은 보호합니다. " +
+                    (archiveConflicts > 0 ? "기존 ZIP/임시 백업 이름 충돌 " + archiveConflicts +
+                        "건 · 해당 백업은 덮어쓰지 않습니다. " : "") +
                     "강제로 삭제하지 말고 작업 폴더와 결과를 별도 검토하세요.");
                 return;
             }
