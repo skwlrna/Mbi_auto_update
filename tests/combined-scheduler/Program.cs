@@ -407,6 +407,32 @@ using (var g = Graphics.FromImage(missionFrame))
     Assert(AbyssMissionCompletePolicy.ConfirmCenter(missionFrame.Size) == new Point(400, 950),
         "post-exit mission confirm uses fixed center of ONE green button");
 
+    // Real 2026-10-16 22:42 screenshot has exact independent gold title,
+    // white "미션 선물" and white "확인" on a continuous green bar. Windows
+    // OCR missed both strings for 90 seconds; the fail-closed fallback must
+    // verify all three text areas on TWO frames, never green+crest alone.
+    Assert(!AbyssMissionCompletePolicy.HasMissionTextVisualEvidence(missionFrame),
+        "gold crest and green confirm WITHOUT three text glyphs never authorize fallback");
+    g.FillRectangle(gold, 312, 235, 184, 26);
+    Assert(!AbyssMissionCompletePolicy.HasMissionTextVisualEvidence(missionFrame),
+        "gold mission title without gift/confirm glyphs is insufficient");
+    g.FillRectangle(Brushes.White, 366, 320, 73, 20);
+    Assert(!AbyssMissionCompletePolicy.HasMissionTextVisualEvidence(missionFrame),
+        "title and gift without white confirm label cannot click green bar");
+    g.FillRectangle(Brushes.White, 380, 941, 44, 19);
+    Assert(AbyssMissionCompletePolicy.HasMissionTextVisualEvidence(missionFrame),
+        "actual-style title + gift + confirm glyphs and crest + green bar pass");
+    using (var secondMissionFrame = (Bitmap)missionFrame.Clone())
+    {
+        Assert(AbyssMissionCompletePolicy.HasStableMissionVisualFallback(
+            missionFrame, secondMissionFrame),
+            "two independent identical mission frames authorize one post-exit fallback");
+        g.FillRectangle(Brushes.Black, 366, 320, 73, 20);
+        Assert(!AbyssMissionCompletePolicy.HasStableMissionVisualFallback(
+            missionFrame, secondMissionFrame),
+            "lost mission-gift heading on first frame blocks fallback");
+    }
+
     using var threeButtons = new Bitmap(800, 1000);
     using var three = Graphics.FromImage(threeButtons);
     three.Clear(Color.Black);
@@ -451,7 +477,8 @@ Assert(scheduleExitSource.Contains("_scheduledExitClicked = true") &&
        sceneSource.Contains("TryAcknowledgeScheduledMissionCompleteAsync(frame, ct)") &&
        sceneMissionSource.Contains("VerifyAbyssClickClientGeometry") &&
        sceneMissionSource.Contains("_scheduledMissionConfirmationClicked = true") &&
-       sceneMissionSource.Contains("FindCompactLabelAsync"),
+       sceneMissionSource.Contains("FindCompactLabelAsync") &&
+       sceneMissionSource.Contains("HasStableMissionVisualFallback"),
     "post-exit mission confirm is one-shot, OCR-checked and guarded by exit proof");
 
 // Scheduler supervisory monitor: no new game input, replay or automatic restart.
