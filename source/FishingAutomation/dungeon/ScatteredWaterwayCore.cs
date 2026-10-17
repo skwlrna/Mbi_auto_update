@@ -214,7 +214,8 @@ internal sealed class WaterwayBoardTracker
         WaterwayEvidence? resetProof = null)
     {
         bool verifiedBoardReset = resetProof.HasValue && resetProof.Value.IsDirect &&
-            resetProof.Value.ObservedAt >= _lastObservedAt;
+            resetProof.Value.ObservedAt >= _lastObservedAt &&
+            resetProof.Value.ObservedAt <= proof.ObservedAt;
         if (!proof.IsDirect || proof.ObservedAt < _lastObservedAt ||
             (resetProof.HasValue && !verifiedBoardReset) ||
             cells.Count != 9 || cells.Any(x => x == WaterwayTile.Unknown))
@@ -303,9 +304,10 @@ internal sealed class WaterwayHeldKeyPlan
     public WaterwayKeys Held { get; private set; }
 
     public WaterwayKeyChange Update(WaterwayKeys desired,
-        bool observedUserControl, bool positionStale, bool cameraUnverified)
+        bool observedUserControl, bool positionStale, bool cameraUnverified,
+        bool uiInterrupt = false)
     {
-        if (observedUserControl || positionStale || cameraUnverified)
+        if (observedUserControl || positionStale || cameraUnverified || uiInterrupt)
             desired = WaterwayKeys.None;
 
         WaterwayKeys release = Held & ~desired;
