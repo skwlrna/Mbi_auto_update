@@ -53,12 +53,13 @@ internal static class AbyssMissionCompletePolicy
             if (!IsGreen(frame.GetPixel(sx, sy))) return false;
         }
 
-        // Independent gold mission crest/title; green bottom buttons are
-        // common elsewhere, and MUST NOT alone authorize confirmation.
+        // Independent gold TROPHY crest only; the lower glowing mission
+        // title is NOT a substitute for the crest. The real 22:42 frame
+        // contains the badge around y100..215, above title glyphs y229+.
         int gold = 0;
-        var crestAndTitle = Scale(new Rectangle(305, 95, 190, 185), frame.Size);
-        for (int y = crestAndTitle.Top; y < crestAndTitle.Bottom; y += 4)
-        for (int x = crestAndTitle.Left; x < crestAndTitle.Right; x += 4)
+        var crestOnly = Scale(new Rectangle(305, 95, 190, 125), frame.Size);
+        for (int y = crestOnly.Top; y < crestOnly.Bottom; y += 4)
+        for (int x = crestOnly.Left; x < crestOnly.Right; x += 4)
         {
             var c = frame.GetPixel(x, y);
             if (c.R >= 155 && c.G >= 105 && c.R >= c.B + 45)
