@@ -5,7 +5,8 @@ namespace DungeonVisionBot;
 // Domain-level observation contract. Never map any field to a packet number or
 // byte offset until a real permitted receive trace has verified that mapping.
 internal sealed record WaterwayTrackedPlayer(
-    string ObjectId, Vector2 Position, WaterwayEvidence PositionEvidence);
+    string ObjectId, Vector2 Position, WaterwayEvidence IdentityEvidence,
+    WaterwayEvidence PositionEvidence);
 
 internal sealed record WaterwayObservedAim(
     string ThrowerObjectId, Vector2 ThrowerPosition, WaterwayEvidence ThrowerPositionEvidence,
@@ -18,7 +19,7 @@ internal sealed record WaterwayObservedShaman(
 
 internal readonly record struct WaterwaySpearPlan(
     string ThrowerObjectId, string ShamanObjectId, string SpearElement,
-    Vector2 Target, long SelectionRevision);
+    Vector2 Target, long SelectionRevision, DateTimeOffset AimObservedAt);
 
 // Plan only after actual observed aim-to-self and matching current shield.
 // Freshness threshold and behind distance MUST come from measured capture/movement behavior.
@@ -36,6 +37,7 @@ internal static class WaterwaySpearPlanner
             string.IsNullOrWhiteSpace(aim.AimedObjectId) ||
             string.IsNullOrWhiteSpace(aim.SpearElement) ||
             aim.AimedObjectId != self.ObjectId ||
+            !self.IdentityEvidence.IsFresh(now, measuredFreshness) ||
             !self.PositionEvidence.IsFresh(now, measuredFreshness) ||
             !aim.ThrowerPositionEvidence.IsFresh(now, measuredFreshness) ||
             !aim.AimEvidence.IsFresh(now, measuredFreshness))
@@ -64,7 +66,8 @@ internal static class WaterwaySpearPlanner
         }
         return best is null || chosenPosition is null ? null :
             new WaterwaySpearPlan(aim.ThrowerObjectId, best.ObjectId,
-                aim.SpearElement, chosenPosition.Value, observationRevision);
+                aim.SpearElement, chosenPosition.Value, observationRevision,
+                aim.AimEvidence.ObservedAt);
     }
 }
 
@@ -79,7 +82,8 @@ internal static class WaterwaySpearSuccess
         WaterwaySpearPlan plan, string observedAffectedShamanId,
         WaterwaySpearOutcome outcome, WaterwayEvidence proof)
     {
-        if (!proof.IsDirect || !string.Equals(plan.ShamanObjectId,
+        if (!proof.IsDirect || proof.ObservedAt < plan.AimObservedAt ||
+            !string.Equals(plan.ShamanObjectId,
                 observedAffectedShamanId, StringComparison.Ordinal))
             return false;
         return outcome is WaterwaySpearOutcome.ShamanHit
