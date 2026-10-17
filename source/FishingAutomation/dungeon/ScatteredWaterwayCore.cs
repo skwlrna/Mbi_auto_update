@@ -168,7 +168,7 @@ internal static class WaterwayTilePlanner
         if (blocking.HasValue) return blocking;
 
         // The opposite corner is preferred AMONG the free corners, not over a forced move.
-        if (lastOwnCorner.HasValue && Corners.Contains(lastOwnCorner.Value))
+        if (board[4] != WaterwayTile.X && lastOwnCorner.HasValue && Corners.Contains(lastOwnCorner.Value))
         {
             int opposite = 8 - lastOwnCorner.Value;
             if (board[opposite] == WaterwayTile.Empty)
@@ -203,6 +203,7 @@ internal static class WaterwayTilePlanner
 internal sealed class WaterwayBoardTracker
 {
     private WaterwayTile[]? _board;
+    private DateTimeOffset _lastObservedAt = DateTimeOffset.MinValue;
     public int BoardRevision { get; private set; }
     public int? LastConfirmedOwnCorner { get; private set; }
     public bool CenterXObserved { get; private set; }
@@ -210,9 +211,13 @@ internal sealed class WaterwayBoardTracker
         Array.AsReadOnly((WaterwayTile[])_board.Clone());
 
     public bool TryObserve(IReadOnlyList<WaterwayTile> cells, WaterwayEvidence proof,
-        bool verifiedBoardReset = false)
+        WaterwayEvidence? resetProof = null)
     {
-        if (!proof.IsDirect || cells.Count != 9 || cells.Any(x => x == WaterwayTile.Unknown))
+        bool verifiedBoardReset = resetProof.HasValue && resetProof.Value.IsDirect &&
+            resetProof.Value.ObservedAt >= _lastObservedAt;
+        if (!proof.IsDirect || proof.ObservedAt < _lastObservedAt ||
+            (resetProof.HasValue && !verifiedBoardReset) ||
+            cells.Count != 9 || cells.Any(x => x == WaterwayTile.Unknown))
             return false;
         if (_board is not null && !verifiedBoardReset)
         {
@@ -224,12 +229,15 @@ internal sealed class WaterwayBoardTracker
         _board = cells.ToArray();
         CenterXObserved |= _board[4] == WaterwayTile.X;
         BoardRevision++;
+        _lastObservedAt = proof.ObservedAt;
         return true;
     }
 
-    public bool ConfirmOwnO(int cell, WaterwayEvidence placement)
+    public bool ConfirmOwnO(int cell, WaterwayEvidence placement, bool selectedPlayerWasMe)
     {
-        if (!placement.IsDirect || _board is null || cell < 0 || cell >= 9 ||
+        if (!selectedPlayerWasMe || !placement.IsDirect ||
+            placement.ObservedAt < _lastObservedAt ||
+            _board is null || cell < 0 || cell >= 9 ||
             _board[cell] != WaterwayTile.O)
             return false;
         if (cell is 0 or 2 or 6 or 8) LastConfirmedOwnCorner = cell;
@@ -240,6 +248,7 @@ internal sealed class WaterwayBoardTracker
     {
         _board = null;
         BoardRevision = 0;
+        _lastObservedAt = DateTimeOffset.MinValue;
         LastConfirmedOwnCorner = null;
         CenterXObserved = false;
     }
