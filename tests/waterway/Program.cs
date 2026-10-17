@@ -207,10 +207,13 @@ static class Program
             held.Update(WaterwayKeys.A, false, false, false);
             Require(held.Update(WaterwayKeys.A, false, true, false).Release == WaterwayKeys.A,
                 "stale player position kept a key held");
+            held.Update(WaterwayKeys.S, false, false, false);
+            Require(held.Update(WaterwayKeys.S, false, false, false, uiInterrupt: true)
+                .Release == WaterwayKeys.S, "scene skip did not release keys");
         });
         Test("spear/target-and-shield-must-be-observed", () =>
         {
-            var self = new WaterwayTrackedPlayer("me", new Vector2(0, 20), Screen());
+            var self = new WaterwayTrackedPlayer("me", new Vector2(0, 20), Screen(), Screen());
             var aim = new WaterwayObservedAim("thrower", new Vector2(0, 0), Screen(),
                 "me", "fire", Screen());
             var matching = new WaterwayObservedShaman("mage1", new Vector2(0, 10), Screen(),
@@ -235,6 +238,8 @@ static class Program
                 WaterwaySpearOutcome.ShamanHit, Screen()), "wrong shaman counted as hit");
             Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
                 WaterwaySpearOutcome.ShamanHit, Guess()), "inference counted as hit");
+            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+                WaterwaySpearOutcome.ShamanHit, Screen(seconds: -1)), "earlier hit reused");
             Require(WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
                 WaterwaySpearOutcome.ShamanStaggered, Screen()), "direct stagger rejected");
         });
