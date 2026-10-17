@@ -67,6 +67,46 @@ internal static class AbyssMissionCompletePolicy
         return gold >= 20;
     }
 
+    // 2026-10-16 22:42 real MCP screenshot has a sharp full-width green
+    // confirmation with the exact three separated typographic anchors, but
+    // Windows compact OCR did not recognize the glowing title/white button.
+    // A two-frame visual fallback is allowed ONLY after an independently
+    // verified scheduled LEFT exit (_scheduledExitClicked). The crest + five
+    // continuous green bar samples are still mandatory.
+    internal static bool HasMissionTextVisualEvidence(Bitmap frame)
+    {
+        if (!HasVisualEvidence(frame)) return false;
+
+        static int GlyphSamples(Bitmap frame, Rectangle area, Func<Color, bool> accept)
+        {
+            int count = 0;
+            for (int y = area.Top; y < area.Bottom; y += 2)
+            for (int x = area.Left; x < area.Right; x += 2)
+                if (accept(frame.GetPixel(x, y))) count++;
+            return count;
+        }
+
+        var title = Scale(new Rectangle(310, 229, 188, 42), frame.Size);
+        var gift = Scale(new Rectangle(358, 313, 93, 34), frame.Size);
+        var confirm = Scale(new Rectangle(372, 934, 58, 33), frame.Size);
+
+        bool titleGlyph = GlyphSamples(frame, title, c =>
+            c.R >= 170 && c.G >= 130 && c.R >= c.B + 24) >= 24;
+        bool giftGlyph = GlyphSamples(frame, gift, c =>
+            Math.Min(c.R, Math.Min(c.G, c.B)) >= 158 &&
+            Math.Max(c.R, Math.Max(c.G, c.B)) -
+            Math.Min(c.R, Math.Min(c.G, c.B)) <= 62) >= 10;
+        bool confirmGlyph = GlyphSamples(frame, confirm, c =>
+            Math.Min(c.R, Math.Min(c.G, c.B)) >= 176 &&
+            Math.Max(c.R, Math.Max(c.G, c.B)) -
+            Math.Min(c.R, Math.Min(c.G, c.B)) <= 65) >= 8;
+        return titleGlyph && giftGlyph && confirmGlyph;
+    }
+
+    internal static bool HasStableMissionVisualFallback(Bitmap first, Bitmap second) =>
+        first.Size == second.Size && HasMissionTextVisualEvidence(first) &&
+        HasMissionTextVisualEvidence(second);
+
     internal static bool IsStableTextEvidence(
         Rectangle heading1, Rectangle heading2, Rectangle button1,
         Rectangle button2, Size firstSize, Size secondSize, bool giftHeading)
