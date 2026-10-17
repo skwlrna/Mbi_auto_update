@@ -1484,8 +1484,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private async Task<bool> IsExactMaterialTransferPromptAsync(Bitmap frame, CancellationToken ct)
     {
         if (!HasMaterialTransferModalVisual(frame)) return false;
-        return await FindAsync(frame, MaterialTransferTitle,
-                   "재료를 전송하시겠습니까?", ct) is not null &&
+        // Korean Windows OCR sometimes drops a trailing question mark.
+        // Both accepted variants preserve the full exact heading; never
+        // authorize a transfer from isolated words like "확인" alone.
+        bool exactTitle = await FindAsync(frame, MaterialTransferTitle,
+            "재료를 전송하시겠습니까?", ct) is not null ||
+            await FindAsync(frame, MaterialTransferTitle,
+                "재료를 전송하시겠습니까", ct) is not null;
+        return exactTitle &&
                await FindAsync(frame, MaterialTransferWeeklyLabel,
                    "일주일 동안 보지 않기", ct) is not null &&
                await FindAsync(frame, MaterialTransferConfirmLabel,
