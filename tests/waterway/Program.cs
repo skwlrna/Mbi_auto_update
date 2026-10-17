@@ -221,8 +221,9 @@ static class Program
             var wrong = matching with { ObjectId = "mage2", ShieldElement = "water" };
             var plan = WaterwaySpearPlanner.TryChoose(self, aim, new[] { wrong, matching },
                 T, TimeSpan.FromSeconds(1), 5, 1);
-            Require(plan is not null && plan.Value.ShamanObjectId == "mage1" &&
-                plan.Value.Target == new Vector2(0, 15), "matching observed target not selected");
+            var acceptedPlan = plan ?? throw new Exception("matching observed target not selected");
+            Require(acceptedPlan.ShamanObjectId == "mage1" &&
+                acceptedPlan.Target == new Vector2(0, 15), "matching observed target not selected");
             Require(WaterwaySpearPlanner.TryChoose(self, aim with { AimedObjectId = "partyMember" },
                 new[] { matching }, T, TimeSpan.FromSeconds(1), 5, 1) is null,
                 "another party member's aim caused player movement");
@@ -232,15 +233,15 @@ static class Program
             Require(WaterwaySpearPlanner.TryChoose(self, aim, new[] { matching },
                 T.AddSeconds(2), TimeSpan.FromSeconds(1), 5, 1) is null,
                 "stale aim accepted");
-            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+            Require(!WaterwaySpearSuccess.IsVerified(acceptedPlan, "mage1",
                 WaterwaySpearOutcome.SpearLaunched, Screen()), "launch counted as hit");
-            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage2",
+            Require(!WaterwaySpearSuccess.IsVerified(acceptedPlan, "mage2",
                 WaterwaySpearOutcome.ShamanHit, Screen()), "wrong shaman counted as hit");
-            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+            Require(!WaterwaySpearSuccess.IsVerified(acceptedPlan, "mage1",
                 WaterwaySpearOutcome.ShamanHit, Guess()), "inference counted as hit");
-            Require(!WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+            Require(!WaterwaySpearSuccess.IsVerified(acceptedPlan, "mage1",
                 WaterwaySpearOutcome.ShamanHit, Screen(seconds: -1)), "earlier hit reused");
-            Require(WaterwaySpearSuccess.IsVerified(plan.Value, "mage1",
+            Require(WaterwaySpearSuccess.IsVerified(acceptedPlan, "mage1",
                 WaterwaySpearOutcome.ShamanStaggered, Screen()), "direct stagger rejected");
         });
         Test("assist/H-toggle-only-on-observed-opposite", () =>
