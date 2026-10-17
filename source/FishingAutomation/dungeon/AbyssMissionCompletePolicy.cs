@@ -53,12 +53,13 @@ internal static class AbyssMissionCompletePolicy
             if (!IsGreen(frame.GetPixel(sx, sy))) return false;
         }
 
-        // Independent gold mission crest/title; green bottom buttons are
-        // common elsewhere, and MUST NOT alone authorize confirmation.
+        // Independent gold TROPHY crest only; the lower glowing mission
+        // title is NOT a substitute for the crest. The real 22:42 frame
+        // contains the badge around y100..215, above title glyphs y229+.
         int gold = 0;
-        var crestAndTitle = Scale(new Rectangle(305, 95, 190, 185), frame.Size);
-        for (int y = crestAndTitle.Top; y < crestAndTitle.Bottom; y += 4)
-        for (int x = crestAndTitle.Left; x < crestAndTitle.Right; x += 4)
+        var crestOnly = Scale(new Rectangle(305, 95, 190, 125), frame.Size);
+        for (int y = crestOnly.Top; y < crestOnly.Bottom; y += 4)
+        for (int x = crestOnly.Left; x < crestOnly.Right; x += 4)
         {
             var c = frame.GetPixel(x, y);
             if (c.R >= 155 && c.G >= 105 && c.R >= c.B + 45)
@@ -66,6 +67,46 @@ internal static class AbyssMissionCompletePolicy
         }
         return gold >= 20;
     }
+
+    // 2026-10-16 22:42 real MCP screenshot has a sharp full-width green
+    // confirmation with the exact three separated typographic anchors, but
+    // Windows compact OCR did not recognize the glowing title/white button.
+    // A two-frame visual fallback is allowed ONLY after an independently
+    // verified scheduled LEFT exit (_scheduledExitClicked). The crest + five
+    // continuous green bar samples are still mandatory.
+    internal static bool HasMissionTextVisualEvidence(Bitmap frame)
+    {
+        if (!HasVisualEvidence(frame)) return false;
+
+        static int GlyphSamples(Bitmap frame, Rectangle area, Func<Color, bool> accept)
+        {
+            int count = 0;
+            for (int y = area.Top; y < area.Bottom; y += 2)
+            for (int x = area.Left; x < area.Right; x += 2)
+                if (accept(frame.GetPixel(x, y))) count++;
+            return count;
+        }
+
+        var title = Scale(new Rectangle(310, 229, 188, 42), frame.Size);
+        var gift = Scale(new Rectangle(358, 313, 93, 34), frame.Size);
+        var confirm = Scale(new Rectangle(372, 934, 58, 33), frame.Size);
+
+        bool titleGlyph = GlyphSamples(frame, title, c =>
+            c.R >= 170 && c.G >= 130 && c.R >= c.B + 24) >= 24;
+        bool giftGlyph = GlyphSamples(frame, gift, c =>
+            Math.Min(c.R, Math.Min(c.G, c.B)) >= 158 &&
+            Math.Max(c.R, Math.Max(c.G, c.B)) -
+            Math.Min(c.R, Math.Min(c.G, c.B)) <= 62) >= 10;
+        bool confirmGlyph = GlyphSamples(frame, confirm, c =>
+            Math.Min(c.R, Math.Min(c.G, c.B)) >= 176 &&
+            Math.Max(c.R, Math.Max(c.G, c.B)) -
+            Math.Min(c.R, Math.Min(c.G, c.B)) <= 65) >= 8;
+        return titleGlyph && giftGlyph && confirmGlyph;
+    }
+
+    internal static bool HasStableMissionVisualFallback(Bitmap first, Bitmap second) =>
+        first.Size == second.Size && HasMissionTextVisualEvidence(first) &&
+        HasMissionTextVisualEvidence(second);
 
     internal static bool IsStableTextEvidence(
         Rectangle heading1, Rectangle heading2, Rectangle button1,
