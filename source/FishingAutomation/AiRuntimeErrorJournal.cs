@@ -64,6 +64,12 @@ internal static class AiRuntimeErrorJournal
                 report.Mode, report.Time.ToUniversalTime());
             if (commonTriage is not null)
                 text += "\n" + commonTriage + "\n";
+            // Stage19: already verified production screen decisions only.
+            // No extra screenshot/OCR/CLI, untrusted text, or game authority.
+            string? screenIncident = AiPassiveCliEvidence.SnapshotForScreenIncident(
+                report.Mode, report.Time.ToUniversalTime());
+            if (screenIncident is not null)
+                text += "\n" + screenIncident + "\n";
 #endif
             // Write the report payload first; the watcher requires a stable evidence file.
             File.WriteAllText(Path.Combine(directory, "summary.json"), json, Encoding.UTF8);
