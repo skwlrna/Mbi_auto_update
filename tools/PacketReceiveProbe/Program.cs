@@ -1,4 +1,5 @@
 using SharpPcap;
+using System.Diagnostics;
 using SharpPcap.LibPcap;
 using FishingAutomation.PacketDiagnostics;
 
@@ -73,15 +74,14 @@ try
     }
 
     using var device = devices[effective.DeviceIndex];
-    long frames = 0;
-    long bytes = 0;
+    var windows = new ReceiveActivityWindows();
+    var captureClock = new Stopwatch();
 
     // This is a packet *counter*, not a decoder. No frame or payload is kept,
     // printed, transmitted or passed to MabiAuto; no capture file is written.
     device.OnPacketArrival += (_, packet) =>
     {
-        Interlocked.Increment(ref frames);
-        Interlocked.Add(ref bytes, packet.Data.Length);
+        windows.Record(captureClock.Elapsed, packet.Data.Length);
     };
     device.Open();
     device.Filter = CaptureProbeOptions.CaptureFilter;
@@ -92,23 +92,41 @@ try
         cancellation.Cancel();
     };
     Console.CancelKeyPress += stop;
+    int reportedSeconds = 0;
     try
     {
         Console.WriteLine(
             $"read_only_probe_start interface_index={effective.DeviceIndex} " +
             $"filter=\"{CaptureProbeOptions.CaptureFilter}\" seconds={effective.Seconds}");
-        device.StartCapture();
+        // Time is measured monotonically. Each line is a one-second capture
+        // window, not a decoded game state or evidence of TCP connectivity.
+        bool started = false;
+        captureClock.Start();
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(effective.Seconds), cancellation.Token);
+            device.StartCapture();
+            started = true;
+            for (int second = 1; second <= effective.Seconds; second++)
+            {
+                TimeSpan remaining = TimeSpan.FromSeconds(second) - captureClock.Elapsed;
+                if (remaining > TimeSpan.Zero)
+                    await Task.Delay(remaining, cancellation.Token);
+                var window = windows.ReadCompletedSecond(second - 1);
+                reportedSeconds = second;
+                Console.WriteLine(
+                    $"read_only_probe_window second={window.Second} frames={window.Frames} " +
+                    $"frame_bytes={window.FrameBytes} activity={window.Activity}");
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            // Ctrl+C is a normal user-requested stop.
+            // Ctrl+C is a normal user-requested stop, not a disconnect signal.
         }
         finally
         {
-            device.StopCapture();
+            if (started)
+                device.StopCapture();
+            captureClock.Stop();
         }
     }
     finally
@@ -116,10 +134,20 @@ try
         Console.CancelKeyPress -= stop;
     }
 
-    long count = Interlocked.Read(ref frames);
-    long total = Interlocked.Read(ref bytes);
-    Console.WriteLine($"read_only_probe_result matched_frames={count} " +
-                      $"frame_bytes={total} status={(count > 0 ? "observed" : "not_observed")}");
+    // A Ctrl+C can end the current second early. Count its partial bucket
+    // in the final summary without pretending it was a full second.
+    int countedSeconds = Math.Min(effective.Seconds,
+        Math.Max(reportedSeconds, (int)Math.Ceiling(captureClock.Elapsed.TotalSeconds)));
+    var summary = windows.Summarize(countedSeconds);
+    Console.WriteLine($"read_only_probe_result matched_frames={summary.MatchedFrames} " +
+                      $"frame_bytes={summary.FrameBytes} " +
+                      $"status={(summary.MatchedFrames > 0 ? "observed" : "not_observed")}");
+    Console.WriteLine($"read_only_probe_activity observed_seconds={summary.ObservedSeconds} " +
+                      $"active_windows={summary.SecondsWithFrames} " +
+                      $"trailing_quiet_windows={summary.TrailingQuietSeconds} " +
+                      $"longest_quiet_windows={summary.LongestQuietSeconds} " +
+                      $"activity={summary.Activity}");
+    Console.WriteLine("A quiet window does not prove disconnect; observed frames do not prove game origin.");
     Console.WriteLine(
         "NOT VERIFIED: game ownership, TCP payload, protocol fields, " +
         "Mobilay API compatibility or permission for automation.");
