@@ -7,6 +7,7 @@ public sealed partial class MainForm
     private Form? _commonObservationWindow;
     private CancellationTokenSource? _commonObservationReadCts;
     private bool _commonObservationReadBusy;
+    private readonly AlteringWorkDeltaSession _commonObservationDeltas = new();
 
     /// <summary>
     /// Only the visible user click opens this optional diagnostics window.
@@ -21,6 +22,7 @@ public sealed partial class MainForm
             return;
         }
 
+        _commonObservationDeltas.Clear();
         var window = new Form
         {
             Text = "게임 상태 관측 · 읽기 전용",
@@ -98,6 +100,7 @@ public sealed partial class MainForm
         {
             try { _commonObservationReadCts?.Cancel(); }
             catch (ObjectDisposedException) { }
+            _commonObservationDeltas.Clear();
             if (ReferenceEquals(_commonObservationWindow, window))
                 _commonObservationWindow = null;
         };
@@ -170,6 +173,9 @@ public sealed partial class MainForm
                     var audit = collector.CompareMultiAltering(null, read);
                     lines.Add("가공 단계 비교: " +
                         CommonObservationDiagnosticReport.ComparisonName(audit.Status));
+                    var delta = _commonObservationDeltas.Observe(
+                        read, DateTimeOffset.UtcNow);
+                    lines.Add(CommonObservationDiagnosticReport.RenderWorkDelta(delta));
                 }
                 if (!window.IsDisposed && !IsDisposed)
                     output.Text = string.Join(Environment.NewLine, lines);
