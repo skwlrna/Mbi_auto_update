@@ -23,7 +23,7 @@ internal static class AiPassiveCliEvidence
         "get_items", "get_alterable_items"
     };
 
-    private static readonly Dictionary<string, Entry> Recent =
+    private static readonly Dictionary<string, List<Entry>> Recent =
         new(StringComparer.Ordinal);
 
     internal static bool Enabled
@@ -85,10 +85,21 @@ internal static class AiPassiveCliEvidence
             var observed = observedAtUtc.ToUniversalTime();
             if (observed == default || observed.Year < 2000)
                 return;
-            if (Recent.TryGetValue(command, out var prior) &&
-                observed < prior.ObservedUtc)
-                return; // late async completion must not replace a newer call
-            Recent[command] = new(command, outcome, observed);
+            if (!Recent.TryGetValue(command, out var history))
+            {
+                history = new List<Entry>(2);
+                Recent.Add(command, history);
+            }
+            if (history.Count > 0 && observed < history[^1].ObservedUtc)
+                return; // late async completion must not override fresh evidence
+            if (history.Count > 0 && observed == history[^1].ObservedUtc)
+                history[^1] = new(command, outcome, observed);
+            else
+            {
+                history.Add(new(command, outcome, observed));
+                if (history.Count > 2)
+                    history.RemoveAt(0);
+            }
         }
     }
 
@@ -109,7 +120,20 @@ internal static class AiPassiveCliEvidence
             var lines = new List<string>(Order.Length);
             foreach (string command in Order)
             {
-                if (!Recent.TryGetValue(command, out var entry))
+                if (!Recent.TryGetValue(command, out var entries))
+                    continue;
+                // Keep at most two recent finishes so a callback AFTER an
+                // error cannot erase the immediately preceding observation.
+                Entry? entry = null;
+                for (int i = entries.Count - 1; i >= 0; i--)
+                {
+                    if (entries[i].ObservedUtc <= at)
+                    {
+                        entry = entries[i];
+                        break;
+                    }
+                }
+                if (entry is null)
                     continue;
                 TimeSpan elapsed = at - entry.ObservedUtc;
                 if (elapsed < TimeSpan.Zero || elapsed > MaximumAge)
