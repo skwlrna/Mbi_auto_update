@@ -15,5 +15,6 @@
     <Compile Include="../../tools/PacketReceiveProbe/ReadOnlyCliComparison.cs" Link="ReadOnlyCliComparison.cs" />
     <Compile Include="../../tools/PacketReceiveProbe/TcpFlowCorrelation.cs" Link="TcpFlowCorrelation.cs" />
     <Compile Include="../../tools/PacketReceiveProbe/TcpOsFlowSnapshot.cs" Link="TcpOsFlowSnapshot.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/TransportEvidenceAssessment.cs" Link="TransportEvidenceAssessment.cs" />
   </ItemGroup>
 </Project>
