@@ -44,8 +44,8 @@ class Stage23ContextTests(unittest.TestCase):
             c = {"allowed_change_prefixes": ["source/FishingAutomation/"]}
             plain = autopilot.prompt_for(context, c)
             joined = autopilot.prompt_for(context, c, advice)
-            self.assertEqual(joined.count("<untrusted-log>"), 1)
-            self.assertEqual(joined.count("</untrusted-log>"), 1)
+            self.assertEqual(joined.splitlines().count("<untrusted-log>"), 1)
+            self.assertEqual(joined.splitlines().count("</untrusted-log>"), 1)
             self.assertIn(advice, joined)
             self.assertEqual(joined,
                              plain.replace("\n</untrusted-log>",
@@ -70,14 +70,14 @@ class Stage23ContextTests(unittest.TestCase):
             external_root.mkdir()
             external = external_root / folder.name
             external.mkdir()
-            (external / "error.txt").write_text(report("채집"))
+            (external / "error.txt").write_text(report("채집"), encoding="utf-8")
             self.assertEqual(adapter.for_runtime_error(external, root), "")
             self.assertEqual(adapter.for_runtime_error(folder, external_root), "")
             self.assertEqual(adapter.for_runtime_error(root / "not_found", root), "")
             self.assertEqual(adapter.for_runtime_error(folder, root / "missing"), "")
             other = root / "unapproved"
             other.mkdir()
-            (other / "error.txt").write_text(report("채집"))
+            (other / "error.txt").write_text(report("채집"), encoding="utf-8")
             self.assertEqual(adapter.for_runtime_error(other, root), "")
             root_symlink = Path(tmp) / "root_link"
             try:
@@ -115,7 +115,7 @@ class Stage23ContextTests(unittest.TestCase):
             self.assertEqual(adapter.for_runtime_error(folder, root), "")
             (folder / "error.txt").unlink()
             self.assertEqual(adapter.for_runtime_error(folder, root), "")
-            (folder / "error.txt").write_text(report("채집"))
+            (folder / "error.txt").write_text(report("채집"), encoding="utf-8")
             for i in range(audit.ab.MAX_FOLDERS + 1):
                 (root / ("unexpected_%03d" % i)).mkdir()
             self.assertEqual(adapter.for_runtime_error(folder, root), "")
