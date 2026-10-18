@@ -19,6 +19,11 @@
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
   </PropertyGroup>
+  <!-- Stage 16 is an explicit opt-in, stand-alone diagnostic-only binary.
+       It must NEVER be set in normal production release workflows. -->
+  <PropertyGroup Condition="'$(Stage16PreviewOnly)' == 'true'">
+    <DefineConstants>$(DefineConstants);STAGE16_PREVIEW_ONLY</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(GatheringLocalPreview)' == 'true'">
     <DefineConstants>$(DefineConstants);GATHERING_LOCAL_PREVIEW</DefineConstants>
   </PropertyGroup>
