@@ -50,7 +50,7 @@ internal static class AiPassiveCliEvidence
     /// </summary>
     internal static void Observe(
         string command, bool success, string state, string? error,
-        DateTimeOffset observedAtUtc)
+        DateTimeOffset observedAtUtc, string? validatedDiagnostic = null)
     {
         // Never interpolate an untrusted input into a result.
         if (!Order.Contains(command, StringComparer.Ordinal))
@@ -59,8 +59,32 @@ internal static class AiPassiveCliEvidence
         string outcome;
         if (success)
         {
-            outcome = command == "status" && state == "connected"
-                ? "cli_connected" : "cli_response_accepted_not_game_event";
+            // These labels are emitted only by the existing vetted CLI
+            // parsers. None of them authorizes game actions, item receipt
+            // or a completed multi-altering batch.
+            outcome = (command, validatedDiagnostic) switch
+            {
+                ("get_activity", "gathering_observed") =>
+                    "cli_gathering_in_progress",
+                ("get_activity", "activity_observed") =>
+                    "cli_activity_observed",
+                ("get_altering_works", "work_running") =>
+                    "cli_altering_work_running",
+                ("get_altering_works", "all_work_rows_completed_not_receipted") =>
+                    "cli_work_rows_completed_receipt_unknown",
+                ("get_altering_works", "empty_work_list_not_completion") =>
+                    "cli_no_work_rows_completion_unknown",
+                ("get_altering_works", "mixed_or_pending_work_not_completion") =>
+                    "cli_mixed_or_pending_works",
+                ("get_items", "inventory_snapshot_only") =>
+                    "cli_inventory_shape_only_no_delta",
+                ("get_alterable_items", "recipe_catalog_snapshot_only") =>
+                    "cli_recipe_catalog_shape_only",
+                (_, "cli_schema_unverified") => "cli_parser_schema_unverified",
+                _ when command == "status" && state == "connected" =>
+                    "cli_connected",
+                _ => "cli_response_accepted_not_game_event"
+            };
         }
         else
         {
