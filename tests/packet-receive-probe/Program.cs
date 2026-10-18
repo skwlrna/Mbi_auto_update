@@ -72,4 +72,65 @@ Check(!Approve(3, "1", "5", null), "EOF during consent authorized capture");
 Check(!Approve(3, "1", null, "YES"), "EOF during duration authorized capture");
 Check(!Approve(3, null, "5", "YES"), "EOF during device selection authorized capture");
 
+// Monotonic one-second aggregation has no SharpPcap dependency and no
+// game data: all inputs are synthetic counts and lengths.
+var windows = new ReceiveActivityWindows();
+Check(windows.Summarize(3) is { MatchedFrames: 0, SecondsWithFrames: 0,
+    TrailingQuietSeconds: 3, LongestQuietSeconds: 3, Activity: "not_observed" },
+    "empty windows were treated as a connection");
+windows.Record(TimeSpan.FromMilliseconds(10), 120);
+windows.Record(TimeSpan.FromMilliseconds(900), 80);
+windows.Record(TimeSpan.FromSeconds(2.1), 64);
+Check(windows.ReadCompletedSecond(0) is
+    { Second: 1, Frames: 2, FrameBytes: 200, Activity: "frames_observed" },
+    "first synthetic window count incorrect");
+Check(windows.ReadCompletedSecond(1) is
+    { Second: 2, Frames: 0, FrameBytes: 0, Activity: "no_frames_in_window" },
+    "quiet interval was not recorded");
+Check(windows.ReadCompletedSecond(2) is
+    { Second: 3, Frames: 1, FrameBytes: 64, Activity: "frames_observed" },
+    "later activity did not return");
+Check(windows.Summarize(1) is { MatchedFrames: 2, FrameBytes: 200,
+    SecondsWithFrames: 1, TrailingQuietSeconds: 0,
+    LongestQuietSeconds: 0, Activity: "frames_recently_observed" },
+    "first-window aggregate incorrect");
+Check(windows.Summarize(2) is { MatchedFrames: 2, FrameBytes: 200,
+    SecondsWithFrames: 1, TrailingQuietSeconds: 1,
+    LongestQuietSeconds: 1, Activity: "quiet_after_observation" },
+    "temporary quiet incorrectly marked disconnect");
+Check(windows.Summarize(3) is { MatchedFrames: 3, FrameBytes: 264,
+    SecondsWithFrames: 2, TrailingQuietSeconds: 0,
+    LongestQuietSeconds: 1, Activity: "frames_recently_observed" },
+    "recovered receive activity aggregate incorrect");
+
+// Reject out-of-range metadata instead of attributing it to another window.
+windows.Record(TimeSpan.FromSeconds(-1), 100000);
+windows.Record(TimeSpan.FromSeconds(30), 100000);
+windows.Record(TimeSpan.FromSeconds(2.2), -5);
+Check(windows.Summarize(3) is { MatchedFrames: 3, FrameBytes: 264 },
+    "invalid duration or frame length polluted counters");
+var boundary = new ReceiveActivityWindows();
+boundary.Record(TimeSpan.FromMilliseconds(999), 100);
+boundary.Record(TimeSpan.FromSeconds(1), 200);
+boundary.Record(TimeSpan.FromSeconds(29.999), 300);
+Check(boundary.ReadCompletedSecond(0).Frames == 1 &&
+      boundary.ReadCompletedSecond(1).Frames == 1 &&
+      boundary.ReadCompletedSecond(29).Frames == 1,
+    "monotonic bucket boundary changed");
+Check(boundary.Summarize(30) is { MatchedFrames: 3, FrameBytes: 600,
+    SecondsWithFrames: 3, TrailingQuietSeconds: 0,
+    LongestQuietSeconds: 27 }, "full 30-second summary incorrect");
+try
+{
+    windows.ReadCompletedSecond(-1);
+    throw new Exception("negative second was accepted");
+}
+catch (ArgumentOutOfRangeException) { checks++; }
+try
+{
+    windows.Summarize(31);
+    throw new Exception("oversized session length was accepted");
+}
+catch (ArgumentOutOfRangeException) { checks++; }
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
