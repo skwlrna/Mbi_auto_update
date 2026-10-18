@@ -7,6 +7,8 @@ on:
       - 'tests/packet-observation/**'
       - 'tests/common-observation/**'
       - 'tests/ai-autopilot/test_passive_cli_context.py'
+      - 'tests/ai-autopilot/test_evidence_ab_stage15.py'
+      - 'source/FishingAutomation/ai-autopilot/evidence_ab.py'
       - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
       - 'source/FishingAutomation/AiAutopilotHost.cs'
       - 'source/FishingAutomation/MabinogiMobileCli.cs'
@@ -47,6 +49,11 @@ jobs:
         run: |
           python -m unittest discover -s tests/ai-autopilot -p test_passive_cli_context.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Passive AI context safety regression failed' }
+      - name: Compare baseline vs diagnostic evidence offline (no Codex)
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p test_evidence_ab_stage15.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Offline A/B evidence regression failed' }
       - name: Check packet receive probe safety and strict CLI
         shell: pwsh
         run: |
