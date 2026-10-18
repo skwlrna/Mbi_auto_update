@@ -50,6 +50,17 @@ internal static class AlteringWorkDeltaDiagnostic
              "mixed_or_pending_work_not_completion" or
              "empty_work_list_not_completion"))
             return false;
+        // Source/type consistency: even an internal synthetic projection
+        // cannot impersonate a validated altering domain or a work state.
+        bool semanticRunning = p.Status == "work_running";
+        bool semanticCompleted = p.Status == "all_work_rows_completed_not_receipted";
+        if ((semanticRunning && (p.Domain != CommonObservationDomain.Altering ||
+                p.State != CommonObservationState.InProgress)) ||
+            (semanticCompleted && (p.Domain != CommonObservationDomain.Altering ||
+                p.State != CommonObservationState.Completed)) ||
+            (!semanticRunning && !semanticCompleted &&
+                (p.Domain is not null || p.State is not null)))
+            return false;
         int pending = p.Count - p.InProgress - p.Completed;
         if (p.Count is < 0 or > 1024 ||
             p.InProgress < 0 || p.Completed < 0 || pending < 0 ||
