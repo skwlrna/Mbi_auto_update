@@ -110,7 +110,7 @@ public sealed partial class MainForm
         public override string ToString() => Recipe.DisplayName +
             (Duplicate ? $" (제법 {Ordinal} · 1회 {Recipe.ProducedPerWork}개)" : "");
     }
-    private sealed record AlteringQueueChoice(AlteringPlan Plan)
+    private sealed record AlteringQueueChoice(AlteringPlan Plan, AlteringRecipe Recipe)
     {
         public override string ToString()
             => $"{Plan.DisplayName}  ·  {Plan.TargetQuantity:N0}개";
@@ -152,6 +152,14 @@ public sealed partial class MainForm
         internal int? CompletedWorks;
         internal IReadOnlyList<AlteringPlan> QueuedAlteringPlans
             => _alteringQueue.Items.Cast<AlteringQueueChoice>().Select(x => x.Plan).ToArray();
+        // F9 reads the exact user-selected CLI shortage snapshot on the UI thread.
+        // This is a planning hint only; the F9 CLI identity and live inventory
+        // remain authoritative before any free gathering action.
+        internal IReadOnlyList<MultiAlteringSupplyPreflight> QueuedAlteringMaterialEvidence
+            => _alteringQueue.Items.Cast<AlteringQueueChoice>()
+                .Select(x => new MultiAlteringSupplyPreflight(
+                    x.Plan, x.Recipe, x.Plan.RequiredWorks))
+                .ToArray();
         internal string? SelectedName => Items.SelectedItem switch
         { GatheringChoice g => g.Item.DisplayName, RecipeChoice r => r.Recipe.DisplayName, _ => null };
         internal string? OutputName => Items.SelectedItem is RecipeChoice r
@@ -545,7 +553,7 @@ public sealed partial class MainForm
                     x.Plan.DisplayName == plan.DisplayName &&
                     x.Plan.RecipeOrdinal == plan.RecipeOrdinal);
 
-                var item = new AlteringQueueChoice(plan);
+                var item = new AlteringQueueChoice(plan, recipe);
                 if (existing >= 0)
                 {
                     _alteringQueue.Items[existing] = item;
