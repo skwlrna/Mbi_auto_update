@@ -1,4 +1,5 @@
 using FishingAutomation.Telemetry;
+using System.Text.Json;
 
 int checks = 0;
 void Check(bool condition, string name)
