@@ -18,11 +18,13 @@ on:
       - 'tests/ai-autopilot/test_incident_coverage_stage21.py'
       - 'tests/ai-autopilot/test_incident_priority_stage22.py'
       - 'tests/ai-autopilot/test_incident_review_bridge_stage23.py'
+      - 'tests/ai-autopilot/test_paired_prompt_ab_stage24.py'
       - 'tests/ai-autopilot/test_stage16_preview_contract.py'
       - 'source/FishingAutomation/ai-autopilot/evidence_ab.py'
       - 'source/FishingAutomation/ai-autopilot/incident_coverage_audit.py'
       - 'source/FishingAutomation/ai-autopilot/incident_priority_review.py'
       - 'source/FishingAutomation/ai-autopilot/incident_review_context.py'
+      - 'source/FishingAutomation/ai-autopilot/paired_prompt_ab_stage24.py'
       - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
       - 'source/FishingAutomation/AiAutopilotHost.cs'
       - 'source/FishingAutomation/MabinogiMobileCli.cs'
@@ -87,6 +89,11 @@ jobs:
         run: |
           python -m unittest discover -s tests/ai-autopilot -p test_incident_review_bridge_stage23.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Stage23 passive AI review context contract failed' }
+      - name: Check Stage24 matched-error A/B prompt safety without AI or game
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p test_paired_prompt_ab_stage24.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Stage24 paired offline prompt A/B regression failed' }
       - name: Check isolated Stage16 GUI user-click and no-input contract
         shell: pwsh
         run: |
