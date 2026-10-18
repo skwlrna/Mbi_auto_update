@@ -587,5 +587,7 @@ Check(!Stage16PreviewGate.ExactReadOnlyQueries
     .Any(q => (int)q < 1 || (int)q > 5),
     "preview admitted an undefined action query");
 
+Stage17Tests.Run();
+
 Console.WriteLine($"PASS {checks} synthetic common observation and historical-DPS regressions.");
 Console.WriteLine("No game input, capture, external API, user export or private data was opened.");
