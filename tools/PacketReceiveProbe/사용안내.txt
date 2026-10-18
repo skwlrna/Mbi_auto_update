@@ -14,8 +14,12 @@
 2) 네트워크 어댑터 목록이 표시됩니다. 사용 중인 연결(예: Realtek 유선)을 확인하고 번호를 입력하세요.
 3) 진단 시간을 1~30초 중에서 선택하세요. 보통 10초면 됩니다.
 4) 실제 캡처를 허용하려면 정확히 YES 를 입력하세요. 취소하려면 빈칸/다른 문자를 입력하세요.
-5) 프로그램이 정해진 시간 뒤 멈추고 결과를 화면에 표시합니다.
-6) matched_frames와 frame_bytes 숫자, status 문구만 알려주면 됩니다.
+5) 실행 중 1초마다 read_only_probe_window 줄이 표시됩니다.
+   frames=0 이 잠깐 나와도 게임 연결 종료를 뜻하지 않습니다.
+6) 정해진 시간 뒤 기존 read_only_probe_result 합계와
+   read_only_probe_activity 요약이 표시됩니다.
+7) matched_frames, frame_bytes, status, active_windows, trailing_quiet_windows,
+   longest_quiet_windows, activity 값만 알려주면 됩니다.
    IP 주소, 계정, 원본 패킷 데이터, 장치 식별자, 전체 화면을 공유할 필요가 없습니다.
 
 [해석]
