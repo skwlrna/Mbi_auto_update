@@ -6,7 +6,11 @@ internal enum VerifiedScreenIncidentSignal
 {
     GatheringStopControlDoubleChecked = 1,
     AbyssClearPairedFrames = 2,
-    AbyssResultConfirmed = 3
+    AbyssResultConfirmed = 3,
+    AlteringFreeActionGuardPassed = 4,
+    CraftingResultPopupGuardPassed = 5,
+    FishingHookReadyTwoFrames = 6,
+    DungeonRetryGuardPassed = 7
 }
 
 /// <summary>
@@ -24,6 +28,14 @@ internal static class VerifiedScreenIncidentDiagnostic
             VerifiedScreenIncidentSignal.AbyssClearPairedFrames or
                 VerifiedScreenIncidentSignal.AbyssResultConfirmed =>
                 CommonIncidentArea.Abyss,
+            VerifiedScreenIncidentSignal.AlteringFreeActionGuardPassed =>
+                CommonIncidentArea.Altering,
+            VerifiedScreenIncidentSignal.CraftingResultPopupGuardPassed =>
+                CommonIncidentArea.Crafting,
+            VerifiedScreenIncidentSignal.FishingHookReadyTwoFrames =>
+                CommonIncidentArea.Fishing,
+            VerifiedScreenIncidentSignal.DungeonRetryGuardPassed =>
+                CommonIncidentArea.Dungeon,
             _ => CommonIncidentArea.Unknown
         };
 
@@ -50,6 +62,14 @@ internal static class VerifiedScreenIncidentDiagnostic
                 "abyss_clear_pair_guard_passed",
             VerifiedScreenIncidentSignal.AbyssResultConfirmed =>
                 "abyss_result_guard_passed",
+            VerifiedScreenIncidentSignal.AlteringFreeActionGuardPassed =>
+                "altering_free_action_guard_passed",
+            VerifiedScreenIncidentSignal.CraftingResultPopupGuardPassed =>
+                "crafting_result_popup_guard_passed",
+            VerifiedScreenIncidentSignal.FishingHookReadyTwoFrames =>
+                "fishing_hook_ready_two_frames",
+            VerifiedScreenIncidentSignal.DungeonRetryGuardPassed =>
+                "dungeon_retry_guard_passed",
             _ => "unknown"
         };
         // The activity CLI can only describe gathering. The Abyss CLI
