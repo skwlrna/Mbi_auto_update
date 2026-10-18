@@ -220,7 +220,7 @@ public sealed partial class MainForm
 
             // The mode cards have no chevron. Their caption area still opens the
             // existing destination selector when a dungeon/abyss mode is active.
-            owner._updateButton = AddButton("업데이트 확인", new(1163, 800, 228, 43), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
+            owner._updateButton = AddButton("업데이트 확인", new(1139, 881, 265, 41), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
             for (int i = 0; i < 3; i++)
             {
                 int index = i;
