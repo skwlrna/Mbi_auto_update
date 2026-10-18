@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../tools/PacketReceiveProbe/CaptureProbeOptions.cs" Link="CaptureProbeOptions.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/InteractiveProbeConsent.cs" Link="InteractiveProbeConsent.cs" />
   </ItemGroup>
 </Project>
