@@ -16,9 +16,11 @@ on:
       - 'tests/ai-autopilot/test_passive_cli_context.py'
       - 'tests/ai-autopilot/test_evidence_ab_stage15.py'
       - 'tests/ai-autopilot/test_incident_coverage_stage21.py'
+      - 'tests/ai-autopilot/test_incident_priority_stage22.py'
       - 'tests/ai-autopilot/test_stage16_preview_contract.py'
       - 'source/FishingAutomation/ai-autopilot/evidence_ab.py'
       - 'source/FishingAutomation/ai-autopilot/incident_coverage_audit.py'
+      - 'source/FishingAutomation/ai-autopilot/incident_priority_review.py'
       - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
       - 'source/FishingAutomation/AiAutopilotHost.cs'
       - 'source/FishingAutomation/MabinogiMobileCli.cs'
@@ -73,6 +75,11 @@ jobs:
         run: |
           python -m unittest discover -s tests/ai-autopilot -p test_incident_coverage_stage21.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Stage21 incident coverage audit regression failed' }
+      - name: Check Stage22 diagnostic-review priority safety and deterministic policy
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p test_incident_priority_stage22.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Stage22 fixed diagnostic review priority regression failed' }
       - name: Check isolated Stage16 GUI user-click and no-input contract
         shell: pwsh
         run: |
