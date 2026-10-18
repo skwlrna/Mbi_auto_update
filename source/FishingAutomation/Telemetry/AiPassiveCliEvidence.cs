@@ -12,6 +12,13 @@ internal static class AiPassiveCliEvidence
     private static readonly TimeSpan MaximumAge = TimeSpan.FromSeconds(5);
     private static bool _enabled;
     private static AlteringWorkCountSnapshot? _lastVerifiedAltering;
+    private sealed record ScreenEntry(VerifiedScreenIncidentSignal Signal,
+        DateTimeOffset ObservedUtc);
+    // Independent from the CLI rows: already-verified, post-gate screen decisions
+    // only. Each signal retains two times so late callbacks cannot erase
+    // evidence from before the error. No OCR text or frame is retained.
+    private static readonly Dictionary<VerifiedScreenIncidentSignal,
+        List<ScreenEntry>> ScreenRecent = new();
 
     private sealed record Entry(string Query, string Outcome,
         DateTimeOffset ObservedUtc);
@@ -41,6 +48,7 @@ internal static class AiPassiveCliEvidence
             _enabled = enabled;
             Recent.Clear();
             _lastVerifiedAltering = null;
+            ScreenRecent.Clear();
         }
     }
 
@@ -193,6 +201,90 @@ internal static class AiPassiveCliEvidence
             }
 
             return CommonIncidentTriage.Evaluate(mode, facts).ToEvidenceBlock();
+        }
+    }
+
+    /// <summary>
+    /// Called only AFTER existing production screen guards have passed.
+    /// This is a cache write: it performs no capture, OCR, CLI or input.
+    /// Unknown signal values and out-of-order notifications are discarded.
+    /// </summary>
+    internal static void ObserveVerifiedScreen(
+        VerifiedScreenIncidentSignal signal, DateTimeOffset observedAtUtc)
+    {
+        if (VerifiedScreenIncidentDiagnostic.AreaOf(signal) ==
+            CommonIncidentArea.Unknown)
+            return;
+        var observed = observedAtUtc.ToUniversalTime();
+        if (observed == default || observed.Year < 2000)
+            return;
+        lock (Gate)
+        {
+            if (!_enabled)
+                return;
+            if (!ScreenRecent.TryGetValue(signal, out var history))
+            {
+                history = new List<ScreenEntry>(2);
+                ScreenRecent.Add(signal, history);
+            }
+            if (history.Count > 0 && observed < history[^1].ObservedUtc)
+                return;
+            if (history.Count > 0 && observed == history[^1].ObservedUtc)
+                history[^1] = new(signal, observed);
+            else
+            {
+                history.Add(new(signal, observed));
+                if (history.Count > 2)
+                    history.RemoveAt(0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Build a separate Stage19 hint from an existing visual check and
+    /// optional previously completed validated activity CLI fact. Never
+    /// infer item receipt, server clear, cause, or safe corrective input.
+    /// </summary>
+    internal static string? SnapshotForScreenIncident(
+        string? mode, DateTimeOffset errorAtUtc)
+    {
+        lock (Gate)
+        {
+            if (!_enabled)
+                return null;
+            var at = errorAtUtc.ToUniversalTime();
+            ScreenEntry? latest = null;
+            foreach (var history in ScreenRecent.Values)
+            {
+                foreach (var entry in history)
+                {
+                    if (entry.ObservedUtc > at ||
+                        VerifiedScreenIncidentDiagnostic.AreaOf(entry.Signal) !=
+                            CommonIncidentTriage.MapMode(mode))
+                        continue;
+                    if (latest is null || entry.ObservedUtc > latest.ObservedUtc)
+                        latest = entry;
+                }
+            }
+            if (latest is null)
+                return null;
+
+            string? activity = null;
+            if (Recent.TryGetValue("get_activity", out var entries))
+            {
+                for (int i = entries.Count - 1; i >= 0; i--)
+                {
+                    var item = entries[i];
+                    if (item.ObservedUtc <= at &&
+                        at - item.ObservedUtc <= MaximumAge)
+                    {
+                        activity = item.Outcome;
+                        break;
+                    }
+                }
+            }
+            return VerifiedScreenIncidentDiagnostic.Render(
+                mode, latest.Signal, latest.ObservedUtc, at, activity);
         }
     }
 
