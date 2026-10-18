@@ -89,12 +89,11 @@ def _modules(root: Path, packaged: Path | None = None) -> tuple[bool, bool, int]
                                  MAX_MODULE_BYTES)
             if raw is None or candidate is None or hashlib.sha256(raw).digest() != hashlib.sha256(candidate).digest():
                 return True, False, len(REQUIRED_RUNTIME_MODULES)
-        if _bounded(packaged, "FishingAutomation.exe", 250_000_000) is None:
-            # EXE is a binary; _bounded deliberately rejects NUL bytes.
-            # Check its file identity without opening/executing the EXE.
-            app = packaged / "FishingAutomation.exe"
-            if app.is_symlink() or not app.is_file() or app.stat().st_size <= 0:
-                return True, False, len(REQUIRED_RUNTIME_MODULES)
+        # EXE may be large or contain binary NUL bytes. Inspect only
+        # metadata, never read, launch, sign, package or transmit it.
+        app = packaged / "FishingAutomation.exe"
+        if app.is_symlink() or not app.is_file() or app.stat().st_size <= 0:
+            return True, False, len(REQUIRED_RUNTIME_MODULES)
         return True, True, len(REQUIRED_RUNTIME_MODULES)
     except (OSError, ValueError):
         return False, False, 0
