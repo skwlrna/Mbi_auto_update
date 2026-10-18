@@ -57,6 +57,13 @@ internal static class AiRuntimeErrorJournal
                 report.Time.ToUniversalTime());
             if (passiveEvidence is not null)
                 text += "\n" + passiveEvidence + "\n";
+            // Unified, fixed-vocabulary cross-feature triage for the same
+            // already opted-in watcher. Local mode is not proof of a game
+            // state. Preserve all existing AI test/review/rollback gates.
+            string? commonTriage = AiPassiveCliEvidence.SnapshotForIncident(
+                report.Mode, report.Time.ToUniversalTime());
+            if (commonTriage is not null)
+                text += "\n" + commonTriage + "\n";
 #endif
             // Write the report payload first; the watcher requires a stable evidence file.
             File.WriteAllText(Path.Combine(directory, "summary.json"), json, Encoding.UTF8);
