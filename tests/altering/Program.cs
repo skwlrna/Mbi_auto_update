@@ -100,6 +100,104 @@ using (var cancelAfterWait = new CancellationTokenSource())
 Check(unexpectedSecondaryRegistration == 0,
     "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
 
+// 2026-10-18 live log: metal and cloth both 7/7 while food is not
+// filled. The old startup queue_full flag permanently skipped the food
+// facility despite positive fresh readiness; 43+ minutes of wait logs ensued.
+// A live CLI positive result must permit this independent lane to reach the
+// normal receipt/material/registration gates, never bypass those gates.
+var clothPlan = new AlteringPlan("옷감 가공 시설", "상급 옷감", 9, 3, false);
+var foodPlan = new AlteringPlan("식재료 가공 시설", "밥", 9, 3, false);
+var clothFull = Enumerable.Range(0, 7).Select(_ =>
+    new AlteringWork("상급 옷감", clothPlan.FacilityName, "InProgress", false, 7200L)).ToArray();
+var foodOldCompleted = new AlteringWork(
+    "기존 음식", foodPlan.FacilityName, "Completed", true, 0);
+var blockedWithTwoFull = fullLane.Concat(clothFull)
+    .Append(foodOldCompleted).ToArray();
+var readyFoodRecipe = new AlteringRecipe(
+    foodPlan.DisplayName, true, foodPlan.ProducedPerWork, null,
+    Array.Empty<AlteringIngredient>(), foodPlan.FacilityName);
+var maskedFoodRecipe = readyFoodRecipe with { Alterable = false, Reason = "queue_full" };
+var positiveFoodRuns = new List<string>();
+var independentLogs = new List<string>();
+int independentRecipeReads = 0;
+using (var stopOnReadyFood = new CancellationTokenSource())
+{
+    try
+    {
+        var scheduler = new MultiAlteringCoordinator(deferOtherLanesWhileQueueFull: true);
+        scheduler.Log += independentLogs.Add;
+        await scheduler.RunAsync(
+            new[] { deferredPlan, clothPlan, foodPlan },
+            (plan, _, ct) =>
+            {
+                positiveFoodRuns.Add(plan.DisplayName);
+                stopOnReadyFood.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(false);
+            },
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(blockedWithTwoFull),
+            (_, ct) => { stopOnReadyFood.Cancel(); ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+            stopOnReadyFood.Token,
+            readRecipes: ct =>
+            {
+                ct.ThrowIfCancellationRequested();
+                independentRecipeReads++;
+                return Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+                    new[] { readyFoodRecipe });
+            });
+    }
+    catch (OperationCanceledException) when (stopOnReadyFood.IsCancellationRequested) { }
+}
+Check(independentRecipeReads > 0 &&
+      positiveFoodRuns.SequenceEqual(new[] { "밥" }) &&
+      independentLogs.Any(x => x.Contains("독립 시설 진행 승인", StringComparison.Ordinal)),
+    "F9 permits live-ready rice lane despite two unrelated 7/7 lanes (real registration guards remain responsible)");
+
+int blockedFoodRuns = 0;
+var maskedLogs = new List<string>();
+using (var stopOnMaskedFood = new CancellationTokenSource())
+{
+    try
+    {
+        var scheduler = new MultiAlteringCoordinator(deferOtherLanesWhileQueueFull: true);
+        scheduler.Log += maskedLogs.Add;
+        await scheduler.RunAsync(
+            new[] { deferredPlan, clothPlan, foodPlan },
+            (plan, _, ct) =>
+            {
+                blockedFoodRuns++;
+                return Task.FromResult(false);
+            },
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(blockedWithTwoFull),
+            (_, ct) => { stopOnMaskedFood.Cancel(); ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+            stopOnMaskedFood.Token,
+            readRecipes: ct => Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+                new[] { maskedFoodRecipe }));
+    }
+    catch (OperationCanceledException) when (stopOnMaskedFood.IsCancellationRequested) { }
+}
+Check(blockedFoodRuns == 0 &&
+      maskedLogs.Any(x => x.Contains("독립 시설 보류", StringComparison.Ordinal) &&
+          x.Contains("queue_full", StringComparison.Ordinal)),
+    "F9 still refuses rice click while CLI only reports queue_full, and logs explicit skip reason");
+
+int missingRecipeRuns = 0;
+bool recipeIdentityBlocked = false;
+try
+{
+    await new MultiAlteringCoordinator(deferOtherLanesWhileQueueFull: true).RunAsync(
+        new[] { deferredPlan, clothPlan, foodPlan },
+        (_, _, ct) => { missingRecipeRuns++; return Task.FromResult(false); },
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(blockedWithTwoFull),
+        (_, ct) => Task.CompletedTask,
+        CancellationToken.None,
+        readRecipes: ct => Task.FromResult<IReadOnlyList<AlteringRecipe>>(Array.Empty<AlteringRecipe>()));
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("제법 동일성 확인 실패", StringComparison.Ordinal))
+{ recipeIdentityBlocked = true; }
+Check(recipeIdentityBlocked && missingRecipeRuns == 0,
+    "F9 fails closed when a live recipe cannot be uniquely identified before independent registration");
+
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
 var travelIdle = new GatheringActivity(
