@@ -110,10 +110,15 @@ internal sealed class AiAutopilotHost : IDisposable
             AiPassiveCliEvidence.SetEnabled(true);
             child.BeginOutputReadLine();
             child.BeginErrorReadLine();
+            // A watcher that exits during startup must not leave passive
+            // collection enabled; its Exited event handles later exits.
+            if (child.HasExited)
+                AiPassiveCliEvidence.SetEnabled(false);
             Publish("AI 감시 준비 및 안전 검사 중");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
+            AiPassiveCliEvidence.SetEnabled(false);
             Publish("AI 감시 실행 실패: " + ex.GetType().Name + " — Python 설치·경로 확인");
         }
     }
