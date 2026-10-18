@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../tools/MobilayExportInspector/ExportShapeInspector.cs" Link="ExportShapeInspector.cs" />
+    <Compile Include="../../tools/MobilayExportInspector/IntegrationCoveragePolicy.cs" Link="IntegrationCoveragePolicy.cs" />
   </ItemGroup>
 </Project>
