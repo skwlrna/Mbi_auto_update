@@ -536,7 +536,8 @@ public sealed partial class MainForm
                 token,
                 preparePlan: PreparePlanMaterialsAsync,
                 onIdleAbyssRound: idleAbyssRound,
-                minimumAbyssWaitSeconds: minimumAbyssWaitSeconds), token);
+                minimumAbyssWaitSeconds: minimumAbyssWaitSeconds,
+                readRecipes: rawAlteringData.RecipesAsync), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
