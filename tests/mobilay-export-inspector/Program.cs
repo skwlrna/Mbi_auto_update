@@ -62,4 +62,41 @@ foreach (string secret in new[] { "accountId", "SECRET", "damage", "combat" })
     Check(!resultDump.Contains(secret, StringComparison.Ordinal),
         "unsafe field name/value leaked through inspector result: " + secret);
 
+// Audit the source-of-truth domain decisions. Neither valid JSON syntax nor
+// an unknown file may promote guessed events into gameplay authority.
+var knownDomains = IntegrationCoveragePolicy.Entries;
+Check(knownDomains.Count == 12, "unexpected capability count");
+Check(knownDomains.Select(x => x.Domain).Distinct(StringComparer.Ordinal).Count() ==
+    knownDomains.Count, "duplicate capability domain");
+foreach (var entry in knownDomains)
+{
+    Check(!entry.ProductionPacketEnabled,
+        "unverified third-party packet integration enabled");
+    foreach (bool validSyntax in new[] { false, true })
+    {
+        var decision = IntegrationCoveragePolicy.Evaluate(
+            entry.Domain, validSyntax);
+        Check(!decision.CanReplaceExistingAuthority &&
+            !decision.GameplayAuthorized,
+            "offline export syntax replaced live CLI/OCR gameplay authority");
+    }
+}
+Check(IntegrationCoveragePolicy.Evaluate("items_inventory", true).Status ==
+    "existing_cli_authoritative", "items should use known CLI");
+Check(IntegrationCoveragePolicy.Evaluate("altering", true).Status ==
+    "existing_cli_authoritative", "altering should use known CLI");
+Check(IntegrationCoveragePolicy.Evaluate("battle_snapshot", false).Status ==
+    "missing_verified_export", "missing actual export was treated as decoded");
+Check(IntegrationCoveragePolicy.Evaluate("battle_snapshot", true).Status ==
+    "structure_only_needs_semantics_and_provenance",
+    "structurally valid JSON was treated as verified real-time event");
+Check(IntegrationCoveragePolicy.Evaluate("boss_emblem", true).Status ==
+    "screen_authority_no_verified_packet_event",
+    "unknown boss emblem packet mapping made authoritative");
+Check(IntegrationCoveragePolicy.Evaluate("abyss_clear", true).Status ==
+    "screen_authority_no_verified_packet_event",
+    "abyss clear screen evidence was replaced by packet metadata");
+Check(IntegrationCoveragePolicy.Evaluate("invented_boss_packet", true).Status ==
+    "unknown_domain", "arbitrary packet domain allowed");
+
 Console.WriteLine($"PASS {checks} synthetic offline JSON/CSV shape regressions. No user files opened.");
