@@ -107,6 +107,28 @@ class OfflineEvidenceAbTests(unittest.TestCase):
             "BEGIN COMMON INCIDENT TRIAGE V1",
             "BEGIN COMMON INCIDENT TRIAGE V2")).status, "invalid")
 
+    def test_stage19_screen_block_not_counted_as_baseline_accuracy(self):
+        screen = (ab.SCREEN_BEGIN + "\\n"
+                  "area=abyss\\n"
+                  "signal=abyss_clear_pair_guard_passed\\n"
+                  "comparison=no_comparable_cli_state\\n"
+                  "age_ms=250\\n"
+                  "verified_cause=false;gameplay_authorized=false;repair_authorized=false\\n"
+                  + ab.SCREEN_END + "\\n")
+        report = ab.parse(BASE + BLOCK + screen)
+        self.assertEqual(report.status, "valid")
+        self.assertEqual(report.baseline, BASE)
+        self.assertFalse(ab.compare_text(BASE + BLOCK + screen)["ground_truth_verified"])
+        self.assertEqual(ab.parse(BASE + BLOCK + screen + screen).status, "invalid")
+        self.assertEqual(ab.parse(BASE + BLOCK + screen.replace(
+            "repair_authorized=false", "repair_authorized=true")).status, "invalid")
+        self.assertEqual(ab.parse(BASE + BLOCK + screen.replace(
+            "age_ms=250", "age_ms=9999")).status, "invalid")
+        self.assertEqual(ab.parse(BASE + BLOCK + screen.replace(
+            "area=abyss", "area=gathering")).status, "invalid")
+        self.assertEqual(ab.parse(BASE + BLOCK + screen.replace(
+            "no_comparable_cli_state", "compatible_gathering_hints_only")).status, "invalid")
+
     def test_heuristic_drift_is_flagged_not_counted_as_accuracy_gain(self):
         # The unchanged error_memory heuristic can be biased by the
         # annotation's footer mentioning "receipt"; this is NOT an
