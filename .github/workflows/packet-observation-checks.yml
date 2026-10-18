@@ -42,3 +42,20 @@ jobs:
         run: |
           dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Main Windows app build failed' }
+      - name: Publish self-contained Windows x64 diagnostic
+        shell: pwsh
+        run: |
+          $dest = Join-Path (Get-Location) '_packet-receive-probe-publish'
+          dotnet publish tools/PacketReceiveProbe/PacketReceiveProbe.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $dest
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic publish failed' }
+          if (-not (Test-Path (Join-Path $dest 'PacketReceiveProbe.exe'))) { throw 'Published EXE missing' }
+          Copy-Item 'tools/PacketReceiveProbe/RunReceiveProbe.cmd' $dest
+          Copy-Item 'tools/PacketReceiveProbe/사용안내.txt' $dest
+          Write-Host 'Packaged independently of the existing macro. Live capture was not performed in CI.'
+      - name: Upload click-to-run diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: PacketReceiveProbe-Win64-ClickToRun
+          path: _packet-receive-probe-publish/**
+          if-no-files-found: error
+          retention-days: 14
