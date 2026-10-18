@@ -6,6 +6,10 @@ on:
       - 'source/FishingAutomation/Telemetry/**'
       - 'tests/packet-observation/**'
       - 'tests/common-observation/**'
+      - 'tests/ai-autopilot/test_passive_cli_context.py'
+      - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
+      - 'source/FishingAutomation/AiAutopilotHost.cs'
+      - 'source/FishingAutomation/MabinogiMobileCli.cs'
       - 'tools/PacketReceiveProbe/**'
       - 'tests/packet-receive-probe/**'
       - 'tools/MobilayExportInspector/**'
@@ -35,6 +39,14 @@ jobs:
         run: |
           dotnet run --project tests/common-observation/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Cross-feature evidence regression failed' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify sanitized AI evidence uses existing untrusted-log boundary
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p test_passive_cli_context.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Passive AI context safety regression failed' }
       - name: Check packet receive probe safety and strict CLI
         shell: pwsh
         run: |
