@@ -20,37 +20,83 @@ internal static class ReadOnlyCliComparison
     internal static bool IsAllowed(string command) =>
         command is "status" or "get_activity";
 
-    internal static string ClassifyResponse(int exitCode, string? stdout)
+    // Matches the current MabinogiMobileCli.Parse contract, but exposes only
+    // minimal status categories and never the original JSON or character data.
+    // In particular, root.status is OPTIONAL: pipe and nested body carry state.
+    internal static string ClassifyResponse(int exitCode, string? stdout,
+        string command = "get_activity")
     {
-        if (exitCode != 0)
-            return "cli_nonzero_exit";
+        if (!IsAllowed(command))
+            return "cli_command_blocked";
         if (string.IsNullOrWhiteSpace(stdout))
-            return "cli_empty";
+            return exitCode == 5 ? "cli_disconnected" : "cli_empty";
         if (stdout.Length > MaximumOutputCharacters)
             return "cli_oversize";
         try
         {
-            using var doc = JsonDocument.Parse(stdout, new JsonDocumentOptions
-            {
-                MaxDepth = 20, AllowTrailingCommas = false
-            });
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            using var doc = JsonDocument.Parse(stdout.Trim().TrimStart('\uFEFF'),
+                new JsonDocumentOptions { MaxDepth = 20, AllowTrailingCommas = false });
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
                 return "cli_invalid_schema";
-            if (!doc.RootElement.TryGetProperty("status", out var status) ||
-                status.ValueKind != JsonValueKind.String)
-                return "cli_json_without_status";
-            return status.GetString() switch
+            var body = Property(root, "body") ?? root;
+            if (body.ValueKind == JsonValueKind.String)
             {
-                "accepted" => "cli_accepted",
-                "success" => "cli_success",
-                "rejected" => "cli_rejected",
-                _ => "cli_other_status"
-            };
+                string? nested = body.GetString();
+                if (!string.IsNullOrWhiteSpace(nested))
+                {
+                    try
+                    {
+                        using var nestedDoc = JsonDocument.Parse(nested);
+                        body = nestedDoc.RootElement.Clone();
+                    }
+                    catch (JsonException)
+                    {
+                        // Mirror the existing macro's fallback: retain string body.
+                    }
+                }
+            }
+            string? status = Text(root, "status") ?? Text(body, "status");
+            string? pipe = Text(body, "pipe") ?? Text(root, "pipe");
+            string? reason = Text(body, "reason") ?? Text(root, "reason");
+            string? error = Text(body, "error") ?? Text(root, "error");
+            if (reason is "game_off" or "option_off" ||
+                error is "game_off" or "option_off")
+                return "cli_game_or_option_off";
+            if (exitCode == 5 || pipe == "disconnected" ||
+                status == "disconnected" || error == "disconnected")
+                return "cli_disconnected";
+            if (exitCode != 0 || status is "rejected" or "error" or "failed" ||
+                error is not null)
+                return "cli_rejected";
+            if (command == "status")
+                return pipe == "connected" ? "cli_connected" :
+                    "cli_unclassified_status";
+            if (body.ValueKind == JsonValueKind.Object)
+                return "cli_readonly_object";
+            return "cli_unexpected_response";
         }
         catch (JsonException)
         {
             return "cli_invalid_json";
         }
+    }
+
+    private static JsonElement? Property(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+        foreach (var property in element.EnumerateObject())
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return property.Value;
+        return null;
+    }
+
+    private static string? Text(JsonElement element, string name)
+    {
+        var value = Property(element, name);
+        return value is { ValueKind: JsonValueKind.String } ?
+            value.Value.GetString() : null;
     }
 
     internal static async Task<string> QueryAsync(
@@ -86,7 +132,7 @@ internal static class ReadOnlyCliComparison
                 await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
                 string response = await stdout.ConfigureAwait(false);
                 await stderr.ConfigureAwait(false);
-                return ClassifyResponse(process.ExitCode, response);
+                return ClassifyResponse(process.ExitCode, response, command);
             }
             finally
             {
