@@ -11,6 +11,7 @@ internal static class AiPassiveCliEvidence
     private static readonly object Gate = new();
     private static readonly TimeSpan MaximumAge = TimeSpan.FromSeconds(5);
     private static bool _enabled;
+    private static AlteringWorkCountSnapshot? _lastVerifiedAltering;
 
     private sealed record Entry(string Query, string Outcome,
         DateTimeOffset ObservedUtc);
@@ -39,6 +40,7 @@ internal static class AiPassiveCliEvidence
             // evidence from an earlier session or after watcher exit.
             _enabled = enabled;
             Recent.Clear();
+            _lastVerifiedAltering = null;
         }
     }
 
@@ -50,7 +52,8 @@ internal static class AiPassiveCliEvidence
     /// </summary>
     internal static void Observe(
         string command, bool success, string state, string? error,
-        DateTimeOffset observedAtUtc, string? validatedDiagnostic = null)
+        DateTimeOffset observedAtUtc, string? validatedDiagnostic = null,
+        CliDiagnosticProjection? verifiedProjection = null)
     {
         // Never interpolate an untrusted input into a result.
         if (!Order.Contains(command, StringComparer.Ordinal))
@@ -116,6 +119,33 @@ internal static class AiPassiveCliEvidence
             }
             if (history.Count > 0 && observed < history[^1].ObservedUtc)
                 return; // late async completion must not override fresh evidence
+
+            // The existing strict CLI parser has already run. Keep only
+            // bounded, anonymous counts; a matching change never confirms
+            // cancellation, item delivery or a particular recipe ID.
+            if (command == "get_altering_works")
+            {
+                if (success && verifiedProjection is not null &&
+                    AlteringWorkDeltaDiagnostic.TryProjection(
+                        verifiedProjection, observed, out var current) &&
+                    current is not null)
+                {
+                    AlteringWorkDeltaAssessment delta =
+                        AlteringWorkDeltaDiagnostic.Compare(
+                            _lastVerifiedAltering, current);
+                    _lastVerifiedAltering = current;
+                    if (delta.Status == "possible_work_removal_not_completion")
+                        outcome = "cli_altering_possible_removed_not_completed";
+                    else if (delta.Status ==
+                        "possible_progress_to_completed_receipt_unknown")
+                        outcome = "cli_altering_possible_finished_receipt_unknown";
+                }
+                else
+                {
+                    _lastVerifiedAltering = null;
+                }
+            }
+
             if (history.Count > 0 && observed == history[^1].ObservedUtc)
                 history[^1] = new(command, outcome, observed);
             else
