@@ -75,6 +75,7 @@ internal static class GuidedDiagnosticRunner
             Console.CancelKeyPress += stop;
             try
             {
+                var finalComparison = new List<string>();
                 for (int stage = 0; stage < GuidedDiagnosticPolicy.MaxStages; stage++)
                 {
                     string name = GuidedDiagnosticPolicy.StageNames[stage];
@@ -153,9 +154,17 @@ internal static class GuidedDiagnosticRunner
                     Console.WriteLine(
                         $"stage_cli stage={name} status_query={status} " +
                         $"activity_query={activity}");
+                    finalComparison.Add(
+                        $"compare stage={name} frames={summary.MatchedFrames} " +
+                        $"frame_bytes={summary.FrameBytes} " +
+                        $"owner_before={before.ProcessNames} owner_after={after.ProcessNames} " +
+                        $"cli_status={status} cli_activity={activity}");
                 }
                 Console.WriteLine();
-                Console.WriteLine("ALL_STAGES_COMPLETE. Send only the stage_* result lines.");
+                Console.WriteLine("=== 3-STAGE FINAL COMPARISON ===");
+                foreach (string row in finalComparison)
+                    Console.WriteLine(row);
+                Console.WriteLine("ALL_STAGES_COMPLETE. Send one screenshot of the 3 compare lines.");
                 Console.WriteLine(
                     "Port owner names, CLI accepted replies and frame counts are " +
                     "independent observations, NOT verified game packet mappings.");
