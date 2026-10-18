@@ -18,7 +18,13 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+#if STAGE16_PREVIEW_ONLY
+        // Independent read-only preview: cannot instantiate macro, update
+        // check, bot, Telegram remote control or AI watcher.
+        Application.Run(new Stage16ReadOnlyPreviewForm());
+#else
         Application.Run(new MainForm());
+#endif
     }
 
     private static void WriteCrash(string source, Exception ex)
