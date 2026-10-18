@@ -80,6 +80,33 @@ class OfflineEvidenceAbTests(unittest.TestCase):
             + ab.END + "\n")
         self.assertEqual(ab.parse(BASE + fabricated).status, "invalid")
 
+    def test_stage18_cross_feature_triage_is_also_removed_from_baseline(self):
+        triage = (ab.TRIAGE_BEGIN + "\n"
+                  "area=altering\n"
+                  "coverage=domain_cli_hint_only\n"
+                  "hint=possible_work_removal_not_completion\n"
+                  "connectivity=cli_timeout_not_disconnect\n"
+                  "relevant_facts=1\n"
+                  "verified_cause=false;gameplay_authorized=false;repair_authorized=false\n"
+                  + ab.TRIAGE_END + "\n")
+        pair = ab.parse(BASE + BLOCK + triage)
+        self.assertEqual(pair.status, "valid")
+        self.assertEqual(pair.baseline, BASE)
+        self.assertEqual(pair.enriched, BASE + BLOCK + triage)
+        report = ab.compare_text(BASE + BLOCK + triage)
+        self.assertFalse(report["ground_truth_verified"])
+        self.assertFalse(report["diagnostic_accuracy_proven"])
+        self.assertFalse(report["ai_analysis_run"])
+        self.assertFalse(report["gameplay_authorized"])
+        poisoned = triage.replace("repair_authorized=false", "repair_authorized=true")
+        self.assertEqual(ab.parse(BASE + BLOCK + poisoned).status, "invalid")
+        leaked = triage.replace("area=altering", "area=PRIVATE_CHARACTER")
+        self.assertEqual(ab.parse(BASE + BLOCK + leaked).status, "invalid")
+        self.assertEqual(ab.parse(BASE + BLOCK + triage + triage).status, "invalid")
+        self.assertEqual(ab.parse(BASE + BLOCK + triage.replace(
+            "BEGIN COMMON INCIDENT TRIAGE V1",
+            "BEGIN COMMON INCIDENT TRIAGE V2")).status, "invalid")
+
     def test_heuristic_drift_is_flagged_not_counted_as_accuracy_gain(self):
         # The unchanged error_memory heuristic can be biased by the
         # annotation's footer mentioning "receipt"; this is NOT an
