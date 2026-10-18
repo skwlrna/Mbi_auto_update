@@ -43,7 +43,13 @@ class Stage26HandoffTests(unittest.TestCase):
         report = handoff.audit(ROOT)
         self.assertEqual(report["status"],
                          "development_handoff_checks_passed_release_held")
-        self.assertEqual(report["candidate_version"], "3.2.24")
+        # GitHub pull_request CI checks the synthetic merge with main,
+        # where the project version may be newer than the draft PR head.
+        from xml.etree import ElementTree as ET
+        expected = ET.parse(
+            ROOT / "source/FishingAutomation/FishingAutomation.csproj"
+        ).getroot().findtext("PropertyGroup/Version")
+        self.assertEqual(report["candidate_version"], expected)
         self.assertTrue(report["ready_for_upstream_reconciliation"])
         self.assertTrue(report["checks"]["stage25_integration_contract"])
         self.assertTrue(report["checks"]["local_version_fields_match"])
@@ -110,6 +116,10 @@ class Stage26HandoffTests(unittest.TestCase):
 
     def test_version_or_rollback_mutation_blocks_auditor(self):
         original = handoff._bounded
+        live_version = handoff.audit(ROOT)["candidate_version"]
+        self.assertRegex(live_version, r"^3\\.\\d+\\.\\d+$")
+        workflow_path = (".github/workflows/release-v" +
+                         live_version.replace(".", "") + "-auto-update.yml")
         substitutions = {
             "source/FishingAutomation/UpdateManager.cs": [
                 b'    public const string CurrentVersion = "V3.2.22";'],
@@ -119,7 +129,7 @@ class Stage26HandoffTests(unittest.TestCase):
                 b"<Project><PropertyGroup><Version>3.2.24</Version>"
                 b"<AssemblyVersion>3.2.22.0</AssemblyVersion>"
                 b"<FileVersion>3.2.24.0</FileVersion></PropertyGroup></Project>"],
-            ".github/workflows/release-v3224-auto-update.yml": [
+            workflow_path: [
                 b"no provenance, no rollback script"],
         }
         for rel, replace in substitutions.items():
