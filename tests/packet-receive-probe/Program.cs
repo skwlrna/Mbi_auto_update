@@ -171,4 +171,54 @@ try
 }
 catch (ArgumentOutOfRangeException) { checks++; }
 
+// One-run batch diagnostics must not auto-run on startup, guess network
+// adapters, or accept consent from a previous invocation.
+Check(GuidedDiagnosticPolicy.StageNames.SequenceEqual(new[]
+    { "client_closed", "character_connected_idle", "character_connected_activity" }),
+    "three guided stages changed");
+Check(GuidedDiagnosticPolicy.MaxTotalCaptureSeconds == 30 &&
+    GuidedDiagnosticPolicy.StageSeconds == 10, "3-stage capture exceeded approved bound");
+Check(GuidedDiagnosticPolicy.TryApprove(5, "3", "YES", out var guidedDevice) &&
+    guidedDevice == 3, "guided explicit device choice or consent failed");
+Check(!GuidedDiagnosticPolicy.TryApprove(5, "3", "yes", out _),
+    "lowercase consent started batch");
+Check(!GuidedDiagnosticPolicy.TryApprove(5, "5", "YES", out _),
+    "out of range adapter started batch");
+Check(!GuidedDiagnosticPolicy.TryApprove(0, "0", "YES", out _),
+    "no adapters started batch");
+Check(!GuidedDiagnosticPolicy.TryApprove(5, null, "YES", out _),
+    "missing adapter started batch");
+Check(!GuidedDiagnosticPolicy.TryApprove(5, "3", null, out _),
+    "missing consent started batch");
+Check(!GuidedDiagnosticPolicy.TryApprove(5, "-1", "YES", out _),
+    "invalid adapter started batch");
+Check(!GuidedDiagnosticPolicy.TryApprove(5, "3 & exit", "YES", out _),
+    "injection-like adapter value started batch");
+Check(GuidedDiagnosticPolicy.IsReady("READY") &&
+    !GuidedDiagnosticPolicy.IsReady("ready") &&
+    !GuidedDiagnosticPolicy.IsReady("") &&
+    !GuidedDiagnosticPolicy.IsReady(null),
+    "manual stage readiness gate changed");
+Check(ReadOnlyCliComparison.IsAllowed("status") &&
+    ReadOnlyCliComparison.IsAllowed("get_activity") &&
+    !ReadOnlyCliComparison.IsAllowed("execute_gathering") &&
+    !ReadOnlyCliComparison.IsAllowed("stop_action") &&
+    !ReadOnlyCliComparison.IsAllowed("get_my_info") &&
+    !ReadOnlyCliComparison.IsAllowed("get_inventory"),
+    "guided CLI did not enforce two-command allowlist");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    "{\\\"status\\\":\\\"accepted\\\",\\\"body\\\":{\\\"characterId\\\":\\\"SECRET\\\"}}")
+    == "cli_accepted", "private body should not affect output classification");
+Check(ReadOnlyCliComparison.ClassifyResponse(1, "{}") == "cli_nonzero_exit",
+    "failed CLI exit accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "not-json") == "cli_invalid_json",
+    "non-json CLI response accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}") == "cli_json_without_status",
+    "unclassified CLI JSON accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "{\\\"status\\\":\\\"rejected\\\"}") ==
+    "cli_rejected", "CLI rejection was promoted to success");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, new string('x', 16385)) ==
+    "cli_oversize", "oversize CLI response accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "") == "cli_empty",
+    "empty CLI response accepted");
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
