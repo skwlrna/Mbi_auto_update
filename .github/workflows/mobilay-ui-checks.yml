@@ -1,0 +1,41 @@
+name: Mobilay-Inspired UI Contract and Windows Build
+
+on:
+  push:
+    branches:
+      - feat/mobilay-inspired-ui-20261019
+    paths:
+      - 'source/FishingAutomation/MainForm*.cs'
+      - 'tests/mobilay-ui/**'
+      - '.github/workflows/mobilay-ui-checks.yml'
+  pull_request:
+    paths:
+      - 'source/FishingAutomation/MainForm*.cs'
+      - 'tests/mobilay-ui/**'
+      - '.github/workflows/mobilay-ui-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract-build:
+    runs-on: windows-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify dashboard navigation and live metric UI safety
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/mobilay-ui -p test_mobilay_ui_contract.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Mobilay dashboard layout contract failed' }
+      - name: Build Windows WinForms application without publishing
+        shell: pwsh
+        run: |
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Mobilay UI WinForms build failed' }
