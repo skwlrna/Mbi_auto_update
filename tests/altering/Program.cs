@@ -1792,6 +1792,62 @@ if (Directory.Exists(nestedSessionDir))
 if (Directory.Exists(dependencySessionDir))
     Directory.Delete(dependencySessionDir, recursive: true);
 
+// 2026-10-17 actual F9: 밥 100개 was selected with "물이 든 병 0/2",
+// but a global queue_full and earlier wood failure prevented food preparation.
+// F9 now plans a safe raw-gather pass independently of facility service order.
+var riceWorld = new RecursiveProductionWorld { IncludeRice = true };
+riceWorld.SetCount("물이 든 병", 0);
+riceWorld.AddExternalWork("이전 식재료", "식재료 가공 시설", "Completed", true, 0);
+var ricePlan = new AlteringPlan("식재료 가공 시설", "밥", 100, 3, false);
+var riceSelected = new AlteringRecipe(
+    "밥", false, 3, "not_enough_ingredient",
+    new[] { new AlteringIngredient("물이 든 병", 2, 0) }, ricePlan.FacilityName);
+var riceQueueFull = riceSelected with
+{
+    Reason = "queue_full",
+    MissingIngredients = Array.Empty<AlteringIngredient>()
+};
+var riceQueueEvidence = new[]
+{
+    new MultiAlteringSupplyPreflight(ricePlan, riceSelected, ricePlan.RequiredWorks)
+};
+var riceRequests = MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+    new[] { ricePlan }, new[] { riceQueueFull }, riceQueueEvidence);
+Check(riceRequests.Count == 1 &&
+      riceRequests[0].Recipe.MissingIngredients.Single().DisplayName == "물이 든 병" &&
+      riceRequests[0].RemainingWorks == 34,
+    "F9 retains verified rice-water shortage when global queue_full masks recipe evidence");
+var riceResolver = new RecursiveAlteringSupplyResolver(
+    riceWorld, riceWorld, riceWorld, riceWorld,
+    delay: (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
+Check(riceWorld.Count("물이 든 병") >= 68 &&
+      riceWorld.Gathered.SequenceEqual(new[] { "물이 든 병" }) &&
+      riceWorld.FieldExitCalls == 1 &&
+      (await riceWorld.WorksAsync(default)).Count == 1,
+    "F9 acquires 34x2 rice water from the well route before wood/food lanes, without collecting old jobs");
+await riceWorld.QueueAsync(ricePlan, () => { }, default);
+Check(riceWorld.Queued.SequenceEqual(new[] { "밥" }) &&
+      riceWorld.Count("물이 든 병") >= 66,
+    "rice can register after gathered water satisfies a fresh live ingredient check");
+Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+        new[] { ricePlan }, new[] { riceQueueFull },
+        Array.Empty<MultiAlteringSupplyPreflight>()).Count == 0 &&
+      MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+        new[] { ricePlan }, new[] { riceQueueFull },
+        new[] { riceQueueEvidence[0] with {
+            Plan = ricePlan with { TargetQuantity = 99 } } }).Count == 0 &&
+      MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+        new[] { ricePlan }, new[] {
+            riceQueueFull with { Reason = "unknown_recipe_block" } },
+        riceQueueEvidence).Count == 0,
+    "F9 never invents water shortages from missing, mismatched or unknown-condition evidence");
+Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+        new[] { ricePlan }, new[] { riceSelected },
+        Array.Empty<MultiAlteringSupplyPreflight>()).Count == 1,
+    "fresh authoritative CLI water shortage triggers early gathering without UI evidence");
+
 var multiWorld = new RecursiveProductionWorld();
 multiWorld.SetCount("석탄", 0);
 var multiLane = new FacilityLaneState(Array.Empty<AlteringWork>());
@@ -3005,7 +3061,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal FacilityLaneState? ManagerObservedDuringGather;
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
     internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
-        HideGatheringCatalogOnFirstQuery, FailFieldExit;
+        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -3052,7 +3108,14 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                 MakeRecipe("합성괴", 1, "금속 가공 시설",
                     new Dictionary<string,long>(StringComparer.Ordinal) { ["합금괴"] = 2 })
             }
-            : Array.Empty<AlteringRecipe>()).ToArray());
+            : Array.Empty<AlteringRecipe>())
+            .Concat(IncludeRice
+                ? new[] {
+                    MakeRecipe("밥", 3, "식재료 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["물이 든 병"] = 2 })
+                }
+                : Array.Empty<AlteringRecipe>()).ToArray());
     }
 
     private AlteringRecipe MakeRecipe(string display, int produced, string facility, IReadOnlyDictionary<string,long> ingredients)
@@ -3090,6 +3153,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             "철괴(철 광석)" => new Dictionary<string,long>(StringComparer.Ordinal) { ["철 광석"] = 10 },
             "합금괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3 },
             "합성괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["합금괴"] = 2 },
+            "밥" when IncludeRice => new Dictionary<string,long>(StringComparer.Ordinal) { ["물이 든 병"] = 2 },
             _ => throw new InvalidOperationException("unexpected recipe")
         };
         foreach (var ingredient in ingredients)
@@ -3158,7 +3222,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         {
             new GatherableItem("철 광석", true),
             new GatherableItem("석탄", true)
-        });
+        }.Concat(IncludeRice
+            ? new[] { new GatherableItem("물이 든 병", true) }
+            : Array.Empty<GatherableItem>()).ToArray());
     }
 
     public Task<GatheringActivity> ActivityAsync(CancellationToken ct)

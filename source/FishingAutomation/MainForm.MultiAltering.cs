@@ -17,6 +17,12 @@ public sealed partial class MainForm
             return;
 
         bool isResume = resumeDirectory is not null;
+        // UI shortage evidence can be masked by a later global queue_full
+        // response. Capture the selected entries before any asynchronous F9
+        // work; live CLI inventory is still checked before gathering.
+        var queuedMaterialEvidence = isResume
+            ? Array.Empty<MultiAlteringSupplyPreflight>()
+            : _alteringPage.QueuedAlteringMaterialEvidence;
         // Snapshot once before awaits; F7 cannot change it while this batch runs.
         bool combinedAbyss = _combinedAlteringRequested;
         long minimumAbyssWaitSeconds = combinedAbyss
@@ -275,6 +281,28 @@ public sealed partial class MainForm
                 SetStatus(text.Replace("[재료 해결] ", ""), Blue);
                 RefreshProductionDashboard();
             });
+
+            // Prepare provable raw shortages across ALL selected recipes before
+            // servicing the first full lane. Otherwise an unrelated wood/metal
+            // failure can prevent food materials (e.g. well water) from ever
+            // being collected. This stage performs only guarded free gathering;
+            // it neither receives existing jobs nor clicks a processing slot.
+            // Resume must preserve its original journal and skip this new pass.
+            if (!isResume)
+            {
+                var freshForPreflight = await rawAlteringData.RecipesAsync(token);
+                var initialShortages =
+                    MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+                        plans, freshForPreflight, queuedMaterialEvidence);
+                _log.Write(
+                    $"[다중가공] F9 전체 품목 선행채집 점검 · {plans.Count}종 중 " +
+                    $"{initialShortages.Count}종 부족 재료 증거 · 빈/가득 찬 시설과 무관하게 현재 재고 재확인");
+                if (initialShortages.Count > 0)
+                {
+                    await resolver.PreGatherKnownShortagesAsync(initialShortages, token);
+                    _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 이후 시설별 등록 시 부족 재검증");
+                }
+            }
 
             var automations = new Dictionary<(string Facility, string Display, int Ordinal), AlteringAutomation>();
             var progress = new Dictionary<(string Facility, string Display, int Ordinal), long>();
