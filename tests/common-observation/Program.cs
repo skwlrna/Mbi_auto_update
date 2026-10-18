@@ -565,5 +565,27 @@ AiPassiveCliEvidence.SetEnabled(false);
 Check(AiPassiveCliEvidence.SnapshotForError(now.AddMilliseconds(50)) is null,
     "AI stop failed to remove validated semantic snapshot");
 
+// Stage 16 preview must be started by a real button click and may never
+// coexist with a same-name production macro, a second diagnostic run or
+// an arbitrary CLI command.
+Check(Stage16PreviewGate.Check(false, false, false) == "explicit_click_required",
+    "preview ran CLI on startup without a user click");
+Check(Stage16PreviewGate.Check(true, true, false) == "close_other_macro_first",
+    "preview allowed CLI reads alongside a running macro");
+Check(Stage16PreviewGate.Check(true, false, true) == "single_session_only",
+    "preview allowed concurrent diagnostic sessions");
+Check(Stage16PreviewGate.Check(true, false, false) == "allowed",
+    "explicitly approved isolated diagnostic did not pass");
+Check(Stage16PreviewGate.ExactReadOnlyQueries.SequenceEqual(new[] {
+    CliDiagnosticQuery.Status, CliDiagnosticQuery.Activity,
+    CliDiagnosticQuery.AlteringWorks, CliDiagnosticQuery.Items,
+    CliDiagnosticQuery.AlteringCatalog }),
+    "preview exact query allowlist changed");
+Check(Stage16PreviewGate.ExactReadOnlyQueries.Distinct().Count() == 5,
+    "preview queries contain duplicates");
+Check(!Stage16PreviewGate.ExactReadOnlyQueries
+    .Any(q => (int)q < 1 || (int)q > 5),
+    "preview admitted an undefined action query");
+
 Console.WriteLine($"PASS {checks} synthetic common observation and historical-DPS regressions.");
 Console.WriteLine("No game input, capture, external API, user export or private data was opened.");
