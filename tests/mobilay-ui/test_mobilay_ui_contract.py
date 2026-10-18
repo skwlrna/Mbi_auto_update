@@ -23,8 +23,8 @@ class MobilayPresentationContract(unittest.TestCase):
         for rgb in ("23, 23, 24", "13, 14, 18", "171, 143, 249",
                     "238, 238, 244", "81, 200, 156"):
             self.assertIn(rgb, self.main)
-        self.assertIn("1180", self.main)
-        self.assertIn("780", self.main)
+        self.assertIn("1120", self.main)
+        self.assertIn("720", self.main)
         self.assertIn("53, 53, 57", self.palette)
         self.assertNotIn("private static readonly Color NavBg = Color.White", self.palette)
 
@@ -33,13 +33,30 @@ class MobilayPresentationContract(unittest.TestCase):
                   "실행 통계", "시스템 상태", "최근 활동")
         for title in titles:
             self.assertIn('"' + title + '"', self.grid)
-        self.assertIn("row * 364", self.grid)
+        self.assertIn("row * 315", self.grid)
         self.assertIn("column * 390", self.grid)
+        self.assertIn("Card(g, new(x, y, 374, 302))", self.grid)
+        self.assertIn('Card(g, new(256, 829, 1166, 115))', self.grid)
+        self.assertIn('TextAt(g, "실행 기록"', self.grid)
+        self.assertIn("int y = 265 + i * 36", self.grid)
+        self.assertIn('new(16, 123, 200, 49)', self.grid)
+        self.assertIn('new(16, 471, 200, 49)', self.grid)
+        self.assertIn('new(1139, 881, 265, 41)', self.shell)
         self.assertIn("private void PaintHome(Graphics g) => PaintMobilayHome(g);",
                       self.shell)
         self.assertIn("_homeLinks.Add(AddButton(", self.grid)
         self.assertIn('case "arrow-up-right":', self.shell)
         self.assertIn('if (_kind == "card-link")', self.shell)
+
+    def test_compact_footer_keeps_manual_updates_and_runtime_separate(self):
+        self.assertIn('owner.CheckForUpdatesAsync(true)', self.shell)
+        self.assertIn('new(277, 890, 831, 40)', self.grid)
+        self.assertIn('F8 테스트  ·  F9 시작  ·  F10 정지', self.grid)
+        self.assertIn('_owner._progressLogPreview.Text', self.grid)
+        self.assertIn('owner.TopMost = !owner.TopMost', self.grid)
+        # The compact visual layout must not alter the keyboard/game actions.
+        self.assertNotIn('SendKeys.', self.grid)
+        self.assertNotIn('SendInput(', self.grid)
 
     def test_no_mock_stats_or_hidden_automation_entry_points(self):
         for existing in (
