@@ -269,6 +269,20 @@ public sealed partial class MainForm : Form
     {
         var panel = CreateCard();
         var header = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = PanelBg };
+        var manualDiagnosis = new Button
+        {
+            Text = "게임 상태 진단",
+            Dock = DockStyle.Right,
+            Width = 128,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = PanelBg,
+            ForeColor = TitleText,
+            Font = new Font("맑은 고딕", 8.3f),
+            Cursor = Cursors.Hand
+        };
+        manualDiagnosis.FlatAppearance.BorderColor = Border;
+        manualDiagnosis.Click += (_, _) => ShowCommonObservationDiagnostic();
+        header.Controls.Add(manualDiagnosis);
         header.Controls.Add(new Label { Text = "실시간 로그", Dock = DockStyle.Left, Width = 140, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(12, 0, 0, 0), Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = TitleText });
         _logBox.Multiline = true;
         _logBox.ReadOnly = true;
