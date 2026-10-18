@@ -4,7 +4,7 @@ namespace FishingAutomation.PacketDiagnostics;
 /// A deliberately limited, operator-invoked receive-volume probe.
 /// It has no game events, packet decoder, output files or traffic injection.
 /// </summary>
-internal sealed record CaptureProbeOptions(bool ListOnly, int DeviceIndex, int Seconds)
+internal sealed record CaptureProbeOptions(bool ListOnly, int DeviceIndex, int Seconds, bool Interactive = false)
 {
     internal const int ExpectedRemoteSourcePort = 16000;
     internal const int MaxSeconds = 30;
@@ -14,6 +14,11 @@ internal sealed record CaptureProbeOptions(bool ListOnly, int DeviceIndex, int S
     internal static bool TryParse(string[] args, out CaptureProbeOptions? options)
     {
         options = null;
+        if (args.Length == 1 && args[0] == "--interactive")
+        {
+            options = new(false, -1, 0, true);
+            return true;
+        }
         if (args.Length == 1 && args[0] == "--list")
         {
             options = new(true, -1, 0);
