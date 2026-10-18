@@ -1886,6 +1886,47 @@ Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
         Array.Empty<MultiAlteringSupplyPreflight>()).Count == 1,
     "fresh authoritative CLI water shortage triggers early gathering without UI evidence");
 
+// 2026-10-18 16:05-16:48 real log: other facilities had full running
+// queues, food had at least one old occupied slot, and the supervisor
+// spent 43 minutes logging only '병렬 대기'. The independent food lane must
+// get a turn without collecting or touching the still-running full lane.
+var riceStillRunningWorks = fullLane.Concat(new[]
+{
+    new AlteringWork("기존 식재료", ricePlan.FacilityName, "Completed", true, 0)
+}).ToArray();
+bool riceReceivedIndependentTurn = false, riceTouchedRunningWood = false;
+using (var stopAfterRiceTurn = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(
+            deferOtherLanesWhileQueueFull: true).RunAsync(
+            new[] { deferredPlan, ricePlan },
+            (plan, slotBudget, token) =>
+            {
+                if (plan.FacilityName == ricePlan.FacilityName &&
+                    slotBudget == 1)
+                    riceReceivedIndependentTurn = true;
+                if (plan.FacilityName == deferredPlan.FacilityName)
+                    riceTouchedRunningWood = true;
+                stopAfterRiceTurn.Cancel();
+                return Task.FromResult(false);
+            },
+            token => Task.FromResult<IReadOnlyList<AlteringWork>>(
+                riceStillRunningWorks),
+            (_, token) =>
+            {
+                stopAfterRiceTurn.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            stopAfterRiceTurn.Token);
+    }
+    catch (OperationCanceledException) when (stopAfterRiceTurn.IsCancellationRequested) { }
+}
+Check(riceReceivedIndependentTurn && !riceTouchedRunningWood,
+    "F9 rice 1/7 lane receives independent registration turn while wood 7/7 remains running");
+
 var multiWorld = new RecursiveProductionWorld();
 multiWorld.SetCount("석탄", 0);
 var multiLane = new FacilityLaneState(Array.Empty<AlteringWork>());
