@@ -108,13 +108,13 @@ class OfflineEvidenceAbTests(unittest.TestCase):
             "BEGIN COMMON INCIDENT TRIAGE V2")).status, "invalid")
 
     def test_stage19_screen_block_not_counted_as_baseline_accuracy(self):
-        screen = (ab.SCREEN_BEGIN + "\\n"
-                  "area=abyss\\n"
-                  "signal=abyss_clear_pair_guard_passed\\n"
-                  "comparison=no_comparable_cli_state\\n"
-                  "age_ms=250\\n"
-                  "verified_cause=false;gameplay_authorized=false;repair_authorized=false\\n"
-                  + ab.SCREEN_END + "\\n")
+        screen = (ab.SCREEN_BEGIN + "\n"
+                  "area=abyss\n"
+                  "signal=abyss_clear_pair_guard_passed\n"
+                  "comparison=no_comparable_cli_state\n"
+                  "age_ms=250\n"
+                  "verified_cause=false;gameplay_authorized=false;repair_authorized=false\n"
+                  + ab.SCREEN_END + "\n")
         report = ab.parse(BASE + BLOCK + screen)
         self.assertEqual(report.status, "valid")
         self.assertEqual(report.baseline, BASE)
