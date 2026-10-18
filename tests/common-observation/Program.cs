@@ -96,7 +96,7 @@ Check(engine.TryObserve(Sample(sequence: 2,
 Check(engine.TryObserve(Sample(sequence: 2,
     observed: now.AddSeconds(-6), expires: now.AddSeconds(2)), now).Status ==
     "stale", "old CLI state admitted");
-Check(engine.TryObserve(Sample(sequence: 2, expires: now)).Status ==
+Check(engine.TryObserve(Sample(sequence: 2, expires: now), now).Status ==
     "invalid_validity", "invalid expiry admitted");
 Check(engine.TryObserve(Sample(sequence: 2,
     expires: now.AddSeconds(11)), now).Status == "invalid_validity",
