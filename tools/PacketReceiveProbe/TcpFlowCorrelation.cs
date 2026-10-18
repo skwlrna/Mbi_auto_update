@@ -114,6 +114,26 @@ internal sealed class TcpFlowCorrelation
         long FlowCapacityDrops, int DistinctMatchedFlows, string Status);
 
     /// <summary>
+    /// Report a separate count for the exact process-name candidate supplied
+    /// by Windows. This label is NOT identity authentication.
+    /// </summary>
+    internal long CountNamedCandidateFrames(
+        IReadOnlyCollection<TcpIpv4Flow> before,
+        IReadOnlyCollection<TcpIpv4Flow> after)
+    {
+        var candidates = new HashSet<TcpIpv4Flow>(before);
+        candidates.UnionWith(after);
+        lock (_gate)
+        {
+            long count = 0;
+            foreach (var item in _counts)
+                if (candidates.Contains(item.Key))
+                    count += item.Value;
+            return count;
+        }
+    }
+
+    /// <summary>
     /// The OS table is sampled only at stage boundaries. Missing matches may
     /// be normal socket churn, and a match does not authenticate game packets.
     /// </summary>
