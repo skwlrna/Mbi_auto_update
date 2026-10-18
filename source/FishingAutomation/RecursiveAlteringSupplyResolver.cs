@@ -54,7 +54,8 @@ internal static class MultiAlteringMaterialPreflightPolicy
                 x.Plan.FacilityName == plan.FacilityName &&
                 x.Plan.DisplayName == plan.DisplayName &&
                 x.Plan.RecipeOrdinal == plan.RecipeOrdinal &&
-                x.Plan.ProducedPerWork == plan.ProducedPerWork);
+                x.Plan.ProducedPerWork == plan.ProducedPerWork &&
+                x.Plan.TargetQuantity == plan.TargetQuantity);
 
             if (prior is not null &&
                 !prior.Recipe.Alterable &&
