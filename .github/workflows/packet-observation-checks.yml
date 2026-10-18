@@ -80,6 +80,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Export inspector publish failed' }
           if (-not (Test-Path (Join-Path $dest 'MobilayExportInspector.exe'))) { throw 'Published export inspector missing' }
           Copy-Item 'tools/MobilayExportInspector/RunExportCheck.cmd' $dest
+          Copy-Item 'tools/MobilayExportInspector/RunCoverageCheck.cmd' $dest
           Copy-Item 'tools/MobilayExportInspector/사용안내.txt' $dest
           Write-Host 'Export inspector never opens network, game, capture drivers or raw packet files.'
       - name: Upload drag-and-drop offline export checker
