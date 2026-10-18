@@ -397,5 +397,52 @@ foreach (string secret in new[] { "PRIVATE_PATH", "account", "character", "token
         StringComparison.OrdinalIgnoreCase),
         "diagnostic output leaked user data");
 
+// Stage 13: opt-in UI gate is checked by the same pure method used on the
+// button click; synthetic tests cannot trigger a real CLI query.
+Check(CommonObservationManualUiPolicy.Evaluate(false, false, false, false, false)
+    == "explicit_click_required", "startup/timer diagnostic unexpectedly permitted");
+Check(CommonObservationManualUiPolicy.Evaluate(true, true, false, false, false)
+    == "automation_busy", "running multi-altering allowed competing CLI query");
+Check(CommonObservationManualUiPolicy.Evaluate(true, false, true, false, false)
+    == "automation_busy", "F9 startup and manual diagnostic can race");
+Check(CommonObservationManualUiPolicy.Evaluate(true, false, false, true, false)
+    == "automation_busy", "existing production CLI poll allowed concurrent read");
+Check(CommonObservationManualUiPolicy.Evaluate(true, false, false, false, true)
+    == "diagnostic_already_running", "parallel diagnostics enabled");
+Check(CommonObservationManualUiPolicy.Evaluate(true, false, false, false, false)
+    == "allowed", "explicit one-click diagnostics blocked");
+
+var readable = CommonObservationDiagnosticReport.Render(
+    CliDiagnosticQuery.AlteringWorks, workRead);
+Check(readable.Contains("가공", StringComparison.Ordinal) &&
+    readable.Contains("진행", StringComparison.Ordinal) &&
+    !readable.Contains("execute_", StringComparison.Ordinal),
+    "fixed-label UI projection missing or exposed game action");
+
+var malicious = new CliDiagnosticReadResult(
+    "SECRET_CHAR_0987",
+    new CliDiagnosticProjection("SECRET_RAW_RESPONSE", Count: 2222),
+    null, null);
+string rendered = CommonObservationDiagnosticReport.Render(
+    CliDiagnosticQuery.Items, malicious);
+Check(!rendered.Contains("SECRET_", StringComparison.Ordinal) &&
+    rendered.Contains("검증되지 않은 상태", StringComparison.Ordinal),
+    "unknown status or private label leaked to diagnostic UI");
+Check(CommonObservationDiagnosticReport.StatusName("PRIVATE_PATH_PASSWORD") ==
+    "검증되지 않은 상태", "private status reflected into UI");
+Check(CommonObservationDiagnosticReport.ComparisonName("PRIVATE_PATH_PASSWORD") ==
+    "단계 비교 보류", "private comparison reason reflected");
+Check(CommonObservationDiagnosticReport.QueryName((CliDiagnosticQuery)999) ==
+    "알 수 없는 조회", "unknown CLI query displayed raw value");
+Check(CommonObservationDiagnosticReport.ObservationName(
+    CommonObservationState.Completed).Contains("수령 미확인", StringComparison.Ordinal),
+    "completed CLI row displayed as confirmed receipt");
+Check(CommonObservationDiagnosticReport.ComparisonName(
+    "local_complete_but_work_running").StartsWith("불일치:", StringComparison.Ordinal),
+    "actual multi-altering discrepancy not displayed");
+Check(!rendered.Contains("character", StringComparison.OrdinalIgnoreCase) &&
+    !rendered.Contains("account", StringComparison.OrdinalIgnoreCase),
+    "diagnostic UI incorrectly displays user identifiers");
+
 Console.WriteLine($"PASS {checks} synthetic common observation and historical-DPS regressions.");
 Console.WriteLine("No game input, capture, external API, user export or private data was opened.");
