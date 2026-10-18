@@ -107,6 +107,54 @@ def _remove_stage18_triage(lines: list[str]) -> Optional[str]:
     return "".join(lines[:a] + lines[b + 1:])
 
 
+SCREEN_BEGIN = "BEGIN VERIFIED SCREEN INCIDENT V1"
+SCREEN_END = "END VERIFIED SCREEN INCIDENT V1"
+SCREEN_SIGNALS = {
+    ("gathering", "gathering_stop_control_double_checked"),
+    ("abyss", "abyss_clear_pair_guard_passed"),
+    ("abyss", "abyss_result_guard_passed"),
+}
+SCREEN_COMPARISONS = {
+    "no_comparable_cli_state", "compatible_gathering_hints_only",
+}
+
+
+def _remove_stage19_screen(lines: list[str]) -> Optional[str]:
+    """Exclude only an exact Stage19 diagnostic block from Stage15 baseline.
+
+    An arbitrary or duplicated block is invalid, not independent evidence.
+    """
+    stripped = [line.rstrip("\r\n") for line in lines]
+    first = [i for i, row in enumerate(stripped)
+             if row.startswith("BEGIN VERIFIED SCREEN INCIDENT")]
+    last = [i for i, row in enumerate(stripped)
+            if row.startswith("END VERIFIED SCREEN INCIDENT")]
+    if not first and not last:
+        return "".join(lines)
+    if len(first) != 1 or len(last) != 1:
+        return None
+    a, b = first[0], last[0]
+    if b != a + 6 or stripped[a] != SCREEN_BEGIN or stripped[b] != SCREEN_END:
+        return None
+    area = stripped[a + 1].removeprefix("area=")
+    signal = stripped[a + 2].removeprefix("signal=")
+    comparison = stripped[a + 3].removeprefix("comparison=")
+    age = re.fullmatch(r"age_ms=(0|[1-9][0-9]{0,3}|5000)",
+                       stripped[a + 4])
+    if ((area, signal) not in SCREEN_SIGNALS or
+            stripped[a + 1] != "area=" + area or
+            stripped[a + 2] != "signal=" + signal or
+            stripped[a + 3] != "comparison=" + comparison or
+            comparison not in SCREEN_COMPARISONS or
+            (area != "gathering" and
+             comparison == "compatible_gathering_hints_only") or
+            age is None or int(age.group(1)) > 5000 or
+            stripped[a + 5] !=
+            "verified_cause=false;gameplay_authorized=false;repair_authorized=false"):
+        return None
+    return "".join(lines[:a] + lines[b + 1:])
+
+
 @dataclass(frozen=True)
 class Evidence:
     status: str  # absent, invalid, valid
@@ -154,6 +202,9 @@ def parse(text: str) -> Evidence:
     # Remove only the exact annotation. Preserve the same original log and
     # surrounding context for a paired comparison, not two different errors.
     baseline = _remove_stage18_triage(lines[:a] + lines[b + 1:])
+    if baseline is None:
+        return Evidence("invalid", text, text)
+    baseline = _remove_stage19_screen(baseline.splitlines(keepends=True))
     if baseline is None:
         return Evidence("invalid", text, text)
     return Evidence("valid", baseline, text, tuple(entries))
