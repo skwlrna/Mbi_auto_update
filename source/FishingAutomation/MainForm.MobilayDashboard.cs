@@ -12,7 +12,7 @@ public sealed partial class MainForm
     {
         private void BuildMobilayNavigation(MainForm owner)
         {
-            AddButton("홈", new(16, 135, 200, 54), () =>
+            AddButton("홈", new(16, 123, 200, 49), () =>
             {
                 _showHome = true;
                 _selectedNavigation = "홈";
@@ -21,22 +21,22 @@ public sealed partial class MainForm
                 owner.ApplyLogVisibility();
                 UpdateAbyssDungeonPickerVisibility();
             }, "home", "nav");
-            AddButton("자동화 실행", new(16, 204, 200, 54), () => SelectMode(0), "play", "nav");
-            AddButton("던전 / 어비스", new(16, 273, 200, 54), () => ShowMenu(
+            AddButton("자동화 실행", new(16, 181, 200, 49), () => SelectMode(0), "play", "nav");
+            AddButton("던전 / 어비스", new(16, 239, 200, 49), () => ShowMenu(
                 new[] { "던전", "어비스", "페카 심층" },
-                i => SelectMode(new[] { 1, 2, 3 }[i]), 228, 273), "swords", "nav");
-            AddButton("생활 생산", new(16, 342, 200, 54), () => ShowMenu(
+                i => SelectMode(new[] { 1, 2, 3 }[i]), 228, 239), "swords", "nav");
+            AddButton("생활 생산", new(16, 297, 200, 49), () => ShowMenu(
                 new[] { "자동 가공", "자동 채집", "제작" },
-                i => SelectMode(new[] { 4, 5, 6 }[i]), 228, 342), "leaf", "nav");
-            AddButton("스케줄러", new(16, 411, 200, 54), () => SelectMode(7), "calendar-clock", "nav");
-            AddButton("기타 / 설정", new(16, 480, 200, 54), () => ShowMenu(
+                i => SelectMode(new[] { 4, 5, 6 }[i]), 228, 297), "leaf", "nav");
+            AddButton("스케줄러", new(16, 355, 200, 49), () => SelectMode(7), "calendar-clock", "nav");
+            AddButton("기타 / 설정", new(16, 413, 200, 49), () => ShowMenu(
                 new[] { "텔레그램 알림", "오류 전송", "인식 테스트" }, i =>
                 {
                     if (i == 0) owner.ShowTelegramSettings();
                     else if (i == 1) owner.ShowErrorUploadSettings();
                     else owner.ShowVisualRecognitionTest();
-                }, 228, 480), "settings", "nav");
-            AddButton("로그 / 진단", new(16, 549, 200, 54), () =>
+                }, 228, 413), "settings", "nav");
+            AddButton("로그 / 진단", new(16, 471, 200, 49), () =>
             {
                 owner._logExpanded = true;
                 owner.ApplyLogVisibility();
@@ -45,14 +45,14 @@ public sealed partial class MainForm
 
             // Mobilay-style bottom sidebar controls. No gameplay, network,
             // packet or automated repair is performed by presentation actions.
-            AddButton("탭 접기", new(16, 809, 200, 45), () => owner.ToggleMini(true), "", "quiet");
-            AddButton("창 최소화", new(16, 862, 200, 45),
+            AddButton("탭 접기", new(16, 822, 200, 40), () => owner.ToggleMini(true), "", "quiet");
+            AddButton("창 최소화", new(16, 869, 200, 40),
                 () => owner.WindowState = FormWindowState.Minimized, "", "quiet");
-            var alwaysTop = AddButton("전체 최상단", new(16, 915, 200, 45),
+            var alwaysTop = AddButton("전체 최상단", new(16, 916, 200, 40),
                 () => owner.TopMost = !owner.TopMost, "", "quiet");
             alwaysTop.Click += (_, _) =>
                 alwaysTop.Text = owner.TopMost ? "최상단 해제" : "전체 최상단";
-            AddButton("설정", new(16, 968, 200, 45), () => ShowSettingsMenu(228, 968),
+            AddButton("설정", new(16, 963, 200, 40), () => ShowSettingsMenu(228, 963),
                 "settings", "quiet");
 
             AddButton("F8 테스트", new(856, 8, 170, 48),
@@ -74,9 +74,9 @@ public sealed partial class MainForm
             for (int i = 0; i < targets.Length; i++)
             {
                 int col = i % 3, row = i / 3;
-                int x = 256 + col * 390, y = 210 + row * 364;
+                int x = 256 + col * 390, y = 198 + row * 315;
                 _homeLinks.Add(AddButton("카드 열기 " + (i + 1),
-                    new(x + 315, y + 16, 37, 37), targets[i],
+                    new(x + 328, y + 12, 33, 33), targets[i],
                     "arrow-up-right", "card-link"));
             }
         }
@@ -91,20 +91,21 @@ public sealed partial class MainForm
 
         // Mobilay six-card grid with *only actual* MabiAuto runtime counters.
         // Empty fields remain empty: no mock DPS, fake chat or game-state claims.
+        // More compact 3x2 dashboard, plus a narrow live-activity strip.
+        // Coordinates are virtual (1448x1086); no mouse/game input in paint.
         private void PaintMobilayHome(Graphics g)
         {
-            TextAt(g, "대시보드 (Dashboard)", new(257, 108, 820, 66), 27, true);
-            TextAt(g, "현재 실행 상태와 자동화 기능을 한눈에 확인합니다.",
-                new(261, 165, 900, 28), 15, false, Muted);
+            TextAt(g, "대시보드", new(257, 113, 620, 50), 26, true);
+            TextAt(g, "작업 상태 · 생산 · 통계 · 진단", new(260, 166, 900, 26), 15, false, Muted);
 
             void Tile(int column, int row, string caption, string icon)
             {
-                int x = 256 + column * 390, y = 210 + row * 364;
-                Card(g, new(x, y, 374, 349));
-                Icon(g, icon, new(x + 20, y + 19, 24, 24), Blue);
-                TextAt(g, caption, new(x + 57, y + 12, 255, 41), 20, true);
+                int x = 256 + column * 390, y = 198 + row * 315;
+                Card(g, new(x, y, 374, 302));
+                Icon(g, icon, new(x + 18, y + 15, 24, 24), Blue);
+                TextAt(g, caption, new(x + 51, y + 8, 270, 38), 19, true);
                 using var pen = new Pen(Line);
-                g.DrawLine(pen, x + 18, y + 60, x + 355, y + 60);
+                g.DrawLine(pen, x + 15, y + 56, x + 358, y + 56);
             }
 
             Tile(0, 0, "자동화 상태", "pulse");
@@ -114,54 +115,55 @@ public sealed partial class MainForm
             Tile(1, 1, "시스템 상태", "server");
             Tile(2, 1, "최근 활동", "log");
 
-            Dot(g, 285, 320, 7, _owner.AnyRunning ? Green : Muted);
-            TextAt(g, _owner._statusValue.Text, new(305, 289, 296, 54), 23, true);
-            TextAt(g, "경과 시간", new(278, 371, 144, 35), 16, false, Muted);
-            TextAt(g, _owner._elapsedValue.Text, new(432, 371, 175, 36),
+            // Existing observable runtime, not synthetic game/DPS values.
+            Dot(g, 284, 300, 7, _owner.AnyRunning ? Green : Muted);
+            TextAt(g, _owner._statusValue.Text, new(306, 273, 300, 54), 22, true);
+            TextAt(g, "경과 시간", new(278, 340, 144, 36), 16, false, Muted);
+            TextAt(g, _owner._elapsedValue.Text, new(428, 340, 181, 36),
                 17, true, TitleText, StringAlignment.Far);
-            TextAt(g, "진행률", new(278, 428, 144, 35), 16, false, Muted);
-            TextAt(g, _owner._progress.Value + "%", new(511, 427, 96, 35),
+            TextAt(g, "진행률", new(278, 393, 145, 32), 16, false, Muted);
+            TextAt(g, _owner._progress.Value + "%", new(510, 392, 99, 34),
                 17, true, Blue, StringAlignment.Far);
             using (var track = new SolidBrush(CardBg2))
-            using (var shape = Round(new(278, 484, 330, 13), 6))
+            using (var shape = Round(new(278, 450, 330, 12), 6))
                 g.FillPath(track, shape);
             if (_owner._progress.Value > 0)
             {
                 using var fill = new SolidBrush(Blue);
-                using var shape = Round(new(278, 484,
-                    Math.Max(13, 330 * _owner._progress.Value / 100f), 13), 6);
+                using var shape = Round(new(278, 450,
+                    Math.Max(12, 330 * _owner._progress.Value / 100f), 12), 6);
                 g.FillPath(fill, shape);
             }
 
-            TextAt(g, "선택 모드", new(667, 290, 321, 31), 15, false, Muted);
-            TextAt(g, _owner._currentModeValue.Text, new(667, 324, 321, 54), 23, true);
-            TextAt(g, "현재 작업", new(667, 391, 318, 30), 15, false, Muted);
-            TextAt(g, _owner._currentDungeonValue.Text, new(667, 422, 322, 43), 17, true);
-            TextAt(g, _owner._currentStepValue.Text, new(667, 479, 323, 57),
+            TextAt(g, "선택 모드", new(667, 272, 320, 30), 15, false, Muted);
+            TextAt(g, _owner._currentModeValue.Text, new(667, 302, 320, 43), 22, true);
+            TextAt(g, "현재 작업", new(667, 354, 321, 29), 15, false, Muted);
+            TextAt(g, _owner._currentDungeonValue.Text, new(667, 384, 323, 40), 17, true);
+            TextAt(g, _owner._currentStepValue.Text, new(667, 436, 323, 47),
                 15, false, Muted, multiline: true);
 
-            // Recipe list is not queried on the dashboard. This indicates
-            // navigation readiness, NOT the availability of game facilities.
-            string[] production = {
+            // Labels are navigation hints, not claimed recipe availability.
+            string[] production =
+            {
                 "가죽 가공", "금속 가공", "목재 가공",
                 "식재료 가공", "옷감 가공", "채집 / 제작"
             };
             for (int i = 0; i < production.Length; i++)
             {
-                int y = 283 + i * 42;
-                TextAt(g, production[i], new(1057, y, 209, 36), 16);
-                TextAt(g, "설정에서 선택", new(1262, y, 133, 36),
-                    14, false, Muted, StringAlignment.Far);
+                int y = 265 + i * 36;
+                TextAt(g, production[i], new(1057, y, 198, 32), 15);
+                TextAt(g, "메뉴에서 설정", new(1246, y, 144, 32),
+                    13, false, Muted, StringAlignment.Far);
             }
 
-            TextAt(g, "완료 / 시도", new(278, 650, 306, 33), 16, false, Muted);
+            TextAt(g, "완료 / 시도", new(278, 571, 316, 32), 16, false, Muted);
             TextAt(g, _owner._successValue.Text + " / " + _owner._roundValue.Text,
-                new(278, 692, 316, 62), 28, true);
-            TextAt(g, "성공률", new(278, 778, 130, 35), 16, false, Muted);
-            TextAt(g, _owner._rateValue.Text, new(414, 778, 178, 35),
-                21, true, Green, StringAlignment.Far);
-            TextAt(g, "통계는 실제 기록만 표시됩니다.", new(278, 843, 316, 35),
-                14, false, Muted);
+                new(278, 607, 311, 58), 28, true);
+            TextAt(g, "성공률", new(278, 692, 132, 34), 16, false, Muted);
+            TextAt(g, _owner._rateValue.Text, new(414, 692, 178, 35),
+                20, true, Green, StringAlignment.Far);
+            TextAt(g, "실제 실행 기록만 표시", new(278, 757, 316, 28),
+                13, false, Muted);
 
             var checks = new (string Name, Label Value)[]
             {
@@ -173,22 +175,30 @@ public sealed partial class MainForm
             };
             for (int i = 0; i < checks.Length; i++)
             {
-                int y = 649 + i * 44;
-                TextAt(g, checks[i].Name, new(667, y, 169, 36), 16, false, Muted);
-                TextAt(g, checks[i].Value.Text, new(827, y, 171, 36),
+                int y = 568 + i * 42;
+                TextAt(g, checks[i].Name, new(667, y, 170, 34), 15, false, Muted);
+                TextAt(g, checks[i].Value.Text, new(835, y, 161, 34),
                     14, true, TitleText, StringAlignment.Far);
             }
 
-            TextAt(g, "최근 인식", new(1056, 651, 321, 34),
-                16, false, Muted);
-            TextAt(g, _owner._recentDetectValue.Text, new(1056, 689, 320, 54),
-                17, true, TitleText, multiline: true);
+            TextAt(g, "최근 인식", new(1056, 565, 321, 33), 15, false, Muted);
+            TextAt(g, _owner._recentDetectValue.Text, new(1056, 603, 320, 49),
+                16, true, TitleText, multiline: true);
             using (var pen = new Pen(Line))
-                g.DrawLine(pen, 1056, 758, 1390, 758);
+                g.DrawLine(pen, 1056, 673, 1390, 673);
             var activity = string.IsNullOrWhiteSpace(_owner._progressLogPreview.Text)
                 ? "최근 활동 기록이 없습니다." : _owner._progressLogPreview.Text;
-            TextAt(g, activity, new(1056, 776, 322, 108),
+            TextAt(g, activity, new(1056, 685, 322, 111),
                 15, false, Muted, multiline: true);
+
+            // Compact read-only footer instead of blank padding.
+            Card(g, new(256, 829, 1166, 115));
+            Icon(g, "log", new(274, 851, 23, 23), Blue);
+            TextAt(g, "실행 기록", new(309, 840, 241, 42), 18, true);
+            TextAt(g, "F8 테스트  ·  F9 시작  ·  F10 정지", new(962, 845, 433, 34),
+                14, false, Muted, StringAlignment.Far);
+            TextAt(g, activity, new(277, 890, 1110, 40),
+                16, false, TitleText);
         }
     }
 }
