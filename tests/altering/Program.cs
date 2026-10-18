@@ -1402,6 +1402,7 @@ try
         exhaustedLeather, new CliIdentityContext(null, null, null, null), 0, 6)
         with
         {
+            BatchId = "regression-six-leather-complete",
             RawMaterialExhausted = true,
             ReceiptTrackingEnabled = true,
             MultiState = MultiAlteringItemState.InProgress,
@@ -1470,7 +1471,8 @@ for (int i = 0; i < 5; i++) leatherMixedWorld.AddCompleted(3);
 leatherMixedWorld.AddPending();
 var leatherMixedCheckpoint = AlteringSessionState.Create(
     exhaustedLeather, new CliIdentityContext(null, null, null, null), 0, 6)
-    with { RawMaterialExhausted = true, MultiState = MultiAlteringItemState.InProgress };
+    with { BatchId = "regression-mixed-leather", RawMaterialExhausted = true,
+        MultiState = MultiAlteringItemState.InProgress };
 string leatherMixedPath = Path.Combine(Path.GetTempPath(),
     "MabiAuto-leather-mixed-test-" + Guid.NewGuid().ToString("N"), "plan.json");
 Directory.CreateDirectory(Path.GetDirectoryName(leatherMixedPath)!);
@@ -3103,7 +3105,7 @@ Check(AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
-catch(Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+catch(Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
 
 internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen
 {
