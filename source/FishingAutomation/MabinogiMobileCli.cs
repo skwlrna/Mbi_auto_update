@@ -1,5 +1,7 @@
 using System.Diagnostics;
+#if MABIAUTO_AI_PASSIVE_CONTEXT
 using FishingAutomation.Telemetry;
+#endif
 using System.Text;
 using System.Text.Json;
 
@@ -183,6 +185,7 @@ public sealed class MabinogiMobileCli
         // Passive metadata only, no additional CLI call, input, or packet parsing.
         // The watcher lifecycle controls opt-in; the collector never throws
         // and cannot change the result or its production safety gates.
+#if MABIAUTO_AI_PASSIVE_CONTEXT
         if (AiPassiveCliEvidence.Enabled)
         {
             // Interpret only the same five existing vetted read-only queries.
@@ -218,6 +221,7 @@ public sealed class MabinogiMobileCli
                     verifiedDiagnostic);
             }
         }
+#endif
         // Never echo arbitrary rejected input or CLI stderr. Successful read-only
         // polling is still written to the file, but hidden from the on-screen log.
         // Failures/rejections plus startup status/capabilities remain visible.
