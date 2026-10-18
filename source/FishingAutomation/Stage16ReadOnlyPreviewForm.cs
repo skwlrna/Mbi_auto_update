@@ -17,6 +17,7 @@ internal sealed class Stage16ReadOnlyPreviewForm : Form
     private readonly TextBox _report;
     private CancellationTokenSource? _cts;
     private bool _busy;
+    private readonly AlteringWorkDeltaSession _alteringWorkDeltas = new();
 
     internal Stage16ReadOnlyPreviewForm()
     {
@@ -152,6 +153,12 @@ internal sealed class Stage16ReadOnlyPreviewForm : Form
                 cts.Token.ThrowIfCancellationRequested();
                 var read = await collector.ReadOnceAsync(query, cts.Token);
                 rows.Add(CommonObservationDiagnosticReport.Render(query, read));
+                if (query == CliDiagnosticQuery.AlteringWorks)
+                {
+                    var delta = _alteringWorkDeltas.Observe(
+                        read, DateTimeOffset.UtcNow);
+                    rows.Add(CommonObservationDiagnosticReport.RenderWorkDelta(delta));
+                }
                 if (!IsDisposed)
                     _report.Text = string.Join(Environment.NewLine, rows);
             }
