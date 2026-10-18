@@ -47,6 +47,8 @@ ALLOWED = {
         "cli_work_rows_completed_receipt_unknown",
         "cli_no_work_rows_completion_unknown",
         "cli_mixed_or_pending_works",
+        "cli_altering_possible_removed_not_completed",
+        "cli_altering_possible_finished_receipt_unknown",
     },
     "get_items": GENERIC | {"cli_inventory_shape_only_no_delta"},
     "get_alterable_items": GENERIC | {"cli_recipe_catalog_shape_only"},
@@ -128,6 +130,10 @@ def signals(rows: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
             observed.add("receipt_not_verified_hint")
         if outcome == "cli_no_work_rows_completion_unknown":
             observed.add("empty_work_list_not_completion_hint")
+        if outcome == "cli_altering_possible_removed_not_completed":
+            observed.add("work_removal_possible_not_completion_hint")
+        if outcome == "cli_altering_possible_finished_receipt_unknown":
+            observed.add("work_finished_possible_receipt_unknown_hint")
         if outcome == "cli_inventory_shape_only_no_delta":
             observed.add("inventory_delta_unknown_hint")
     return tuple(sorted(observed))
