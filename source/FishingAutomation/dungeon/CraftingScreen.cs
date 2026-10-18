@@ -1494,6 +1494,17 @@ internal sealed class CraftingScreen : ICraftingScreen
                 }
             }
 
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+            // Existing two-frame + fresh result-popup gate only.
+            // This does not prove item receipt, quest completion or server state.
+            try
+            {
+                FishingAutomation.Telemetry.AiPassiveCliEvidence.ObserveVerifiedScreen(
+                    FishingAutomation.Telemetry.VerifiedScreenIncidentSignal.CraftingResultPopupGuardPassed,
+                    DateTimeOffset.UtcNow);
+            }
+            catch (Exception) { /* logging cannot affect crafting safety */ }
+#endif
             _stage.Move(ProductionStage.Complete, $"{displayName} 제작 완료");
             _ui.TapFresh(0x39, ct); // Space = actual result popup confirm only
             Log?.Invoke(
