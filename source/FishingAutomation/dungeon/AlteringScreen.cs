@@ -1886,6 +1886,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(immediate, reason);
                 }
                 ct.ThrowIfCancellationRequested();
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+                // Passive diagnostic AFTER existing fresh detail, identity,
+                // local/remote and free-button geometry gates passed.
+                // It never asserts registration, receipt or a successful click.
+                try
+                {
+                    FishingAutomation.Telemetry.AiPassiveCliEvidence.ObserveVerifiedScreen(
+                        FishingAutomation.Telemetry.VerifiedScreenIncidentSignal.AlteringFreeActionGuardPassed,
+                        DateTimeOffset.UtcNow);
+                }
+                catch (Exception) { /* diagnostic cannot alter the input path */ }
+#endif
                 _ui.ClickFresh(liveCenter, ct);
                 // Optional storage transfer after free registration. Without it
                 // the caller waits for a CLI +1 that can never appear.
