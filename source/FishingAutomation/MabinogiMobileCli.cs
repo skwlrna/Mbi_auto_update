@@ -201,12 +201,14 @@ public sealed class MabinogiMobileCli
             };
             if (diagnosticQuery is { } query)
             {
+                CliDiagnosticProjection? verifiedProjection = null;
                 string? verifiedDiagnostic = null;
                 try
                 {
-                    verifiedDiagnostic =
+                    verifiedProjection =
                         ReadOnlyCliObservationBridge.ProjectExistingResult(
-                            query, result).Status;
+                            query, result);
+                    verifiedDiagnostic = verifiedProjection.Status;
                 }
                 catch (Exception ex) when (ex is InvalidDataException or
                     InvalidOperationException or System.Text.Json.JsonException or
@@ -218,7 +220,7 @@ public sealed class MabinogiMobileCli
                 }
                 AiPassiveCliEvidence.Observe(result.Command, result.Success,
                     result.State, result.Error, DateTimeOffset.UtcNow,
-                    verifiedDiagnostic);
+                    verifiedDiagnostic, verifiedProjection);
             }
         }
 #endif
