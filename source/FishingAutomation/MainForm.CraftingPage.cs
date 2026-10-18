@@ -182,7 +182,7 @@ public sealed partial class MainForm
                 Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "제작 하단 시작 정지"
             };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent; _start.ForeColor = Color.White;
+            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent; _start.ForeColor = Color.FromArgb(22, 22, 25);
             _stop = Button("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "제작 정지";
             actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
@@ -420,7 +420,7 @@ public sealed partial class MainForm
                 using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
                 e.Graphics.FillRectangle(background, e.Bounds);
                 TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
-                    selected ? Color.FromArgb(22, 58, 112) : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    selected ? Blue : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
             };
         }
