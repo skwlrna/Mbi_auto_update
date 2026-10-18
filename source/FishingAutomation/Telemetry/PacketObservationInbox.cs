@@ -37,6 +37,8 @@ internal sealed class PacketObservationInbox
     private readonly HashSet<string> _allowedAdapters;
     private readonly Dictionary<(string, PacketObservationKind), long> _sequences = new();
     private readonly Dictionary<PacketObservationKind, PacketObservation> _latest = new();
+    // Retain accepted ordering watermarks after a hint expires or is read.
+    private readonly Dictionary<PacketObservationKind, DateTimeOffset> _lastObserved = new();
 
     internal bool DiagnosticsEnabled { get; }
 
@@ -92,11 +94,12 @@ internal sealed class PacketObservationInbox
             if (_sequences.TryGetValue(key, out long prior) &&
                 observation.Sequence <= prior)
                 return new(false, "duplicate_or_reordered");
-            if (_latest.TryGetValue(observation.Kind, out var latest) &&
-                observed < latest.ObservedAtUtc.ToUniversalTime())
+            if (_lastObserved.TryGetValue(observation.Kind, out var lastObserved) &&
+                observed < lastObserved)
                 return new(false, "older_observation");
 
             _sequences[key] = observation.Sequence;
+            _lastObserved[observation.Kind] = observed;
             _latest[observation.Kind] = observation;
             return new(true, "accepted");
         }
@@ -128,6 +131,7 @@ internal sealed class PacketObservationInbox
         lock (_gate)
         {
             _sequences.Clear();
+            _lastObserved.Clear();
             _latest.Clear();
         }
     }
