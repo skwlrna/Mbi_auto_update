@@ -7,6 +7,8 @@ on:
       - 'tests/packet-observation/**'
       - 'tools/PacketReceiveProbe/**'
       - 'tests/packet-receive-probe/**'
+      - 'tools/MobilayExportInspector/**'
+      - 'tests/mobilay-export-inspector/**'
       - 'docs/PACKET_OBSERVATION_STAGE1.md'
       - '.github/workflows/packet-observation-checks.yml'
   workflow_dispatch:
@@ -37,6 +39,16 @@ jobs:
         run: |
           dotnet build tools/PacketReceiveProbe/PacketReceiveProbe.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Independent capture diagnostic build failed' }
+      - name: Check offline export inspector safety regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/mobilay-export-inspector/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Export inspector regression failed' }
+      - name: Build independent offline export inspector
+        shell: pwsh
+        run: |
+          dotnet build tools/MobilayExportInspector/MobilayExportInspector.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Export inspector build failed' }
       - name: Build main Windows app
         shell: pwsh
         run: |
@@ -58,5 +70,22 @@ jobs:
         with:
           name: PacketReceiveProbe-Win64-ClickToRun
           path: _packet-receive-probe-publish/**
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish independent offline export checker
+        shell: pwsh
+        run: |
+          $dest = Join-Path (Get-Location) '_mobilay-export-inspector-publish'
+          dotnet publish tools/MobilayExportInspector/MobilayExportInspector.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $dest
+          if ($LASTEXITCODE -ne 0) { throw 'Export inspector publish failed' }
+          if (-not (Test-Path (Join-Path $dest 'MobilayExportInspector.exe'))) { throw 'Published export inspector missing' }
+          Copy-Item 'tools/MobilayExportInspector/RunExportCheck.cmd' $dest
+          Copy-Item 'tools/MobilayExportInspector/사용안내.txt' $dest
+          Write-Host 'Export inspector never opens network, game, capture drivers or raw packet files.'
+      - name: Upload drag-and-drop offline export checker
+        uses: actions/upload-artifact@v4
+        with:
+          name: MobilayExportInspector-Win64-Offline
+          path: _mobilay-export-inspector-publish/**
           if-no-files-found: error
           retention-days: 14
