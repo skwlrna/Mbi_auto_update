@@ -66,6 +66,45 @@ internal static class CommonObservationDiagnosticReport
         _ => "단계 비교 보류"
     };
 
+    // Cross-read hints are inferred from counts only. No work IDs,
+    // materials, receipt or verified cancellation reason is available.
+    internal static string WorkDeltaName(string? status) => status switch
+    {
+        "baseline_recorded" => "첫 조회 저장 · 다음 조회와 비교 가능",
+        "unchanged_counts_identity_unknown" => "가공 수량 변화 없음 · 작업별 상태 미확인",
+        "possible_work_removal_not_completion" =>
+            "전체·진행 작업 감소 / 완료 표시 변화 없음 · 취소·제거 가능성 (미확정)",
+        "possible_progress_to_completed_receipt_unknown" =>
+            "진행 감소 / 완료 표시 증가 · 수령 여부 미확인",
+        "possible_work_added" => "작업 증가 가능성 · 작업별 식별 불가",
+        "work_counts_changed_identity_unknown" =>
+            "가공 수량 변화 감지 · 원인 미확정",
+        "pair_too_old" => "조회 간격 15분 초과 · 비교 기준 새로 저장",
+        "out_of_order_pair" => "조회 순서·시각 오류 · 비교 기준 새로 저장",
+        "unverified_snapshot_reset" => "조회 불확실 · 이전 비교 기준 삭제",
+        "missing_verified_pair" => "비교 가능한 연속 조회 없음",
+        _ => "가공 변화 판정 보류"
+    };
+
+    internal static string RenderWorkDelta(AlteringWorkDeltaAssessment assessment)
+    {
+        string summary = "가공 변화: " + WorkDeltaName(assessment.Status);
+        // Counts are bounded by the verified parser; never show private
+        // work identifiers or unexpected status strings.
+        if (assessment.Status is
+            "possible_work_removal_not_completion" or
+            "possible_progress_to_completed_receipt_unknown" or
+            "possible_work_added" or
+            "work_counts_changed_identity_unknown")
+        {
+            summary += " · 전체 " + assessment.TotalChange.ToString("+0;-0;0") +
+                ", 진행 " + assessment.RunningChange.ToString("+0;-0;0") +
+                ", 완료표시 " + assessment.CompletedChange.ToString("+0;-0;0") +
+                ", 대기 " + assessment.PendingChange.ToString("+0;-0;0");
+        }
+        return summary;
+    }
+
     internal static string Render(
         CliDiagnosticQuery query,
         CliDiagnosticReadResult? read)
