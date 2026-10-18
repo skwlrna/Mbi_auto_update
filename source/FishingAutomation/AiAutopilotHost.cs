@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using FishingAutomation.Telemetry;
 
 namespace FishingAutomation;
 
@@ -85,6 +86,8 @@ internal sealed class AiAutopilotHost : IDisposable
             child.ErrorDataReceived += (_, e) => { if (e.Data is not null) Observe(e.Data); };
             child.Exited += (_, _) =>
             {
+                if (ReferenceEquals(_child, child))
+                    AiPassiveCliEvidence.SetEnabled(false);
                 if (!_disposed && ReferenceEquals(_child, child))
                 {
                     int code;
@@ -102,6 +105,9 @@ internal sealed class AiAutopilotHost : IDisposable
                 return;
             }
             _child = child;
+            // Only a successfully started, user-enabled AI watcher opts
+            // into RAM-only passive CLI metadata; never queries the game.
+            AiPassiveCliEvidence.SetEnabled(true);
             child.BeginOutputReadLine();
             child.BeginErrorReadLine();
             Publish("AI 감시 준비 및 안전 검사 중");
@@ -220,6 +226,8 @@ internal sealed class AiAutopilotHost : IDisposable
 
     internal void Stop()
     {
+        // Stop and purge passive diagnostics even when the child is absent.
+        AiPassiveCliEvidence.SetEnabled(false);
         var child = _child;
         _child = null;
         if (child is null) return;
