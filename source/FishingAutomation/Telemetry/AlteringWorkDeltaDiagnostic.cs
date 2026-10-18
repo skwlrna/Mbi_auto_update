@@ -29,21 +29,39 @@ internal static class AlteringWorkDeltaDiagnostic
                  "empty_work_list_not_completion"))
             return false;
 
-        CliDiagnosticProjection p = read.Projection;
+        if (read.Projection.State is not null &&
+            read.Admission?.Accepted != true)
+            return false;
+        if (read.Projection.State is null && read.Admission is not null)
+            return false;
+        return TryProjection(read.Projection, atUtc, out snapshot);
+    }
+
+    // Reuse only after the existing strict AlteringQueries.ParseWorks
+    // parser succeeded. AI passive reads have no separate semantic
+    // admission because they observe already-completed production CLI reads.
+    internal static bool TryProjection(
+        CliDiagnosticProjection p, DateTimeOffset atUtc,
+        out AlteringWorkCountSnapshot? snapshot)
+    {
+        snapshot = null;
+        if (p.Status is not
+            ("work_running" or "all_work_rows_completed_not_receipted" or
+             "mixed_or_pending_work_not_completion" or
+             "empty_work_list_not_completion"))
+            return false;
         int pending = p.Count - p.InProgress - p.Completed;
         if (p.Count is < 0 or > 1024 ||
             p.InProgress < 0 || p.Completed < 0 || pending < 0 ||
-            (long)p.InProgress + p.Completed + pending != p.Count)
+            (long)p.InProgress + p.Completed + pending != p.Count ||
+            (p.Status == "work_running" && p.InProgress <= 0) ||
+            (p.Status == "all_work_rows_completed_not_receipted" &&
+                (p.Count == 0 || p.InProgress != 0 || p.Completed != p.Count)) ||
+            (p.Status == "empty_work_list_not_completion" && p.Count != 0) ||
+            (p.Status == "mixed_or_pending_work_not_completion" &&
+                (p.InProgress != 0 || p.Count == 0 || p.Completed == p.Count)))
             return false;
 
-        // For a semantic state, the shared engine must have admitted the
-        // read. Pending/empty lists cannot vote on live game state but are
-        // still valid aggregates from the strict existing CLI parser.
-        if (p.State is not null && read.Admission?.Accepted != true)
-            return false;
-        if (p.State is null &&
-            read.Admission is not null)
-            return false;
 
         var at = atUtc.ToUniversalTime();
         if (at == default || at.Year < 2000)
