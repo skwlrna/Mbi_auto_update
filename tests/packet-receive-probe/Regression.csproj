@@ -16,5 +16,6 @@
     <Compile Include="../../tools/PacketReceiveProbe/TcpFlowCorrelation.cs" Link="TcpFlowCorrelation.cs" />
     <Compile Include="../../tools/PacketReceiveProbe/TcpOsFlowSnapshot.cs" Link="TcpOsFlowSnapshot.cs" />
     <Compile Include="../../tools/PacketReceiveProbe/TransportEvidenceAssessment.cs" Link="TransportEvidenceAssessment.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/SanitizedSummaryReport.cs" Link="SanitizedSummaryReport.cs" />
   </ItemGroup>
 </Project>
