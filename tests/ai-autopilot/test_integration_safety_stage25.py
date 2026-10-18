@@ -120,7 +120,8 @@ class FinalIntegrationStage25Tests(unittest.TestCase):
             self.assertFalse(out["repair_authorized"])
             self.assertTrue(bridge.for_runtime_error(folders[0], root))
             # Syntax-valid global reference never authorizes a corrupted event.
-            self.assertEqual(bridge.for_runtime_error(folders[1], root) != "", True)
+            self.assertEqual(bridge.for_runtime_error(folders[1], root), "",
+                             "malformed event must not inherit global advisory")
 
     def test_source_gate_passes_current_code_and_reports_no_release_authority(self):
         r = gate.inspect(ROOT)
@@ -152,7 +153,8 @@ class FinalIntegrationStage25Tests(unittest.TestCase):
              "journal_opt_in_snapshot_only"),
             ("coverage", "root.is_symlink()", "root.is_link_fake()",
              "bounded_local_diagnostic_adapters"),
-            ("priority", '"diagnostic_accuracy_change"', '"fake_accuracy"',
+            ("priority", '"verified_root_causes": "not_measurable"',
+             '"verified_root_causes": "proven"',
              "fixed_priority_and_no_truth_claim"),
             ("agent", "<untrusted-log>", "<trusted-command>",
              "codex_untrusted_prompt_fence"),
