@@ -87,11 +87,29 @@ def _marker_state(lines: list[str], name: str, remove) -> str:
     return "valid" if remove([row + "\n" for row in lines]) is not None else "invalid"
 
 
+def _isolated_cli(text: str) -> ab.Evidence:
+    """Classify Stage14 format independently of a forged Stage18/19 block.
+
+    A malformed companion block must not make a valid CLI *format* appear
+    invalid, but summarize() still quarantines the whole event for pairing.
+    Reuse the existing strict Stage14 parser on exactly its original block.
+    """
+    lines = text.splitlines(keepends=True)
+    starts = [i for i, row in enumerate(lines)
+              if row.rstrip("\\r\\n").startswith("BEGIN READ-ONLY CLI DIAGNOSTIC")]
+    ends = [i for i, row in enumerate(lines)
+            if row.rstrip("\\r\\n").startswith("END READ-ONLY CLI DIAGNOSTIC")]
+    if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
+        return ab.parse(text)
+    return ab.parse("MabiAuto synthetic\\n" +
+                    "".join(lines[starts[0]:ends[0] + 1]))
+
+
 def parse_record(text: str) -> Record:
     """Parse shape only; malformed blocks are marked invalid, not trusted."""
     lines = text.splitlines()
     mode = _mode(lines)
-    cli = ab.parse(text)
+    cli = _isolated_cli(text)
     screen_status = _marker_state(
         lines, "VERIFIED SCREEN INCIDENT", ab._remove_stage19_screen
     )
