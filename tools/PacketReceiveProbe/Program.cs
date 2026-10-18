@@ -74,6 +74,14 @@ try
     }
 
     using var device = devices[effective.DeviceIndex];
+    // This is Windows' socket-owner snapshot, not a packet/endpoint match.
+    // It runs only after the user has explicitly approved the diagnostic.
+    var tcpBefore = TcpSocketOwnerProbe.ReadMatchingIpv4RemotePort(
+        CaptureProbeOptions.ExpectedRemoteSourcePort);
+    Console.WriteLine(
+        $"read_only_tcp_owner_before status={tcpBefore.Status} " +
+        $"remote_port_sockets={tcpBefore.MatchingIpv4Sockets} " +
+        $"owner_names={tcpBefore.ProcessNames} ipv4_only=true");
     var windows = new ReceiveActivityWindows();
     var captureClock = new Stopwatch();
 
@@ -147,6 +155,15 @@ try
                       $"trailing_quiet_windows={summary.TrailingQuietSeconds} " +
                       $"longest_quiet_windows={summary.LongestQuietSeconds} " +
                       $"activity={summary.Activity}");
+    var tcpAfter = TcpSocketOwnerProbe.ReadMatchingIpv4RemotePort(
+        CaptureProbeOptions.ExpectedRemoteSourcePort);
+    Console.WriteLine(
+        $"read_only_tcp_owner_after status={tcpAfter.Status} " +
+        $"remote_port_sockets={tcpAfter.MatchingIpv4Sockets} " +
+        $"owner_names={tcpAfter.ProcessNames} ipv4_only=true");
+    Console.WriteLine(
+        "OS TCP owners are IPv4 remote-port candidates only; " +
+        "no source-IP/frame correlation or CLI status validation was performed.");
     Console.WriteLine("A quiet window does not prove disconnect; observed frames do not prove game origin.");
     Console.WriteLine(
         "NOT VERIFIED: game ownership, TCP payload, protocol fields, " +
