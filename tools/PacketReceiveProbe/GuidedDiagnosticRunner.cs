@@ -12,7 +12,7 @@ namespace FishingAutomation.PacketDiagnostics;
 internal static class GuidedDiagnosticRunner
 {
     private sealed record ActiveCapture(
-        ReceiveActivityWindows Windows, Stopwatch Clock);
+        ReceiveActivityWindows Windows, TcpFlowCorrelation FlowCorrelation, Stopwatch Clock);
 
     internal static async Task<int> RunAsync()
     {
@@ -64,6 +64,8 @@ internal static class GuidedDiagnosticRunner
                 var current = Volatile.Read(ref activeCapture);
                 if (current is not null)
                     current.Windows.Record(current.Clock.Elapsed, packet.Data.Length);
+                if (current is not null)
+                    current.FlowCorrelation.Record(packet.Data);
             };
 
             using var cancellation = new CancellationTokenSource();
@@ -103,17 +105,20 @@ internal static class GuidedDiagnosticRunner
 
                     var before = TcpSocketOwnerProbe.ReadMatchingIpv4RemotePort(
                         CaptureProbeOptions.ExpectedRemoteSourcePort);
+                    var beforeFlows = TcpOsFlowSnapshot.ReadMatchingRemotePort(
+                        CaptureProbeOptions.ExpectedRemoteSourcePort);
                     Console.WriteLine(
                         $"stage_owner_before stage={name} status={before.Status} " +
                         $"sockets={before.MatchingIpv4Sockets} names={before.ProcessNames}");
 
                     var windows = new ReceiveActivityWindows();
+                    var correlation = new TcpFlowCorrelation();
                     var clock = new Stopwatch();
                     bool started = false;
                     try
                     {
                         clock.Start();
-                        Volatile.Write(ref activeCapture, new ActiveCapture(windows, clock));
+                        Volatile.Write(ref activeCapture, new ActiveCapture(windows, correlation, clock));
                         device.StartCapture();
                         started = true;
                         await Task.Delay(
@@ -136,6 +141,11 @@ internal static class GuidedDiagnosticRunner
                     var summary = windows.Summarize(GuidedDiagnosticPolicy.StageSeconds);
                     var after = TcpSocketOwnerProbe.ReadMatchingIpv4RemotePort(
                         CaptureProbeOptions.ExpectedRemoteSourcePort);
+                    var afterFlows = TcpOsFlowSnapshot.ReadMatchingRemotePort(
+                        CaptureProbeOptions.ExpectedRemoteSourcePort);
+                    var comparison = correlation.Compare(
+                        beforeFlows.Flows, afterFlows.Flows,
+                        beforeFlows.Available, afterFlows.Available);
                     Console.WriteLine(
                         $"stage_capture stage={name} frames={summary.MatchedFrames} " +
                         $"frame_bytes={summary.FrameBytes} " +
@@ -144,6 +154,12 @@ internal static class GuidedDiagnosticRunner
                     Console.WriteLine(
                         $"stage_owner_after stage={name} status={after.Status} " +
                         $"sockets={after.MatchingIpv4Sockets} names={after.ProcessNames}");
+                    Console.WriteLine(
+                        $"stage_flow_match stage={name} status={comparison.Status} " +
+                        $"matched_frames={comparison.MatchedFrames} " +
+                        $"unmatched_frames={comparison.UnmatchedFrames} " +
+                        $"unparsed_frames={comparison.UnparsedFrames} " +
+                        $"capacity_drops={comparison.FlowCapacityDrops}");
 
                     // Existing game CLI is queried separately from the network
                     // counter. Neither result validates or overrides the other.
@@ -157,7 +173,9 @@ internal static class GuidedDiagnosticRunner
                     finalComparison.Add(
                         $"compare stage={name} frames={summary.MatchedFrames} " +
                         $"frame_bytes={summary.FrameBytes} " +
-                        $"owner_before={before.ProcessNames} owner_after={after.ProcessNames} " +
+                        $"flow_matched={comparison.MatchedFrames} " +
+                        $"flow_unmatched={comparison.UnmatchedFrames} " +
+                        $"flow_status={comparison.Status} " +
                         $"cli_status={status} cli_activity={activity}");
                 }
                 Console.WriteLine();
@@ -168,6 +186,9 @@ internal static class GuidedDiagnosticRunner
                 Console.WriteLine(
                     "Port owner names, CLI accepted replies and frame counts are " +
                     "independent observations, NOT verified game packet mappings.");
+                Console.WriteLine(
+                    "IPv4 4-tuples match sampled OS endpoints only; no payload decoding, " +
+                    "authentication, or ability to identify dungeon events.");
                 return 0;
             }
             finally
