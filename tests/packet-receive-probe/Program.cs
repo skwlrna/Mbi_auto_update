@@ -385,4 +385,77 @@ foreach (string cli in new[]
     }
 }
 
+// Redacted report accepts only the three known stages, counts, fixed result
+// codes and exact user SAVE consent; never console transcripts or CLI bodies.
+SanitizedSummaryReport.Stage ReportStage(string name, long frames = 15,
+    long bytes = 1024, long matched = 8, long named = 7,
+    string cliStatus = "cli_connected", string evidence = "independent_sources_agree") =>
+    new(name, frames, bytes, matched, frames - matched, named,
+        "ipv4_tcp_4tuple_matched", cliStatus, "cli_readonly_object", evidence);
+var reportStages = GuidedDiagnosticPolicy.StageNames.Select(x =>
+    ReportStage(x)).ToArray();
+Check(SanitizedSummaryReport.TryCreate(reportStages, out string safeReport),
+    "valid allowlisted summary rejected");
+Check(safeReport.Contains("client_closed", StringComparison.Ordinal) &&
+    safeReport.Contains("character_connected_activity", StringComparison.Ordinal) &&
+    safeReport.Split("compare stage=").Length == 4,
+    "redacted report missing exactly three stage lines");
+foreach (string banned in new[] { "ProcessName=", "remote_ip=", "pid=", "cli_json=",
+    "auth_token=", "192.0.2.10", "MabinogiMobile", "SECRET" })
+    Check(!safeReport.Contains(banned, StringComparison.OrdinalIgnoreCase),
+        "report has raw data or process name: " + banned);
+Check(!SanitizedSummaryReport.TryCreate(
+    reportStages.Take(2).ToArray(), out _),
+    "partial session report accepted");
+Check(!SanitizedSummaryReport.TryCreate(new[] { reportStages[1],
+    reportStages[0], reportStages[2] }, out _),
+    "reordered stage report accepted");
+Check(!SanitizedSummaryReport.TryCreate(null, out _),
+    "null diagnostic report accepted");
+var maliciousStage = ReportStage(GuidedDiagnosticPolicy.StageNames[1],
+    cliStatus: "cli_connected\\r\\ntoken=SECRET");
+Check(!SanitizedSummaryReport.TryCreate(
+    new[] { reportStages[0], maliciousStage, reportStages[2] }, out _),
+    "arbitrary CLI output injected into result file");
+var fakeEvent = ReportStage(GuidedDiagnosticPolicy.StageNames[1],
+    evidence: "boss_defeated");
+Check(!SanitizedSummaryReport.TryCreate(
+    new[] { reportStages[0], fakeEvent, reportStages[2] }, out _),
+    "unverified game event name injected into report");
+var badCounts = new SanitizedSummaryReport.Stage(
+    GuidedDiagnosticPolicy.StageNames[1], 3, 256, 2, 2, 1,
+    "ipv4_tcp_4tuple_matched", "cli_connected",
+    "cli_readonly_object", "independent_sources_agree");
+Check(!SanitizedSummaryReport.TryCreate(
+    new[] { reportStages[0], badCounts, reportStages[2] }, out _),
+    "impossible per-frame count accepted");
+var testDirectory = Path.Combine(Path.GetTempPath(),
+    "packet-summary-test-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(testDirectory);
+try
+{
+    Check(!SanitizedSummaryReport.TrySave("yes", reportStages,
+        testDirectory, out _) &&
+        Directory.GetFiles(testDirectory).Length == 0,
+        "silent report save occurred without exact SAVE consent");
+    Check(!SanitizedSummaryReport.TrySave("", reportStages,
+        testDirectory, out _) &&
+        Directory.GetFiles(testDirectory).Length == 0,
+        "empty save consent wrote files");
+    Check(SanitizedSummaryReport.TrySave("SAVE", reportStages,
+        testDirectory, out string fileName) &&
+        fileName == "PacketDiagnostic_Summary.txt" &&
+        File.ReadAllText(Path.Combine(testDirectory, fileName)) == safeReport,
+        "explicit consent did not write only sanitized report");
+    Check(SanitizedSummaryReport.TrySave("SAVE", reportStages,
+        testDirectory, out string nextName) &&
+        nextName == "PacketDiagnostic_Summary_001.txt" &&
+        File.ReadAllText(Path.Combine(testDirectory, fileName)) == safeReport,
+        "old report overwritten rather than uniquely preserved");
+}
+finally
+{
+    Directory.Delete(testDirectory, recursive: true);
+}
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
