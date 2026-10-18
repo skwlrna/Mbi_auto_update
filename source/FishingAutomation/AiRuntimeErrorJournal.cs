@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
+#if MABIAUTO_AI_PASSIVE_CONTEXT
 using FishingAutomation.Telemetry;
+#endif
 
 namespace FishingAutomation;
 
@@ -50,10 +52,12 @@ internal static class AiRuntimeErrorJournal
             // Freeze only ALREADY COMPLETED, validly timed CLI query labels.
             // This path issues no new game query, and stale/disabled evidence
             // never enters the watcher's existing redacted error.txt context.
+#if MABIAUTO_AI_PASSIVE_CONTEXT
             string? passiveEvidence = AiPassiveCliEvidence.SnapshotForError(
                 report.Time.ToUniversalTime());
             if (passiveEvidence is not null)
                 text += "\n" + passiveEvidence + "\n";
+#endif
             // Write the report payload first; the watcher requires a stable evidence file.
             File.WriteAllText(Path.Combine(directory, "summary.json"), json, Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "error.txt"), text, Encoding.UTF8);
