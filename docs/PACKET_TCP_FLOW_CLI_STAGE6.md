@@ -35,6 +35,13 @@ counts and coarse result codes are shown:
 - `matched_frames`, `unmatched_frames`, `unparsed_frames`,
   `capacity_drops` are counts only, *not* decoded game events.
 
+`named_game_candidate_frames` / `named_candidate_frames` are a stricter
+subset: the same 4-tuple must also be listed under the exact **Windows process
+basename** `MabinogiMobile` during either boundary sample. Port-only and
+unavailable-owner matches do not count toward this subset. Names and PIDs are
+never authenticated; a match is *diagnostic evidence*, not a proof of game
+binary authenticity or event interpretation.
+
 IP addresses and ephemeral ports exist only as temporary in-memory numeric
 fields for set comparison and are never printed, written to disk, sent to
 GitHub or added to the macro. Packet contents are never saved. Distinct
