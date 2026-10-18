@@ -275,7 +275,9 @@ jobs:
         run: |
           $state = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
           if($state -match 'class ProductionDashboard'){throw 'separate production overlay must stay removed'}
-          $layout = Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw
+          # ReferenceDashboard is now split across two presentation partials.
+          $layout = (Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw) + "`n" +
+                    (Get-Content source/FishingAutomation/MainForm.MobilayDashboard.cs -Raw)
           if($layout -match 'new ProductionDashboard\(this\)'){throw 'separate production dashboard is still attached'}
           foreach($text in @('자동 가공','자동 채집','제작','작업 대상')){
             if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
@@ -286,7 +288,7 @@ jobs:
             if($productionPage -notmatch [regex]::Escape($text)){throw "production quantity UI missing: $text"}
           }
           # V3.1.92 groups production destinations under one accessible menu.
-          if($layout -notmatch 'AddButton\("생산 관리"'){throw 'new production navigation is missing'}
+          if($layout -notmatch 'AddButton\\("(생산 관리|생활 생산)"'){throw 'new production navigation is missing'}
           foreach($text in @('자동 가공','자동 채집','제작')){
             if($layout -notmatch [regex]::Escape($text)){throw "production menu option missing: $text"}
           }
