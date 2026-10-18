@@ -197,7 +197,7 @@ public sealed partial class MainForm
             TextAt(g, "실행 기록", new(309, 840, 241, 42), 18, true);
             TextAt(g, "F8 테스트  ·  F9 시작  ·  F10 정지", new(962, 845, 433, 34),
                 14, false, Muted, StringAlignment.Far);
-            TextAt(g, activity, new(277, 890, 1110, 40),
+            TextAt(g, activity, new(277, 890, 831, 40),
                 16, false, TitleText);
         }
     }
