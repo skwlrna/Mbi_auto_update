@@ -20,7 +20,7 @@ internal static class Program
                 { RunFilteredQuery = (a, ct) => fake.Query(a[0], ct) });
             form.Show(); Pump();
             Check(form.FormBorderStyle == FormBorderStyle.None &&
-                  form.Padding.All == 2 && form.BackColor == Color.FromArgb(98, 121, 150),
+                  form.Padding.All == 2 && form.BackColor == Color.FromArgb(13, 14, 18),
                 "borderless app frame paints a 2px outline around all normal pages");
             var controls = All(form).ToArray();
             var captionButtons = controls.OfType<Button>().Where(x =>
@@ -50,9 +50,9 @@ internal static class Program
                 }
                 if (name is "자동 가공" or "자동 채집" or "제작")
                 {
-                    // The clean-white navigation intentionally groups these three modes.
+                    // The dark Mobilay-style navigation still groups these three modes.
                     // Exercise the actual visible production menu, not an obsolete hidden shortcut.
-                    controls.OfType<Button>().Single(x => x.Text == "생산 관리").PerformClick();
+                    controls.OfType<Button>().Single(x => x.Text == "생활 생산").PerformClick();
                     Pump();
                     var dashboard = Field<Control>(form, "_referenceDashboard");
                     var popup = Field<ContextMenuStrip>(dashboard, "_openMenu");
@@ -89,7 +89,7 @@ internal static class Program
             Check(ReferenceEquals(schedulerCardHeader.Parent, schedulerTabs.Parent) &&
                   schedulerCardHeader.Parent!.Controls.GetChildIndex(schedulerCardHeader) <
                       schedulerCardHeader.Parent.Controls.GetChildIndex(schedulerTabs) &&
-                  schedulerCardHeader.BackColor == Color.FromArgb(246, 248, 252) &&
+                  schedulerCardHeader.BackColor == Color.FromArgb(23, 23, 24) &&
                   schedulerCardHeader.Width == schedulerTabs.Width &&
                   schedulerCardHeader.Height >= firstNativeTab.Bottom + 5,
                 "opaque card header covers native tab separators and the dark horizontal seam");
@@ -145,7 +145,7 @@ internal static class Program
             Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
                   x.Text.StartsWith("2. ") || x.Text.StartsWith("3. ")).All(x =>
                   x.Font.Size == Math.Max(13f, MathF.Round(18f * InitialSchedulerFontScale())) &&
-                  x.ForeColor == Color.FromArgb(23, 32, 51) && x.BackColor == Color.White),
+                  x.ForeColor == Color.FromArgb(238, 238, 244) && x.BackColor == Color.FromArgb(29, 29, 31)),
                 "scheduler checkbox captions use the same scaled font and constant contrast as production");
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:"),
@@ -196,8 +196,8 @@ internal static class Program
                 "update check appears on home dashboard");
             Check(Field<string>(dashboard, "_selectedNavigation") == "홈",
                 "home is the sole selected navigation destination");
-            var navOrder = new[] { "홈", "자동화 실행", "생산 관리", "스케줄러",
-                "설정", "인식 관리", "로그 / 진단" };
+            var navOrder = new[] { "홈", "자동화 실행", "던전 / 어비스", "생활 생산",
+                "스케줄러", "기타 / 설정", "로그 / 진단" };
             var navButtons = controls.OfType<Button>().Where(x => navOrder.Contains(x.Text))
                 .OrderBy(x => x.Top).Select(x => x.Text).ToArray();
             Check(navButtons.SequenceEqual(navOrder),
@@ -502,8 +502,9 @@ internal static class Program
             {
                 Menu(mode);
                 Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
-                Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "자동화 실행",
-                    "mode tab keeps single automation navigation selection: " + mode);
+                Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") ==
+                    (mode == "낚시" ? "자동화 실행" : "던전 / 어비스"),
+                    "mode tab keeps the correct sidebar selection: " + mode);
             }
             fake.Fail = true; Menu("자동 채집");
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick();
@@ -610,7 +611,7 @@ internal static class Program
                               FullyContained(queueFeedback, altering) &&
                               FullyContained(addAlteringQueue, altering),
                             "multi-altering add button and explanation stay visible at " + size);
-                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "생산 관리",
+                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "생활 생산",
                             "production navigation remains exclusively selected at " + size);
                     }
                     if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }
