@@ -37,6 +37,44 @@ FENCE_OPEN = "\n<untrusted-log>\n"
 FENCE_CLOSE = "\n</untrusted-log>"
 
 
+def _valid_advisory(advisory: str) -> bool:
+    """Accept only the exact Stage23 fixed policy, not injected text."""
+    if not advisory or len(advisory) > bridge.MAX_ADVISORY:
+        return False
+    rows = advisory.splitlines()
+    if len(rows) < 7 or len(rows) > 6 + bridge.TOP_ITEMS:
+        return False
+    if rows[:4] != [
+        bridge.BEGIN,
+        "scope=global_aggregate_not_this_incident",
+        "meaning=evidence_quality_review_not_gameplay_severity",
+        "no_root_cause_or_ai_accuracy_verified=true",
+    ] or rows[-2:] != [
+        "gameplay_authorized=false;repair_authorized=false;deployment_authorized=false",
+        bridge.END,
+    ]:
+        return False
+    previous = -1
+    for row in rows[4:-2]:
+        if not row.startswith("review="):
+            return False
+        parts = row[len("review="):].split(":")
+        if len(parts) != 4:
+            return False
+        tier, category, check, qty = parts
+        if not qty.isascii() or not qty.isdecimal() or (
+                len(qty) > 1 and qty.startswith("0")):
+            return False
+        if not 1 <= int(qty) <= coverage.ab.MAX_FOLDERS:
+            return False
+        index = next((i for i, item in enumerate(bridge.review.POLICY)
+                      if item[:3] == (tier, category, check)), -1)
+        if index <= previous:
+            return False
+        previous = index
+    return True
+
+
 def _evaluate_one(folder: Path, root: Path) -> tuple[str, bool]:
     """Return fixed verdict + heuristic warning, never raw prompt or labels."""
     try:
@@ -53,11 +91,8 @@ def _evaluate_one(folder: Path, root: Path) -> tuple[str, bool]:
                 bridge.BEGIN in context or bridge.END in context):
             return "unsafe_input_fence_vetoes", False
         advisory = bridge.for_runtime_error(folder, root)
-        if (not isinstance(advisory, str) or
-                len(advisory) > bridge.MAX_ADVISORY or
-                (advisory and not (
-                    advisory.startswith(bridge.BEGIN + "\n") and
-                    advisory.endswith("\n" + bridge.END)))):
+        if not isinstance(advisory, str) or (
+                advisory and not _valid_advisory(advisory)):
             return "prompt_contract_vetoes", False
         baseline = autopilot.prompt_for(context, DEFAULT_POLICY)
         enriched = autopilot.prompt_for(context, DEFAULT_POLICY, advisory)
