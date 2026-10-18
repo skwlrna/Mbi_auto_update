@@ -444,5 +444,89 @@ Check(!rendered.Contains("character", StringComparison.OrdinalIgnoreCase) &&
     !rendered.Contains("account", StringComparison.OrdinalIgnoreCase),
     "diagnostic UI incorrectly displays user identifiers");
 
+// Stage 14: AI watcher-consented passive error evidence is built ONLY from
+// results the normal read-only CLI already delivered. It never reads a game.
+AiPassiveCliEvidence.SetEnabled(false);
+AiPassiveCliEvidence.Observe("status", true, "connected", null, now);
+Check(!AiPassiveCliEvidence.Enabled &&
+    AiPassiveCliEvidence.SnapshotForError(now) is null,
+    "passive CLI evidence leaked while AI watcher disabled");
+
+AiPassiveCliEvidence.SetEnabled(true);
+Check(AiPassiveCliEvidence.Enabled &&
+    AiPassiveCliEvidence.SnapshotForError(now) is null,
+    "empty opt-in session fabricated evidence");
+AiPassiveCliEvidence.Observe("execute_altering", true, "connected", null, now);
+AiPassiveCliEvidence.Observe("get_my_info", true, "connected", null, now);
+AiPassiveCliEvidence.Observe("get_currencies", true, "connected", null, now);
+Check(AiPassiveCliEvidence.SnapshotForError(now) is null,
+    "action or private-identity query was admitted");
+
+AiPassiveCliEvidence.Observe("status", true, "connected", null, now);
+AiPassiveCliEvidence.Observe("get_altering_works", false, "disconnected",
+    "timeout", now.AddMilliseconds(-100));
+AiPassiveCliEvidence.Observe("get_items", true, "connected",
+    "USER_PRIVATE_TOKEN", now.AddMilliseconds(-500));
+AiPassiveCliEvidence.Observe("get_activity", false, "disconnected",
+    "cli_unavailable", now.AddMilliseconds(-250));
+string? evidence = AiPassiveCliEvidence.SnapshotForError(now);
+Check(evidence is not null &&
+    evidence.Contains("status=cli_connected;age_ms=0", StringComparison.Ordinal) &&
+    evidence.Contains("get_altering_works=cli_timeout_state_unknown;age_ms=100",
+        StringComparison.Ordinal) &&
+    evidence.Contains("get_activity=cli_unavailable_state_unknown;age_ms=250",
+        StringComparison.Ordinal) &&
+    evidence.Contains("get_items=cli_response_accepted_not_game_event;age_ms=500",
+        StringComparison.Ordinal),
+    "recent existing CLI outcomes did not produce bounded evidence");
+Check(evidence!.Split('\n').Length <= 8,
+    "AI context length exceeds bounded per-query source lines");
+foreach (string secret in new[] {
+    "USER_PRIVATE_TOKEN", "execute_altering", "get_my_info",
+    "get_currencies", "character", "username", "password",
+    "C:\\Users", "github_pat_", "sk-"
+})
+    Check(!evidence.Contains(secret, StringComparison.OrdinalIgnoreCase),
+        "private name/token/action leaked into AI evidence: " + secret);
+
+Check(!evidence.Contains("confirmed_game_event", StringComparison.Ordinal) &&
+    evidence.Contains("not decoded packet data or permission to act",
+        StringComparison.Ordinal),
+    "passive metadata presented as a decoded game event");
+
+AiPassiveCliEvidence.Observe("get_alterable_items", false, "error",
+    "PRIVATE_ERROR_MESSAGE", now.AddMilliseconds(-50));
+Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "get_alterable_items=cli_failed_unknown;age_ms=50", StringComparison.Ordinal),
+    "unknown CLI error was echoed or classified as success");
+AiPassiveCliEvidence.Observe("status", false, "disconnected",
+    "disconnected", now.AddMilliseconds(50));
+Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "status=cli_connected;age_ms=0", StringComparison.Ordinal),
+    "post-error asynchronous query was included in an earlier error record");
+Check(!AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "cli_explicit_disconnect", StringComparison.Ordinal),
+    "post-error evidence contaminated previous snapshot");
+AiPassiveCliEvidence.Observe("status", true, "connected", null,
+    now.AddMilliseconds(-100));
+Check(AiPassiveCliEvidence.SnapshotForError(now.AddMilliseconds(100))!
+    .Contains("status=cli_explicit_disconnect;age_ms=50",
+        StringComparison.Ordinal),
+    "out-of-order finished queries incorrectly replaced newer evidence");
+Check(AiPassiveCliEvidence.SnapshotForError(now.AddSeconds(6)) is null,
+    "stale CLI evidence was attached beyond 5 second TTL");
+AiPassiveCliEvidence.SetEnabled(false);
+Check(AiPassiveCliEvidence.SnapshotForError(now) is null,
+    "stopping AI watcher did not immediately purge evidence");
+AiPassiveCliEvidence.SetEnabled(true);
+Check(AiPassiveCliEvidence.SnapshotForError(now) is null,
+    "new watcher session inherited old CLI evidence");
+AiPassiveCliEvidence.Observe("get_activity", false, "disconnected",
+    "game_off", now);
+Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "get_activity=cli_reports_game_off;age_ms=0", StringComparison.Ordinal),
+    "documented game_off state was not distinguished");
+AiPassiveCliEvidence.SetEnabled(false);
+
 Console.WriteLine($"PASS {checks} synthetic common observation and historical-DPS regressions.");
 Console.WriteLine("No game input, capture, external API, user export or private data was opened.");
