@@ -528,5 +528,42 @@ Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
     "documented game_off state was not distinguished");
 AiPassiveCliEvidence.SetEnabled(false);
 
+// Verified statuses may only be supplied after production's already-existing
+// schema parser succeeds. Even then, server rows are NOT receipt evidence.
+AiPassiveCliEvidence.SetEnabled(true);
+AiPassiveCliEvidence.Observe("get_altering_works", true, "connected",
+    null, now, "work_running");
+Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "get_altering_works=cli_altering_work_running;age_ms=0",
+    StringComparison.Ordinal), "validated running work status was lost");
+AiPassiveCliEvidence.Observe("get_altering_works", true, "connected",
+    null, now.AddMilliseconds(10), "all_work_rows_completed_not_receipted");
+Check(AiPassiveCliEvidence.SnapshotForError(now.AddMilliseconds(10))!.Contains(
+    "get_altering_works=cli_work_rows_completed_receipt_unknown;age_ms=0",
+    StringComparison.Ordinal), "work rows were mistaken for confirmed receipt");
+AiPassiveCliEvidence.Observe("get_altering_works", true, "connected",
+    null, now.AddMilliseconds(20), "empty_work_list_not_completion");
+Check(AiPassiveCliEvidence.SnapshotForError(now.AddMilliseconds(20))!.Contains(
+    "get_altering_works=cli_no_work_rows_completion_unknown;age_ms=0",
+    StringComparison.Ordinal), "empty work list implied complete batch");
+AiPassiveCliEvidence.Observe("get_activity", true, "connected",
+    null, now, "gathering_observed");
+Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "get_activity=cli_gathering_in_progress;age_ms=0",
+    StringComparison.Ordinal), "validated gathering state missing");
+AiPassiveCliEvidence.Observe("get_items", true, "connected",
+    null, now, "inventory_snapshot_only");
+Check(AiPassiveCliEvidence.SnapshotForError(now)!.Contains(
+    "get_items=cli_inventory_shape_only_no_delta;age_ms=0",
+    StringComparison.Ordinal), "single inventory listing implied quantity delta");
+AiPassiveCliEvidence.Observe("get_activity", true, "connected",
+    null, now.AddMilliseconds(50), "cli_schema_unverified");
+Check(AiPassiveCliEvidence.SnapshotForError(now.AddMilliseconds(50))!.Contains(
+    "get_activity=cli_parser_schema_unverified;age_ms=0",
+    StringComparison.Ordinal), "CLI wrapper success hid invalid activity schema");
+AiPassiveCliEvidence.SetEnabled(false);
+Check(AiPassiveCliEvidence.SnapshotForError(now.AddMilliseconds(50)) is null,
+    "AI stop failed to remove validated semantic snapshot");
+
 Console.WriteLine($"PASS {checks} synthetic common observation and historical-DPS regressions.");
 Console.WriteLine("No game input, capture, external API, user export or private data was opened.");
