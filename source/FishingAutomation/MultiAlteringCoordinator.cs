@@ -171,7 +171,8 @@ internal sealed class MultiAlteringCoordinator
         CancellationToken ct,
         Func<AlteringPlan, CancellationToken, Task>? preparePlan = null,
         Func<CancellationToken, Task>? onIdleAbyssRound = null,
-        long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds)
+        long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds,
+        Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -208,6 +209,8 @@ internal sealed class MultiAlteringCoordinator
             StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
         var prepared = new HashSet<(string Facility, string Display, int Ordinal)>();
+        var globalQueueBlocked = new HashSet<string>(StringComparer.Ordinal);
+        var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
@@ -296,17 +299,6 @@ internal sealed class MultiAlteringCoordinator
                     .ToArray();
                 _laneState?.Observe(facility, facilityWorks, allowShrink: false);
 
-                // Some CLI builds report queue_full for EVERY recipe when one
-                // facility's 7-slot lane is full. Handle the owned full lane's
-                // verified wait/receipt first; don't attempt to register in
-                // another lane before that capacity condition has cleared.
-                if (_deferOtherLanesWhileQueueFull &&
-                    facilityWorks.Length < 7 &&
-                    orderedFacilities.Any(other =>
-                        !string.Equals(other, facility, StringComparison.Ordinal) &&
-                        works.Count(w => w.FacilityName == other) == 7))
-                    continue;
-
                 bool laneReady =
                     facilityWorks.Length == 0 ||
                     facilityWorks.All(x => x.IsCompleted);
@@ -315,6 +307,60 @@ internal sealed class MultiAlteringCoordinator
 
                 if (!laneReady && !initialVacancy)
                     continue;
+
+                // The first F9 CLI snapshot may report global queue_full just
+                // because an unrelated facility has seven works. It is NOT a
+                // lifetime embargo on an otherwise independent food/medicine
+                // lane: re-query the currently selected recipe while slots are
+                // available. Only affirmative live evidence may lift the mask.
+                // MissingIngredients authorizes the existing resolver, NEVER
+                // a registration click; AlteringAutomation rechecks Alterable
+                // and live works before each actual UI operation.
+                bool anotherFullLane = orderedFacilities.Any(other =>
+                    !string.Equals(other, facility, StringComparison.Ordinal) &&
+                    works.Count(w => w.FacilityName == other) == 7);
+                if (_deferOtherLanesWhileQueueFull &&
+                    facilityWorks.Length < 7 && anotherFullLane)
+                {
+                    if (readRecipes is null)
+                        continue; // Legacy callers cannot prove independent readiness.
+
+                    int next = FindNextPendingIndex(facility);
+                    if (next < 0) continue;
+                    var nextPlan = plansByFacility[facility][next];
+                    var freshRecipes = await readRecipes(ct);
+                    var selected = freshRecipes.Where(x =>
+                        string.Equals(x.DisplayName, nextPlan.DisplayName,
+                            StringComparison.Ordinal)).ToArray();
+                    if (selected.Length < nextPlan.RecipeOrdinal ||
+                        selected[nextPlan.RecipeOrdinal - 1].ProducedPerWork != nextPlan.ProducedPerWork ||
+                        AlteringFacilityResolver.Resolve(
+                            selected[nextPlan.RecipeOrdinal - 1]) != facility)
+                        throw new InvalidOperationException(
+                            $"전역 queue_full 재검증 중 제법 동일성 확인 실패 · {nextPlan.DisplayName} · 추가 등록 없이 정지");
+
+                    var currentRecipe = selected[nextPlan.RecipeOrdinal - 1];
+                    if (!currentRecipe.Alterable &&
+                        currentRecipe.MissingIngredients.Count == 0)
+                    {
+                        if (globalQueueBlocked.Add(facility))
+                            Log?.Invoke(
+                                $"[다중가공] 독립 시설 보류 · {nextPlan.DisplayName} · " +
+                                $"현재 CLI Reason={currentRecipe.Reason ?? "unknown"} · " +
+                                $"해당 시설 {facilityWorks.Length}/7칸, 타 시설 7/7칸 · " +
+                                "다음 대기 주기에 실제 제법 재조회 · 무확인 등록 클릭 금지");
+                        globalQueueUnblocked.Remove(facility);
+                        continue;
+                    }
+
+                    globalQueueBlocked.Remove(facility);
+                    if (globalQueueUnblocked.Add(facility))
+                        Log?.Invoke(
+                            $"[다중가공] 독립 시설 진행 승인 · {nextPlan.DisplayName} · " +
+                            $"CLI {(currentRecipe.Alterable ? "가공 가능" : "구체적 부족 재료 있음")} · " +
+                            $"해당 시설 {facilityWorks.Length}/7칸 · " +
+                            "기존 화면·재료·등록 안전 검증 유지");
+                }
 
                 if (initialVacancy)
                     Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} " +
