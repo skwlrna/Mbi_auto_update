@@ -5,6 +5,8 @@ on:
     paths:
       - 'source/FishingAutomation/Telemetry/**'
       - 'tests/packet-observation/**'
+      - 'tools/PacketReceiveProbe/**'
+      - 'tests/packet-receive-probe/**'
       - 'docs/PACKET_OBSERVATION_STAGE1.md'
       - '.github/workflows/packet-observation-checks.yml'
   workflow_dispatch:
@@ -25,6 +27,16 @@ jobs:
         run: |
           dotnet run --project tests/packet-observation/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Packet observation regression failed' }
+      - name: Check packet receive probe safety and strict CLI
+        shell: pwsh
+        run: |
+          dotnet run --project tests/packet-receive-probe/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Receive probe safety regression failed' }
+      - name: Build independent receive diagnostic (no live capture)
+        shell: pwsh
+        run: |
+          dotnet build tools/PacketReceiveProbe/PacketReceiveProbe.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Independent capture diagnostic build failed' }
       - name: Build main Windows app
         shell: pwsh
         run: |
