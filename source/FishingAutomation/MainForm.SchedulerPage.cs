@@ -449,7 +449,7 @@ public sealed partial class MainForm
             var button = new Button
             {
                 Text = label, Dock = DockStyle.Fill, FlatStyle = FlatStyle.Flat,
-                BackColor = primary ? Blue : CardBg2, ForeColor = primary ? Color.White : TitleText,
+                BackColor = primary ? Blue : CardBg2, ForeColor = primary ? Color.FromArgb(22, 22, 25) : TitleText,
                 Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand, Margin = new Padding(3), TextAlign = ContentAlignment.MiddleCenter,
                 UseVisualStyleBackColor = false
