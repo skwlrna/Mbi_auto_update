@@ -327,5 +327,15 @@ Check(unknownTable.Status == "os_flow_table_unavailable",
     "missing socket snapshots reported as verified match");
 Check(!TcpOsFlowSnapshot.ReadMatchingRemotePort(0).Available,
     "invalid port caused OS table access");
+Check(TcpOsFlowSnapshot.IsNamedGameCandidate("MabinogiMobile") &&
+    TcpOsFlowSnapshot.IsNamedGameCandidate("mabinogimobile") &&
+    !TcpOsFlowSnapshot.IsNamedGameCandidate("MabinogiMobileHelper") &&
+    !TcpOsFlowSnapshot.IsNamedGameCandidate(null),
+    "named game candidate matching must be exact, case-insensitive");
+Check(flowCollector.CountNamedCandidateFrames(new[] { tuple },
+    Array.Empty<TcpIpv4Flow>()) == 2, "named game candidate 4-tuple counter failed");
+Check(flowCollector.CountNamedCandidateFrames(Array.Empty<TcpIpv4Flow>(),
+    Array.Empty<TcpIpv4Flow>()) == 0,
+    "port-only matches incorrectly counted as game-process candidates");
 
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
