@@ -87,8 +87,11 @@ public sealed partial class MainForm : Form
         var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1448, 1086);
         // The reference uses a wider dashboard than the old 1448:1086 design.
         // Preserve responsive per-axis scaling in ReferenceDashboard for smaller monitors.
-        ClientSize = new Size(Math.Min(1180, area.Width - 32), Math.Min(780, area.Height - 32));
-        MinimumSize = new Size(Math.Min(940, area.Width), Math.Min(700, area.Height));
+        // Compact Mobilay-style window; coordinate-space cards and controls
+        // scale with the actual form, while the engine/input logic is untouched.
+        ClientSize = new Size(Math.Min(1120, Math.Max(780, area.Width - 32)),
+                              Math.Min(720, Math.Max(550, area.Height - 32)));
+        MinimumSize = new Size(Math.Min(940, area.Width), Math.Min(640, area.Height));
         StartPosition = FormStartPosition.CenterScreen;
         // A real 2px frame on the borderless form: the docked content fills only
         // inside the padding, so the outline surrounds the title, sidebar and body.
