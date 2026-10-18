@@ -1,4 +1,5 @@
 #if STAGE16_PREVIEW_ONLY
+using System.ComponentModel;
 using System.Diagnostics;
 using FishingAutomation.Telemetry;
 
