@@ -30,6 +30,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+      - name: Mobilay-inspired user reference UI safety and navigation regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/mobilay-ui -p 'test_mobilay_ui_contract.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Mobilay-inspired UI source and navigation regression failed' }
+
       - name: AI MCP watcher queue regression tests
         shell: pwsh
         run: |
