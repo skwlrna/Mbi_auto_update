@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using FishingAutomation.Telemetry;
 
 namespace FishingAutomation;
 
@@ -46,6 +47,13 @@ internal static class AiRuntimeErrorJournal
                 "Mode: " + ShortText(report.Mode, 60) + "\n" +
                 "Error: " + title + "\n" +
                 "Detail: " + detail + "\n";
+            // Freeze only ALREADY COMPLETED, validly timed CLI query labels.
+            // This path issues no new game query, and stale/disabled evidence
+            // never enters the watcher's existing redacted error.txt context.
+            string? passiveEvidence = AiPassiveCliEvidence.SnapshotForError(
+                report.Time.ToUniversalTime());
+            if (passiveEvidence is not null)
+                text += "\n" + passiveEvidence + "\n";
             // Write the report payload first; the watcher requires a stable evidence file.
             File.WriteAllText(Path.Combine(directory, "summary.json"), json, Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "error.txt"), text, Encoding.UTF8);
