@@ -1,5 +1,23 @@
 using FishingAutomation.ExportDiagnostics;
 
+// Static audited coverage; unlike file inspection it reads no user data and
+// cannot connect to the game, the OS socket table or a private event API.
+if (args.Length == 1 && args[0] == "--coverage")
+{
+    Console.WriteLine("MabiAuto current read-only coverage audit:");
+    foreach (var entry in IntegrationCoveragePolicy.Entries)
+    {
+        var decision = IntegrationCoveragePolicy.Evaluate(entry.Domain, false);
+        Console.WriteLine(
+            $"coverage domain={entry.Domain} authority={entry.ExistingAuthority} " +
+            $"queries={entry.ExistingQueries} export={entry.ThirdPartyExport} " +
+            $"packet_enabled={entry.ProductionPacketEnabled.ToString().ToLowerInvariant()} " +
+            $"decision={decision.Status}");
+    }
+    Console.WriteLine("No decoded event export was verified. Existing CLI/OCR is authoritative.");
+    return 0;
+}
+
 if (args.Length != 2 || args[0] != "--inspect")
 {
     Console.WriteLine("Drag a locally exported JSON/CSV onto RunExportCheck.cmd.");
