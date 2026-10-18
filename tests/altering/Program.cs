@@ -67,15 +67,17 @@ Check(missingSlotEvidence.Contains("조회되지 않음", StringComparison.Ordin
 var otherFacilityPlan = new AlteringPlan("금속 가공 시설", "철괴", 9, 3, false);
 var otherFacilityRecipe = new AlteringRecipe("철괴", false, 3, "queue_full",
     Array.Empty<AlteringIngredient>(), "금속 가공 시설");
-// Live CLI reports queue_full for *every* recipe while one 7-slot lane is full.
-// Readiness preflight must allow the selected full lane to drain, without
-// authorizing registration into the other empty lane before the full one clears.
+// Live CLI can report queue_full for *every* recipe while a different
+// seven-slot facility is still processing. That state must not permanently
+// starve an independent 0/7 or 1/7 food lane. The actual screen + CLI +1
+// registration guards, not a different lane's occupied slots, determine
+// whether a separate free slot can be used.
 AlteringQueueStartGuard.EnsureStartable(
     new[] { deferredPlan, otherFacilityPlan },
     new[] { fullLaneRecipe, otherFacilityRecipe }, fullLane);
 Check(true, "global queue_full can hand off selected existing full lane even if another selected facility is empty");
-int unexpectedSecondaryRegistration = 0;
-using (var cancelAfterWait = new CancellationTokenSource())
+int runningFullCalls = 0, otherEmptyLaneCalls = 0;
+using (var stopAfterIndependent = new CancellationTokenSource())
 {
     try
     {
@@ -84,21 +86,57 @@ using (var cancelAfterWait = new CancellationTokenSource())
             new[] { deferredPlan, otherFacilityPlan },
             (item, budget, ct) =>
             {
-                unexpectedSecondaryRegistration++;
+                if (item.FacilityName == deferredPlan.FacilityName) runningFullCalls++;
+                if (item.FacilityName == otherFacilityPlan.FacilityName) otherEmptyLaneCalls++;
+                stopAfterIndependent.Cancel();
                 return Task.FromResult(false);
             },
             ct => Task.FromResult<IReadOnlyList<AlteringWork>>(fullLane),
             (time, ct) =>
             {
-                cancelAfterWait.Cancel();
+                stopAfterIndependent.Cancel();
                 ct.ThrowIfCancellationRequested();
                 return Task.CompletedTask;
-            }, cancelAfterWait.Token);
+            }, stopAfterIndependent.Token);
     }
-    catch (OperationCanceledException) when (cancelAfterWait.IsCancellationRequested) { }
+    catch (OperationCanceledException) when (stopAfterIndependent.IsCancellationRequested) { }
 }
-Check(unexpectedSecondaryRegistration == 0,
-    "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
+Check(runningFullCalls == 0 && otherEmptyLaneCalls == 1,
+    "global queue_full with full RUNNING lane visits independent empty lane instead of waiting indefinitely");
+
+// A wholly completed 7/7 lane still owns the first guarded receipt turn.
+// No other lane is entered before the completed work is reconciled.
+int completedFullCalls = 0, prematureOtherCalls = 0;
+var fullyCompletedOldLane = fullLane.Select(x => x with
+{
+    State = "Completed", IsCompleted = true, RemainingSeconds = 0
+}).ToArray();
+using (var stopAfterReceipt = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(
+            deferOtherLanesWhileQueueFull: true).RunAsync(
+            new[] { otherFacilityPlan, deferredPlan },
+            (item, budget, ct) =>
+            {
+                if (item.FacilityName == deferredPlan.FacilityName) completedFullCalls++;
+                if (item.FacilityName == otherFacilityPlan.FacilityName) prematureOtherCalls++;
+                stopAfterReceipt.Cancel();
+                return Task.FromResult(false);
+            },
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(fullyCompletedOldLane),
+            (time, ct) =>
+            {
+                stopAfterReceipt.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            }, stopAfterReceipt.Token);
+    }
+    catch (OperationCanceledException) when (stopAfterReceipt.IsCancellationRequested) { }
+}
+Check(completedFullCalls == 1 && prematureOtherCalls == 0,
+    "global queue_full prioritizes guarded receipt of fully completed 7/7 lane before other registrations");
 
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
@@ -1847,6 +1885,47 @@ Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
         new[] { ricePlan }, new[] { riceSelected },
         Array.Empty<MultiAlteringSupplyPreflight>()).Count == 1,
     "fresh authoritative CLI water shortage triggers early gathering without UI evidence");
+
+// 2026-10-18 16:05-16:48 real log: other facilities had full running
+// queues, food had at least one old occupied slot, and the supervisor
+// spent 43 minutes logging only '병렬 대기'. The independent food lane must
+// get a turn without collecting or touching the still-running full lane.
+var riceStillRunningWorks = fullLane.Concat(new[]
+{
+    new AlteringWork("기존 식재료", ricePlan.FacilityName, "Completed", true, 0)
+}).ToArray();
+bool riceReceivedIndependentTurn = false, riceTouchedRunningWood = false;
+using (var stopAfterRiceTurn = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(
+            deferOtherLanesWhileQueueFull: true).RunAsync(
+            new[] { deferredPlan, ricePlan },
+            (plan, slotBudget, token) =>
+            {
+                if (plan.FacilityName == ricePlan.FacilityName &&
+                    slotBudget == 1)
+                    riceReceivedIndependentTurn = true;
+                if (plan.FacilityName == deferredPlan.FacilityName)
+                    riceTouchedRunningWood = true;
+                stopAfterRiceTurn.Cancel();
+                return Task.FromResult(false);
+            },
+            token => Task.FromResult<IReadOnlyList<AlteringWork>>(
+                riceStillRunningWorks),
+            (_, token) =>
+            {
+                stopAfterRiceTurn.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            stopAfterRiceTurn.Token);
+    }
+    catch (OperationCanceledException) when (stopAfterRiceTurn.IsCancellationRequested) { }
+}
+Check(riceReceivedIndependentTurn && !riceTouchedRunningWood,
+    "F9 rice 1/7 lane receives independent registration turn while wood 7/7 remains running");
 
 var multiWorld = new RecursiveProductionWorld();
 multiWorld.SetCount("석탄", 0);

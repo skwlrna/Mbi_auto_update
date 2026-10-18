@@ -296,16 +296,43 @@ internal sealed class MultiAlteringCoordinator
                     .ToArray();
                 _laneState?.Observe(facility, facilityWorks, allowShrink: false);
 
-                // Some CLI builds report queue_full for EVERY recipe when one
-                // facility's 7-slot lane is full. Handle the owned full lane's
-                // verified wait/receipt first; don't attempt to register in
-                // another lane before that capacity condition has cleared.
+                // A global queue_full recipe response can be caused by a
+                // DIFFERENT facility's seven slots. A full but still running
+                // lane cannot be collected yet: permanently deferring every
+                // other facility here prevented food (1/7) from registering
+                // for over 43 minutes in the 2026-10-18 F9 log.
+                //
+                // Prioritize only a selected full lane which is ALL completed
+                // and ready for its normal guarded whole-lane receipt. Running
+                // full lanes do NOT own the other facilities' vacant slots.
+                // Actual registration remains subject to the existing live
+                // recipe, on-site screen, zero-wing and CLI +1 proof checks.
                 if (_deferOtherLanesWhileQueueFull &&
-                    facilityWorks.Length < 7 &&
-                    orderedFacilities.Any(other =>
-                        !string.Equals(other, facility, StringComparison.Ordinal) &&
-                        works.Count(w => w.FacilityName == other) == 7))
-                    continue;
+                    facilityWorks.Length < 7)
+                {
+                    var otherSelectedFullLanes = orderedFacilities
+                        .Where(other =>
+                            !string.Equals(other, facility, StringComparison.Ordinal) &&
+                            PendingCount(other) > 0)
+                        .Select(other => works
+                            .Where(w => w.FacilityName == other).ToArray())
+                        .Where(otherWorks => otherWorks.Length == 7)
+                        .ToArray();
+                    if (otherSelectedFullLanes.Any(otherWorks =>
+                            otherWorks.All(w => w.IsCompleted)))
+                    {
+                        Log?.Invoke(
+                            $"[다중가공] {facility.Replace(" 시설", "")} 빈 슬롯 보류 · " +
+                            "다른 선택 시설 완료 7/7 배치 수령을 먼저 검증");
+                        continue;
+                    }
+
+                    if (otherSelectedFullLanes.Length > 0)
+                        Log?.Invoke(
+                            $"[다중가공] {facility.Replace(" 시설", "")} 독립 슬롯 검사 허용 · " +
+                            "다른 시설은 7/7 진행 중이라 수령 불가 · " +
+                            $"이 시설 {facilityWorks.Length}/7의 실제 등록 가능 여부는 현장+CLI로 검증");
+                }
 
                 bool laneReady =
                     facilityWorks.Length == 0 ||
