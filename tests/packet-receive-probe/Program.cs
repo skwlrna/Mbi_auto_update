@@ -47,4 +47,29 @@ Check(CaptureProbeOptions.CaptureFilter == "tcp src port 16000",
 Check(CaptureProbeOptions.MaxSeconds == 30,
     "capture upper bound changed");
 
+
+Check(CaptureProbeOptions.TryParse(new[] { "--interactive" }, out var interactive) &&
+    interactive is { Interactive: true, DeviceIndex: -1, Seconds: 0 },
+    "one-click invocation not recognized");
+Check(!Try("--INTERACTIVE"), "unexpected upper-case interactive flag accepted");
+Check(!Try("--interactive", "--probe"), "interactive added arbitrary options");
+
+bool Approve(int count, string? device, string? seconds, string? consent) =>
+    InteractiveProbeConsent.TryApprove(count, device, seconds, consent, out _);
+Check(InteractiveProbeConsent.TryApprove(3, "2", "10", "YES", out var accepted) &&
+    accepted is { DeviceIndex: 2, Seconds: 10, Interactive: false },
+    "interactive explicit approval rejected");
+Check(Approve(1, "0", "1", "YES"), "minimum consent duration rejected");
+Check(Approve(1, "0", "30", "YES"), "maximum consent duration rejected");
+foreach (string? consent in new string?[] { "", "yes", "Yes", "Y", "NO", null, " YES" })
+    Check(!Approve(3, "1", "10", consent), "consent not exact YES");
+foreach (string? device in new string?[] { "", "-1", "3", "abc", "0 & whoami", null })
+    Check(!Approve(3, device, "10", "YES"), "invalid or injected adapter selection allowed");
+foreach (string? seconds in new string?[] { "", "0", "31", "999999", "1 & whoami", null })
+    Check(!Approve(3, "1", seconds, "YES"), "invalid or injected time allowed");
+Check(!Approve(0, "0", "5", "YES"), "capture with no adapters allowed");
+Check(!Approve(3, "1", "5", null), "EOF during consent authorized capture");
+Check(!Approve(3, "1", null, "YES"), "EOF during duration authorized capture");
+Check(!Approve(3, null, "5", "YES"), "EOF during device selection authorized capture");
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
