@@ -49,8 +49,19 @@ def _allowed(report: object) -> bool:
     """Refuse arbitrary external/malformed dictionaries (no partial queue)."""
     if not isinstance(report, dict):
         return False
-    if (report.get("schema") != 1 or report.get("stage") != 21 or
-            report.get("status") not in VALID_STATUSES or
+    exact_fields = {
+        "schema", "stage", "status", "source", "counts", "by_mode",
+        "verified_gameplay_conflicts", "diagnostic_accuracy_change",
+        "absence_interpretation", "comparison_interpretation",
+        "ground_truth_verified", "gameplay_authorized", "repair_authorized",
+        "new_cli_queries", "new_screen_captures", "ai_runs", "game_runs",
+    }
+    if set(report) != exact_fields:
+        return False
+    if (type(report.get("schema")) is not int or report["schema"] != 1 or
+            type(report.get("stage")) is not int or report["stage"] != 21 or
+            type(report.get("status")) is not str or
+            report["status"] not in VALID_STATUSES or
             report.get("source") != "local_offline_or_synthetic_reports" or
             report.get("ground_truth_verified") is not False or
             report.get("gameplay_authorized") is not False or
