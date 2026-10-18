@@ -160,8 +160,7 @@ internal sealed class CommonObservationEngine
                     CommonObservationDomain.Connection =>
                         state is CommonObservationState.Connected or
                             CommonObservationState.Disconnected,
-                    CommonObservationDomain.Activity or
-                    CommonObservationDomain.Combat =>
+                    CommonObservationDomain.Activity =>
                         state is CommonObservationState.Active or
                             CommonObservationState.Idle,
                     CommonObservationDomain.Inventory =>
