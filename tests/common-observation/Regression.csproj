@@ -14,6 +14,7 @@
     <Compile Include="../../source/FishingAutomation/Telemetry/CommonObservationManualUiPolicy.cs" Link="CommonObservationManualUiPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/Telemetry/CommonObservationDiagnosticReport.cs" Link="CommonObservationDiagnosticReport.cs" />
     <Compile Include="../../source/FishingAutomation/Telemetry/AiPassiveCliEvidence.cs" Link="AiPassiveCliEvidence.cs" />
+    <Compile Include="../../source/FishingAutomation/Telemetry/CommonIncidentTriage.cs" Link="CommonIncidentTriage.cs" />
     <Compile Include="../../source/FishingAutomation/Telemetry/AlteringWorkDeltaDiagnostic.cs" Link="AlteringWorkDeltaDiagnostic.cs" />
     <Compile Include="../../source/FishingAutomation/Telemetry/Stage16PreviewGate.cs" Link="Stage16PreviewGate.cs" />
   </ItemGroup>
