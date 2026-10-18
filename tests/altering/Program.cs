@@ -1382,6 +1382,120 @@ Check(oldLeatherResult == AlteringRunResult.RawMaterialExhausted &&
       oldLeatherWork.Owned == 3,
     "old leather jobs finish and are collected normally without starting any new jobs");
 
+// Live 2026-10-18 17:55:24 V3.2.25 incident:
+// Existing leather 6/7, all six Completed, previously saved raw-shortage
+// flag. The initial-empty-slot exemption incorrectly prevented receipt,
+// then the 120-second watchdog stopped all F9 work after 495 seconds.
+// Exercise the ACTUAL managed RunBatch receipt and saved resume checkpoint,
+// including exactly-one receipt, no seventh registration and no wings.
+var sixLeatherComplete = new FakeWorld(exhaustedLeather) { Available = false, Freeze = true };
+for (int i = 0; i < 6; i++) sixLeatherComplete.AddCompleted(3);
+var sixLeatherSnapshot = await sixLeatherComplete.WorksAsync(default);
+var sixLeatherLane = new FacilityLaneState(sixLeatherSnapshot);
+string leatherCheckpointPath = Path.Combine(Path.GetTempPath(),
+    "MabiAuto-leather-receipt-test-" + Guid.NewGuid().ToString("N"), "plan.json");
+Directory.CreateDirectory(Path.GetDirectoryName(leatherCheckpointPath)!);
+try
+{
+    var leatherCheckpointStore = new AlteringSessionStore(leatherCheckpointPath);
+    var leatherCheckpoint = AlteringSessionState.Create(
+        exhaustedLeather, new CliIdentityContext(null, null, null, null), 0, 6)
+        with
+        {
+            BatchId = "regression-six-leather-complete",
+            RawMaterialExhausted = true,
+            ReceiptTrackingEnabled = true,
+            MultiState = MultiAlteringItemState.InProgress,
+            Stage = "가죽 원재료 소진 · 신규 등록 중단"
+        };
+    leatherCheckpointStore.Save(leatherCheckpoint);
+    int guardedPreReceipt = 0, guardedPostReceipt = 0;
+    var resumedLeatherAuto = new AlteringAutomation(
+        sixLeatherComplete, sixLeatherComplete, (_, ct) => Task.CompletedTask,
+        4, sessionStore: leatherCheckpointStore, session: leatherCheckpoint,
+        facilityState: sixLeatherLane,
+        beforeReceipt: async (p, ct) =>
+        {
+            var before = (await sixLeatherComplete.WorksAsync(ct))
+                .Where(w => w.FacilityName == p.FacilityName).ToArray();
+            if (before.Length != 6 || before.Any(w => !w.IsCompleted))
+                throw new InvalidOperationException("test pre-receipt evidence lost");
+            guardedPreReceipt++;
+        },
+        afterReceipt: async (p, ct) =>
+        {
+            var after = await sixLeatherComplete.WorksAsync(ct);
+            if (after.Any(w => w.FacilityName == p.FacilityName))
+                throw new InvalidOperationException("test receipt not fully confirmed");
+            var latest = leatherCheckpointStore.Load()!;
+            leatherCheckpointStore.Save(latest with
+            {
+                ConfirmedReceivedWorks = 6,
+                LastObservedOutputQuantity = await sixLeatherComplete.ItemCountAsync(
+                    p.OutputName, ct)
+            });
+            sixLeatherLane.Observe(p.FacilityName, after, allowShrink: true);
+            guardedPostReceipt++;
+        });
+    var drainedLeatherResult = await resumedLeatherAuto.RunBatchAsync(
+        exhaustedLeather, 1, default);
+    var drainedCheckpoint = leatherCheckpointStore.Load()!;
+    Check(drainedLeatherResult == AlteringRunResult.RawMaterialExhausted &&
+          drainedCheckpoint.MultiState == MultiAlteringItemState.RawMaterialExhausted &&
+          drainedCheckpoint.RawMaterialExhausted &&
+          drainedCheckpoint.ConfirmedReceivedWorks == 6 &&
+          sixLeatherComplete.CollectionCount == 1 &&
+          sixLeatherComplete.ReceiptDirectives.Count == 1 &&
+          sixLeatherComplete.QueueCalls == 0 &&
+          sixLeatherComplete.Owned == 18 &&
+          resumedLeatherAuto.ReservedWings == 0 &&
+          guardedPreReceipt == 1 && guardedPostReceipt == 1,
+        "V3.2.26: exhausted six-completed leather jobs are collected exactly once using managed receipt + durable checkpoint");
+    var resumedAgain = await resumedLeatherAuto.RunBatchAsync(
+        exhaustedLeather, 1, default);
+    Check(resumedAgain == AlteringRunResult.RawMaterialExhausted &&
+          sixLeatherComplete.CollectionCount == 1 &&
+          sixLeatherComplete.QueueCalls == 0 && guardedPostReceipt == 1,
+        "V3.2.26: terminal exhausted leather checkpoint cannot recollect or register on retry");
+}
+finally
+{
+    Directory.Delete(Path.GetDirectoryName(leatherCheckpointPath)!, recursive: true);
+}
+
+// Five completed plus one running is NOT a valid managed receive-all,
+// even when leather is exhausted. Preserve the unfinished server job.
+var leatherMixedWorld = new FakeWorld(exhaustedLeather)
+    { Available = false, Freeze = true };
+for (int i = 0; i < 5; i++) leatherMixedWorld.AddCompleted(3);
+leatherMixedWorld.AddPending();
+var leatherMixedCheckpoint = AlteringSessionState.Create(
+    exhaustedLeather, new CliIdentityContext(null, null, null, null), 0, 6)
+    with { BatchId = "regression-mixed-leather", RawMaterialExhausted = true,
+        MultiState = MultiAlteringItemState.InProgress };
+string leatherMixedPath = Path.Combine(Path.GetTempPath(),
+    "MabiAuto-leather-mixed-test-" + Guid.NewGuid().ToString("N"), "plan.json");
+Directory.CreateDirectory(Path.GetDirectoryName(leatherMixedPath)!);
+try
+{
+    var mixedStore = new AlteringSessionStore(leatherMixedPath);
+    mixedStore.Save(leatherMixedCheckpoint);
+    var mixedAuto = new AlteringAutomation(
+        leatherMixedWorld, leatherMixedWorld, (_, ct) => Task.CompletedTask,
+        4, sessionStore: mixedStore, session: leatherMixedCheckpoint,
+        facilityState: new FacilityLaneState(await leatherMixedWorld.WorksAsync(default)));
+    var mixedResult = await mixedAuto.RunBatchAsync(exhaustedLeather, 1, default);
+    Check(mixedResult == AlteringRunResult.BatchQueued &&
+          leatherMixedWorld.CollectionCount == 0 &&
+          leatherMixedWorld.QueueCalls == 0 &&
+          (await leatherMixedWorld.WorksAsync(default)).Count == 6,
+        "V3.2.26: exhausted partial-completion leather facility cannot trigger receive-all or add new work");
+}
+finally
+{
+    Directory.Delete(Path.GetDirectoryName(leatherMixedPath)!, recursive: true);
+}
+
 var noDeparturePlan = plan with { TargetQuantity = 3 };
 var m1NoDepartureWorld = new FakeWorld(noDeparturePlan) { Available = false };
 var m1NoDepartureLane = new FacilityLaneState(Array.Empty<AlteringWork>());
@@ -2991,7 +3105,7 @@ Check(AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
-catch(Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+catch(Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
 
 internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen
 {

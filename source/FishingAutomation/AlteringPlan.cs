@@ -546,7 +546,15 @@ internal sealed class AlteringAutomation
             // early receive-all simply because the old slots are complete.
             // Subsequent ordinary full-lane receipt keeps the existing guard.
             var initialLane = _facilityState?.Snapshot(plan.FacilityName);
+            // 2026-10-18 V3.2.25 live failure: a leather recipe with six
+            // pre-F9 completed works and a durable raw-material-exhausted
+            // checkpoint could never fill the seventh slot. Continuing the
+            // initial-vacancy exemption skipped collection indefinitely and
+            // eventually tripped the lane watchdog. An exhausted recipe must
+            // NOT register any further jobs, but may collect a proven
+            // all-completed facility through the normal guarded receipt path.
             bool fillingInitialVacancies = yieldAtBatchBoundary &&
+                !rawMaterialExhausted && _session?.RawMaterialExhausted != true &&
                 initialLane is not null &&
                 initialLane.InitialObservedWorks > 0 &&
                 initialLane.MainRegisteredWorks <
