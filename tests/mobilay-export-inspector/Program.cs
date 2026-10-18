@@ -13,7 +13,7 @@ ExportShapeInspector.Result CheckText(string ext, string content) =>
 
 var simple = CheckText(".json", """{"combat":[{"damage":100},{"damage":200}],"accountId":"SECRET"}""");
 Check(simple is { Status: "structure_only_not_verified", Format: "json",
-    Objects: 3, Arrays: 1, Scalars: 3, Properties: 5 },
+    Objects: 3, Arrays: 1, Scalars: 3, Properties: 4 },
     "JSON structural count incorrect");
 Check(CheckText(".json", "[]") is { Arrays: 1, Objects: 0 },
     "JSON array not supported");
