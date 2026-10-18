@@ -88,4 +88,104 @@ Check(inbox.TryObserve(Sample(), now).Accepted, "clear did not reset sequence");
 Check(inbox.ReadFresh(PacketObservationKind.EncounterEndedHint, now) is null,
     "unobserved hint returned a synthetic value");
 
-Console.WriteLine($"PASS {checks} synthetic telemetry admission regressions (no game, network or packet data).");
+
+string Timestamp(DateTimeOffset time) =>
+    time.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+string FixtureRow(
+    string kind = "combat_activity",
+    long sequence = 1,
+    double? value = null,
+    DateTimeOffset? at = null,
+    DateTimeOffset? until = null)
+{
+    var values = new Dictionary<string, object>
+    {
+        ["schemaVersion"] = 1,
+        ["kind"] = kind,
+        ["sequence"] = sequence,
+        ["observedAtUtc"] = Timestamp(at ?? now),
+        ["expiresAtUtc"] = Timestamp(until ?? now.AddSeconds(3))
+    };
+    if (value.HasValue)
+        values["value"] = value.Value;
+    return JsonSerializer.Serialize(values);
+}
+
+var fixtureInbox = new PacketObservationInbox(diagnosticsEnabled: true,
+    allowedAdapters: new[] { PacketObservationFixtureReplay.FixtureAdapterId });
+var fixtureText = string.Join("\n",
+    FixtureRow("combat_activity"),
+    FixtureRow("target_health_fraction", value: 0.25),
+    FixtureRow("encounter_ended"));
+var noOptIn = PacketObservationFixtureReplay.Replay(
+    new StringReader(fixtureText), fixtureInbox, now);
+Check(noOptIn.Status == "disabled" && noOptIn.Records == 0,
+    "fixture replay without explicit opt-in");
+Check(fixtureInbox.ReadFresh(PacketObservationKind.CombatActivityHint, now) is null,
+    "disabled replay admitted event");
+
+var validReplay = PacketObservationFixtureReplay.Replay(
+    new StringReader(fixtureText), fixtureInbox, now, explicitlyEnabled: true);
+Check(validReplay.Status == "replayed" && validReplay.Records == 3 &&
+    validReplay.Accepted == 3 && validReplay.Rejected == 0,
+    "verified fixture batch was not admitted");
+Check(fixtureInbox.ReadFresh(PacketObservationKind.TargetHealthFractionHint, now)?.Value == 0.25,
+    "fixture health field missing");
+
+var duplicateReplay = PacketObservationFixtureReplay.Replay(
+    new StringReader(fixtureText), fixtureInbox, now, explicitlyEnabled: true);
+Check(duplicateReplay.Records == 3 && duplicateReplay.Accepted == 0 &&
+    duplicateReplay.Rejected == 3, "replaying same fixture bypassed sequence guard");
+
+var strangerInbox = new PacketObservationInbox(diagnosticsEnabled: true);
+var strangerResult = PacketObservationFixtureReplay.Replay(
+    new StringReader(FixtureRow()), strangerInbox, now, explicitlyEnabled: true);
+Check(strangerResult.Status == "replayed" && strangerResult.Accepted == 0 &&
+    strangerResult.Rejected == 1, "fixture ignored approved-adapter requirement");
+
+void MustRejectEntireFixture(string text, string name)
+{
+    var fresh = new PacketObservationInbox(true,
+        new[] { PacketObservationFixtureReplay.FixtureAdapterId });
+    var result = PacketObservationFixtureReplay.Replay(
+        new StringReader(text), fresh, now, explicitlyEnabled: true);
+    Check(result.Status != "replayed" && result.Accepted == 0,
+        "invalid fixture accepted: " + name);
+    Check(fresh.ReadFresh(PacketObservationKind.CombatActivityHint, now) is null,
+        "partial replay polluted inbox: " + name);
+}
+MustRejectEntireFixture("", "empty");
+MustRejectEntireFixture("[]", "not object");
+MustRejectEntireFixture("{broken", "malformed json");
+MustRejectEntireFixture(FixtureRow().Replace("\"schemaVersion\":1",
+    "\"schemaVersion\":2"), "schema version");
+MustRejectEntireFixture(FixtureRow().Replace("\"sequence\":1",
+    "\"sequence\":0"), "invalid sequence");
+MustRejectEntireFixture(FixtureRow("unverified_packet_250"), "unknown kind");
+MustRejectEntireFixture(FixtureRow("combat_activity", value: 0.5), "unexpected value");
+MustRejectEntireFixture(FixtureRow("target_health_fraction"), "missing health");
+MustRejectEntireFixture(FixtureRow("target_health_fraction", value: 1.5), "invalid health");
+MustRejectEntireFixture(FixtureRow().Replace("\"kind\":\"combat_activity\"",
+    "\"kind\":\"combat_activity\",\"kind\":\"encounter_ended\""), "duplicate key");
+MustRejectEntireFixture(FixtureRow().Replace("\"sequence\":1",
+    "\"sequence\":1,\"adapterId\":\"impostor\""), "unknown key");
+MustRejectEntireFixture(FixtureRow().Replace("\"observedAtUtc\":\"", 
+    "\"observedAtUtc\":\"2026-10-18T13:00:00+09:00"), "non UTC");
+MustRejectEntireFixture(FixtureRow() + "\n" + "{broken", "batch atomic validation");
+MustRejectEntireFixture(new string('x', 2049), "oversized row");
+MustRejectEntireFixture(string.Join("\n", Enumerable.Repeat(FixtureRow(), 129)),
+    "too many rows");
+
+var staleResult = PacketObservationFixtureReplay.Replay(
+    new StringReader(FixtureRow()), new PacketObservationInbox(true,
+        new[] { PacketObservationFixtureReplay.FixtureAdapterId }),
+    now.AddSeconds(6), explicitlyEnabled: true);
+Check(staleResult.Status == "replayed" && staleResult.Rejected == 1 &&
+    staleResult.Accepted == 0, "stale fixture promoted to active event");
+
+fixtureInbox.Clear();
+Check(fixtureInbox.ReadFresh(PacketObservationKind.EncounterEndedHint, now) is null,
+    "clear failed after replay");
+Console.WriteLine($"PASS {checks} synthetic telemetry and offline JSONL fixture regressions.");
+
