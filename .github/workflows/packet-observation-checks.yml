@@ -5,6 +5,7 @@ on:
     paths:
       - 'source/FishingAutomation/Telemetry/**'
       - 'tests/packet-observation/**'
+      - 'tests/common-observation/**'
       - 'tools/PacketReceiveProbe/**'
       - 'tests/packet-receive-probe/**'
       - 'tools/MobilayExportInspector/**'
@@ -29,6 +30,11 @@ jobs:
         run: |
           dotnet run --project tests/packet-observation/Regression.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Packet observation regression failed' }
+      - name: Check shared read-only evidence reconciliation and historical DPS
+        shell: pwsh
+        run: |
+          dotnet run --project tests/common-observation/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Cross-feature evidence regression failed' }
       - name: Check packet receive probe safety and strict CLI
         shell: pwsh
         run: |
