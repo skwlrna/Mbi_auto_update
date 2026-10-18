@@ -145,115 +145,39 @@ jobs:
           python source/FishingAutomation/ai-autopilot/release_handoff_stage26.py --build-dir $bin
           if ($LASTEXITCODE -ne 0) { throw 'Stage26 local build module parity failed; release remains held' }
           Write-Host 'Stage26 development handoff checked: this is NOT main merge, release, approval or live test.'
-      - name: Assemble Stage26 V3.2.26 test-only Windows ZIP payload (NOT a release)
+      - name: Assemble Stage26 V3.2.26 test-only Windows artifact
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 231
         shell: pwsh
         run: |
           $pkg = Join-Path (Get-Location) '_stage26-test-only'
-          $output = Join-Path $pkg 'release'
-          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o $output
-          if ($LASTEXITCODE -ne 0) { throw 'Test-only app publish failed' }
-          $required = @('FishingAutomation.exe', 'ai-autopilot/autopilot.py',
-            'ai-autopilot/release_source.py', 'ai-autopilot/incident_review_context.py',
-            'ai-autopilot/integration_safety_gate_stage25.py',
-            'ai-autopilot/release_handoff_stage26.py', 'ai-autopilot/config.json')
-          foreach ($file in $required) {
-            if (-not (Test-Path -LiteralPath (Join-Path $output $file) -PathType Leaf)) {
-              throw "Stage26 test-only publish missing required file: $file"
+          $out = Join-Path $pkg 'release'
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o $out
+          if ($LASTEXITCODE -ne 0) { throw 'Test-only publish failed' }
+          foreach ($name in @('FishingAutomation.exe','ai-autopilot/autopilot.py','ai-autopilot/incident_review_context.py','ai-autopilot/release_handoff_stage26.py','ai-autopilot/config.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $out $name) -PathType Leaf)) {
+              throw "Missing test-only build file: $name"
             }
           }
-          python source/FishingAutomation/ai-autopilot/release_handoff_stage26.py --build-dir $output
-          if ($LASTEXITCODE -ne 0) { throw 'Test-only runtime modules differ from reviewed checkout' }
-          foreach ($file in @('START.cmd', 'ROLLBACK_PREVIOUS.cmd', 'tools/ApplyUpdate.ps1',
-            'tools/RollbackPrevious.ps1', 'MabiAutoAI', 'BUILD_COMMIT.txt')) {
-            if (Test-Path -LiteralPath (Join-Path $output $file)) {
-              throw "Test-only EXE directory unexpectedly contains production updater/installer: $file"
-            }
+          python source/FishingAutomation/ai-autopilot/release_handoff_stage26.py --build-dir $out
+          if ($LASTEXITCODE -ne 0) { throw 'Test-only build source parity failed' }
+          foreach ($name in @('START.cmd','ROLLBACK_PREVIOUS.cmd','tools/ApplyUpdate.ps1','tools/RollbackPrevious.ps1','BUILD_COMMIT.txt')) {
+            if (Test-Path -LiteralPath (Join-Path $out $name)) { throw 'Updater or installer forbidden in test-only bundle' }
           }
-          $checkedSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          if ($LASTEXITCODE -ne 0 -or $checkedSha -notmatch '^[0-9a-f]{40}
-        shell: pwsh
-        run: |
-          $staging = Join-Path (Get-Location) '_stage16-published'
-          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true -p:Stage16PreviewOnly=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $staging
-          if ($LASTEXITCODE -ne 0) { throw 'Stage16 isolated GUI build failed' }
-          $exe = Join-Path $staging 'FishingAutomation.exe'
-          if (-not (Test-Path $exe)) { throw 'Stage16 isolated EXE missing' }
-          $check = Start-Process -FilePath $exe -ArgumentList '--stage16-self-test' -Wait -PassThru -NoNewWindow
-          if ($check.ExitCode -ne 0) { throw 'Stage16 opt-in entrypoint smoke test failed' }
-          $delivery = Join-Path (Get-Location) '_stage16-readonly-delivery'
-          New-Item -ItemType Directory -Force -Path $delivery | Out-Null
-          # Deliberately allow only the standalone executable and printed
-          # instructions; do not ship production settings, AI configuration,
-          # bots, updater scripts, private files or the release START.cmd.
-          Copy-Item $exe (Join-Path $delivery 'FishingAutomation.exe')
-          Copy-Item 'tools/Stage16Preview/Run_Stage16_ReadOnly.cmd' $delivery
-          Copy-Item 'tools/Stage16Preview/사용안내.txt' $delivery
-          $names = @(Get-ChildItem -LiteralPath $delivery -File | ForEach-Object Name | Sort-Object)
-          $expected = @('FishingAutomation.exe', 'Run_Stage16_ReadOnly.cmd', '사용안내.txt' | Sort-Object)
-          if (@(Compare-Object -ReferenceObject $expected -DifferenceObject $names).Count -ne 0) { throw 'Stage16 artifact contains unexpected files' }
-          Write-Host 'Stage16 preview self-test passed. No GUI click, CLI call, capture, game input or AI process executed in CI.'
-      - name: Upload isolated Stage16 read-only test ZIP artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: MabiAuto-Stage16-Isolated-ReadOnly-Win64
-          path: _stage16-readonly-delivery/**
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish self-contained Windows x64 diagnostic
-        shell: pwsh
-        run: |
-          $dest = Join-Path (Get-Location) '_packet-receive-probe-publish'
-          dotnet publish tools/PacketReceiveProbe/PacketReceiveProbe.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $dest
-          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic publish failed' }
-          if (-not (Test-Path (Join-Path $dest 'PacketReceiveProbe.exe'))) { throw 'Published EXE missing' }
-          Copy-Item 'tools/PacketReceiveProbe/RunReceiveProbe.cmd' $dest
-          Copy-Item 'tools/PacketReceiveProbe/RunAllChecks.cmd' $dest
-          Copy-Item 'tools/PacketReceiveProbe/사용안내.txt' $dest
-          Write-Host 'Packaged independently of the existing macro. Live capture was not performed in CI.'
-      - name: Upload click-to-run diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: PacketReceiveProbe-Win64-ClickToRun
-          path: _packet-receive-probe-publish/**
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish independent offline export checker
-        shell: pwsh
-        run: |
-          $dest = Join-Path (Get-Location) '_mobilay-export-inspector-publish'
-          dotnet publish tools/MobilayExportInspector/MobilayExportInspector.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $dest
-          if ($LASTEXITCODE -ne 0) { throw 'Export inspector publish failed' }
-          if (-not (Test-Path (Join-Path $dest 'MobilayExportInspector.exe'))) { throw 'Published export inspector missing' }
-          Copy-Item 'tools/MobilayExportInspector/RunExportCheck.cmd' $dest
-          Copy-Item 'tools/MobilayExportInspector/RunCoverageCheck.cmd' $dest
-          Copy-Item 'tools/MobilayExportInspector/사용안내.txt' $dest
-          Write-Host 'Export inspector never opens network, game, capture drivers or raw packet files.'
-      - name: Upload drag-and-drop offline export checker
-        uses: actions/upload-artifact@v4
-        with:
-          name: MobilayExportInspector-Win64-Offline
-          path: _mobilay-export-inspector-publish/**
-          if-no-files-found: error
-          retention-days: 14
-) {
-            throw 'Could not prove test-only build checkout commit'
-          }
-          $checkedSha | Set-Content -LiteralPath (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ascii
-          $appHash = (Get-FileHash (Join-Path $output 'FishingAutomation.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$appHash  release/FishingAutomation.exe" | Set-Content -LiteralPath (Join-Path $pkg 'EXE_SHA256.txt') -Encoding ascii
+          $sha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sha.Length -ne 40) { throw 'Invalid test build source SHA' }
+          $sha | Set-Content -LiteralPath (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          $hash = (Get-FileHash (Join-Path $out 'FishingAutomation.exe') -Algorithm SHA256).Hash
+          $hash | Set-Content -LiteralPath (Join-Path $pkg 'EXE_SHA256.txt') -Encoding ASCII
           @(
-            'MabiAuto Stage26 / V3.2.26 integration TEST ONLY. Not a GitHub Release or auto-update.',
-            'Exact tested GitHub checkout merge SHA is recorded in BUILD_COMMIT.txt.',
-            'Run only from a NEW, isolated test folder with the production macro closed.',
-            'There is NO production updater, START.cmd, rollback installer or release authorization.',
-            'Keep your current working installation and its settings backed up and unchanged.',
-            'Existing Codex pinned-source policy may refuse AI repair on this PR-only SHA; this is intended.',
-            'A developer CI pass does not verify real-game actions or AI repair accuracy.',
-            'After manual test stop the candidate and discard the isolated folder if validation fails.'
+            'TEST ONLY / NOT A RELEASE OR AUTO-UPDATE.',
+            'V3.2.26 integrated development candidate; GitHub checkout SHA is BUILD_COMMIT.txt.',
+            'Close your existing macro and use a SEPARATE test directory.',
+            'Keep the existing working install and settings untouched, with an independent backup.',
+            'No START.cmd, update installer or automatic release is included.',
+            'Existing Codex pinned-release guard may block code repair at a PR-only SHA. Do not bypass it.',
+            'GitHub CI does not prove gameplay success. Do not deploy as a production replacement.'
           ) | Set-Content -LiteralPath (Join-Path $pkg 'TEST_ONLY_README.txt') -Encoding UTF8
-          Write-Host 'Stage26 user-test payload prepared from a verified checkout; no release, user PC, or live game touched.'
-      - name: Upload Stage26 V3.2.26 test-only Windows ZIP (not main/release)
+      - name: Upload Stage26 isolated Windows test artifact
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 231
         uses: actions/upload-artifact@v4
         with:
