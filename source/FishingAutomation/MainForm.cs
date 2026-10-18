@@ -58,13 +58,15 @@ public sealed partial class MainForm : Form
     // Disabled by default; the ordinary abyss and processing entry points are unchanged.
     private bool _combinedAlteringRequested;
 
-    private static readonly Color WindowBg = Color.FromArgb(246, 248, 252);
-    private static readonly Color WindowFrame = Color.FromArgb(98, 121, 150);
-    private static readonly Color PanelBg = Color.White;
-    private static readonly Color Border = Color.FromArgb(223, 230, 240);
-    private static readonly Color TitleText = Color.FromArgb(23, 32, 51);
-    private static readonly Color Blue = Color.FromArgb(40, 112, 242);
-    private static readonly Color Green = Color.FromArgb(22, 143, 99);
+    // Mobilay-inspired charcoal/lavender palette drawn from the user's UI reference.
+    // No third-party brand artwork, executables or assets are bundled.
+    private static readonly Color WindowBg = Color.FromArgb(23, 23, 24);
+    private static readonly Color WindowFrame = Color.FromArgb(13, 14, 18);
+    private static readonly Color PanelBg = Color.FromArgb(30, 30, 32);
+    private static readonly Color Border = Color.FromArgb(52, 52, 57);
+    private static readonly Color TitleText = Color.FromArgb(238, 238, 244);
+    private static readonly Color Blue = Color.FromArgb(171, 143, 249);
+    private static readonly Color Green = Color.FromArgb(81, 200, 156);
 
     public MainForm() : this(null) { }
 
@@ -83,8 +85,9 @@ public sealed partial class MainForm : Form
 
         Text = "Mabi_Auto";
         var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1448, 1086);
-        float uiScale = 0.65f * Math.Min(1f, Math.Min((area.Width - 32) / 1448f, (area.Height - 32) / 1086f));
-        ClientSize = new Size((int)(1448 * uiScale), (int)(1086 * uiScale));
+        // The reference uses a wider dashboard than the old 1448:1086 design.
+        // Preserve responsive per-axis scaling in ReferenceDashboard for smaller monitors.
+        ClientSize = new Size(Math.Min(1180, area.Width - 32), Math.Min(780, area.Height - 32));
         MinimumSize = new Size(Math.Min(940, area.Width), Math.Min(700, area.Height));
         StartPosition = FormStartPosition.CenterScreen;
         // A real 2px frame on the borderless form: the docked content fills only
