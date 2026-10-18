@@ -54,6 +54,32 @@ class OfflineEvidenceAbTests(unittest.TestCase):
         self.assertFalse(summary["diagnostic_accuracy_proven"])
         self.assertFalse(summary["gameplay_authorized"])
 
+    def test_stage17_possible_removal_hints_do_not_prove_cancellation(self):
+        """Two CLI count snapshots imply possible removal only, not identity."""
+        block = (ab.BEGIN + "\n"
+            "get_altering_works=cli_altering_possible_removed_not_completed;age_ms=300\n"
+            + ab.END + "\n")
+        result = ab.compare_text(BASE + block)
+        self.assertEqual(result["evidence_format"], "valid")
+        self.assertIn("work_removal_possible_not_completion_hint",
+                      result["additional_hints"])
+        self.assertFalse(result["ground_truth_verified"])
+        self.assertFalse(result["diagnostic_accuracy_proven"])
+        self.assertFalse(result["gameplay_authorized"])
+        after = (ab.BEGIN + "\n"
+            "get_altering_works=cli_altering_possible_finished_receipt_unknown;age_ms=5000\n"
+            + ab.END + "\n")
+        result2 = ab.compare_text(BASE + after)
+        self.assertEqual(result2["evidence_format"], "valid")
+        self.assertIn("work_finished_possible_receipt_unknown_hint",
+                      result2["additional_hints"])
+        self.assertFalse(result2["ground_truth_verified"])
+        # Never allow an invented confirmed-cancel/receipt label.
+        fabricated = (ab.BEGIN + "\n"
+            "get_altering_works=cli_altering_cancelled_confirmed;age_ms=300\n"
+            + ab.END + "\n")
+        self.assertEqual(ab.parse(BASE + fabricated).status, "invalid")
+
     def test_heuristic_drift_is_flagged_not_counted_as_accuracy_gain(self):
         # The unchanged error_memory heuristic can be biased by the
         # annotation's footer mentioning "receipt"; this is NOT an
