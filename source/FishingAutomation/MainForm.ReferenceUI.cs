@@ -793,8 +793,8 @@ public sealed partial class MainForm
                 if (_kind == "card-link")
                 {
                     using var bg = new SolidBrush(_pressed ? AccentSoft : _hover ? CardBg2 : Color.FromArgb(43, 43, 46));
-                    using var shape = Round(new RectangleF(0.5f, 0.5f, Math.Max(1, w - 1), Math.Max(1, h - 1)), 9);
-                    g.FillPath(bg, shape);
+                    using var cardLinkShape = Round(new RectangleF(0.5f, 0.5f, Math.Max(1, w - 1), Math.Max(1, h - 1)), 9);
+                    g.FillPath(bg, cardLinkShape);
                     _ui.Icon(g, "arrow-up-right", new(7, 7, w - 14, h - 14), TitleText);
                     return;
                 }
