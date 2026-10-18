@@ -1,4 +1,7 @@
 using System.Diagnostics;
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+using FishingAutomation.Telemetry;
+#endif
 
 namespace FishingAutomation;
 
@@ -85,6 +88,10 @@ internal sealed class AiAutopilotHost : IDisposable
             child.ErrorDataReceived += (_, e) => { if (e.Data is not null) Observe(e.Data); };
             child.Exited += (_, _) =>
             {
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+                if (ReferenceEquals(_child, child))
+                    AiPassiveCliEvidence.SetEnabled(false);
+#endif
                 if (!_disposed && ReferenceEquals(_child, child))
                 {
                     int code;
@@ -102,12 +109,26 @@ internal sealed class AiAutopilotHost : IDisposable
                 return;
             }
             _child = child;
+            // Only a successfully started, user-enabled AI watcher opts
+            // into RAM-only passive CLI metadata; never queries the game.
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+            AiPassiveCliEvidence.SetEnabled(true);
+#endif
             child.BeginOutputReadLine();
             child.BeginErrorReadLine();
+            // A watcher that exits during startup must not leave passive
+            // collection enabled; its Exited event handles later exits.
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+            if (child.HasExited)
+                AiPassiveCliEvidence.SetEnabled(false);
+#endif
             Publish("AI 감시 준비 및 안전 검사 중");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+            AiPassiveCliEvidence.SetEnabled(false);
+#endif
             Publish("AI 감시 실행 실패: " + ex.GetType().Name + " — Python 설치·경로 확인");
         }
     }
@@ -220,6 +241,10 @@ internal sealed class AiAutopilotHost : IDisposable
 
     internal void Stop()
     {
+        // Stop and purge passive diagnostics even when the child is absent.
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+        AiPassiveCliEvidence.SetEnabled(false);
+#endif
         var child = _child;
         _child = null;
         if (child is null) return;

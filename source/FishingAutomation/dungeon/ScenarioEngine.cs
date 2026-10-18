@@ -826,6 +826,21 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                     continue;
                 var settledRetry = await _detector.DetectAsync("retry_ocr_strict", settledRetryFrame, ct);
                 if (!settledRetry.Found || !settledRetry.Bounds.IntersectsWith(retryConfirm.Bounds)) continue;
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+                // Ordinary dungeon only, not Abyss. The exact retry label
+                // survived two frames, exclusions, and final fresh geometry.
+                // This is a retry UI observation, NOT dungeon-clear proof.
+                if (!IsAbyss)
+                {
+                    try
+                    {
+                        FishingAutomation.Telemetry.AiPassiveCliEvidence.ObserveVerifiedScreen(
+                            FishingAutomation.Telemetry.VerifiedScreenIncidentSignal.DungeonRetryGuardPassed,
+                            DateTimeOffset.UtcNow);
+                    }
+                    catch (Exception) { /* never affect result safety */ }
+                }
+#endif
                 retryConfirm = settledRetry;
                 normalResultRetryClicks++;
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);

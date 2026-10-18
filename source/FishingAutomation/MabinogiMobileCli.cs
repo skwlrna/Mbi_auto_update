@@ -1,4 +1,7 @@
 using System.Diagnostics;
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+using FishingAutomation.Telemetry;
+#endif
 using System.Text;
 using System.Text.Json;
 
@@ -179,6 +182,48 @@ public sealed class MabinogiMobileCli
 
     private MabinogiCliResult Finish(MabinogiCliResult result)
     {
+        // Passive metadata only, no additional CLI call, input, or packet parsing.
+        // The watcher lifecycle controls opt-in; the collector never throws
+        // and cannot change the result or its production safety gates.
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+        if (AiPassiveCliEvidence.Enabled)
+        {
+            // Interpret only the same five existing vetted read-only queries.
+            // This adapter is passive: it does not call QueryAsync/RunProcess.
+            CliDiagnosticQuery? diagnosticQuery = result.Command switch
+            {
+                "status" => CliDiagnosticQuery.Status,
+                "get_activity" => CliDiagnosticQuery.Activity,
+                "get_altering_works" => CliDiagnosticQuery.AlteringWorks,
+                "get_items" => CliDiagnosticQuery.Items,
+                "get_alterable_items" => CliDiagnosticQuery.AlteringCatalog,
+                _ => null
+            };
+            if (diagnosticQuery is { } query)
+            {
+                CliDiagnosticProjection? verifiedProjection = null;
+                string? verifiedDiagnostic = null;
+                try
+                {
+                    verifiedProjection =
+                        ReadOnlyCliObservationBridge.ProjectExistingResult(
+                            query, result);
+                    verifiedDiagnostic = verifiedProjection.Status;
+                }
+                catch (Exception ex) when (ex is InvalidDataException or
+                    InvalidOperationException or System.Text.Json.JsonException or
+                    FormatException or ArgumentException or OverflowException)
+                {
+                    // Diagnostic parsing can fail, but may not alter the
+                    // existing production CLI result or its safety gates.
+                    verifiedDiagnostic = "cli_schema_unverified";
+                }
+                AiPassiveCliEvidence.Observe(result.Command, result.Success,
+                    result.State, result.Error, DateTimeOffset.UtcNow,
+                    verifiedDiagnostic, verifiedProjection);
+            }
+        }
+#endif
         // Never echo arbitrary rejected input or CLI stderr. Successful read-only
         // polling is still written to the file, but hidden from the on-screen log.
         // Failures/rejections plus startup status/capabilities remain visible.

@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <!-- Production-app-only passive AI evidence hooks; legacy isolated CLI tests compile without this dependency. -->
+    <DefineConstants>$(DefineConstants);MABIAUTO_AI_PASSIVE_CONTEXT</DefineConstants>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <UseWindowsForms>true</UseWindowsForms>
@@ -16,6 +18,11 @@
     <RunAnalyzers>false</RunAnalyzers>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
+  </PropertyGroup>
+  <!-- Stage 16 is an explicit opt-in, stand-alone diagnostic-only binary.
+       It must NEVER be set in normal production release workflows. -->
+  <PropertyGroup Condition="'$(Stage16PreviewOnly)' == 'true'">
+    <DefineConstants>$(DefineConstants);STAGE16_PREVIEW_ONLY</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(GatheringLocalPreview)' == 'true'">
     <DefineConstants>$(DefineConstants);GATHERING_LOCAL_PREVIEW</DefineConstants>
