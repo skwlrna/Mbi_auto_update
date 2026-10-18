@@ -230,7 +230,7 @@ def _read_sources(root: Path) -> dict[str, str] | None:
                 return None
             data = path.read_bytes()
             total += len(data)
-            if total > MAX_TOTAL_BYTES or not data or b"\\x00" in data:
+            if total > MAX_TOTAL_BYTES or not data or b"\x00" in data:
                 return None
             result[label] = data.decode("utf-8-sig", errors="strict")
         return result
