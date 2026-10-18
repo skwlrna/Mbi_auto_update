@@ -96,12 +96,12 @@ def _isolated_cli(text: str) -> ab.Evidence:
     """
     lines = text.splitlines(keepends=True)
     starts = [i for i, row in enumerate(lines)
-              if row.rstrip("\\r\\n").startswith("BEGIN READ-ONLY CLI DIAGNOSTIC")]
+              if row.rstrip("\r\n").startswith("BEGIN READ-ONLY CLI DIAGNOSTIC")]
     ends = [i for i, row in enumerate(lines)
-            if row.rstrip("\\r\\n").startswith("END READ-ONLY CLI DIAGNOSTIC")]
+            if row.rstrip("\r\n").startswith("END READ-ONLY CLI DIAGNOSTIC")]
     if len(starts) != 1 or len(ends) != 1 or starts[0] >= ends[0]:
         return ab.parse(text)
-    return ab.parse("MabiAuto synthetic\\n" +
+    return ab.parse("MabiAuto synthetic\n" +
                     "".join(lines[starts[0]:ends[0] + 1]))
 
 
