@@ -7,11 +7,13 @@ on:
     paths:
       - 'source/FishingAutomation/MainForm*.cs'
       - 'tests/mobilay-ui/**'
+      - 'tests/production-ui/**'
       - '.github/workflows/mobilay-ui-checks.yml'
   pull_request:
     paths:
       - 'source/FishingAutomation/MainForm*.cs'
       - 'tests/mobilay-ui/**'
+      - 'tests/production-ui/**'
       - '.github/workflows/mobilay-ui-checks.yml'
 
 permissions:
@@ -39,6 +41,11 @@ jobs:
         run: |
           dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Mobilay UI WinForms build failed' }
+      - name: Exercise real WinForms UI with isolated fake CLI
+        shell: pwsh
+        run: |
+          dotnet run --project tests/production-ui/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Real Mobilay-layout WinForms UI regression failed' }
       - name: Package UI preview for isolated Windows comparison only
         if: github.event_name == 'pull_request'
         shell: pwsh
