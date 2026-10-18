@@ -288,7 +288,8 @@ jobs:
             if($productionPage -notmatch [regex]::Escape($text)){throw "production quantity UI missing: $text"}
           }
           # V3.1.92 groups production destinations under one accessible menu.
-          if($layout -notmatch 'AddButton\\("(생산 관리|생활 생산)"'){throw 'new production navigation is missing'}
+          if($layout -notmatch [regex]::Escape('AddButton("생활 생산"') -and
+             $layout -notmatch [regex]::Escape('AddButton("생산 관리"')){throw 'new production navigation is missing'}
           foreach($text in @('자동 가공','자동 채집','제작')){
             if($layout -notmatch [regex]::Escape($text)){throw "production menu option missing: $text"}
           }
