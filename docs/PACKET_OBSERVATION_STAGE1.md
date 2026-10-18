@@ -71,3 +71,58 @@ The added PR workflow also builds the Windows production project with .NET 8.
   source labels without raw data or identity fields; safe fallback always.
 - Do not route event hints to gameplay decisions until a separate reviewed
   change with replay-based conflict tests and existing safety guards.
+
+
+## Phase 2: explicit offline fixture replay (2026-10-18)
+
+`PacketObservationFixtureReplay` implements an **offline-only, synthetic fixture**
+input contract. It is neither a Mobilay export reader nor a packet decoder.
+No Mobilay live API was confirmed from the package or the product's published
+features. This work does not subscribe to any host port, WebSocket, or game process.
+
+- Diagnostics and replay must **both** be explicitly enabled by the caller.
+  There is no enabled-by-default game integration or background file watch.
+- The normalized adapter source is hardcoded to `fixture/offline-v1`.
+  The developer-authorized inbox must separately allow this exact source.
+  The fixture cannot supply its own source or authenticate a real program.
+- Strict JSON Lines (one object per line), version 1, UTC ISO-8601
+  timestamps ending in `Z`, positive sequence, known hint kind, optional
+  `value` only for health fraction. Unknown or duplicate properties, invalid
+  numbers, unknown kinds, malformed JSON or extra metadata are rejected.
+- Hard bounds: 128 records, 2,048 characters/line, 65,536 characters total.
+  **Entire batch parsing precedes admission**: one malformed record rejects
+  the whole fixture. In an otherwise valid file, late/duplicate values are
+  rejected individually by the existing inbox.
+- Status output includes **only** counts and one of `disabled`,
+  `invalid_or_oversized_fixture`, `invalid_fixture_schema`,
+  `fixture_unreadable`, `empty_fixture`, or `replayed`.
+  No raw payloads or private IDs are logged.
+- It accepts a caller-provided `TextReader` rather than scanning folders
+  or reaching into Mobilay's private storage.
+
+Minimal **synthetic example** (not a real Mobilay record):
+
+```jsonl
+{"schemaVersion":1,"kind":"combat_activity","sequence":1,"observedAtUtc":"2026-10-18T04:00:00.0000000Z","expiresAtUtc":"2026-10-18T04:00:03.0000000Z"}
+{"schemaVersion":1,"kind":"target_health_fraction","sequence":1,"observedAtUtc":"2026-10-18T04:00:00.0000000Z","expiresAtUtc":"2026-10-18T04:00:03.0000000Z","value":0.25}
+```
+
+A fixture should be replayed with a matching **explicit test clock**, because
+the inbox's 5-second staleness rules are intentionally strict. Historical
+fixtures are not live gameplay evidence.
+
+Test command (synthetic data, no game):
+
+```powershell
+dotnet run --project tests/packet-observation/Regression.csproj -c Release
+```
+
+### What still blocks actual real-time integration
+
+A written/permitted external event API contract (or verified exported data
+schema) is still missing, so this phase does **not** establish a real-time
+data connection to Mobilay. The existing CLI/OCR, F10 stop, input ownership,
+2-observation Abyss-clear evidence and recovery policies stay unchanged.
+A future real adapter must prove source authentication, field semantics and
+game policy compliance, and it must be tested before enabling any runtime
+observation, much less game actions.
