@@ -213,7 +213,7 @@ Check(ReadOnlyCliComparison.ClassifyResponse(0,
     """{"body":{"activity":"SECRET"}}""", "get_activity")
     == "cli_readonly_object", "real CLI get_activity body without status misclassified");
 Check(ReadOnlyCliComparison.ClassifyResponse(0,
-    """{"body":"{\\"pipe\\":\\"connected\\"}"}""", "status")
+    """{"body":"{\"pipe\":\"connected\"}"}""", "status")
     == "cli_connected", "escaped nested JSON body not recognized");
 Check(ReadOnlyCliComparison.ClassifyResponse(0,
     """{"body":{"pipe":"disconnected"}}""", "status")
