@@ -16,10 +16,16 @@
 4) 실제 캡처를 허용하려면 정확히 YES 를 입력하세요. 취소하려면 빈칸/다른 문자를 입력하세요.
 5) 실행 중 1초마다 read_only_probe_window 줄이 표시됩니다.
    frames=0 이 잠깐 나와도 게임 연결 종료를 뜻하지 않습니다.
-6) 정해진 시간 뒤 기존 read_only_probe_result 합계와
+6) 시작 전과 종료 후 read_only_tcp_owner_before / read_only_tcp_owner_after도 표시됩니다.
+   owner_names는 Windows TCP 연결 테이블의 원격 포트 16000 사용 프로세스 이름만
+   표시한 것입니다. 프로세스 이름으로 실제 프레임 주인이나 게임 상태가 증명되지는 않습니다.
+   IPv4 연결만 확인하며 IPv6 연결은 조사하지 않습니다.
+7) 정해진 시간 뒤 기존 read_only_probe_result 합계와
    read_only_probe_activity 요약이 표시됩니다.
-7) matched_frames, frame_bytes, status, active_windows, trailing_quiet_windows,
+8) matched_frames, frame_bytes, status, active_windows, trailing_quiet_windows,
    longest_quiet_windows, activity 값만 알려주면 됩니다.
+   원격 포트 소유 프로세스는 궁금한 경우 이름만 확인하고 알려줘도 됩니다.
+   민감해 보이는 프로세스 이름은 가려서 공유하세요.
    IP 주소, 계정, 원본 패킷 데이터, 장치 식별자, 전체 화면을 공유할 필요가 없습니다.
 
 [해석]
