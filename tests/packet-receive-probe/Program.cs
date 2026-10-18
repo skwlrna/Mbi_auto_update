@@ -338,4 +338,51 @@ Check(flowCollector.CountNamedCandidateFrames(Array.Empty<TcpIpv4Flow>(),
     Array.Empty<TcpIpv4Flow>()) == 0,
     "port-only matches incorrectly counted as game-process candidates");
 
+// Case studies use synthetic metadata, never packet bytes or user details.
+TransportEvidenceAssessment.Result Evidence(
+    string cli, long frames, long namedFlows, bool osTable = true,
+    long unparsed = 0, long overflow = 0) =>
+    TransportEvidenceAssessment.Assess(new(cli, frames, namedFlows,
+        unparsed, overflow, osTable));
+
+var correlated = Evidence("cli_connected", 40, 25);
+Check(correlated is { Evidence: "independent_sources_agree",
+    PacketMeaningVerified: false, AuthorizesGameplay: false },
+    "independent sources were promoted to decoded game event");
+var cliOnly = Evidence("cli_connected", 40, 0);
+Check(cliOnly.Evidence == "cli_only" && !cliOnly.AuthorizesGameplay,
+    "CLI alone authorized packet-driven actions");
+Check(Evidence("cli_disconnected", 30, 20).Evidence ==
+    "conflicting_signals", "disconnect disagreement went undetected");
+Check(Evidence("cli_game_or_option_off", 30, 20).Evidence ==
+    "conflicting_signals", "game-off disagreement went undetected");
+Check(Evidence("cli_timeout", 30, 20).Evidence ==
+    "network_candidate_only", "timeout treated as disconnected");
+Check(Evidence("cli_readonly_object", 30, 20).Evidence ==
+    "network_candidate_only", "activity response alone inferred connection");
+Check(Evidence("cli_disconnected", 0, 0).Evidence ==
+    "no_observation", "silence was treated as proof game is off");
+Check(Evidence("cli_connected", 0, 0).Evidence ==
+    "cli_only", "no frames falsely supported socket agreement");
+Check(Evidence("cli_timeout", 9, 0).Evidence ==
+    "unattributed_traffic", "unmatched traffic was attributed to game");
+Check(Evidence("cli_connected", 40, 25, osTable: false).Evidence ==
+    "unavailable", "missing OS socket snapshot treated as agreement");
+Check(Evidence("cli_connected", 40, 25, overflow: 1).Evidence ==
+    "incomplete_evidence", "flow table overflow ignored");
+Check(Evidence("cli_connected", 40, 41).Evidence ==
+    "invalid_evidence", "more named frames than total frames accepted");
+Check(Evidence("cli_connected", -1, 0).Evidence ==
+    "invalid_evidence", "negative frame count accepted");
+foreach (string cli in new[]
+    { "cli_connected", "cli_timeout", "cli_disconnected", "cli_rejected", "cli_empty" })
+{
+    foreach (long frames in new long[] { 0, 1, 40 })
+    {
+        var result = Evidence(cli, frames, frames > 0 ? 1 : 0);
+        Check(!result.PacketMeaningVerified && !result.AuthorizesGameplay,
+            "gameplay authorization raised by diagnostic-only data");
+    }
+}
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
