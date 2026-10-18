@@ -207,18 +207,43 @@ Check(ReadOnlyCliComparison.IsAllowed("status") &&
     !ReadOnlyCliComparison.IsAllowed("get_inventory"),
     "guided CLI did not enforce two-command allowlist");
 Check(ReadOnlyCliComparison.ClassifyResponse(0,
-    """{"status":"accepted","body":{"characterId":"SECRET"}}""")
-    == "cli_accepted", "private body should not affect output classification");
-Check(ReadOnlyCliComparison.ClassifyResponse(1, "{}") == "cli_nonzero_exit",
+    """{"body":{"pipe":"connected","health":"SECRET"}}""", "status")
+    == "cli_connected", "real CLI status envelope with no root.status misclassified");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    """{"body":{"activity":"SECRET"}}""", "get_activity")
+    == "cli_readonly_object", "real CLI get_activity body without status misclassified");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    """{"body":"{\\"pipe\\":\\"connected\\"}"}""", "status")
+    == "cli_connected", "escaped nested JSON body not recognized");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    """{"body":{"pipe":"disconnected"}}""", "status")
+    == "cli_disconnected", "nested disconnected state not recognized");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    """{"body":{"reason":"game_off"}}""", "status")
+    == "cli_game_or_option_off", "game_off not classified");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    """{"body":{"reason":"option_off"}}""", "status")
+    == "cli_game_or_option_off", "option_off not classified");
+Check(ReadOnlyCliComparison.ClassifyResponse(0,
+    """{"body":{"error":"forbidden"}}""", "get_activity")
+    == "cli_rejected", "error envelope accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(5, "{}") == "cli_disconnected",
+    "CLI disconnected exit not recognized");
+Check(ReadOnlyCliComparison.ClassifyResponse(1, "{}") == "cli_rejected",
     "failed CLI exit accepted");
 Check(ReadOnlyCliComparison.ClassifyResponse(0, "not-json") == "cli_invalid_json",
     "non-json CLI response accepted");
-Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}") == "cli_json_without_status",
-    "unclassified CLI JSON accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}", "status")
+    == "cli_unclassified_status", "unclassified status promoted to connection");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}", "get_activity")
+    == "cli_readonly_object", "valid empty activity object misclassified");
 Check(ReadOnlyCliComparison.ClassifyResponse(0, """{"status":"rejected"}""") ==
     "cli_rejected", "CLI rejection was promoted to success");
 Check(ReadOnlyCliComparison.ClassifyResponse(0, new string('x', 16385)) ==
     "cli_oversize", "oversize CLI response accepted");
 Check(ReadOnlyCliComparison.ClassifyResponse(0, "") == "cli_empty",
     "empty CLI response accepted");
+Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}", "execute_gathering")
+    == "cli_command_blocked", "action passed CLI parser");
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
