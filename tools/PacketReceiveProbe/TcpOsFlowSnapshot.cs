@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace FishingAutomation.PacketDiagnostics;
 
@@ -21,10 +22,17 @@ internal static class TcpOsFlowSnapshot
         IntPtr buffer, ref int size, bool ordered, int family, int tableClass,
         uint reserved);
 
-    internal sealed record Snapshot(bool Available, IReadOnlyCollection<TcpIpv4Flow> Flows)
+    internal sealed record Snapshot(bool Available, IReadOnlyCollection<TcpIpv4Flow> Flows,
+        IReadOnlyCollection<TcpIpv4Flow> NamedGameCandidateFlows)
     {
-        internal static Snapshot Unavailable() => new(false, Array.Empty<TcpIpv4Flow>());
+        internal static Snapshot Unavailable() => new(false,
+            Array.Empty<TcpIpv4Flow>(), Array.Empty<TcpIpv4Flow>());
     }
+
+    // The screenshot showed this process basename on the user PC.
+    // It is a diagnostic candidate label, never an authenticated identity.
+    internal static bool IsNamedGameCandidate(string? processName) =>
+        string.Equals(processName, "MabinogiMobile", StringComparison.OrdinalIgnoreCase);
 
     internal static Snapshot ReadMatchingRemotePort(int remotePort)
     {
@@ -51,6 +59,7 @@ internal static class TcpOsFlowSnapshot
                 if (count < 0 || (long)count * RowBytes + 4 > length)
                     return Snapshot.Unavailable();
                 var flows = new HashSet<TcpIpv4Flow>();
+                var gameCandidates = new HashSet<TcpIpv4Flow>();
                 for (int i = 0; i < count; i++)
                 {
                     IntPtr row = IntPtr.Add(allocation, 4 + i * RowBytes);
@@ -66,11 +75,28 @@ internal static class TcpOsFlowSnapshot
 
                     uint localAddress = unchecked((uint)Marshal.ReadInt32(row, 4));
                     uint remoteAddress = unchecked((uint)Marshal.ReadInt32(row, 12));
-                    flows.Add(new(remoteAddress, (ushort)sourcePort, localAddress, localPort));
+                    var flow = new TcpIpv4Flow(remoteAddress, (ushort)sourcePort,
+                        localAddress, localPort);
+                    flows.Add(flow);
+                    int pid = Marshal.ReadInt32(row, 20);
+                    if (pid > 0)
+                    {
+                        try
+                        {
+                            using var process = Process.GetProcessById(pid);
+                            if (IsNamedGameCandidate(process.ProcessName))
+                                gameCandidates.Add(flow);
+                        }
+                        catch (Exception e) when (e is ArgumentException or
+                            InvalidOperationException or System.ComponentModel.Win32Exception)
+                        {
+                            // PIDs may expire during the read; fail closed.
+                        }
+                    }
                     if (flows.Count > MaximumMatchingFlows)
                         return Snapshot.Unavailable();
                 }
-                return new(true, flows.ToArray());
+                return new(true, flows.ToArray(), gameCandidates.ToArray());
             }
             finally
             {
