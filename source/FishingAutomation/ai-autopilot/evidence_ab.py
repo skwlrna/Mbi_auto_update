@@ -113,6 +113,10 @@ SCREEN_SIGNALS = {
     ("gathering", "gathering_stop_control_double_checked"),
     ("abyss", "abyss_clear_pair_guard_passed"),
     ("abyss", "abyss_result_guard_passed"),
+    ("altering", "altering_free_action_guard_passed"),
+    ("crafting", "crafting_result_popup_guard_passed"),
+    ("fishing", "fishing_hook_ready_two_frames"),
+    ("dungeon", "dungeon_retry_guard_passed"),
 }
 SCREEN_COMPARISONS = {
     "no_comparable_cli_state", "compatible_gathering_hints_only",
