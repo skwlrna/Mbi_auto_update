@@ -133,4 +133,42 @@ try
 }
 catch (ArgumentOutOfRangeException) { checks++; }
 
+// A fixed, synthetic Windows socket-owner table. Nothing here reads the
+// machine TCP table or exposes IP addresses/ports beyond the known filter.
+var sockets = new[]
+{
+    new TcpSocketOwnerProbe.SocketOwner(16000, "GameCandidate"),
+    new TcpSocketOwnerProbe.SocketOwner(16000, "GameCandidate"),
+    new TcpSocketOwnerProbe.SocketOwner(16000, "other_process"),
+    new TcpSocketOwnerProbe.SocketOwner(443, "web_browser")
+};
+var owners = TcpSocketOwnerProbe.Classify(sockets, 16000);
+Check(owners is { Status: "port_matched_owner_candidates",
+    MatchingIpv4Sockets: 3, DistinctOwnerNames: 2 } &&
+    owners.ProcessNames == "GameCandidate,other_process",
+    "per-port owner list duplicated names or leaked unrelated sockets");
+var noOwner = TcpSocketOwnerProbe.Classify(sockets, 8000);
+Check(noOwner is { Status: "no_ipv4_port_match", MatchingIpv4Sockets: 0,
+    DistinctOwnerNames: 0, ProcessNames: "none" },
+    "unmatched source port was reported as a game socket");
+var sanitized = TcpSocketOwnerProbe.Classify(
+    new[] { new TcpSocketOwnerProbe.SocketOwner(16000, "owner with spaces") },
+    16000);
+Check(sanitized.ProcessNames == "owner_with_spaces",
+    "process labels not bounded/sanitized");
+Check(TcpSocketOwnerProbe.ReadMatchingIpv4RemotePort(0).Status ==
+    "os_tcp_table_unavailable", "invalid port permitted OS probing");
+try
+{
+    TcpSocketOwnerProbe.Classify(sockets, 0);
+    throw new Exception("port-zero owner lookup accepted");
+}
+catch (ArgumentOutOfRangeException) { checks++; }
+try
+{
+    TcpSocketOwnerProbe.Classify(sockets, 65536);
+    throw new Exception("out-of-range port owner lookup accepted");
+}
+catch (ArgumentOutOfRangeException) { checks++; }
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
