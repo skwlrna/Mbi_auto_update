@@ -73,12 +73,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.23"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.24"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.23</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3223-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.23"')) {
+          if ($p -notmatch '<Version>3\.2\.24</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3224-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.24"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
