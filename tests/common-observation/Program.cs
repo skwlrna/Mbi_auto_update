@@ -230,5 +230,167 @@ Check(MobilayDpsSummaryValidator.Inspect(
 Check(Inspect("622417 00 00 50 3B").Status == "invalid_json",
     "hex CharacterInfo record was treated as a decoded export");
 
+// Stage 12: existing read-only CLI semantics, never action commands.
+// Timeouts can be labeled disconnected in the existing CLI wrapper: do not
+// interpret a timeout/error as a verified game disconnect.
+Check(ReadOnlyCliObservationProjection.Connection("status", true, "connected", null)
+    is { Status: "state_observed", Domain: CommonObservationDomain.Connection,
+        State: CommonObservationState.Connected, AuthorizesGameplay: false },
+    "verified status did not map to diagnostic connection");
+Check(ReadOnlyCliObservationProjection.Connection("status", false, "disconnected",
+    "disconnected") is { State: CommonObservationState.Disconnected },
+    "explicit disconnected evidence not classified");
+foreach (string reason in new[] { "timeout", "cli_unavailable", "invalid_json", "game_off" })
+    Check(ReadOnlyCliObservationProjection.Connection("status", false,
+        "disconnected", reason).State is null,
+        "ambiguous connection failure became disconnection: " + reason);
+Check(ReadOnlyCliObservationProjection.Connection("execute_altering",
+    true, "connected", null).State is null,
+    "CLI action response accepted by projector");
+
+Check(ReadOnlyCliObservationProjection.Activity(true, false, false, false, false)
+    is { State: CommonObservationState.Active,
+        Domain: CommonObservationDomain.Activity },
+    "auto travel not reported as activity diagnostic");
+Check(ReadOnlyCliObservationProjection.Activity(false, false, false, true, false)
+    is { State: CommonObservationState.InProgress,
+        Domain: CommonObservationDomain.Gathering },
+    "typed running-gathering signal lost");
+Check(ReadOnlyCliObservationProjection.Activity(false, false, false, false, true)
+    is { State: null, Status: "fishing_seen_unmapped" },
+    "unverified fishing CLI signal promoted to gameplay state");
+Check(ReadOnlyCliObservationProjection.Activity(false, false, false, false, false)
+    is { State: null, Status: "activity_not_classified" },
+    "absence of activity evidence promoted to idle");
+Check(ReadOnlyCliObservationProjection.AlteringWorks(0, 0, 0, 0)
+    is { State: null, Status: "empty_work_list_not_completion" },
+    "empty works misclassified as job completion");
+var runningWorks = ReadOnlyCliObservationProjection.AlteringWorks(2, 1, 1, 0);
+Check(runningWorks is { Domain: CommonObservationDomain.Altering,
+    State: CommonObservationState.InProgress,
+    Count: 2, InProgress: 1, Completed: 1 },
+    "running works aggregate incorrect");
+var endedWorks = ReadOnlyCliObservationProjection.AlteringWorks(2, 0, 2, 0);
+Check(endedWorks is { Status: "all_work_rows_completed_not_receipted",
+    State: CommonObservationState.Completed, AuthorizesGameplay: false },
+    "server rows mistaken for a received item");
+Check(ReadOnlyCliObservationProjection.AlteringWorks(2, 0, 1, 1)
+    is { State: null, Status: "mixed_or_pending_work_not_completion" },
+    "pending work incorrectly marked finished");
+Check(ReadOnlyCliObservationProjection.AlteringWorks(2, 3, 0, 0)
+    is { State: null, Status: "invalid_work_counts" },
+    "invalid aggregate not rejected");
+Check(ReadOnlyCliObservationProjection.InventoryShape(true, true, 24)
+    is { State: null, Count: 24, Status: "inventory_snapshot_only" },
+    "single inventory read incorrectly established a quantity delta");
+Check(ReadOnlyCliObservationProjection.InventoryShape(true, false, 0)
+    .Status == "inventory_unavailable",
+    "invalid inventory promoted to stable");
+
+Check(MultiAlteringObservationAudit.Compare(
+    CommonObservationState.Completed, runningWorks)
+    is { Status: "local_complete_but_work_running",
+        NeedsReview: true, AuthorizesGameplay: false },
+    "local complete with active server work not flagged");
+Check(MultiAlteringObservationAudit.Compare(
+    CommonObservationState.InProgress, endedWorks)
+    is { Status: "server_rows_completed_receipt_unknown",
+        NeedsReview: true, AuthorizesGameplay: false },
+    "unreceived server work rows automatically completed local process");
+Check(MultiAlteringObservationAudit.Compare(
+    CommonObservationState.InProgress, runningWorks)
+    is { Status: "same_stage_diagnostic_only",
+        NeedsReview: false, AuthorizesGameplay: false },
+    "agreement authorized gameplay");
+Check(MultiAlteringObservationAudit.Compare(
+    CommonObservationState.Completed,
+    ReadOnlyCliObservationProjection.AlteringWorks(0, 0, 0, 0))
+    is { Status: "unknown_server_work_state", NeedsReview: true },
+    "empty server work list incorrectly confirmed local completion");
+
+var collectorEngine = new CommonObservationEngine(true,
+    new[] { CommonObservationSource.ReadOnlyCli,
+            CommonObservationSource.LocalScheduler });
+int cliCalls = 0;
+Task<CliDiagnosticProjection> FakeRead(CliDiagnosticQuery query, CancellationToken ct)
+{
+    cliCalls++;
+    return Task.FromResult(query switch
+    {
+        CliDiagnosticQuery.Status =>
+            ReadOnlyCliObservationProjection.Connection(
+                "status", true, "connected", null),
+        CliDiagnosticQuery.AlteringWorks => runningWorks,
+        CliDiagnosticQuery.Items =>
+            ReadOnlyCliObservationProjection.InventoryShape(true, true, 12),
+        _ => new CliDiagnosticProjection("no_verified_gameplay_state")
+    });
+}
+var disabledCollector = new ReadOnlyCliObservationCollector(
+    collectorEngine, FakeRead, now: () => now);
+Check((await disabledCollector.ReadOnceAsync(CliDiagnosticQuery.Status))
+    .Status == "disabled" && cliCalls == 0,
+    "disabled collector executed CLI");
+var opted = new ReadOnlyCliObservationCollector(
+    collectorEngine, FakeRead, explicitlyEnabled: true, now: () => now);
+Check((await opted.ReadOnceAsync((CliDiagnosticQuery)999))
+    .Status == "query_not_allowed" && cliCalls == 0,
+    "arbitrary CLI query invoked");
+var firstRead = await opted.ReadOnceAsync(CliDiagnosticQuery.Status);
+Check(firstRead is { Status: "state_observed" } &&
+    firstRead.Admission?.Accepted == true &&
+    firstRead.Assessment is { Status: "single_source_only",
+        State: CommonObservationState.Connected,
+        AuthorizesGameplay: false } && cliCalls == 1,
+    "one-shot status read failed");
+var inventoryRead = await opted.ReadOnceAsync(CliDiagnosticQuery.Items);
+Check(inventoryRead is { Status: "inventory_snapshot_only",
+    Admission: null, Assessment: null } &&
+    collectorEngine.Evaluate(CommonObservationDomain.Inventory, now).State is null,
+    "inventory snapshot caused automatic stable/changed judgment");
+var workRead = await opted.ReadOnceAsync(CliDiagnosticQuery.AlteringWorks);
+Check(workRead.Admission?.Accepted == true &&
+    collectorEngine.Evaluate(CommonObservationDomain.Altering, now)
+        is { State: CommonObservationState.InProgress, AuthorizesGameplay: false },
+    "real query projection failed to enter common observation");
+Check(opted.CompareMultiAltering(CommonObservationState.Completed, workRead)
+    is { Status: "local_complete_but_work_running", AuthorizesGameplay: false },
+    "multi-altering mismatch not surfaced");
+Check(opted.CompareMultiAltering(null, workRead).NeedsReview,
+    "missing local stage auto-passed");
+Check(opted.ObserveSchedulerRunning().Accepted &&
+    collectorEngine.Evaluate(CommonObservationDomain.Scheduler, now)
+        is { Status: "single_source_only",
+            State: CommonObservationState.InProgress, AuthorizesGameplay: false },
+    "scheduler runtime observation not recorded as diagnostic");
+
+var noLocalSource = new CommonObservationEngine(true,
+    new[] { CommonObservationSource.ReadOnlyCli });
+var deniedScheduler = new ReadOnlyCliObservationCollector(
+    noLocalSource, FakeRead, explicitlyEnabled: true, now: () => now);
+Check(deniedScheduler.ObserveSchedulerRunning().Status == "source_not_allowed",
+    "scheduler evidence bypassed allowlist");
+
+var unavailable = new ReadOnlyCliObservationCollector(collectorEngine,
+    (q, ct) => throw new IOException("PRIVATE_PATH"),
+    explicitlyEnabled: true, now: () => now);
+var unavailableResult = await unavailable.ReadOnceAsync(CliDiagnosticQuery.Status);
+Check(unavailableResult is { Status: "cli_query_unavailable", Admission: null },
+    "CLI failure leaked private content or invented connection");
+
+using var cancelled = new CancellationTokenSource();
+cancelled.Cancel();
+try
+{
+    await opted.ReadOnceAsync(CliDiagnosticQuery.Status, cancelled.Token);
+    throw new InvalidOperationException("cancelled query executed");
+}
+catch (OperationCanceledException) { checks++; }
+
+foreach (string secret in new[] { "PRIVATE_PATH", "account", "character", "token" })
+    Check(!unavailableResult.ToString().Contains(secret,
+        StringComparison.OrdinalIgnoreCase),
+        "diagnostic output leaked user data");
+
 Console.WriteLine($"PASS {checks} synthetic common observation and historical-DPS regressions.");
 Console.WriteLine("No game input, capture, external API, user export or private data was opened.");
