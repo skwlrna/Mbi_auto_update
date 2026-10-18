@@ -68,6 +68,17 @@ internal static class ReadOnlyCliObservationBridge
             _ => throw new InvalidOperationException("query_not_allowed")
         };
 
+        return ProjectExistingResult(query, result);
+    }
+
+    /// <summary>
+    /// Normalize an ALREADY FETCHED response without launching a new query.
+    /// Used by both the explicit 1-shot diagnostic window and the optional
+    /// passive AI watcher. Production action/receipt gates are unchanged.
+    /// </summary>
+    internal static CliDiagnosticProjection ProjectExistingResult(
+        CliDiagnosticQuery query, MabinogiCliResult result)
+    {
         if (query == CliDiagnosticQuery.Status)
             return ReadOnlyCliObservationProjection.Connection(
                 result.Command, result.Success, result.State, result.Error);
