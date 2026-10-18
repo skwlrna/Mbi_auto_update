@@ -19,6 +19,40 @@ internal static class ReadOnlyCliObservationBridge
             explicitlyEnabled, now);
     }
 
+    /// <summary>
+    /// Exposes only the actual local SchedulerRunMonitor.IsRunning property.
+    /// A finished/nonrunning scheduler cannot be inferred to have succeeded.
+    /// </summary>
+    internal static CommonObservationAdmission ObserveRunningScheduler(
+        ReadOnlyCliObservationCollector collector, SchedulerRunMonitor monitor)
+    {
+        ArgumentNullException.ThrowIfNull(collector);
+        ArgumentNullException.ThrowIfNull(monitor);
+        if (!collector.Enabled)
+            return new(false, "disabled");
+        return monitor.IsRunning ? collector.ObserveSchedulerRunning() :
+            new(false, "scheduler_not_running");
+    }
+
+    /// <summary>
+    /// Compare existing local production stage with a CLI work snapshot.
+    /// This is an advisory only. VerifyInventory and other transitional
+    /// stages are not interpreted as complete or running.
+    /// </summary>
+    internal static MultiAlteringObservationAudit.Result AuditLocalProductionStage(
+        ReadOnlyCliObservationCollector collector,
+        ProductionStage localStage, CliDiagnosticReadResult? workRead)
+    {
+        ArgumentNullException.ThrowIfNull(collector);
+        CommonObservationState? state = localStage switch
+        {
+            ProductionStage.Process => CommonObservationState.InProgress,
+            ProductionStage.Complete => CommonObservationState.Completed,
+            _ => null
+        };
+        return collector.CompareMultiAltering(state, workRead);
+    }
+
     private static async Task<CliDiagnosticProjection> QueryExistingCliAsync(
         MabinogiMobileCli cli, CliDiagnosticQuery query, CancellationToken token)
     {
