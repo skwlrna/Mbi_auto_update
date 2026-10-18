@@ -39,3 +39,32 @@ jobs:
         run: |
           dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Mobilay UI WinForms build failed' }
+      - name: Package UI preview for isolated Windows comparison only
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $dest = Join-Path (Get-Location) '_mobilay-ui-preview'
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o $dest
+          if ($LASTEXITCODE -ne 0) { throw 'UI preview publish failed' }
+          if (-not (Test-Path (Join-Path $dest 'FishingAutomation.exe'))) { throw 'UI preview EXE missing' }
+          $sha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sha.Length -ne 40) { throw 'Cannot verify preview source SHA' }
+          $sha | Set-Content -LiteralPath (Join-Path $dest 'UI_PREVIEW_BUILD_COMMIT.txt') -Encoding ASCII
+          @(
+            'MabiAuto Mobilay-inspired UI preview for visual comparison only.',
+            'Based on the existing MabiAuto V3.2.26 source with navigation and palette-only changes.',
+            'NOT a production release. Do not overwrite your current working install.',
+            'Stop the existing macro first; unzip into a SEPARATE directory for visual inspection.',
+            'This GUI build has not been tested with your actual live game.',
+            'The original F8, F9, F10, safety and updater policies remain in force.',
+            'No third-party Mobilay binaries, artwork or fonts are included.'
+          ) | Set-Content -LiteralPath (Join-Path $dest 'UI_PREVIEW_README.txt') -Encoding UTF8
+          if (Test-Path (Join-Path $dest 'START.cmd')) { throw 'Unexpected release launcher in UI preview' }
+      - name: Upload 14-day UI preview artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MabiAuto-Mobilay-UI-Preview-Win64
+          path: _mobilay-ui-preview/**
+          if-no-files-found: error
+          retention-days: 14
