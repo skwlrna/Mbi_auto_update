@@ -67,7 +67,7 @@ internal static class SanitizedSummaryReport
                 row.FlowMatched > row.Frames ||
                 row.FlowUnmatched > row.Frames ||
                 row.NamedCandidateFrames > row.FlowMatched ||
-                row.FlowMatched + row.FlowUnmatched > row.Frames ||
+                row.FlowMatched > row.Frames - row.FlowUnmatched ||
                 !AllowedFlowStatus.Contains(row.FlowStatus) ||
                 !AllowedCliStatus.Contains(row.CliStatus) ||
                 !AllowedCliStatus.Contains(row.CliActivity) ||
