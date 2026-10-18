@@ -59,6 +59,53 @@ NAME = re.compile(r"^runtime_[0-9]{8}_[0-9]{6}_[0-9]{3}_[0-9a-f]{8}$")
 MAX_INPUT = 16_384
 MAX_FOLDERS = 200
 
+TRIAGE_BEGIN = "BEGIN COMMON INCIDENT TRIAGE V1"
+TRIAGE_END = "END COMMON INCIDENT TRIAGE V1"
+TRIAGE_AREAS = {"unknown", "gathering", "altering", "crafting",
+                "fishing", "dungeon", "abyss", "scheduler"}
+TRIAGE_COVERAGE = {"unknown_mode_no_verified_state", "domain_cli_hint_only",
+    "domain_data_missing", "no_verified_crafting_state",
+    "no_verified_fishing_state", "no_verified_dungeon_state",
+    "no_verified_scheduler_run_at_error"}
+TRIAGE_HINTS = {"no_domain_specific_evidence", "gathering_reported_in_progress",
+    "possible_work_removal_not_completion",
+    "work_completed_rows_receipt_unknown", "work_reported_in_progress",
+    "empty_work_list_not_completion"}
+TRIAGE_CONNECTIVITY = {"connectivity_unverified", "read_only_cli_connected_only",
+    "cli_disconnect_reported", "cli_timeout_not_disconnect",
+    "cli_unavailable_not_disconnect", "cli_game_off_reported"}
+
+
+def _remove_stage18_triage(lines: list[str]) -> Optional[str]:
+    """Remove only one exact, versioned and allowlisted Stage18 block.
+
+    An arbitrary incident-like block must not contaminate the Stage15
+    paired pre-diagnostic arm or silently pass as verified evidence.
+    """
+    stripped = [line.rstrip("\r\n") for line in lines]
+    first = [i for i, line in enumerate(stripped)
+             if line.startswith("BEGIN COMMON INCIDENT TRIAGE")]
+    last = [i for i, line in enumerate(stripped)
+            if line.startswith("END COMMON INCIDENT TRIAGE")]
+    if not first and not last:
+        return "".join(lines)
+    if len(first) != 1 or len(last) != 1:
+        return None
+    a, b = first[0], last[0]
+    if b != a + 7 or stripped[a] != TRIAGE_BEGIN or stripped[b] != TRIAGE_END:
+        return None
+    def val(index: int, key: str, allowed: set[str]) -> bool:
+        return stripped[index] in {key + "=" + item for item in allowed}
+    if not (val(a + 1, "area", TRIAGE_AREAS) and
+            val(a + 2, "coverage", TRIAGE_COVERAGE) and
+            val(a + 3, "hint", TRIAGE_HINTS) and
+            val(a + 4, "connectivity", TRIAGE_CONNECTIVITY) and
+            stripped[a + 5] in {"relevant_facts=" + str(i) for i in range(6)} and
+            stripped[a + 6] ==
+            "verified_cause=false;gameplay_authorized=false;repair_authorized=false"):
+        return None
+    return "".join(lines[:a] + lines[b + 1:])
+
 
 @dataclass(frozen=True)
 class Evidence:
@@ -106,7 +153,9 @@ def parse(text: str) -> Evidence:
 
     # Remove only the exact annotation. Preserve the same original log and
     # surrounding context for a paired comparison, not two different errors.
-    baseline = "".join(lines[:a] + lines[b + 1:])
+    baseline = _remove_stage18_triage(lines[:a] + lines[b + 1:])
+    if baseline is None:
+        return Evidence("invalid", text, text)
     return Evidence("valid", baseline, text, tuple(entries))
 
 
