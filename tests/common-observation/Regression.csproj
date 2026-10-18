@@ -11,5 +11,7 @@
     <Compile Include="../../source/FishingAutomation/Telemetry/MobilayDpsSummaryValidator.cs" Link="MobilayDpsSummaryValidator.cs" />
     <Compile Include="../../source/FishingAutomation/Telemetry/ReadOnlyCliObservationProjection.cs" Link="ReadOnlyCliObservationProjection.cs" />
     <Compile Include="../../source/FishingAutomation/Telemetry/ReadOnlyCliObservationCollector.cs" Link="ReadOnlyCliObservationCollector.cs" />
+    <Compile Include="../../source/FishingAutomation/Telemetry/CommonObservationManualUiPolicy.cs" Link="CommonObservationManualUiPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/Telemetry/CommonObservationDiagnosticReport.cs" Link="CommonObservationDiagnosticReport.cs" />
   </ItemGroup>
 </Project>
