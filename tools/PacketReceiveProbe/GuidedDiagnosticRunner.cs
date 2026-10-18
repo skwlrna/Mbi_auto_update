@@ -146,6 +146,9 @@ internal static class GuidedDiagnosticRunner
                     var comparison = correlation.Compare(
                         beforeFlows.Flows, afterFlows.Flows,
                         beforeFlows.Available, afterFlows.Available);
+                    long namedCandidateFrames = correlation.CountNamedCandidateFrames(
+                        beforeFlows.NamedGameCandidateFlows,
+                        afterFlows.NamedGameCandidateFlows);
                     Console.WriteLine(
                         $"stage_capture stage={name} frames={summary.MatchedFrames} " +
                         $"frame_bytes={summary.FrameBytes} " +
@@ -159,7 +162,8 @@ internal static class GuidedDiagnosticRunner
                         $"matched_frames={comparison.MatchedFrames} " +
                         $"unmatched_frames={comparison.UnmatchedFrames} " +
                         $"unparsed_frames={comparison.UnparsedFrames} " +
-                        $"capacity_drops={comparison.FlowCapacityDrops}");
+                        $"capacity_drops={comparison.FlowCapacityDrops} " +
+                        $"named_game_candidate_frames={namedCandidateFrames}");
 
                     // Existing game CLI is queried separately from the network
                     // counter. Neither result validates or overrides the other.
@@ -175,6 +179,7 @@ internal static class GuidedDiagnosticRunner
                         $"frame_bytes={summary.FrameBytes} " +
                         $"flow_matched={comparison.MatchedFrames} " +
                         $"flow_unmatched={comparison.UnmatchedFrames} " +
+                        $"named_candidate_frames={namedCandidateFrames} " +
                         $"flow_status={comparison.Status} " +
                         $"cli_status={status} cli_activity={activity}");
                 }
