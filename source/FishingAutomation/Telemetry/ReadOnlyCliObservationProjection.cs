@@ -34,12 +34,14 @@ internal static class ReadOnlyCliObservationProjection
         bool autoTraveling, bool inCombat, bool autoPlaying,
         bool isGathering, bool isFishing)
     {
-        if (autoTraveling || inCombat || autoPlaying)
-            return new("activity_observed", CommonObservationDomain.Activity,
-                CommonObservationState.Active);
+        // A verified GatheringQueries.IsGathering state is more specific
+        // than the broad IsAutoPlaying activity flag; retain that evidence.
         if (isGathering)
             return new("gathering_observed", CommonObservationDomain.Gathering,
                 CommonObservationState.InProgress);
+        if (autoTraveling || inCombat || autoPlaying)
+            return new("activity_observed", CommonObservationDomain.Activity,
+                CommonObservationState.Active);
         if (isFishing)
             return new("fishing_seen_unmapped");
         return new("activity_not_classified");
