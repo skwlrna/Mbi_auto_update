@@ -12,6 +12,10 @@ on:
       - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
       - 'source/FishingAutomation/AiAutopilotHost.cs'
       - 'source/FishingAutomation/MabinogiMobileCli.cs'
+      - 'source/FishingAutomation/Program.cs'
+      - 'source/FishingAutomation/Stage16ReadOnlyPreviewForm.cs'
+      - 'source/FishingAutomation/FishingAutomation.csproj'
+      - 'tools/Stage16Preview/**'
       - 'tools/PacketReceiveProbe/**'
       - 'tests/packet-receive-probe/**'
       - 'tools/MobilayExportInspector/**'
@@ -79,6 +83,35 @@ jobs:
         run: |
           dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Main Windows app build failed' }
+      - name: Publish isolated Stage16 manual read-only GUI
+        shell: pwsh
+        run: |
+          $staging = Join-Path (Get-Location) '_stage16-published'
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true -p:Stage16PreviewOnly=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o $staging
+          if ($LASTEXITCODE -ne 0) { throw 'Stage16 isolated GUI build failed' }
+          $exe = Join-Path $staging 'FishingAutomation.exe'
+          if (-not (Test-Path $exe)) { throw 'Stage16 isolated EXE missing' }
+          $check = Start-Process -FilePath $exe -ArgumentList '--stage16-self-test' -Wait -PassThru -NoNewWindow
+          if ($check.ExitCode -ne 0) { throw 'Stage16 opt-in entrypoint smoke test failed' }
+          $delivery = Join-Path (Get-Location) '_stage16-readonly-delivery'
+          New-Item -ItemType Directory -Force -Path $delivery | Out-Null
+          # Deliberately allow only the standalone executable and printed
+          # instructions; do not ship production settings, AI configuration,
+          # bots, updater scripts, private files or the release START.cmd.
+          Copy-Item $exe (Join-Path $delivery 'FishingAutomation.exe')
+          Copy-Item 'tools/Stage16Preview/Run_Stage16_ReadOnly.cmd' $delivery
+          Copy-Item 'tools/Stage16Preview/사용안내.txt' $delivery
+          $names = @(Get-ChildItem -LiteralPath $delivery -File | ForEach-Object Name | Sort-Object)
+          $expected = @('FishingAutomation.exe', 'Run_Stage16_ReadOnly.cmd', '사용안내.txt' | Sort-Object)
+          if (@(Compare-Object -ReferenceObject $expected -DifferenceObject $names).Count -ne 0) { throw 'Stage16 artifact contains unexpected files' }
+          Write-Host 'Stage16 preview self-test passed. No GUI click, CLI call, capture, game input or AI process executed in CI.'
+      - name: Upload isolated Stage16 read-only test ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MabiAuto-Stage16-Isolated-ReadOnly-Win64
+          path: _stage16-readonly-delivery/**
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish self-contained Windows x64 diagnostic
         shell: pwsh
         run: |
