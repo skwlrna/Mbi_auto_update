@@ -113,6 +113,17 @@ internal static class Stage17Tests
             Count: 32, InProgress: 0, Completed: 25);
         Assert(!AlteringWorkDeltaDiagnostic.TryProjection(spoofed, now, out _),
             "zero-running status was improperly trusted");
+        var wrongSource = new CliDiagnosticProjection("work_running",
+            CommonObservationDomain.Gathering, CommonObservationState.InProgress,
+            Count: 32, InProgress: 3, Completed: 25);
+        Assert(!AlteringWorkDeltaDiagnostic.TryProjection(wrongSource, now, out _),
+            "foreign domain spoofed an altering work snapshot");
+        var impossibleSemanticState = new CliDiagnosticProjection("work_running",
+            CommonObservationDomain.Altering, CommonObservationState.Completed,
+            Count: 32, InProgress: 3, Completed: 25);
+        Assert(!AlteringWorkDeltaDiagnostic.TryProjection(
+            impossibleSemanticState, now, out _),
+            "inconsistent work-running semantic state was admitted");
         var future = new AlteringWorkCountSnapshot(32, 3, 25, 4, now.AddSeconds(10));
         Assert(AlteringWorkDeltaDiagnostic.Compare(future,
             new(31, 2, 25, 4, now)).Status == "out_of_order_pair",
