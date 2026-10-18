@@ -8,6 +8,7 @@ on:
       - 'tests/common-observation/**'
       - 'tests/ai-autopilot/test_passive_cli_context.py'
       - 'tests/ai-autopilot/test_evidence_ab_stage15.py'
+      - 'tests/ai-autopilot/test_stage16_preview_contract.py'
       - 'source/FishingAutomation/ai-autopilot/evidence_ab.py'
       - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
       - 'source/FishingAutomation/AiAutopilotHost.cs'
@@ -58,6 +59,11 @@ jobs:
         run: |
           python -m unittest discover -s tests/ai-autopilot -p test_evidence_ab_stage15.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Offline A/B evidence regression failed' }
+      - name: Check isolated Stage16 GUI user-click and no-input contract
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p test_stage16_preview_contract.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Stage16 preview contract regression failed' }
       - name: Check packet receive probe safety and strict CLI
         shell: pwsh
         run: |
