@@ -256,6 +256,11 @@ Check(ReadOnlyCliObservationProjection.Activity(false, false, false, true, false
     is { State: CommonObservationState.InProgress,
         Domain: CommonObservationDomain.Gathering },
     "typed running-gathering signal lost");
+Check(ReadOnlyCliObservationProjection.Activity(false, false, true, true, false)
+    is { Status: "gathering_observed",
+        State: CommonObservationState.InProgress,
+        Domain: CommonObservationDomain.Gathering },
+    "generic auto-play overrode a verified gathering activity");
 Check(ReadOnlyCliObservationProjection.Activity(false, false, false, false, true)
     is { State: null, Status: "fishing_seen_unmapped" },
     "unverified fishing CLI signal promoted to gameplay state");
