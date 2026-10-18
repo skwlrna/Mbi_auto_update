@@ -207,7 +207,7 @@ Check(ReadOnlyCliComparison.IsAllowed("status") &&
     !ReadOnlyCliComparison.IsAllowed("get_inventory"),
     "guided CLI did not enforce two-command allowlist");
 Check(ReadOnlyCliComparison.ClassifyResponse(0,
-    "{\\\"status\\\":\\\"accepted\\\",\\\"body\\\":{\\\"characterId\\\":\\\"SECRET\\\"}}")
+    """{"status":"accepted","body":{"characterId":"SECRET"}}""")
     == "cli_accepted", "private body should not affect output classification");
 Check(ReadOnlyCliComparison.ClassifyResponse(1, "{}") == "cli_nonzero_exit",
     "failed CLI exit accepted");
@@ -215,7 +215,7 @@ Check(ReadOnlyCliComparison.ClassifyResponse(0, "not-json") == "cli_invalid_json
     "non-json CLI response accepted");
 Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}") == "cli_json_without_status",
     "unclassified CLI JSON accepted");
-Check(ReadOnlyCliComparison.ClassifyResponse(0, "{\\\"status\\\":\\\"rejected\\\"}") ==
+Check(ReadOnlyCliComparison.ClassifyResponse(0, """{"status":"rejected"}""") ==
     "cli_rejected", "CLI rejection was promoted to success");
 Check(ReadOnlyCliComparison.ClassifyResponse(0, new string('x', 16385)) ==
     "cli_oversize", "oversize CLI response accepted");
