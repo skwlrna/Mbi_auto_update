@@ -129,6 +129,41 @@ class OfflineEvidenceAbTests(unittest.TestCase):
         self.assertEqual(ab.parse(BASE + BLOCK + screen.replace(
             "no_comparable_cli_state", "compatible_gathering_hints_only")).status, "invalid")
 
+    def test_stage20_screen_only_four_mode_allowlist_and_spoofing(self):
+        cases = (
+            ("altering", "altering_free_action_guard_passed"),
+            ("crafting", "crafting_result_popup_guard_passed"),
+            ("fishing", "fishing_hook_ready_two_frames"),
+            ("dungeon", "dungeon_retry_guard_passed"),
+        )
+        for area, signal in cases:
+            block = (ab.SCREEN_BEGIN + "\n"
+                     + "area=" + area + "\n"
+                     + "signal=" + signal + "\n"
+                     + "comparison=no_comparable_cli_state\n"
+                     + "age_ms=5000\n"
+                     + "verified_cause=false;gameplay_authorized=false;repair_authorized=false\n"
+                     + ab.SCREEN_END + "\n")
+            with self.subTest(area=area):
+                checked = ab.parse(BASE + BLOCK + block)
+                self.assertEqual(checked.status, "valid")
+                self.assertEqual(checked.baseline, BASE)
+                self.assertEqual(ab.parse(BASE + BLOCK + block + block).status,
+                                 "invalid")
+                self.assertEqual(ab.parse(BASE + BLOCK + block.replace(
+                    "repair_authorized=false", "repair_authorized=true")).status,
+                                 "invalid")
+                self.assertEqual(ab.parse(BASE + BLOCK + block.replace(
+                    "age_ms=5000", "age_ms=5001")).status, "invalid")
+                self.assertEqual(ab.parse(BASE + BLOCK + block.replace(
+                    "no_comparable_cli_state",
+                    "compatible_gathering_hints_only")).status, "invalid")
+                self.assertEqual(ab.parse(BASE + BLOCK + block.replace(
+                    "signal=" + signal, "signal=arbitrary_untrusted_input")).status,
+                                 "invalid")
+                self.assertFalse(ab.compare_text(
+                    BASE + BLOCK + block)["diagnostic_accuracy_proven"])
+
     def test_heuristic_drift_is_flagged_not_counted_as_accuracy_gain(self):
         # The unchanged error_memory heuristic can be biased by the
         # annotation's footer mentioning "receipt"; this is NOT an
