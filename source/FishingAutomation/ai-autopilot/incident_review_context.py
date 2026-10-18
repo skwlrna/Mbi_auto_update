@@ -36,6 +36,19 @@ def for_runtime_error(folder: Path, runtime_root: Path) -> str:
                 runtime_root.resolve(strict=True) or
                 coverage._read(runtime_root, folder) is None):
             return ""
+        # Stage25 hardening: a globally valid summary must not lend
+        # apparent credibility to a tampered annotation on THIS error.
+        # It remains untrusted for the pre-existing error-text flow.
+        event = coverage.parse_record(coverage._read(runtime_root, folder) or "")
+        if ("invalid" in (event.cli, event.triage, event.screen) or
+                (event.screen == "valid" and
+                 (event.screen_row is None or
+                  coverage.MODE_AREAS.get(event.mode) !=
+                  event.screen_row.area)) or
+                (event.triage == "valid" and
+                 event.triage_area !=
+                 coverage.MODE_AREAS.get(event.mode, "unknown"))):
+            return ""
         summary = coverage.summarize(runtime_root)
         outcome = review.prioritize(summary)
         if (outcome.get("status") != "review_candidates_available" or
