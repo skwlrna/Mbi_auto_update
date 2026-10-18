@@ -296,7 +296,7 @@ public sealed partial class MainForm
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 40 : 70));
             if (altering) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.ForeColor = Color.White; _start.AccessibleName = AccessibleName + " 시작";
+            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.ForeColor = Color.FromArgb(22, 22, 25); _start.AccessibleName = AccessibleName + " 시작";
             _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
             actions.Controls.Add(_start, 0, 0);
             if (altering)
@@ -430,7 +430,7 @@ public sealed partial class MainForm
                 using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
                 e.Graphics.FillRectangle(background, e.Bounds);
                 TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
-                    selected ? Color.FromArgb(22, 58, 112) : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    selected ? Blue : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
                 if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
             };
         }

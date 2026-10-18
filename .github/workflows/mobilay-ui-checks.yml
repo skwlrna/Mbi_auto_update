@@ -1,0 +1,77 @@
+name: Mobilay-Inspired UI Contract and Windows Build
+
+on:
+  push:
+    branches:
+      - feat/mobilay-inspired-ui-20261019
+    paths:
+      - 'source/FishingAutomation/MainForm*.cs'
+      - 'tests/mobilay-ui/**'
+      - 'tests/production-ui/**'
+      - '.github/workflows/mobilay-ui-checks.yml'
+  pull_request:
+    paths:
+      - 'source/FishingAutomation/MainForm*.cs'
+      - 'tests/mobilay-ui/**'
+      - 'tests/production-ui/**'
+      - '.github/workflows/mobilay-ui-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract-build:
+    runs-on: windows-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify dashboard navigation and live metric UI safety
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/mobilay-ui -p test_mobilay_ui_contract.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Mobilay dashboard layout contract failed' }
+      - name: Build Windows WinForms application without publishing
+        shell: pwsh
+        run: |
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Mobilay UI WinForms build failed' }
+      - name: Exercise real WinForms UI with isolated fake CLI
+        shell: pwsh
+        run: |
+          dotnet run --project tests/production-ui/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Real Mobilay-layout WinForms UI regression failed' }
+      - name: Package UI preview for isolated Windows comparison only
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $dest = Join-Path (Get-Location) '_mobilay-ui-preview'
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o $dest
+          if ($LASTEXITCODE -ne 0) { throw 'UI preview publish failed' }
+          if (-not (Test-Path (Join-Path $dest 'FishingAutomation.exe'))) { throw 'UI preview EXE missing' }
+          $sha = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sha.Length -ne 40) { throw 'Cannot verify preview source SHA' }
+          $sha | Set-Content -LiteralPath (Join-Path $dest 'UI_PREVIEW_BUILD_COMMIT.txt') -Encoding ASCII
+          @(
+            'MabiAuto Mobilay-inspired UI preview for visual comparison only.',
+            'Based on the existing MabiAuto V3.2.26 source with navigation and palette-only changes.',
+            'NOT a production release. Do not overwrite your current working install.',
+            'Stop the existing macro first; unzip into a SEPARATE directory for visual inspection.',
+            'This GUI build has not been tested with your actual live game.',
+            'The original F8, F9, F10, safety and updater policies remain in force.',
+            'No third-party Mobilay binaries, artwork or fonts are included.'
+          ) | Set-Content -LiteralPath (Join-Path $dest 'UI_PREVIEW_README.txt') -Encoding UTF8
+          if (Test-Path (Join-Path $dest 'START.cmd')) { throw 'Unexpected release launcher in UI preview' }
+      - name: Upload 14-day UI preview artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MabiAuto-Mobilay-UI-Preview-Win64
+          path: _mobilay-ui-preview/**
+          if-no-files-found: error
+          retention-days: 14

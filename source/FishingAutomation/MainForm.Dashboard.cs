@@ -53,13 +53,13 @@ public sealed partial class MainForm
     private string? _runError;
     private string _recentDetectText = "대기 중";
 
-    private static readonly Color NavBg = Color.White;
-    private static readonly Color CardBg = Color.White;
-    private static readonly Color CardBg2 = Color.FromArgb(244, 247, 252);
-    private static readonly Color Accent = Color.FromArgb(40, 112, 242);
-    private static readonly Color AccentSoft = Color.FromArgb(232, 241, 255);
-    private static readonly Color Muted = Color.FromArgb(100, 116, 139);
-    private static readonly Color Line = Color.FromArgb(223, 230, 240);
+    private static readonly Color NavBg = Color.FromArgb(22, 22, 23);
+    private static readonly Color CardBg = Color.FromArgb(29, 29, 31);
+    private static readonly Color CardBg2 = Color.FromArgb(38, 38, 40);
+    private static readonly Color Accent = Color.FromArgb(171, 143, 249);
+    private static readonly Color AccentSoft = Color.FromArgb(33, 37, 49);
+    private static readonly Color Muted = Color.FromArgb(163, 168, 180);
+    private static readonly Color Line = Color.FromArgb(53, 53, 57);
 
     private Button SmallButton(string caption, Action action)
     {
@@ -87,8 +87,8 @@ public sealed partial class MainForm
             Text = caption,
             Dock = DockStyle.Fill,
             FlatStyle = FlatStyle.Flat,
-            BackColor = selected ? Color.FromArgb(15, 81, 157) : NavBg,
-            ForeColor = selected ? Color.White : Color.FromArgb(187, 209, 232),
+            BackColor = selected ? AccentSoft : NavBg,
+            ForeColor = selected ? Accent : Muted,
             TextAlign = ContentAlignment.MiddleLeft,
             Padding = new Padding(18, 0, 0, 0),
             Margin = new Padding(8, 3, 8, 3),
@@ -97,7 +97,7 @@ public sealed partial class MainForm
         };
         b.FlatAppearance.BorderSize = selected ? 1 : 0;
         b.FlatAppearance.BorderColor = selected ? Accent : NavBg;
-        b.FlatAppearance.MouseOverBackColor = Color.FromArgb(11, 48, 82);
+        b.FlatAppearance.MouseOverBackColor = Color.FromArgb(43, 42, 51);
         b.Click += (_, _) => action();
         return b;
     }

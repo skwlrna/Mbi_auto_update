@@ -30,6 +30,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
           dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
           if ($LASTEXITCODE -ne 0) { throw 'dotnet step failed' }
+      - name: Mobilay-inspired user reference UI safety and navigation regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/mobilay-ui -p 'test_mobilay_ui_contract.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Mobilay-inspired UI source and navigation regression failed' }
+
       - name: AI MCP watcher queue regression tests
         shell: pwsh
         run: |
@@ -73,12 +80,12 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.26"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.27"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.26</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3226-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.26"')) {
+          if ($p -notmatch '<Version>3\.2\.27</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3227-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.27"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
@@ -275,7 +282,9 @@ jobs:
         run: |
           $state = Get-Content source/FishingAutomation/MainForm.ProductionUI.cs -Raw
           if($state -match 'class ProductionDashboard'){throw 'separate production overlay must stay removed'}
-          $layout = Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw
+          # ReferenceDashboard is now split across two presentation partials.
+          $layout = (Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw) + "`n" +
+                    (Get-Content source/FishingAutomation/MainForm.MobilayDashboard.cs -Raw)
           if($layout -match 'new ProductionDashboard\(this\)'){throw 'separate production dashboard is still attached'}
           foreach($text in @('자동 가공','자동 채집','제작','작업 대상')){
             if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
@@ -286,7 +295,8 @@ jobs:
             if($productionPage -notmatch [regex]::Escape($text)){throw "production quantity UI missing: $text"}
           }
           # V3.1.92 groups production destinations under one accessible menu.
-          if($layout -notmatch 'AddButton\("생산 관리"'){throw 'new production navigation is missing'}
+          if($layout -notmatch [regex]::Escape('AddButton("생활 생산"') -and
+             $layout -notmatch [regex]::Escape('AddButton("생산 관리"')){throw 'new production navigation is missing'}
           foreach($text in @('자동 가공','자동 채집','제작')){
             if($layout -notmatch [regex]::Escape($text)){throw "production menu option missing: $text"}
           }
