@@ -52,8 +52,14 @@ Do not assume device 0 is the correct adapter. Select the interface from
 Capture is never started from the GUI or during update/install.
 
 Expected output: `read_only_probe_result matched_frames=N frame_bytes=M
-status=observed|not_observed`. This is **network metadata only**,
-not parsed packet, character or dungeon state.
+status=observed|not_observed`. The probe now additionally writes
+`read_only_probe_window second=S frames=F frame_bytes=B activity=A` once
+per completed monotonic second and a final `read_only_probe_activity`
+summary containing `active_windows`, `trailing_quiet_windows`, and
+`longest_quiet_windows`. These are **network metadata only**, never
+parsed packet, character or dungeon state. A quiet second is not proof
+of a disconnect; frames observed are not proof of game origin.
+The independent counters are intentionally kept in RAM only.
 
 ## Automated validation
 
