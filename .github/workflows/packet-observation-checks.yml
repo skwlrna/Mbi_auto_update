@@ -20,6 +20,7 @@ on:
       - 'tests/ai-autopilot/test_incident_review_bridge_stage23.py'
       - 'tests/ai-autopilot/test_paired_prompt_ab_stage24.py'
       - 'tests/ai-autopilot/test_integration_safety_stage25.py'
+      - 'tests/ai-autopilot/test_release_handoff_stage26.py'
       - 'tests/ai-autopilot/test_stage16_preview_contract.py'
       - 'source/FishingAutomation/ai-autopilot/evidence_ab.py'
       - 'source/FishingAutomation/ai-autopilot/incident_coverage_audit.py'
@@ -27,6 +28,7 @@ on:
       - 'source/FishingAutomation/ai-autopilot/incident_review_context.py'
       - 'source/FishingAutomation/ai-autopilot/paired_prompt_ab_stage24.py'
       - 'source/FishingAutomation/ai-autopilot/integration_safety_gate_stage25.py'
+      - 'source/FishingAutomation/ai-autopilot/release_handoff_stage26.py'
       - 'source/FishingAutomation/AiRuntimeErrorJournal.cs'
       - 'source/FishingAutomation/AiAutopilotHost.cs'
       - 'source/FishingAutomation/MabinogiMobileCli.cs'
@@ -133,6 +135,16 @@ jobs:
         run: |
           dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Main Windows app build failed' }
+      - name: Check Stage26 read-only handoff and local build module parity
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/ai-autopilot -p test_release_handoff_stage26.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Stage26 offline release handoff contract regression failed' }
+          $bin = Join-Path (Get-Location) 'source/FishingAutomation/bin/Release/net8.0-windows10.0.19041.0/win-x64'
+          if (-not (Test-Path (Join-Path $bin 'FishingAutomation.exe'))) { throw 'Stage26 built app not found' }
+          python source/FishingAutomation/ai-autopilot/release_handoff_stage26.py --build-dir $bin
+          if ($LASTEXITCODE -ne 0) { throw 'Stage26 local build module parity failed; release remains held' }
+          Write-Host 'Stage26 development handoff checked: this is NOT main merge, release, approval or live test.'
       - name: Publish isolated Stage16 manual read-only GUI
         shell: pwsh
         run: |
