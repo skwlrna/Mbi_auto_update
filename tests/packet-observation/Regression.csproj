@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../source/FishingAutomation/Telemetry/PacketObservationInbox.cs" Link="PacketObservationInbox.cs" />
+    <Compile Include="../../source/FishingAutomation/Telemetry/PacketObservationFixtureReplay.cs" Link="PacketObservationFixtureReplay.cs" />
   </ItemGroup>
 </Project>
