@@ -190,10 +190,10 @@ public sealed partial class MainForm
                 output.Text = "읽기 전용 상태 조회가 취소되었습니다. 게임 동작은 변경하지 않았습니다.";
             }
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or
-            InvalidDataException or UnauthorizedAccessException or
-            System.ComponentModel.Win32Exception or ObjectDisposedException)
+        catch (Exception)
         {
+            // The modeless click handler must never throw an unobserved UI
+            // exception, and it must never reveal raw CLI exception messages.
             if (!window.IsDisposed)
             {
                 status.Text = "조회 실패";
