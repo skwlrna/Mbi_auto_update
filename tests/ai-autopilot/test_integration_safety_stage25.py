@@ -156,7 +156,8 @@ class FinalIntegrationStage25Tests(unittest.TestCase):
             ("priority", '"verified_root_causes": "not_measurable"',
              '"verified_root_causes": "proven"',
              "fixed_priority_and_no_truth_claim"),
-            ("agent", "<untrusted-log>", "<trusted-command>",
+            ("agent", "<untrusted-log>\\n{context}{passive_review}\\n</untrusted-log>",
+             "<trusted-command>\\n{context}{passive_review}\\n</trusted-command>",
              "codex_untrusted_prompt_fence"),
             ("agent", "No auto merge/deploy: live-game validation and human approval still required",
              "AUTO_MERGE_NOW", "existing_ai_isolation_test_review_gates"),
@@ -165,8 +166,8 @@ class FinalIntegrationStage25Tests(unittest.TestCase):
              "watcher_queue_no_diagnostic_reordering"),
             ("ab", '"codex_executions": 0', '"codex_executions": 1',
              "offline_ab_no_model_or_game_calls"),
-            ("ci", "test_paired_prompt_ab_stage24.py",
-             "test_paired_prompt_bypass.py", "ci_regression_registration"),
+            ("ci", "-p test_paired_prompt_ab_stage24.py -v",
+             "-p test_paired_prompt_bypass.py -v", "ci_regression_registration"),
         ]
         for name, original, mutated, expected_flag in corruptions:
             with self.subTest(name=name, gate=expected_flag):
