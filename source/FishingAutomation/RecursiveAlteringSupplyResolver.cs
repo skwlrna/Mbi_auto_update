@@ -9,6 +9,68 @@ internal static class MultiAlteringMaterialPreflightPolicy
 {
     internal static bool CanRun(bool hasResumableSession, bool hasSelectedFacilityWorks)
         => !hasResumableSession && !hasSelectedFacilityWorks;
+
+    // Global F9 free-gather preflight is independent of the order in which
+    // facilities are serviced. It never receives jobs or registers production.
+    // Existing per-recipe preflight is retained for later rechecks.
+    internal static IReadOnlyList<MultiAlteringSupplyPreflight> SelectInitialKnownShortages(
+        IReadOnlyList<AlteringPlan> plans,
+        IReadOnlyList<AlteringRecipe> freshRecipes,
+        IReadOnlyList<MultiAlteringSupplyPreflight> queuedEvidence)
+    {
+        ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(freshRecipes);
+        ArgumentNullException.ThrowIfNull(queuedEvidence);
+        var selected = new List<MultiAlteringSupplyPreflight>();
+
+        foreach (var plan in plans)
+        {
+            plan.Validate();
+            var fresh = freshRecipes.Where(x =>
+                string.Equals(x.DisplayName, plan.DisplayName, StringComparison.Ordinal))
+                .ElementAtOrDefault(plan.RecipeOrdinal - 1);
+            if (fresh is null || fresh.ProducedPerWork != plan.ProducedPerWork ||
+                AlteringFacilityResolver.Resolve(fresh) != plan.FacilityName)
+                throw new InvalidOperationException(
+                    $"F9 선행채집 제법 확인 실패: {plan.DisplayName}. 새로고침 후 재확인하세요.");
+
+            // A new read-only CLI shortage is preferred over any UI evidence.
+            if (fresh.MissingIngredients.Count > 0)
+            {
+                selected.Add(new MultiAlteringSupplyPreflight(
+                    plan, fresh, plan.RequiredWorks));
+                continue;
+            }
+
+            // Some CLI versions replace the shortage reason with queue_full
+            // while another selected facility has seven occupied slots. Only
+            // an exact prior *user-selected* shortage snapshot may fill this
+            // gap, and only when the fresh CLI confirms queue_full.
+            if (fresh.Alterable ||
+                !string.Equals(fresh.Reason, "queue_full", StringComparison.Ordinal))
+                continue;
+
+            var prior = queuedEvidence.SingleOrDefault(x =>
+                x.Plan.FacilityName == plan.FacilityName &&
+                x.Plan.DisplayName == plan.DisplayName &&
+                x.Plan.RecipeOrdinal == plan.RecipeOrdinal &&
+                x.Plan.ProducedPerWork == plan.ProducedPerWork);
+
+            if (prior is not null &&
+                !prior.Recipe.Alterable &&
+                string.Equals(prior.Recipe.Reason, "not_enough_ingredient", StringComparison.Ordinal) &&
+                prior.Recipe.DisplayName == fresh.DisplayName &&
+                prior.Recipe.ProducedPerWork == fresh.ProducedPerWork &&
+                AlteringFacilityResolver.Resolve(prior.Recipe) == plan.FacilityName &&
+                prior.Recipe.MissingIngredients.Count > 0 &&
+                prior.Recipe.MissingIngredients.All(x =>
+                    !string.IsNullOrWhiteSpace(x.DisplayName) && x.Required > 0 && x.Owned >= 0))
+                selected.Add(new MultiAlteringSupplyPreflight(
+                    plan, prior.Recipe, plan.RequiredWorks));
+        }
+
+        return selected;
+    }
 }
 
 internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
