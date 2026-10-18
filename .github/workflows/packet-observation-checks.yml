@@ -1,0 +1,32 @@
+name: Read-only packet observation checks
+
+on:
+  pull_request:
+    paths:
+      - 'source/FishingAutomation/Telemetry/**'
+      - 'tests/packet-observation/**'
+      - 'docs/PACKET_OBSERVATION_STAGE1.md'
+      - '.github/workflows/packet-observation-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics-and-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Check packet observation diagnostic regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/packet-observation/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Packet observation regression failed' }
+      - name: Build main Windows app
+        shell: pwsh
+        run: |
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Main Windows app build failed' }
