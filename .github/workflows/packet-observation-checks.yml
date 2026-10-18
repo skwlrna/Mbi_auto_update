@@ -50,6 +50,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic publish failed' }
           if (-not (Test-Path (Join-Path $dest 'PacketReceiveProbe.exe'))) { throw 'Published EXE missing' }
           Copy-Item 'tools/PacketReceiveProbe/RunReceiveProbe.cmd' $dest
+          Copy-Item 'tools/PacketReceiveProbe/RunAllChecks.cmd' $dest
           Copy-Item 'tools/PacketReceiveProbe/사용안내.txt' $dest
           Write-Host 'Packaged independently of the existing macro. Live capture was not performed in CI.'
       - name: Upload click-to-run diagnostics
