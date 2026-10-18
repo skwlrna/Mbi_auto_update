@@ -158,6 +158,45 @@ internal static class AiPassiveCliEvidence
     }
 
     /// <summary>
+    /// Produce one cross-feature hypothesis from ALREADY COMPLETED validly
+    /// timed query classifications. No new CLI requests or raw game data.
+    /// Even if no source is available, explicitly documents coverage gaps.
+    /// </summary>
+    internal static string? SnapshotForIncident(
+        string? mode, DateTimeOffset errorAtUtc)
+    {
+        lock (Gate)
+        {
+            if (!_enabled)
+                return null;
+            var at = errorAtUtc.ToUniversalTime();
+            var facts = new List<CommonIncidentFact>(Order.Length);
+            foreach (string command in Order)
+            {
+                if (!Recent.TryGetValue(command, out var history))
+                    continue;
+                Entry? entry = null;
+                for (int i = history.Count - 1; i >= 0; i--)
+                {
+                    if (history[i].ObservedUtc <= at)
+                    {
+                        entry = history[i];
+                        break;
+                    }
+                }
+                if (entry is null)
+                    continue;
+                var age = at - entry.ObservedUtc;
+                if (age < TimeSpan.Zero || age > MaximumAge)
+                    continue;
+                facts.Add(new(command, entry.Outcome));
+            }
+
+            return CommonIncidentTriage.Evaluate(mode, facts).ToEvidenceBlock();
+        }
+    }
+
+    /// <summary>
     /// Returns fixed machine labels only, bounded to five lines and 5 seconds.
     /// CLI observations finishing AFTER the event are never included.
     /// The text is diagnostic context, not instructions or game authority.
