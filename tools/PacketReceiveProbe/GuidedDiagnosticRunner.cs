@@ -174,6 +174,15 @@ internal static class GuidedDiagnosticRunner
                     Console.WriteLine(
                         $"stage_cli stage={name} status_query={status} " +
                         $"activity_query={activity}");
+                    var evidence = TransportEvidenceAssessment.Assess(new(
+                        status, summary.MatchedFrames, namedCandidateFrames,
+                        comparison.UnparsedFrames, comparison.FlowCapacityDrops,
+                        beforeFlows.Available || afterFlows.Available));
+                    Console.WriteLine(
+                        $"stage_evidence stage={name} classification={evidence.Evidence} " +
+                        $"reason={evidence.Explanation} " +
+                        $"packet_meaning_verified={evidence.PacketMeaningVerified.ToString().ToLowerInvariant()} " +
+                        $"gameplay_authorized={evidence.AuthorizesGameplay.ToString().ToLowerInvariant()}");
                     finalComparison.Add(
                         $"compare stage={name} frames={summary.MatchedFrames} " +
                         $"frame_bytes={summary.FrameBytes} " +
@@ -181,7 +190,8 @@ internal static class GuidedDiagnosticRunner
                         $"flow_unmatched={comparison.UnmatchedFrames} " +
                         $"named_candidate_frames={namedCandidateFrames} " +
                         $"flow_status={comparison.Status} " +
-                        $"cli_status={status} cli_activity={activity}");
+                        $"cli_status={status} cli_activity={activity} " +
+                        $"evidence={evidence.Evidence}");
                 }
                 Console.WriteLine();
                 Console.WriteLine("=== 3-STAGE FINAL COMPARISON ===");
