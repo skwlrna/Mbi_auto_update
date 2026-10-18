@@ -9,5 +9,6 @@
   <ItemGroup>
     <Compile Include="../../tools/PacketReceiveProbe/CaptureProbeOptions.cs" Link="CaptureProbeOptions.cs" />
     <Compile Include="../../tools/PacketReceiveProbe/InteractiveProbeConsent.cs" Link="InteractiveProbeConsent.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/ReceiveActivityWindows.cs" Link="ReceiveActivityWindows.cs" />
   </ItemGroup>
 </Project>
