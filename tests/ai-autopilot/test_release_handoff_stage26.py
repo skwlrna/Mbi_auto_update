@@ -117,7 +117,7 @@ class Stage26HandoffTests(unittest.TestCase):
     def test_version_or_rollback_mutation_blocks_auditor(self):
         original = handoff._bounded
         live_version = handoff.audit(ROOT)["candidate_version"]
-        self.assertRegex(live_version, r"^3\\.\\d+\\.\\d+$")
+        self.assertIsNotNone(handoff.VERSION.fullmatch(live_version))
         workflow_path = (".github/workflows/release-v" +
                          live_version.replace(".", "") + "-auto-update.yml")
         substitutions = {
