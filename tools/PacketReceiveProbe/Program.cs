@@ -5,7 +5,7 @@ using FishingAutomation.PacketDiagnostics;
 if (!CaptureProbeOptions.TryParse(args, out var options) || options is null)
 {
     Console.Error.WriteLine(
-        "Usage: --list OR --probe --allow-read-only-capture --device-index N --seconds 1..30");
+        "Usage: --interactive OR --list OR --probe --allow-read-only-capture --device-index N --seconds 1..30");
     return 2;
 }
 
@@ -13,7 +13,8 @@ if (!CaptureProbeOptions.TryParse(args, out var options) || options is null)
 try
 {
     var devices = LibPcapLiveDeviceList.Instance;
-    if (options.ListOnly)
+    CaptureProbeOptions effective = options;
+    if (options.ListOnly || options.Interactive)
     {
         Console.WriteLine($"interfaces={devices.Count}");
         for (int index = 0; index < devices.Count; index++)
@@ -25,16 +26,53 @@ try
             if (display.Length > 120) display = display[..120];
             Console.WriteLine($"[{index}] {display}");
         }
-        return 0;
+        if (options.ListOnly)
+            return 0;
+
+        if (devices.Count == 0)
+        {
+            Console.WriteLine("No adapters found. Nothing was captured.");
+            return 3;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Read-only diagnostic: count inbound TCP frames from source port 16000.");
+        Console.WriteLine("No payloads, IP addresses, PCAP files, game state or account data saved.");
+        Console.WriteLine("This does not verify that the traffic belongs to the game.");
+        Console.WriteLine("You must have permission to passively observe the network interface.");
+        Console.Write("Choose adapter index (blank cancels): ");
+        string? chosenAdapter = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(chosenAdapter))
+        {
+            Console.WriteLine("Cancelled. No capture started.");
+            return 0;
+        }
+        Console.Write("Duration in seconds (1-30; blank cancels): ");
+        string? chosenDuration = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(chosenDuration))
+        {
+            Console.WriteLine("Cancelled. No capture started.");
+            return 0;
+        }
+        Console.Write("To consent to passive capture, type YES exactly (anything else cancels): ");
+        string? consent = Console.ReadLine();
+        if (!InteractiveProbeConsent.TryApprove(
+                devices.Count, chosenAdapter, chosenDuration, consent, out var approved) ||
+            approved is null)
+        {
+            Console.WriteLine("Cancelled or invalid selection. No capture started.");
+            return 0;
+        }
+        effective = approved;
     }
 
-    if (options.DeviceIndex >= devices.Count)
+    if (effective.DeviceIndex >= devices.Count)
     {
         Console.Error.WriteLine("Selected adapter is unavailable; use --list.");
         return 2;
     }
 
-    using var device = devices[options.DeviceIndex];
+    using var device = devices[effective.DeviceIndex];
     long frames = 0;
     long bytes = 0;
 
@@ -57,12 +95,12 @@ try
     try
     {
         Console.WriteLine(
-            $"read_only_probe_start interface_index={options.DeviceIndex} " +
-            $"filter=\"{CaptureProbeOptions.CaptureFilter}\" seconds={options.Seconds}");
+            $"read_only_probe_start interface_index={effective.DeviceIndex} " +
+            $"filter=\"{CaptureProbeOptions.CaptureFilter}\" seconds={effective.Seconds}");
         device.StartCapture();
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(options.Seconds), cancellation.Token);
+            await Task.Delay(TimeSpan.FromSeconds(effective.Seconds), cancellation.Token);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
