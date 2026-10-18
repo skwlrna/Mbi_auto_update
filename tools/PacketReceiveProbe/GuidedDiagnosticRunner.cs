@@ -78,6 +78,7 @@ internal static class GuidedDiagnosticRunner
             try
             {
                 var finalComparison = new List<string>();
+                var exportableSummary = new List<SanitizedSummaryReport.Stage>();
                 for (int stage = 0; stage < GuidedDiagnosticPolicy.MaxStages; stage++)
                 {
                     string name = GuidedDiagnosticPolicy.StageNames[stage];
@@ -183,6 +184,11 @@ internal static class GuidedDiagnosticRunner
                         $"reason={evidence.Explanation} " +
                         $"packet_meaning_verified={evidence.PacketMeaningVerified.ToString().ToLowerInvariant()} " +
                         $"gameplay_authorized={evidence.AuthorizesGameplay.ToString().ToLowerInvariant()}");
+                    exportableSummary.Add(new SanitizedSummaryReport.Stage(
+                        name, summary.MatchedFrames, summary.FrameBytes,
+                        comparison.MatchedFrames, comparison.UnmatchedFrames,
+                        namedCandidateFrames, comparison.Status, status, activity,
+                        evidence.Evidence));
                     finalComparison.Add(
                         $"compare stage={name} frames={summary.MatchedFrames} " +
                         $"frame_bytes={summary.FrameBytes} " +
@@ -197,13 +203,29 @@ internal static class GuidedDiagnosticRunner
                 Console.WriteLine("=== 3-STAGE FINAL COMPARISON ===");
                 foreach (string row in finalComparison)
                     Console.WriteLine(row);
-                Console.WriteLine("ALL_STAGES_COMPLETE. Send one screenshot of the 3 compare lines.");
+                Console.WriteLine("ALL_STAGES_COMPLETE. One screenshot of the 3 compare lines is sufficient.");
                 Console.WriteLine(
                     "Port owner names, CLI accepted replies and frame counts are " +
                     "independent observations, NOT verified game packet mappings.");
                 Console.WriteLine(
                     "IPv4 4-tuples match sampled OS endpoints only; no payload decoding, " +
                     "authentication, or ability to identify dungeon events.");
+                Console.Write("Optional: type SAVE to write only a redacted local TXT summary " +
+                              "(anything else skips saving): ");
+                string? saveChoice = Console.ReadLine();
+                if (saveChoice == SanitizedSummaryReport.SaveConsent)
+                {
+                    bool saved = SanitizedSummaryReport.TrySave(
+                        saveChoice, exportableSummary, AppContext.BaseDirectory,
+                        out string fileName);
+                    Console.WriteLine(saved
+                        ? $"Summary saved next to this diagnostic EXE: {fileName}"
+                        : "Summary not saved (validation or local folder permission).");
+                }
+                else
+                {
+                    Console.WriteLine("No summary file written.");
+                }
                 return 0;
             }
             finally
