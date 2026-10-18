@@ -246,4 +246,86 @@ Check(ReadOnlyCliComparison.ClassifyResponse(0, "") == "cli_empty",
 Check(ReadOnlyCliComparison.ClassifyResponse(0, "{}", "execute_gathering")
     == "cli_command_blocked", "action passed CLI parser");
 
+// Ethernet II / IPv4 / TCP frames with synthetic documentation ranges only.
+// Parser must never read or emit application-layer payloads.
+byte[] MakeFrame(
+    ushort sourcePort = 16000,
+    ushort destPort = 51000,
+    bool vlan = false,
+    bool fragment = false)
+{
+    int ethernetHeader = vlan ? 18 : 14;
+    var frame = new byte[ethernetHeader + 40];
+    frame[12] = vlan ? (byte)0x81 : (byte)0x08;
+    frame[13] = vlan ? (byte)0x00 : (byte)0x00;
+    if (vlan)
+    {
+        frame[16] = 0x08;
+        frame[17] = 0x00;
+    }
+    int ip = ethernetHeader;
+    frame[ip] = 0x45;
+    frame[ip + 2] = 0x00; frame[ip + 3] = 40;
+    if (fragment) frame[ip + 6] = 0x20;
+    frame[ip + 9] = 6;
+    // TEST-NET-1 and RFC1918 addresses, never real user endpoints.
+    frame[ip + 12] = 192; frame[ip + 13] = 0;
+    frame[ip + 14] = 2; frame[ip + 15] = 10;
+    frame[ip + 16] = 10; frame[ip + 17] = 0;
+    frame[ip + 18] = 0; frame[ip + 19] = 15;
+    int tcp = ip + 20;
+    frame[tcp] = (byte)(sourcePort >> 8);
+    frame[tcp + 1] = (byte)sourcePort;
+    frame[tcp + 2] = (byte)(destPort >> 8);
+    frame[tcp + 3] = (byte)destPort;
+    frame[tcp + 12] = 0x50; // TCP header length = 20 bytes
+    return frame;
+}
+
+Check(TcpIpv4FrameParser.TryRead(MakeFrame(), out var tuple) &&
+    tuple.RemotePort == 16000 && tuple.LocalPort == 51000 &&
+    tuple.RemoteAddress != tuple.LocalAddress, "header-only TCP tuple parse failed");
+Check(TcpIpv4FrameParser.TryRead(MakeFrame(vlan: true), out var tagged) &&
+    tagged.Equals(tuple), "802.1Q VLAN tuple failed");
+Check(!TcpIpv4FrameParser.TryRead(MakeFrame(sourcePort: 443), out _),
+    "wrong source port accepted as 16000");
+Check(!TcpIpv4FrameParser.TryRead(MakeFrame(fragment: true), out _),
+    "fragmented datagram accepted as complete");
+Check(!TcpIpv4FrameParser.TryRead(MakeFrame()[..20], out _),
+    "truncated frame accepted");
+var udp = MakeFrame();
+udp[14 + 9] = 17;
+Check(!TcpIpv4FrameParser.TryRead(udp, out _), "UDP accepted as TCP");
+var malformed = MakeFrame();
+malformed[14 + 2] = 0; malformed[14 + 3] = 10;
+Check(!TcpIpv4FrameParser.TryRead(malformed, out _),
+    "invalid IP total length accepted");
+var unsupported = MakeFrame();
+unsupported[12] = 0x86; unsupported[13] = 0xdd;
+Check(!TcpIpv4FrameParser.TryRead(unsupported, out _),
+    "IPv6 under IPv4-only matcher accepted");
+
+var flowCollector = new TcpFlowCorrelation();
+flowCollector.Record(MakeFrame());
+flowCollector.Record(MakeFrame(vlan: true));
+flowCollector.Record(MakeFrame(destPort: 51001));
+flowCollector.Record(udp);
+var flowResult = flowCollector.Compare(
+    new[] { tuple }, Array.Empty<TcpIpv4Flow>(), true, true);
+Check(flowResult is { MatchedFrames: 2, UnmatchedFrames: 1,
+    UnparsedFrames: 1, FlowCapacityDrops: 0,
+    DistinctMatchedFlows: 1, Status: "ipv4_tcp_4tuple_matched" },
+    "4-tuple comparison misattributed remote/local port");
+var noOwners = flowCollector.Compare(
+    Array.Empty<TcpIpv4Flow>(), Array.Empty<TcpIpv4Flow>(), true, true);
+Check(noOwners is { MatchedFrames: 0, UnmatchedFrames: 3,
+    Status: "no_ipv4_tcp_4tuple_match" },
+    "matching source port alone incorrectly attributed to game");
+var unknownTable = flowCollector.Compare(
+    Array.Empty<TcpIpv4Flow>(), Array.Empty<TcpIpv4Flow>(), false, false);
+Check(unknownTable.Status == "os_flow_table_unavailable",
+    "missing socket snapshots reported as verified match");
+Check(!TcpOsFlowSnapshot.ReadMatchingRemotePort(0).Available,
+    "invalid port caused OS table access");
+
 Console.WriteLine($"PASS {checks} opt-in-only receive-probe argument regressions; no capture attempted.");
