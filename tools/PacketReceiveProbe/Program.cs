@@ -3,6 +3,11 @@ using System.Diagnostics;
 using SharpPcap.LibPcap;
 using FishingAutomation.PacketDiagnostics;
 
+// The 3-stage manual comparison is deliberately separate from normal --interactive.
+// No permission, packet capture, CLI invocation or game action occurs until YES.
+if (args.Length == 1 && args[0] == "--guided")
+    return await GuidedDiagnosticRunner.RunAsync();
+
 if (!CaptureProbeOptions.TryParse(args, out var options) || options is null)
 {
     Console.Error.WriteLine(
