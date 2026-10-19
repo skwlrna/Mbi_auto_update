@@ -462,7 +462,10 @@ internal sealed class MultiAlteringCoordinator
         Func<CancellationToken, Task>? onIdleAbyssRound = null,
         long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds,
         Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null,
-        Func<AlteringPlan, MaterialSupplyHold, CancellationToken, Task<MaterialSupplyHold?>>? recheckUnavailableRoute = null)
+        Func<AlteringPlan, MaterialSupplyHold, CancellationToken, Task<MaterialSupplyHold?>>? recheckUnavailableRoute = null,
+        Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<MultiAlteringMaterialHoldCheckpoint>>? restoreMaterialHolds = null,
+        Action<AlteringPlan, MaterialSupplyHold>? persistMaterialHold = null,
+        Action<AlteringPlan>? clearMaterialHold = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -532,6 +535,36 @@ internal sealed class MultiAlteringCoordinator
             }
         }
         RestoreCompleted();
+
+        // V3.2.41: restore only quarantine evidence, never 'prepared' status,
+        // facility onsite ownership, receipt, or registration permission.
+        // Force an immediate fresh read even when the persisted stock was
+        // recently checked before F10/crash. Explicit resume verification
+        // and the durable work journal still gate every actual input.
+        if (restoreMaterialHolds is not null)
+        {
+            if (recheckUnavailableRoute is null || persistMaterialHold is null ||
+                clearMaterialHold is null)
+                throw new InvalidOperationException(
+                    "재료 보류 복원에 필요한 영속/재확인 경로가 없습니다 · 안전 정지");
+            foreach (var saved in restoreMaterialHolds(plans))
+            {
+                var matches = plans.Where(p =>
+                    p.FacilityName == saved.FacilityName &&
+                    MultiAlteringBatchStore.Key(p) == saved.PlanKey).ToArray();
+                if (matches.Length != 1 || completed.Contains(Key(matches[0])) ||
+                    !held.TryAdd(saved.FacilityName,
+                        (matches[0], new MaterialSupplyHold(
+                            saved.Item, saved.Required, saved.Observed, saved.Category),
+                         _now())))
+                    throw new InvalidOperationException(
+                        "저장된 재료 보류/현재 작업 목록 불일치 · 추가 등록 없이 정지");
+                Log?.Invoke(
+                    $"[다중가공][보류 복원] {saved.FacilityName} · {matches[0].DisplayName} · " +
+                    $"{saved.Item} {saved.Observed}/{saved.Required} · " +
+                    $"이전 확인 {saved.Rechecks}회 · 실제 재고/제법 신규 확인 전 등록 차단");
+            }
+        }
 
         int FindNextPendingIndex(string facility)
         {
@@ -612,10 +645,17 @@ internal sealed class MultiAlteringCoordinator
                         waiting.Plan, waiting.Reason, ct);
                     if (unresolved is not null)
                     {
+                        // Atomic checkpoint must succeed before an updated hold
+                        // enters the in-memory scheduler. Failure stops all input.
+                        persistMaterialHold?.Invoke(waiting.Plan, unresolved);
                         held[facility] = (waiting.Plan, unresolved,
                             _now() + TimeSpan.FromSeconds(30));
                         continue;
                     }
+                    // Never remove the in-memory guard until its disk record
+                    // has been atomically cleared. Every next input still
+                    // passes the original recipe, queue and onsite guards.
+                    clearMaterialHold?.Invoke(waiting.Plan);
                     held.Remove(facility);
                     Log?.Invoke($"[다중가공][재료 재확인] {facility} · {waiting.Plan.DisplayName} · " +
                         "부족 상태 재조회 완료 · 기존 F9 장부/화면 등록 검증을 다시 수행");
@@ -787,6 +827,7 @@ internal sealed class MultiAlteringCoordinator
                                 // Must be raised BEFORE any input for this plan.
                                 // No completion, no work ticket and no next
                                 // recipe in this same facility may be claimed.
+                                persistMaterialHold?.Invoke(plan, unavailable.Evidence);
                                 held[facility] = (plan, unavailable.Evidence,
                                     _now() + TimeSpan.FromSeconds(30));
                                 Log?.Invoke($"[다중가공][재료 확보 대기] {facility} · " +
