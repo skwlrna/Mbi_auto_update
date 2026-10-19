@@ -449,8 +449,10 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
     }
 
     internal static string Readiness(
-        IReadOnlyList<AlteringWork> works, bool held, bool initialVacancy)
+        IReadOnlyList<AlteringWork> works, bool held, bool initialVacancy,
+        bool readQuarantined = false)
     {
+        if (readQuarantined) return "read_quarantine";
         if (held) return "material_hold";
         if (works.Count > 0 && works.All(x => x.IsCompleted))
             return "completed_batch";
@@ -461,16 +463,16 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
 
     internal void Observe(
         string facility, IReadOnlyList<AlteringWork> works, bool held,
-        bool initialVacancy)
+        bool initialVacancy, bool readQuarantined = false)
     {
         var entry = Get(facility);
         entry.ObservedPasses++;
-        entry.State = Readiness(works, held, initialVacancy);
+        entry.State = Readiness(works, held, initialVacancy, readQuarantined);
         entry.ReadyThisPass = entry.State is "completed_batch" or "empty" or
             "initial_vacancy";
         entry.ServedThisPass = false;
         if (entry.ReadyThisPass) entry.ReadyPasses++;
-        else if (held) entry.HeldPasses++;
+        else if (held || readQuarantined) entry.HeldPasses++;
         else entry.RunningPasses++;
     }
 
@@ -488,7 +490,7 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
             "completed_batch" => 0,
             "empty" => 1,
             "initial_vacancy" => 2,
-            "material_hold" => 3,
+            "material_hold" or "read_quarantine" => 3,
             _ => 4
         };
         return selectedFacilities.Select((facility, index) => new
@@ -559,6 +561,7 @@ internal sealed class MultiAlteringCoordinator
     internal event Action<string>? Log;
     internal MultiAlteringFacilityBottleneckTracker Bottlenecks { get; }
     internal MultiAlteringFacilityEfficiencyTracker Efficiency { get; } = new();
+    internal MultiAlteringReadQuarantineTracker ReadQuarantine { get; }
 
     internal MultiAlteringCoordinator(
         FacilityLaneState? laneState = null,
@@ -574,6 +577,7 @@ internal sealed class MultiAlteringCoordinator
         _laneOwner = laneOwner;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         Bottlenecks = new MultiAlteringFacilityBottleneckTracker(_now);
+        ReadQuarantine = new MultiAlteringReadQuarantineTracker(_now);
         _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(2);
         _restoreCompleted = restoreCompleted;
         _fillInitialVacancies = fillInitialVacancies;
@@ -596,7 +600,9 @@ internal sealed class MultiAlteringCoordinator
         Func<AlteringPlan, MaterialSupplyHold, CancellationToken, Task<MaterialSupplyHold?>>? recheckUnavailableRoute = null,
         Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<MultiAlteringMaterialHoldCheckpoint>>? restoreMaterialHolds = null,
         Action<AlteringPlan, MaterialSupplyHold>? persistMaterialHold = null,
-        Action<AlteringPlan>? clearMaterialHold = null)
+        Action<AlteringPlan>? clearMaterialHold = null,
+        Func<AlteringPlan, CancellationToken, Task>? verifySafePreInputRead = null,
+        Action<MultiAlteringReadQuarantineSnapshot>? reportReadQuarantine = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -764,7 +770,8 @@ internal sealed class MultiAlteringCoordinator
                 if (PendingCount(facility) == 0) continue;
                 var current = works.Where(x => x.FacilityName == facility).ToArray();
                 Efficiency.Observe(facility, current, held.ContainsKey(facility),
-                    startupVacancies.Contains(facility) && current.Length is > 0 and < 7);
+                    startupVacancies.Contains(facility) && current.Length is > 0 and < 7,
+                    readQuarantined: ReadQuarantine.HasUnverified(facility));
             }
             var facilityOrder = Efficiency.Order(orderedFacilities,
                 _optimizeFacilityOrder);
@@ -814,6 +821,48 @@ internal sealed class MultiAlteringCoordinator
                     held.Remove(facility);
                     Log?.Invoke($"[다중가공][재료 재확인] {facility} · {waiting.Plan.DisplayName} · " +
                         "부족 상태 재조회 완료 · 기존 F9 장부/화면 등록 검증을 다시 수행");
+                }
+
+                // V3.2.44: a typed read-only preflight failure can pause ONLY
+                // its own facility. Never downgrade a state/ownership failure
+                // or anything after game input to a lane-local incident.
+                if (ReadQuarantine.HasUnverified(facility))
+                {
+                    if (verifySafePreInputRead is null)
+                        throw new InvalidOperationException(
+                            "Safe-read quarantine has no fresh verification callback");
+                    if (ReadQuarantine.IsBlocked(facility, _now()))
+                        continue;
+                    var pending = plansByFacility[facility][FindNextPendingIndex(facility)];
+                    var beforeRecovery = await readWorks(ct);
+                    var local = beforeRecovery.Where(x =>
+                        x.FacilityName == facility).ToArray();
+                    _laneState?.Observe(facility, local, allowShrink: false);
+                    if (local.Length != 0)
+                        throw new InvalidOperationException(
+                            "Read quarantine observed foreign or unconfirmed queue change; stop");
+                    try
+                    {
+                        await verifySafePreInputRead(pending, ct);
+                    }
+                    catch (SafePreInputReadException transient)
+                    {
+                        var evidence = ReadQuarantine.NoteFailure(
+                            pending, transient.Operation, TimeSpan.FromSeconds(30));
+                        Log?.Invoke($"[다중가공][읽기 격리] {facility} · {pending.DisplayName} · " +
+                            $"안전한 사전 CLI 재확인 실패 {evidence.ConsecutiveFailures}회 · " +
+                            "30초 후 읽기만 재검증 · 다른 시설 진행 · 게임 입력 없음");
+                        if (evidence.Repeated) reportReadQuarantine?.Invoke(evidence);
+                        continue;
+                    }
+                    var recovered = ReadQuarantine.NoteRecovered(pending);
+                    reportReadQuarantine?.Invoke(recovered);
+                    Log?.Invoke($"[다중가공][읽기 복구] {facility} · {pending.DisplayName} · " +
+                        "새 CLI 제법·대기열 확인 완료 · 기존 재료/현장/장부 가드 재실행");
+                    works = await readWorks(ct);
+                    if (works.Any(x => x.FacilityName == facility))
+                        throw new InvalidOperationException(
+                            "Read quarantine recovery queue changed; stop without input");
                 }
 
                 var facilityWorks = works
@@ -975,6 +1024,29 @@ internal sealed class MultiAlteringCoordinator
                             try
                             {
                                 await preparePlan(plan, ct);
+                            }
+                            catch (SafePreInputReadException transient)
+                                when (verifySafePreInputRead is not null &&
+                                      facilityWorks.Length == 0)
+                            {
+                                // The typed exception is emitted ONLY by the
+                                // three read-only preflight queries. No movement,
+                                // gathering, receipt or registration began.
+                                var evidence = ReadQuarantine.NoteFailure(
+                                    plan, transient.Operation, TimeSpan.FromSeconds(30));
+                                Log?.Invoke(
+                                    $"[다중가공][읽기 격리] {facility} · {plan.DisplayName} · " +
+                                    $"사전 CLI 오류 {evidence.ConsecutiveFailures}회 · " +
+                                    "해당 시설만 보류 · 다른 시설 계속 · 30초 후 읽기 재검증");
+                                if (evidence.Repeated)
+                                {
+                                    Log?.Invoke(
+                                        $"[다중가공][반복 오류] {facility} · " +
+                                        "동일 읽기 오류 연속 2회 이상 · 진단 기록/AutoFix 검토 대상 · " +
+                                        "무인 코드 수정·배포/게임 입력 재실행 없음");
+                                    reportReadQuarantine?.Invoke(evidence);
+                                }
+                                break;
                             }
                             catch (MaterialSupplyHoldException unavailable)
                                 when (recheckUnavailableRoute is not null)

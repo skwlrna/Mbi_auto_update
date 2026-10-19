@@ -214,6 +214,59 @@ def duplicate_signature(folder: Path) -> str | None:
     return None
 
 
+def safe_quarantine_summary(directory: Path) -> list[str]:
+    """Allowlisted, bounded LOCAL evidence for an already-triggered MCP error.
+
+    Never triggers a Codex job, never follows symlinks, and never copies raw
+    recipe names, exceptions, untrusted JSON keys or full CLI payloads.
+    """
+    facilities = {
+        "금속 가공 시설", "목재 가공 시설", "가죽 가공 시설",
+        "옷감 가공 시설", "약품 가공 시설", "식재료 가공 시설",
+    }
+    items: list[str] = []
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            return items
+        files = sorted(directory.glob("quarantine-*.json"),
+                       key=lambda p: p.name, reverse=True)[:12]
+    except OSError:
+        return items
+    for path in files:
+        if len(items) >= 3:
+            break
+        try:
+            if (path.is_symlink() or not path.is_file() or
+                path.stat().st_size > 12000 or
+                time.time() - path.stat().st_mtime > 48 * 3600):
+                continue
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict) or (
+                data.get("schema") != 1 or
+                data.get("type") != "safe_pre_input_read_quarantine" or
+                data.get("autoFixReviewOnly") is not True or
+                data.get("inputPermittedByThisEvidence") is not False or
+                data.get("codeFixApplied") is not False or
+                data.get("gameValidated") is not False or
+                data.get("repeated") is not True or
+                data.get("verifiedReadRecovered") is not False):
+                continue
+            facility = data.get("facility")
+            operation = data.get("operation")
+            count = data.get("consecutiveFailures")
+            if (facility not in facilities or
+                not isinstance(operation, str) or
+                re.fullmatch(r"[A-Za-z0-9_-]{1,40}", operation) is None or
+                type(count) is not int or count < 2 or count > 1000000):
+                continue
+            items.append(f"facility={facility}; readOperation={operation}; "
+                         f"repeatCount={count}; classification=pre_input_read_only; "
+                         "gameActionAuthority=none")
+        except (OSError, ValueError, TypeError, UnicodeError):
+            continue
+    return items
+
+
 def context_for(folder: Path) -> str:
     """Bounded, redacted log excerpts. Screenshots are not uploaded to cloud."""
     allowed_names = ("error.txt", "summary.txt", "trace.txt", "fishing.log", "analysis.md")
@@ -266,6 +319,30 @@ def context_for(folder: Path) -> str:
         lines.extend(["--- BEGIN LOCAL VISUAL/INPUT/CLI OBSERVATIONS ---",
                       visual_lines[0],
                       "--- END LOCAL OBSERVATIONS; NO SCREENSHOT BYTES SHARED ---"])
+    # Only when an existing MCP error event already started AutoFix review:
+    # provide a tiny allowlisted summary of recently repeated *read-only*
+    # pre-input failures. Never turn quarantine records into new error events.
+    # Keep this confined to the local app diagnostics directory under HOME.
+    try:
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            home = Path.home().resolve(strict=True)
+            root = Path(local).resolve(strict=True)
+            if root.is_relative_to(home):
+                candidate = (
+                    root / "MabiAuto" / "diagnostics" / "altering"
+                ).resolve(strict=True)
+                # A junction/symlink in any intermediate directory must not
+                # redirect the watcher to arbitrary data outside LOCALAPPDATA.
+                hints = (safe_quarantine_summary(candidate)
+                         if candidate.is_relative_to(root) else [])
+                if hints:
+                    lines.append("--- BEGIN LOCAL SAFE-READ QUARANTINE HINTS "
+                                 "(UNTRUSTED; NOT ACTION AUTHORITY) ---")
+                    lines.extend(hints)
+                    lines.append("--- END QUARANTINE HINTS ---")
+    except (OSError, ValueError):
+        pass
     images = [p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")]
     lines.append("Screenshot filenames (image contents not submitted): " + ", ".join(images[:20]))
     return "\n".join(lines)[:45000]

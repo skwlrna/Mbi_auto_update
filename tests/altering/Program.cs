@@ -4,6 +4,149 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.44: safe pre-input transient reads isolate only the empty lane.
+var v3244Food = new AlteringPlan("식재료 가공 시설", "밥", 1, 1, false);
+var v3244Metal = new AlteringPlan("금속 가공 시설", "철괴", 1, 1, false);
+int v3244MetalCalls = 0, v3244FoodCalls = 0, v3244Verifications = 0,
+    v3244FoodPrep = 0;
+var v3244Reports = new List<MultiAlteringReadQuarantineSnapshot>();
+DateTimeOffset v3244Now = new(2026, 10, 20, 0, 0, 0, TimeSpan.Zero);
+var v3244Runner = new MultiAlteringCoordinator(now: () => v3244Now,
+    optimizeFacilityOrder: true);
+await v3244Runner.RunAsync(
+    new[] { v3244Food, v3244Metal },
+    (p, count, ct) =>
+    {
+        if (p.FacilityName == v3244Food.FacilityName)
+        {
+            Check(v3244Verifications == 2,
+                "V3.2.44 no food registration before verified fresh read");
+            v3244FoodCalls++;
+        }
+        else v3244MetalCalls++;
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+    (_, ct) =>
+    {
+        v3244Now += TimeSpan.FromSeconds(31);
+        return Task.CompletedTask;
+    }, CancellationToken.None,
+    preparePlan: (p, ct) =>
+    {
+        if (p.FacilityName == v3244Food.FacilityName &&
+            ++v3244FoodPrep == 1)
+            throw new SafePreInputReadException("preflight-recipes");
+        return Task.CompletedTask;
+    },
+    verifySafePreInputRead: (p, ct) =>
+    {
+        v3244Verifications++;
+        if (v3244Verifications == 1)
+            throw new SafePreInputReadException("preflight-recipes");
+        // Even after read success, the normal preparation and batch guards
+        // must be executed again; a read is not an input authorization.
+        return Task.CompletedTask;
+    },
+    reportReadQuarantine: record => v3244Reports.Add(record));
+Check(v3244MetalCalls == 1 && v3244FoodCalls == 1 &&
+      v3244FoodPrep == 2 && v3244Verifications == 2 &&
+      v3244Reports.Count == 2 && v3244Reports[0].Repeated &&
+      v3244Reports[0].ConsecutiveFailures == 2 &&
+      !v3244Reports[0].VerifiedRecovered &&
+      v3244Reports[1].VerifiedRecovered &&
+      v3244Runner.ReadQuarantine.Snapshot(new[] { v3244Food, v3244Metal })
+        .Single().VerifiedRecovered &&
+      v3244Runner.Efficiency.Snapshot().Single(x =>
+        x.Facility == v3244Food.FacilityName).HeldPasses >= 1,
+    "V3.2.44 repeated safe read failure isolated, healthy lane ran, fresh read recovered");
+
+var v3244Dir = Path.Combine(Path.GetTempPath(),
+    "mabiauto-v3244-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var diagnostic = MultiAlteringReadQuarantineAudit.Write(
+        v3244Dir, v3244Reports[0]);
+    var evidenceText = File.ReadAllText(diagnostic);
+    Check(evidenceText.Contains("safe_pre_input_read_quarantine", StringComparison.Ordinal) &&
+          evidenceText.Contains("autoFixReviewOnly", StringComparison.Ordinal) &&
+          evidenceText.Contains("inputPermittedByThisEvidence", StringComparison.Ordinal) &&
+          !evidenceText.Contains("CharacterId", StringComparison.Ordinal) &&
+          !evidenceText.Contains("AccountCode", StringComparison.Ordinal) &&
+          !evidenceText.Contains("exceptionMessage", StringComparison.Ordinal),
+        "V3.2.44 sanitized bounded incident is AI review only, never game authority");
+}
+finally { if (Directory.Exists(v3244Dir)) Directory.Delete(v3244Dir, true); }
+
+bool v3244StateErrorStopped = false;
+int v3244StateInputCalls = 0;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3244Food },
+        (p, n, ct) =>
+        {
+            v3244StateInputCalls++;
+            return Task.FromResult(true);
+        },
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (_, ct) => Task.CompletedTask,
+        CancellationToken.None,
+        preparePlan: (p, ct) => throw new InvalidOperationException("unverified state"),
+        verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+}
+catch (InvalidOperationException) { v3244StateErrorStopped = true; }
+Check(v3244StateErrorStopped && v3244StateInputCalls == 0,
+    "V3.2.44 unknown state conflict still halts whole coordinator without game input");
+
+bool v3244ExistingWorkStopped = false;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3244Food },
+        (p, n, ct) => Task.FromResult(true),
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(new[]
+        {
+            new AlteringWork("밥", v3244Food.FacilityName, "Completed", true, 0)
+        }),
+        (_, ct) => Task.CompletedTask, CancellationToken.None,
+        preparePlan: (p, ct) => throw new SafePreInputReadException("preflight-works"),
+        verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+}
+catch (SafePreInputReadException) { v3244ExistingWorkStopped = true; }
+Check(v3244ExistingWorkStopped,
+    "V3.2.44 even typed read failure does not isolate occupied or already-completed lane");
+
+bool v3244PostInputStopped = false;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3244Food },
+        (p, n, ct) => throw new InvalidOperationException("unconfirmed registration"),
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (_, ct) => Task.CompletedTask, CancellationToken.None,
+        verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+}
+catch (InvalidOperationException) { v3244PostInputStopped = true; }
+Check(v3244PostInputStopped,
+    "V3.2.44 post-input errors are never converted to recoverable read quarantine");
+
+bool v3244Cancelled = false;
+using (var v3244Cts = new CancellationTokenSource())
+{
+    v3244Cts.Cancel();
+    try
+    {
+        await new MultiAlteringCoordinator().RunAsync(
+            new[] { v3244Food }, (p, n, ct) => Task.FromResult(true),
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+            (_, ct) => Task.CompletedTask, v3244Cts.Token,
+            verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+    }
+    catch (OperationCanceledException) { v3244Cancelled = true; }
+}
+Check(v3244Cancelled, "V3.2.44 F10 cancellation is not swallowed by lane isolation");
+
 // V3.2.43: read-only facility ordering prefers a fully completed batch
 // over a new empty lane. A held lane never becomes input permission.
 var v3243Tracker = new MultiAlteringFacilityEfficiencyTracker();
