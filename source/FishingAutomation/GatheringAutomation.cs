@@ -227,7 +227,10 @@ internal sealed class GatheringAutomation
         catch (Exception)
         {
             if (workTicket is not null)
+            {
                 _workFence.MarkUncertain(workTicket, "gather_stop_or_inventory_unconfirmed");
+                _managerState?.RecordUncertainAction(LifeSkillStage.Gathering, "gather_final");
+            }
             throw;
         }
     }
