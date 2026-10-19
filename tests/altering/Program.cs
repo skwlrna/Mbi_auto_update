@@ -4,6 +4,87 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.41: durable quarantine is never an authorization to register a
+// previously held item until fresh live evidence removes it.
+var v3241Food = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
+var v3241Metal = new AlteringPlan("금속 가공 시설", "철괴", 2, 1, false);
+var v3241Plans = new[] { v3241Food, v3241Metal };
+var v3241Saved = new MultiAlteringMaterialHoldCheckpoint
+{
+    FacilityName = v3241Food.FacilityName,
+    PlanKey = MultiAlteringBatchStore.Key(v3241Food),
+    Item = "미확인 재료", Required = 3, Observed = 0,
+    Category = "acquisition_route_unverified",
+    FirstHeldAt = DateTimeOffset.UtcNow, LastCheckedAt = DateTimeOffset.UtcNow
+};
+var v3241Clock = DateTimeOffset.Parse("2026-10-20T00:00:00+00:00");
+int v3241Rechecks = 0, v3241FoodInputs = 0, v3241MetalInputs = 0;
+var v3241Events = new List<string>();
+var v3241Coordinator = new MultiAlteringCoordinator(now: () => v3241Clock);
+v3241Coordinator.Log += v3241Events.Add;
+await v3241Coordinator.RunAsync(
+    v3241Plans,
+    (p, _, ct) =>
+    {
+        if (p == v3241Food)
+        {
+            Check(v3241Rechecks >= 2 && v3241MetalInputs == 1,
+                "V3.2.41 stale restored hold cannot execute food input");
+            v3241FoodInputs++;
+        }
+        else v3241MetalInputs++;
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+    (interval, ct) => { v3241Clock += interval; return Task.CompletedTask; },
+    CancellationToken.None,
+    recheckUnavailableRoute: (plan, prior, ct) =>
+    {
+        v3241Rechecks++;
+        return Task.FromResult<MaterialSupplyHold?>(
+            v3241Rechecks == 1 ? prior with { Observed = 1 } : null);
+    },
+    restoreMaterialHolds: _ => new[] { v3241Saved },
+    persistMaterialHold: (plan, evidence) =>
+    {
+        Check(v3241FoodInputs == 0 && evidence.Observed == 1,
+            "V3.2.41 hold remains isolated during first live poll");
+    },
+    clearMaterialHold: plan =>
+    {
+        Check(v3241Rechecks == 2 && v3241FoodInputs == 0,
+            "V3.2.41 clearing requires new live stock check first");
+    });
+Check(v3241Rechecks == 2 && v3241MetalInputs == 1 && v3241FoodInputs == 1 &&
+      v3241Events.Any(x => x.Contains("[보류 복원]", StringComparison.Ordinal)),
+    "V3.2.41 food hold restart makes progress only after fresh verified release");
+
+// Failing to commit the hold is fatal BEFORE any queue input is attempted.
+var v3241BlockedInputs = 0;
+bool v3241DiskFailureStopped = false;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3241Food },
+        (plan, _, ct) =>
+        {
+            v3241BlockedInputs++;
+            return Task.FromResult(true);
+        },
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (_, ct) => Task.CompletedTask,
+        CancellationToken.None,
+        preparePlan: (plan, ct) => throw new MaterialSupplyHoldException(
+            new("미확인 재료", 3, 0, "acquisition_route_unverified")),
+        recheckUnavailableRoute: (plan, prior, ct) =>
+            Task.FromResult<MaterialSupplyHold?>(prior),
+        persistMaterialHold: (plan, evidence) => throw new IOException("atomic hold failure"));
+}
+catch (IOException ex) when (ex.Message == "atomic hold failure")
+{ v3241DiskFailureStopped = true; }
+Check(v3241DiskFailureStopped && v3241BlockedInputs == 0,
+    "V3.2.41 hold journal failure safely stops without registration");
+
 // V3.2.40: unknown food inputs are held, never invented as gatherable.
 var v3240Food = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
 var v3240Recipe = new AlteringRecipe("밥", false, 1,
