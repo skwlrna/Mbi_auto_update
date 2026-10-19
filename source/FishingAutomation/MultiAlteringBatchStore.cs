@@ -23,12 +23,29 @@ internal sealed record MultiAlteringReceiptSnapshot
     public int TotalFacilityWorks { get; init; }
 }
 
+// Read-only shortage evidence. This is NOT a work ticket or registration authority.
+// Persisted in the same atomic batch manifest as other F9 checkpoints.
+internal sealed record MultiAlteringMaterialHoldCheckpoint
+{
+    public string FacilityName { get; init; } = "";
+    public string PlanKey { get; init; } = "";
+    public string Item { get; init; } = "";
+    public long Required { get; init; }
+    public long Observed { get; init; }
+    public string Category { get; init; } = "";
+    public DateTimeOffset FirstHeldAt { get; init; }
+    public DateTimeOffset LastCheckedAt { get; init; }
+    public int Rechecks { get; init; }
+}
+
 internal sealed record MultiAlteringBatch
 {
     public int Version { get; init; } = 2;
     public MultiAlteringConsumptionTransaction? PreparedConsumption { get; init; }
     // Atomic before-input receipt intent. Any crash leaves RecoveryRequired.
     public MultiAlteringReceiptSnapshot? PendingReceipt { get; init; }
+    // V3.2.41: strictly diagnostic, never restores physical onsite proof.
+    public MultiAlteringMaterialHoldCheckpoint[] MaterialHolds { get; init; } = [];
     public MultiAlteringConsumptionTransaction[] AppliedConsumption { get; init; } = [];
     public string BatchId { get; init; } = "";
     public bool MigratedFromLegacy { get; init; }
@@ -490,6 +507,24 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 .Any(x => x.ReceiptTrackingEnabled &&
                     x.MultiState != MultiAlteringItemState.RecoveryRequired)))
             throw new InvalidDataException("F9 수령 직전 대기열 기록 손상 · 안전 정지");
+        // Every hold must refer to exactly one still-pending recipe, and its
+        // evidence can never be interpreted as an already confirmed input.
+        if (b.MaterialHolds is null ||
+            b.MaterialHolds.Select(h => h.FacilityName).Distinct(StringComparer.Ordinal).Count() != b.MaterialHolds.Length ||
+            b.State != MultiAlteringBatchState.Active && b.MaterialHolds.Length != 0)
+            throw new InvalidDataException("F9 재료 보류 장부 상태/시설 중복 · 원본 보존");
+        foreach (var hold in b.MaterialHolds)
+        {
+            var item = b.Items.SingleOrDefault(s => Key(s) == hold.PlanKey &&
+                s.FacilityName == hold.FacilityName);
+            if (item is null || MultiAlteringItemStatePolicy.IsTerminal(item.MultiState) ||
+                string.IsNullOrWhiteSpace(hold.Item) || hold.Item.Length > 160 ||
+                string.IsNullOrWhiteSpace(hold.Category) || hold.Category.Length > 128 ||
+                hold.Required <= 0 || hold.Observed < 0 ||
+                hold.Observed >= hold.Required || hold.Rechecks < 0 ||
+                hold.FirstHeldAt == default || hold.LastCheckedAt < hold.FirstHeldAt)
+                throw new InvalidDataException("F9 재료 보류 기록 손상/완료 품목 충돌 · 안전 정지");
+        }
         if (b.State != MultiAlteringBatchState.Active && b.PendingReceipt is not null)
             throw new InvalidDataException("미확정 수령 기록이 남은 배치 종료 차단");
         if (b.State != MultiAlteringBatchState.Active && b.PreparedConsumption is not null)
@@ -509,6 +544,62 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     {
         if (!SamePlans(Batch, plans)) throw new InvalidOperationException("배치 계획 불일치 · 안전 정지");
         return plans.Where(p => MultiAlteringItemStatePolicy.IsTerminal(Session(p).MultiState)).ToArray();
+    }
+
+    // A restored hold is a quarantine hint only: the coordinator must make a
+    // NEW live stock + recipe read before it may leave the quarantine.
+    internal IReadOnlyList<MultiAlteringMaterialHoldCheckpoint> RestoreMaterialHolds(
+        IReadOnlyList<AlteringPlan> plans)
+    {
+        if (!SamePlans(Batch, plans))
+            throw new InvalidOperationException("재료 보류 복원 시 계획이 일치하지 않습니다.");
+        return Batch.MaterialHolds.ToArray();
+    }
+
+    internal void RecordMaterialHold(AlteringPlan plan, MaterialSupplyHold evidence)
+    {
+        if (Batch.State != MultiAlteringBatchState.Active ||
+            MultiAlteringItemStatePolicy.IsTerminal(Session(plan).MultiState) ||
+            !string.Equals(plan.FacilityName, "식재료 가공 시설", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(evidence.Item) ||
+            evidence.Required <= evidence.Observed || evidence.Observed < 0)
+            throw new InvalidOperationException("재료 보류 증거/상태 불일치 · 자동 재개 차단");
+        string key = Key(plan);
+        var previous = Batch.MaterialHolds.SingleOrDefault(h => h.FacilityName == plan.FacilityName);
+        if (previous is not null && previous.PlanKey != key)
+            throw new InvalidOperationException("동일 시설의 다른 보류 품목 덮어쓰기 차단");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        bool sameEvidence = previous is not null &&
+            previous.Item == evidence.Item && previous.Required == evidence.Required;
+        var next = new MultiAlteringMaterialHoldCheckpoint
+        {
+            FacilityName = plan.FacilityName, PlanKey = key,
+            Item = evidence.Item, Required = evidence.Required,
+            Observed = evidence.Observed, Category = evidence.Category,
+            FirstHeldAt = sameEvidence ? previous!.FirstHeldAt : now,
+            LastCheckedAt = sameEvidence && now < previous!.LastCheckedAt
+                ? previous.LastCheckedAt : now,
+            Rechecks = sameEvidence ? checked(previous!.Rechecks + 1) : 0
+        };
+        Commit(Batch with
+        {
+            MaterialHolds = Batch.MaterialHolds.Where(h => h.FacilityName != plan.FacilityName)
+                .Append(next).ToArray()
+        });
+    }
+
+    internal void ClearMaterialHold(AlteringPlan plan)
+    {
+        if (Batch.State != MultiAlteringBatchState.Active)
+            throw new InvalidOperationException("종료된 배치의 재료 보류 변경 차단");
+        string key = Key(plan);
+        if (!Batch.MaterialHolds.Any(h => h.PlanKey == key &&
+            h.FacilityName == plan.FacilityName))
+            throw new InvalidOperationException("재확인 대상 보류 장부가 없습니다.");
+        Commit(Batch with
+        {
+            MaterialHolds = Batch.MaterialHolds.Where(h => h.PlanKey != key).ToArray()
+        });
     }
 
     private void SaveItem(AlteringPlan plan, AlteringSessionState state)
@@ -719,6 +810,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     {
         if (Batch.PreparedConsumption is not null)
             throw new InvalidOperationException("F05 미확정 소비 거래 · 배치 종료 차단");
+        if (Batch.MaterialHolds.Length != 0)
+            throw new InvalidOperationException("재료 보류가 남은 배치 완료 차단");
         if (Batch.Items.Any(s => !MultiAlteringItemStatePolicy.IsTerminal(s.MultiState)))
             throw new InvalidOperationException("전체 품목 완료 증거 부족 · 배치 종료 차단");
         if (Batch.State == MultiAlteringBatchState.Active)
