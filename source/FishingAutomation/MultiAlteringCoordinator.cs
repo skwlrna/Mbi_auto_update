@@ -209,7 +209,9 @@ internal sealed class MultiAlteringCoordinator
             StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
         var prepared = new HashSet<(string Facility, string Display, int Ordinal)>();
-        var globalQueueBlocked = new HashSet<string>(StringComparer.Ordinal);
+        // Keep diagnostic evidence when the CLI refusal reason changes. Avoid
+        // repeating an identical line every 30-second observation cycle.
+        var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         // Only the explicit new-F9 mode gets one initial pass into vacant
@@ -343,12 +345,19 @@ internal sealed class MultiAlteringCoordinator
                     if (!currentRecipe.Alterable &&
                         currentRecipe.MissingIngredients.Count == 0)
                     {
-                        if (globalQueueBlocked.Add(facility))
+                        string refusal = currentRecipe.Reason ?? "unknown";
+                        string evidence = nextPlan.DisplayName + "\u001f" + refusal +
+                            "\u001f" + facilityWorks.Length;
+                        if (!globalQueueBlocked.TryGetValue(facility, out string? previous) ||
+                            !string.Equals(previous, evidence, StringComparison.Ordinal))
+                        {
+                            globalQueueBlocked[facility] = evidence;
                             Log?.Invoke(
                                 $"[다중가공] 독립 시설 보류 · {nextPlan.DisplayName} · " +
-                                $"현재 CLI Reason={currentRecipe.Reason ?? "unknown"} · " +
+                                $"현재 CLI Reason={refusal} · 부족 재료 증거 없음 · " +
                                 $"해당 시설 {facilityWorks.Length}/7칸, 타 시설 7/7칸 · " +
                                 "다음 대기 주기에 실제 제법 재조회 · 무확인 등록 클릭 금지");
+                        }
                         globalQueueUnblocked.Remove(facility);
                         continue;
                     }
