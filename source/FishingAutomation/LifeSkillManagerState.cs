@@ -87,6 +87,20 @@ internal sealed class LifeSkillRecoveryJournal
     private const int MaxPatterns = 24;
     private readonly object _gate = new();
     private readonly List<LifeSkillRecoveryPattern> _patterns = [];
+    // Totals survive eviction of old pattern details (the detail window is 24).
+    private long _totalEvents, _repeatedEvents, _retryAttempts, _recoveredReads,
+        _exhaustedReads, _uncertainActions;
+
+    internal LifeSkillRecoveryOutcomeMetrics OutcomeSnapshot()
+    {
+        lock (_gate)
+        {
+            long concluded = _recoveredReads + _exhaustedReads;
+            return new(_retryAttempts, _recoveredReads, _exhaustedReads,
+                _uncertainActions, _repeatedEvents, _totalEvents, _patterns.Count,
+                concluded > 0 ? (double)_recoveredReads / concluded : null);
+        }
+    }
 
     internal LifeSkillRecoveryPattern Note(
         LifeSkillStage stage, string operation, LifeSkillRecoveryDecision decision)
@@ -99,11 +113,24 @@ internal sealed class LifeSkillRecoveryJournal
             ? operation : "other";
         lock (_gate)
         {
+            _totalEvents++;
+            if (decision.Category == "transient_read" &&
+                decision.Disposition == LifeSkillRecoveryDisposition.RetryReadOnlyOnce)
+                _retryAttempts++;
+            else if (decision.Category == "transient_read_recovered" &&
+                decision.Disposition == LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead)
+                _recoveredReads++;
+            else if (decision.Category == "transient_read_exhausted" &&
+                decision.Disposition == LifeSkillRecoveryDisposition.SafeStopAndDiagnose)
+                _exhaustedReads++;
+            else if (decision.Category == "unconfirmed_action")
+                _uncertainActions++;
             int index = _patterns.FindIndex(x => x.Stage == stage &&
                 x.Operation == tag && x.Category == decision.Category &&
                 x.Disposition == decision.Disposition);
             if (index >= 0)
             {
+                _repeatedEvents++;
                 var previous = _patterns[index];
                 var updated = previous with
                 {
@@ -373,7 +400,7 @@ internal sealed class LifeSkillManagerState
         => RecoveryJournal.Snapshot();
 
     internal LifeSkillRecoveryOutcomeMetrics RecoveryOutcomeSnapshot()
-        => LifeSkillRecoveryOutcomePolicy.Summarize(RecoveryJournal.Snapshot());
+        => RecoveryJournal.OutcomeSnapshot();
 
     // Call only after a non-idempotent screen operation became uncertain.
     // A history match or a recent inventory count may NEVER clear this flag.
