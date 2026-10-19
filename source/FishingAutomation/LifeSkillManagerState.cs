@@ -327,6 +327,14 @@ internal sealed class LifeSkillManagerState
     internal IReadOnlyList<LifeSkillRecoveryPattern> RecoveryPatternsSnapshot()
         => RecoveryJournal.Snapshot();
 
+    // Call only after a non-idempotent screen operation became uncertain.
+    // A history match or a recent inventory count may NEVER clear this flag.
+    internal void RecordUncertainAction(LifeSkillStage stage, string operation)
+    {
+        NoteRecovery(stage, operation,
+            LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false));
+    }
+
     private void NoteRecovery(LifeSkillStage stage, string operation,
         LifeSkillRecoveryDecision decision)
     {
