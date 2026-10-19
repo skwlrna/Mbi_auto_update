@@ -29,6 +29,95 @@ catch (InvalidOperationException ex) { changedYieldError = ex.Message; }
 Check(changedYieldError.Contains("등록 당시와 달라져", StringComparison.Ordinal),
     "F9 blocks an altered recipe identity before session creation");
 
+
+ // V3.2.29: F9 re-reads a contradictory global queue_full before creating
+ // any manifest or clicking. A clean, later CLI snapshot may unblock safely.
+ int refreshReads = 0, refreshWorkReads = 0, refreshDelays = 0;
+ var refreshEvidence = new List<string>();
+ var refreshed = await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+     new[] { deferredPlan },
+     _ => Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+         new[] { ++refreshReads == 1
+             ? deferredRecipe with { Reason = "queue_full" }
+             : deferredRecipe with { Alterable = true, Reason = null } }),
+     _ => { refreshWorkReads++; return Task.FromResult<IReadOnlyList<AlteringWork>>(
+         Array.Empty<AlteringWork>()); },
+     (_, _) => { refreshDelays++; return Task.CompletedTask; },
+     CancellationToken.None, refreshEvidence.Add);
+ Check(refreshReads == 2 && refreshWorkReads == 2 && refreshDelays == 1 &&
+       refreshed.Recipes.Single().Alterable &&
+       refreshEvidence.Single().Contains("입력 없음", StringComparison.Ordinal),
+     "F9 retries unverified queue_full read-only and accepts a fresh ready snapshot");
+
+ int persistReads = 0, persistDelays = 0;
+ bool persistentRejected = false;
+ try
+ {
+     await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+         new[] { deferredPlan },
+         _ => { persistReads++; return Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+             new[] { deferredRecipe with { Reason = "queue_full" } }); },
+         _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+         (_, _) => { persistDelays++; return Task.CompletedTask; },
+         CancellationToken.None);
+ }
+ catch (InvalidOperationException ex)
+ {
+     persistentRejected = ex.Message.Contains("queue_full", StringComparison.Ordinal);
+ }
+ Check(persistentRejected && persistReads == 3 && persistDelays == 2,
+     "persistent unverified queue_full refuses F9 after exactly two bounded retries");
+
+ int shortageReads = 0;
+ var explicitShortage = await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+     new[] { deferredPlan },
+     _ => { shortageReads++; return Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+         new[] { deferredRecipe with { Reason = "not_enough_ingredient",
+             MissingIngredients = new[] { new AlteringIngredient("통나무", 2, 0) } } }); },
+     _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+     (_, _) => throw new Exception("Explicit shortage must not re-poll"),
+     CancellationToken.None);
+ Check(shortageReads == 1 && explicitShortage.Recipes.Single().MissingIngredients.Count == 1,
+     "F9 preserves explicit shortage resolver authority without masked-queue retry");
+
+ int otherFailureReads = 0;
+ bool otherFailureRejected = false;
+ try
+ {
+     await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+         new[] { deferredPlan },
+         _ => { otherFailureReads++; return Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+             new[] { deferredRecipe }); },
+         _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+         (_, _) => throw new Exception("Unrelated refusal must not re-poll"),
+         CancellationToken.None);
+ }
+ catch (InvalidOperationException ex)
+ {
+     otherFailureRejected = ex.Message.Contains("unknown_after_patch", StringComparison.Ordinal);
+ }
+ Check(otherFailureRejected && otherFailureReads == 1,
+     "F9 does not disguise other CLI recipe refusals as transient queue_full");
+
+ using (var cancelRead = new CancellationTokenSource())
+ {
+     int cancelledReads = 0;
+     bool cancelledWithoutNewInput = false;
+     try
+     {
+         await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+             new[] { deferredPlan },
+             _ => { cancelledReads++; return Task.FromResult<IReadOnlyList<AlteringRecipe>>(
+                 new[] { deferredRecipe with { Reason = "queue_full" } }); },
+             _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+             (_, _) => { cancelRead.Cancel(); return Task.CompletedTask; },
+             cancelRead.Token);
+     }
+     catch (OperationCanceledException) { cancelledWithoutNewInput = true; }
+     Check(cancelledWithoutNewInput && cancelledReads == 1,
+         "F10 cancellation stops queue_full refresh before a second snapshot");
+ }
+
 // 2026-10-15 18:57 live CLI log: ALL 91 recipes were reported
 // Alterable=false, Reason=queue_full. Existing seven-slot queues must be
 // managed by the old wait -> verified receipt -> refill engine, not rejected.

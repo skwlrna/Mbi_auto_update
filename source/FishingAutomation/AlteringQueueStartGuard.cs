@@ -4,6 +4,77 @@ namespace FishingAutomation;
 // F9 BEFORE any game-window inputs, while preserving a deferred queue entry.
 internal static class AlteringQueueStartGuard
 {
+    // Retry only a contradictory, unconfirmed queue_full snapshot, never an
+    // actual full facility or a general recipe/material failure. All observations
+    // are read-only and occur before a game action or batch manifest is opened.
+    internal static async Task<(IReadOnlyList<AlteringRecipe> Recipes,
+        IReadOnlyList<AlteringWork> Works)> EnsureStartableWithRefreshAsync(
+        IReadOnlyList<AlteringPlan> plans,
+        Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>> readRecipes,
+        Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        CancellationToken ct,
+        Action<string>? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(readRecipes);
+        ArgumentNullException.ThrowIfNull(readWorks);
+        ArgumentNullException.ThrowIfNull(delay);
+
+        for (int attempt = 0; ; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var recipes = await readRecipes(ct);
+            var works = await readWorks(ct);
+            try
+            {
+                EnsureStartable(plans, recipes, works);
+                return (recipes, works);
+            }
+            catch (InvalidOperationException) when (
+                attempt < 2 && IsUnverifiedQueueFullConflict(plans, recipes, works))
+            {
+                string slots = string.Join("; ", plans.Select(x => x.FacilityName)
+                    .Distinct(StringComparer.Ordinal).Select(f =>
+                        $"{f} {works.Count(w => w.FacilityName == f)}/7"));
+                log?.Invoke(
+                    $"[CLI][가공 시작 재검증] queue_full/시설별 슬롯 불일치 · " +
+                    $"추가 읽기 전용 확인 {attempt + 1}/2 · {slots} · 입력 없음");
+                await delay(TimeSpan.FromMilliseconds(300 * (attempt + 1)), ct);
+            }
+        }
+    }
+
+    private static bool IsUnverifiedQueueFullConflict(
+        IReadOnlyList<AlteringPlan> plans,
+        IReadOnlyList<AlteringRecipe> recipes,
+        IReadOnlyList<AlteringWork> works)
+    {
+        // No authoritative full lane among the user's selected facilities.
+        // A full lane (or real shortage) takes the existing guarded path.
+        if (plans.Select(p => p.FacilityName).Distinct(StringComparer.Ordinal)
+            .Any(f => works.Count(w => w.FacilityName == f) == 7))
+            return false;
+
+        bool sawQueueMask = false;
+        foreach (var plan in plans)
+        {
+            var matching = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
+            if (matching.Length < plan.RecipeOrdinal ||
+                matching[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
+                return false;
+
+            var recipe = matching[plan.RecipeOrdinal - 1];
+            if (recipe.Alterable || recipe.MissingIngredients.Count > 0) continue;
+            if (!string.Equals(recipe.Reason, "queue_full", StringComparison.Ordinal))
+                return false;
+            if (works.Count(w => w.FacilityName == plan.FacilityName) > 6)
+                return false;
+            sawQueueMask = true;
+        }
+        return sawQueueMask;
+    }
+
     internal static void EnsureStartable(
         IReadOnlyList<AlteringPlan> plans,
         IReadOnlyList<AlteringRecipe> recipes,

@@ -93,11 +93,14 @@ public sealed partial class MainForm
                 _log.Write("[다중가공] 단일 캐릭터 전용 · CLI 서버명만 검증 · " +
                     "다른 캐릭터로 전환하지 않음");
 
-            var recipes = await rawAlteringData.RecipesAsync(token);
-            // Observe current game slots before deciding if queue_full is a
-            // true occupied lane or a contradictory CLI readiness report.
-            // Both calls are read-only and occur before session creation/input.
-            var currentWorks = await rawAlteringData.WorksAsync(token);
+            // Fresh recipe + works must agree before F9 starts. Re-query up to
+            // twice only for a transient, unverified global queue_full mask.
+            // No UI input or manifest exists at this boundary.
+            var (recipes, currentWorks) =
+                await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+                    plans, rawAlteringData.RecipesAsync, rawAlteringData.WorksAsync,
+                    (delay, ct) => Task.Delay(delay, ct), token,
+                    message => _log.Write(message));
             if (plans.Any(plan => recipes.Where(x => x.DisplayName == plan.DisplayName)
                     .ElementAtOrDefault(plan.RecipeOrdinal - 1)?.Reason == "queue_full"))
             {
@@ -107,7 +110,6 @@ public sealed partial class MainForm
                         $" (완료 {currentWorks.Count(x => x.FacilityName == f && x.IsCompleted)})"));
                 _log.Write("[CLI][가공 대기열] queue_full 재검증 · " + laneEvidence);
             }
-            AlteringQueueStartGuard.EnsureStartable(plans, recipes, currentWorks);
 
             string mainSessionDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
