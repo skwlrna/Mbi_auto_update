@@ -28,11 +28,21 @@ Check(await MaterialSupplyRoutePolicy.FindHoldAsync(
     Array.Empty<GatherableItem>(), V3240Count, CancellationToken.None) is null,
     "V3.2.40 fresh inventory sufficient for selected food works clears an unknown-route shortage");
 v3240Counts["확보경로 미확인 재료"] = 0;
-Check(await MaterialSupplyRoutePolicy.FindHoldAsync(
+var v3240UnsupportedBulk = await MaterialSupplyRoutePolicy.FindHoldAsync(
     v3240Food, v3240Recipe, new[] { v3240Recipe },
     new[] { new GatherableItem("확보경로 미확인 재료", true) },
+    V3240Count, CancellationToken.None);
+Check(v3240UnsupportedBulk?.Category == "bulk_route_unverified",
+    "V3.2.40 a CLI gatherable not supported by bulk screen remains safely held");
+var v3240KnownGather = v3240Recipe with
+{
+    MissingIngredients = new[] { new AlteringIngredient("물이 든 병", 2, 0) }
+};
+Check(await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240KnownGather, new[] { v3240KnownGather },
+    new[] { new GatherableItem("물이 든 병", true) },
     V3240Count, CancellationToken.None) is null,
-    "V3.2.40 actual bulk gather catalog evidence authorizes normal guarded material resolver");
+    "V3.2.40 known bulk-supported well water keeps existing guarded gathering flow");
 var v3240NoTool = await MaterialSupplyRoutePolicy.FindHoldAsync(
     v3240Food, v3240Recipe, new[] { v3240Recipe },
     new[] { new GatherableItem("확보경로 미확인 재료", false) },
