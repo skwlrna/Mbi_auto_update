@@ -1,4 +1,36 @@
+using System.Net;
+
 namespace FishingAutomation;
+
+// Only transient failures of confirmed read-only CLI queries may be retried.
+// State conflicts, material shortages and uncertain GUI actions are not recoverable
+// by reissuing a click, claim, craft, stop or registration.
+internal static class LifeSkillReadRecoveryPolicy
+{
+    internal static bool IsTransient(Exception error) => error switch
+    {
+        TimeoutException => true,
+        IOException => true,
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout } => true,
+        _ => false
+    };
+
+    internal static string Category(Exception error) => error switch
+    {
+        OperationCanceledException => "cancelled",
+        InvalidDataException => "invalid_cli_data",
+        InvalidOperationException => "state_conflict",
+        _ when IsTransient(error) => "transient_read",
+        _ => "unclassified_no_retry"
+    };
+}
+
 
 // Per-run observation ledger for the existing middle manager. Never authorizes
 // GUI input; all action paths continue their own fresh CLI and visual checks.
@@ -10,16 +42,20 @@ internal sealed class LifeSkillManagerState
     private readonly object _gate = new();
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _ttl;
+    private readonly Func<TimeSpan, CancellationToken, Task> _recoveryDelay;
     private readonly Dictionary<string, LifeSkillCountEvidence> _inventory =
         new(StringComparer.Ordinal);
     private LifeSkillStage? _current;
     private long _epoch;
     internal event Action<string>? Log;
 
-    internal LifeSkillManagerState(Func<DateTimeOffset>? now = null, TimeSpan? ttl = null)
+    internal LifeSkillManagerState(
+        Func<DateTimeOffset>? now = null, TimeSpan? ttl = null,
+        Func<TimeSpan, CancellationToken, Task>? recoveryDelay = null)
     {
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _ttl = ttl ?? TimeSpan.FromSeconds(5);
+        _recoveryDelay = recoveryDelay ?? Task.Delay;
         if (_ttl <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(ttl));
     }
 
@@ -48,6 +84,72 @@ internal sealed class LifeSkillManagerState
         Log?.Invoke("[중간관리자] 상태 미확정 · 재고 관측 무효화 · " + reason);
     }
 
+    private long CaptureEpoch(LifeSkillStage stage)
+    {
+        lock (_gate)
+        {
+            if (_current != stage)
+                throw new InvalidOperationException(
+                    "중간관리자 단계 불일치 · 다른 작업 상태로 CLI 조회/입력을 진행하지 않습니다.");
+            return _epoch;
+        }
+    }
+
+    private void AssertEpoch(LifeSkillStage stage, long expected)
+    {
+        lock (_gate)
+        {
+            if (_current != stage || _epoch != expected)
+                throw new InvalidOperationException(
+                    "중간관리자 조회 도중 작업 단계가 변경돼 늦은 CLI 응답/재시도를 폐기합니다.");
+        }
+    }
+
+    // V3.2.32 shared bounded recovery. Only call this for side-effect-free
+    // CLI reads. Do not wrap screen reads (which may manipulate UI), actions,
+    // F05 receipts, batch registration, writes or an entire stage.
+    internal async Task<T> ReadWithRecoveryAsync<T>(
+        LifeSkillStage stage, string operation,
+        Func<CancellationToken, Task<T>> readOnly, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentNullException.ThrowIfNull(readOnly);
+        ct.ThrowIfCancellationRequested();
+        long epoch = CaptureEpoch(stage);
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            AssertEpoch(stage, epoch);
+            try
+            {
+                T result = await readOnly(ct);
+                ct.ThrowIfCancellationRequested();
+                AssertEpoch(stage, epoch);
+                if (attempt > 0)
+                    Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
+                        "새 CLI 응답 확인 · 기존 작업/장부 유지");
+                return result;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception error)
+            {
+                if (attempt == 0 && !ct.IsCancellationRequested &&
+                    LifeSkillReadRecoveryPolicy.IsTransient(error))
+                {
+                    Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
+                        "일시적인 CLI 조회 실패 · 300ms 뒤 읽기 전용 1회 재조회 · 화면 입력 없음");
+                    await _recoveryDelay(TimeSpan.FromMilliseconds(300), ct);
+                    continue;
+                }
+                Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
+                    $"분류={LifeSkillReadRecoveryPolicy.Category(error)} · " +
+                    "안전 정지 · 클릭/등록/수령 자동 반복 없음");
+                throw;
+            }
+        }
+        throw new InvalidOperationException("중간관리자 조회 복구 횟수 초과");
+    }
+
     // Each invocation performs a real CLI-backed read. It is never a cached
     // result for registration, gathering, crafting or collection permissions.
     internal async Task<long> ReadFreshCountAsync(
@@ -56,25 +158,28 @@ internal sealed class LifeSkillManagerState
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(item);
         ArgumentNullException.ThrowIfNull(read);
-        ct.ThrowIfCancellationRequested();
-        long expected;
+        // Preserve the original epoch through the post-query evidence commit.
+        // Otherwise an Altering -> Gathering -> Altering transition could
+        // accidentally commit an observation under the newer Altering epoch.
+        long expectedEpoch = CaptureEpoch(stage);
+        // A negative count is a semantic CLI inconsistency, never a transient
+        // transport issue. Validation occurs before the evidence is committed.
+        long count = await ReadWithRecoveryAsync(stage, "inventory",
+            async token =>
+            {
+                long observed = await read(item, token);
+                if (observed < 0)
+                    throw new InvalidDataException("CLI 재고 수량이 음수라 안전 정지합니다.");
+                return observed;
+            }, ct);
         lock (_gate)
         {
-            if (_current != stage)
+            if (_current != stage || _epoch != expectedEpoch)
                 throw new InvalidOperationException(
-                    "중간관리자 작업 단계 불일치 · 기존 상태를 새 작업에 사용하지 않습니다.");
-            expected = _epoch;
-        }
-        long count = await read(item, ct);
-        ct.ThrowIfCancellationRequested();
-        if (count < 0)
-            throw new InvalidDataException("CLI 재고 수량이 음수라 안전 정지합니다.");
-        lock (_gate)
-        {
-            if (_epoch != expected || _current != stage)
-                throw new InvalidOperationException(
-                    "CLI 조회 도중 작업 단계가 변경돼 해당 응답을 폐기합니다.");
-            _inventory[item] = new(stage, expected, count, _now());
+                    "중간관리자 재고 기록 직전 작업 단계/epoch 변경 · 해당 증거 폐기");
+            // A new read cannot stand in for a committed queue/receipt; it is
+            // diagnostic evidence only, never click authorization.
+            _inventory[item] = new(stage, _epoch, count, _now());
         }
         return count;
     }

@@ -91,7 +91,7 @@ internal sealed class MultiGatheringCoordinator
                 $"[다중 채집] 시작 · {request.DisplayName} · 현재 {fresh} / 목표 {targetTotal} · 추가 {remaining}");
 
             var automation = new GatheringAutomation(
-                _data, _screen, _delay, _verificationAttempts);
+                _data, _screen, _delay, _verificationAttempts, _managerState);
             automation.Log += text => Log?.Invoke(text);
             await automation.RunAsync(plan, ct);
 

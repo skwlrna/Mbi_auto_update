@@ -429,7 +429,9 @@ public sealed partial class MainForm
             // CLI reports known shortages only: still recheck on registration.
             async Task PreparePlanMaterialsAsync(AlteringPlan plan, CancellationToken ct)
             {
-                var freshRecipes = await rawAlteringData.RecipesAsync(ct);
+                var freshRecipes = await managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "preflight-recipes",
+                    rawAlteringData.RecipesAsync, ct);
                 var matching = freshRecipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
                 if (matching.Length < plan.RecipeOrdinal ||
                     matching[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
@@ -437,7 +439,9 @@ public sealed partial class MainForm
                         $"{plan.DisplayName} 재료 점검 직전 제법이 변경되었습니다. 목록을 새로고침하세요.");
 
                 var recipe = matching[plan.RecipeOrdinal - 1];
-                var liveWorks = await rawAlteringData.WorksAsync(ct);
+                var liveWorks = await managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "preflight-works",
+                    rawAlteringData.WorksAsync, ct);
                 bool occupied = liveWorks.Any(x => x.FacilityName == plan.FacilityName);
                 // Leather is raw material: do not pre-gather or recursively
                 // manufacture a replacement. The batch engine records a normal
@@ -544,13 +548,17 @@ public sealed partial class MainForm
                         consumptionLedger.UnregisterProducer(plan);
                     return finished;
                 },
-                rawAlteringData.WorksAsync,
+                ct => managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "scheduler-works",
+                    rawAlteringData.WorksAsync, ct),
                 Task.Delay,
                 token,
                 preparePlan: PreparePlanMaterialsAsync,
                 onIdleAbyssRound: idleAbyssRound,
                 minimumAbyssWaitSeconds: minimumAbyssWaitSeconds,
-                readRecipes: rawAlteringData.RecipesAsync), token);
+                readRecipes: ct => managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "scheduler-recipes",
+                    rawAlteringData.RecipesAsync, ct)), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;

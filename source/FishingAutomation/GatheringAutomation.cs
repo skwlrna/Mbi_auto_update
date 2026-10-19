@@ -44,18 +44,34 @@ internal sealed class GatheringAutomation
     private readonly IGatheringScreen _screen;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly int _noProgressLimit;
+    private readonly LifeSkillManagerState? _managerState;
     internal event Action<string>? Log;
     internal long Gained { get; private set; }
 
     internal GatheringAutomation(IGatheringData data, IGatheringScreen screen,
-        Func<TimeSpan, CancellationToken, Task>? delay = null, int noProgressLimit = 150)
-    { _data = data; _screen = screen; _delay = delay ?? Task.Delay; _noProgressLimit = noProgressLimit; }
+        Func<TimeSpan, CancellationToken, Task>? delay = null, int noProgressLimit = 150,
+        LifeSkillManagerState? managerState = null)
+    {
+        _data = data; _screen = screen; _delay = delay ?? Task.Delay;
+        _noProgressLimit = noProgressLimit; _managerState = managerState;
+    }
+
+    private Task<T> ReadGatheringAsync<T>(string operation,
+        Func<CancellationToken, Task<T>> readOnly, CancellationToken ct)
+        => _managerState is null ? readOnly(ct) :
+            _managerState.ReadWithRecoveryAsync(
+                LifeSkillStage.Gathering, operation, readOnly, ct);
+
+    private Task<long> ReadGatheringCountAsync(string name, CancellationToken ct)
+        => _managerState is null ? _data.ItemCountAsync(name, ct) :
+            _managerState.ReadFreshCountAsync(
+                LifeSkillStage.Gathering, name, _data.ItemCountAsync, ct);
 
     internal async Task RunAsync(GatheringPlan plan, CancellationToken ct)
     {
         plan.Validate(); Gained = 0;
         await CheckToolAsync(plan, ct);
-        var initial = await _data.ActivityAsync(ct);
+        var initial = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
         Log?.Invoke("[자동 채집] 시작 전 상태 · " + DescribeActivity(initial));
         if (!GatheringSafetyPolicy.IsSafeField(initial))
             throw new InvalidOperationException("사망·대화·던전 등 채집을 시작할 수 없는 상태입니다. 상태: " + DescribeActivity(initial));
@@ -70,7 +86,7 @@ internal sealed class GatheringAutomation
                 await probe.IsStopButtonVisibleAsync(ct))
                 throw new InvalidOperationException("정지 버튼이 남아 있어 새 채집을 시작하지 않습니다. 상태: " + DescribeActivity(initial));
 
-            var checkedAgain = await _data.ActivityAsync(ct);
+            var checkedAgain = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
             if (checkedAgain.IsGathering || checkedAgain.IsFishing || checkedAgain.IsAutoTraveling ||
                 (checkedAgain.MainButtonState == "Stop" &&
                  await probe.IsStopButtonVisibleAsync(ct)))
@@ -79,7 +95,7 @@ internal sealed class GatheringAutomation
             Log?.Invoke("[자동 채집] CLI MainButton=Stop 잔상 확인 · 화면 Stop 버튼 2회 부재로 다음 재료 시작 허용");
         }
         await CheckWeightAsync(ct);
-        long baseline = await _data.ItemCountAsync(plan.DisplayName, ct);
+        long baseline = await ReadGatheringCountAsync(plan.DisplayName, ct);
         bool started = false;
         Exception? failure = null;
         try
@@ -94,7 +110,7 @@ internal sealed class GatheringAutomation
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                var activity = await _data.ActivityAsync(ct);
+                var activity = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
                 if (activity.IsFishing)
                     throw new InvalidOperationException("선택 품목이 낚시로 연결되었습니다. 현재 자동 채집에서는 낚시를 지원하지 않아 정지합니다.");
                 if (!GatheringSafetyPolicy.IsSafeField(activity))
@@ -133,7 +149,7 @@ internal sealed class GatheringAutomation
                     continue;
                 }
 
-                long count = await _data.ItemCountAsync(plan.DisplayName, ct);
+                long count = await ReadGatheringCountAsync(plan.DisplayName, ct);
                 if (count < baseline) throw new InvalidOperationException("채집 중 대상 재료의 보유 수량이 감소해 수량을 확정할 수 없습니다.");
                 long gained = count - baseline;
                 if (gained < Gained) throw new InvalidOperationException("채집 중 재료가 소비되어 추가 수량 확인을 중단합니다.");
@@ -200,7 +216,7 @@ internal sealed class GatheringAutomation
             if (polls == 1 || polls % 5 == 0)
                 Log?.Invoke($"[자동 채집] 전투 중 · 입력 없이 종료 대기 · {phase}");
             await _delay(TimeSpan.FromSeconds(2), ct);
-            state = await _data.ActivityAsync(ct);
+            state = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
             if (!GatheringSafetyPolicy.IsSafeField(state))
                 throw new InvalidOperationException(
                     $"전투 대기 중 사망·대화·던전 등 진행 불가 상태가 확인되었습니다. 상태: {DescribeActivity(state)}");
@@ -221,13 +237,13 @@ internal sealed class GatheringAutomation
 
     private async Task CheckToolAsync(GatheringPlan plan, CancellationToken ct)
     {
-        var item = (await _data.CatalogAsync(ct)).SingleOrDefault(x => x.DisplayName == plan.DisplayName);
+        var item = (await ReadGatheringAsync("catalog", _data.CatalogAsync, ct)).SingleOrDefault(x => x.DisplayName == plan.DisplayName);
         if (item is null) throw new InvalidOperationException("현재 생활 레벨에서 선택한 품목을 채집할 수 없습니다.");
         if (!item.ToolOk) throw new InvalidOperationException("채집 도구가 없거나 내구도가 부족합니다.");
     }
     private async Task CheckWeightAsync(CancellationToken ct)
     {
-        var weight = await _data.WeightAsync(ct);
+        var weight = await ReadGatheringAsync("weight", _data.WeightAsync, ct);
         if (weight.Current >= weight.Maximum) throw new InvalidOperationException("가방 무게가 가득 차 채집을 정지합니다.");
     }
 }
