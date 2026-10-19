@@ -26,6 +26,85 @@ static class Program
 
     static async Task Main()
     {
+        await Test("V3.2.41 food hold persists across restart without registering", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(Plans);
+            var missing = new MaterialSupplyHold("외부 수급 재료", 5, 0, "acquisition_route_unverified");
+            using (var initial = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(initial, world);
+                initial.RecordMaterialHold(Rice, missing);
+                var saved = initial.RestoreMaterialHolds(Plans).Single();
+                Check(saved.PlanKey == MultiAlteringBatchStore.Key(Rice) &&
+                    saved.Required == 5 && saved.Rechecks == 0,
+                    "Initial food hold not saved against exact recipe");
+                Check(MultiAlteringBatchStore.ReadManifestSnapshot(temp.Path)
+                    .MaterialHolds.Length == 1, "Missing atomic on-disk food hold");
+            }
+            using (var reopened = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(reopened, world);
+                var oldHold = reopened.RestoreMaterialHolds(Plans).Single();
+                Check(oldHold.Observed == 0 && oldHold.Item == missing.Item,
+                    "Restart lost the quarantine/stock evidence");
+                reopened.RecordMaterialHold(Rice, missing with { Observed = 2 });
+                var updated = reopened.RestoreMaterialHolds(Plans).Single();
+                Check(updated.Observed == 2 && updated.Rechecks == 1 &&
+                    updated.FirstHeldAt == oldHold.FirstHeldAt,
+                    "Repeated fresh-check evidence or hold duration lost");
+                reopened.ClearMaterialHold(Rice);
+                Check(reopened.RestoreMaterialHolds(Plans).Count == 0,
+                    "Freshly cleared hold survived in batch journal");
+            }
+            Check(world.Registered.Count == 0 && world.Receipts == 0,
+                "Hold storage/restart performed an unauthorized game action");
+        });
+
+        await Test("V3.2.41 corrupt/mismatched persisted hold fails closed", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(Plans);
+            using (var first = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(first, world);
+                first.RecordMaterialHold(Rice,
+                    new MaterialSupplyHold("미확정", 2, 0, "acquisition_route_unverified"));
+                await Reject(() => Task.Run(() => first.RecordMaterialHold(
+                    Wood, new MaterialSupplyHold("미확정", 2, 0, "acquisition_route_unverified"))),
+                    "증거/상태 불일치");
+            }
+            var saved = MultiAlteringBatchStore.ReadManifestSnapshot(temp.Path);
+            var bad = saved with
+            {
+                MaterialHolds = new[] { saved.MaterialHolds.Single() with
+                { PlanKey = MultiAlteringBatchStore.Key(Wood) } }
+            };
+            File.WriteAllText(temp.Manifest, JsonSerializer.Serialize(bad));
+            using var broken = new MultiAlteringBatchStore(temp.Path);
+            await Reject(() => Open(broken, world), "재료 보류 기록 손상");
+            Check(world.Registered.Count == 0 && world.Receipts == 0,
+                "Corrupted hold permitted game input");
+        });
+
+        await Test("V3.2.41 checkpoint write failure does not erase F9 state", async () =>
+        {
+            using var temp = new Temp(); var world = new World(Plans);
+            bool inject = false;
+            using var batch = new MultiAlteringBatchStore(temp.Path, point =>
+            {
+                if (inject && point == "replace") throw new IOException("injected hold replace");
+            });
+            await Open(batch, world);
+            string unchanged = File.ReadAllText(temp.Manifest);
+            inject = true;
+            await Reject(() => Task.Run(() => batch.RecordMaterialHold(Rice,
+                new MaterialSupplyHold("미확정", 1, 0, "acquisition_route_unverified"))),
+                "원자 저장 실패");
+            Check(File.ReadAllText(temp.Manifest) == unchanged &&
+                world.Registered.Count == 0, "Failed hold checkpoint erased or replayed work");
+        });
+
         await Test("A/F10 partial completion, new objects and total progress", async () =>
         {
             using var temp = new Temp(); var world = new World(Plans);
