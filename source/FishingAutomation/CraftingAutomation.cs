@@ -21,6 +21,7 @@ internal sealed class CraftingAutomation
     private readonly RecursiveAlteringSupplyResolver _alteringResolver;
     private readonly IAlteringData? _altering;
     private readonly LifeSkillManagerState? _managerState;
+    private readonly LifeSkillWorkFence _workFence;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     internal event Action<string>? Log;
@@ -43,6 +44,8 @@ internal sealed class CraftingAutomation
         _alteringResolver = alteringResolver;
         _altering = altering;
         _managerState = managerState;
+        _workFence = managerState?.WorkFence ?? new LifeSkillWorkFence();
+        if (managerState is null) _workFence.Log += message => Log?.Invoke(message);
         _delay = delay ?? Task.Delay;
     }
 
@@ -96,11 +99,25 @@ internal sealed class CraftingAutomation
             await PrepareBatchWithRecoveryAsync(plan, batchCrafts, requiredCrafts, ct);
 
             long beforeCraft = await _data.ItemCountAsync(plan.DisplayName, ct);
-            await _screen.ReturnToStationAndCraftAsync(plan, batchCrafts, ct);
-
             long expectedMinimum = checked((long)batchCrafts * plan.ProducedPerCraft);
-            long afterCraft = await WaitForOutputIncreaseAfterCompletionAsync(
-                plan.DisplayName, beforeCraft, expectedMinimum, ct);
+            var workTicket = _workFence.Begin("craft:" + plan.DisplayName);
+            long afterCraft;
+            try
+            {
+                // The screen already requires the actual completion popup.
+                // A fresh and stable inventory increase must agree before the
+                // next batch can reuse this operation key.
+                await _screen.ReturnToStationAndCraftAsync(plan, batchCrafts, ct);
+                afterCraft = await WaitForOutputIncreaseAfterCompletionAsync(
+                    plan.DisplayName, beforeCraft, expectedMinimum, ct);
+                _workFence.ConfirmInventoryIncrease(
+                    workTicket, beforeCraft, afterCraft, expectedMinimum);
+            }
+            catch (Exception)
+            {
+                _workFence.MarkUncertain(workTicket, "craft_result_unconfirmed");
+                throw; // Never replay an uncertain craft click.
+            }
 
             CompletedCrafts += batchCrafts;
             lastObserved = afterCraft;
