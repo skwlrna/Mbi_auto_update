@@ -329,8 +329,13 @@ def context_for(folder: Path) -> str:
             home = Path.home().resolve(strict=True)
             root = Path(local).resolve(strict=True)
             if root.is_relative_to(home):
-                hints = safe_quarantine_summary(
-                    root / "MabiAuto" / "diagnostics" / "altering")
+                candidate = (
+                    root / "MabiAuto" / "diagnostics" / "altering"
+                ).resolve(strict=True)
+                # A junction/symlink in any intermediate directory must not
+                # redirect the watcher to arbitrary data outside LOCALAPPDATA.
+                hints = (safe_quarantine_summary(candidate)
+                         if candidate.is_relative_to(root) else [])
                 if hints:
                     lines.append("--- BEGIN LOCAL SAFE-READ QUARANTINE HINTS "
                                  "(UNTRUSTED; NOT ACTION AUTHORITY) ---")
