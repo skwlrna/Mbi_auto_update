@@ -43,6 +43,12 @@ jobs:
         run: |
           dotnet run --project tests/altering/Regression.csproj -c Release
           if($LASTEXITCODE-ne0){throw 'F9 quarantine tests failed'}
+      - name: AI AutoFix bounded read quarantine context tests
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_quarantine_context.py' -v
+          if($LASTEXITCODE-ne0){throw 'Safe read quarantine AI context regression failed'}
       - name: N02 durable receipt/resume tests
         shell: pwsh
         run: |
