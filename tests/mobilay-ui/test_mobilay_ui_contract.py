@@ -18,6 +18,8 @@ class MobilayPresentationContract(unittest.TestCase):
         cls.palette = (UI / "MainForm.Dashboard.cs").read_text(encoding="utf-8")
         cls.shell = (UI / "MainForm.ReferenceUI.cs").read_text(encoding="utf-8")
         cls.grid = (UI / "MainForm.MobilayDashboard.cs").read_text(encoding="utf-8")
+        cls.ai_panel = (UI / "MainForm.AiAutopilot.cs").read_text(encoding="utf-8")
+        cls.ai_dashboard = (UI / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
 
     def test_charcoal_purple_theme_and_proportions(self):
         for rgb in ("23, 23, 24", "13, 14, 18", "171, 143, 249",
@@ -77,7 +79,7 @@ class MobilayPresentationContract(unittest.TestCase):
     def test_sidebar_routes_reuse_existing_macro_handlers(self):
         for existing in (
             "SelectMode(0)", "SelectMode(7)",
-            "new[] { 1, 2, 3 }", "new[] { 4, 5, 6 }",
+            "new[] { 1, 2 }", "new[] { 4, 5, 6 }",
             "ShowTelegramSettings()", "ShowErrorUploadSettings()",
             "ShowVisualRecognitionTest()", "owner.ToggleMini(true)",
             "owner.TopMost = !owner.TopMost", "owner.TestOrRefresh",
@@ -92,6 +94,33 @@ class MobilayPresentationContract(unittest.TestCase):
                       self.shell)
         self.assertIn("owner.StartSelected()", self.shell)
         self.assertIn("owner.StopSelected()", self.shell)
+
+    def test_peaca_deep_is_not_offered_in_dungeon_sidebar(self):
+        self.assertIn('new[] { "던전", "어비스" }', self.grid)
+        self.assertNotIn('new[] { "던전", "어비스", "페카 심층" }', self.grid)
+        self.assertIn('new[] { "허상의 정박지", "광기의 동굴", "흩어진 물길" }', self.shell)
+        # The implementation remains in place; this change only hides the nav entry.
+        self.assertIn('if (string.Equals(mode, "페카 심층"', self.shell)
+
+    def test_ai_diagnostic_colors_match_dark_application(self):
+        self.assertIn("BackColor = PanelBg", self.ai_panel)
+        self.assertNotIn("BackColor = Color.White", self.ai_panel)
+        self.assertIn("ForeColor = Muted", self.ai_panel)
+        for color in ("UiBackground", "UiPanel", "UiButton", "UiText", "UiMuted",
+                      "UiBorder", "UiError"):
+            self.assertIn(color, self.ai_dashboard)
+        self.assertNotIn("Color.White", self.ai_dashboard)
+        for item in ("EnableHeadersVisualStyles = false",
+                     "ColumnHeadersDefaultCellStyle",
+                     "AlternatingRowsDefaultCellStyle",
+                     "SelectionBackColor = UiAccentSoft",
+                     "ForeColor = UiText"):
+            self.assertIn(item, self.ai_dashboard)
+
+    def test_dashboard_reuses_gdi_fonts_and_skips_unchanged_layout(self):
+        self.assertIn("_textFonts.TryGetValue", self.shell)
+        self.assertIn("foreach (var font in _textFonts.Values) font.Dispose()", self.shell)
+        self.assertIn("if (control.Bounds != bounds) control.Bounds = bounds;", self.shell)
 
     def test_does_not_embed_third_party_assets(self):
         for path in (
