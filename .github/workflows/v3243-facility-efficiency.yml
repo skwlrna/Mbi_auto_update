@@ -1,0 +1,58 @@
+name: V3.2.43 Facility Efficiency Safety Validation
+
+# Feature-only development branch based on unreleased V3.2.42.
+# Absolutely no stable Release or production updater publication.
+on:
+  push:
+    branches: [feat/v3243-facility-efficiency-scheduling]
+  pull_request:
+    branches: [feat/v3242-material-forecast]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  facility-efficiency:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify safe scheduler configuration and version gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scheduler=Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
+          $form=Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          if(-not $scheduler.Contains('bool optimizeFacilityOrder = false') -or
+             -not $scheduler.Contains('Efficiency.EndPass()') -or
+             -not $form.Contains('optimizeFacilityOrder: true') -or
+             -not $form.Contains('facilityEfficiency?.Snapshot()')){
+            throw 'Facility scheduling and read-only diagnostics required'
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.2.43.md)){throw 'Candidate release notes missing'}
+          $version=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if(-not $version.Contains('CurrentVersion = "V3.2.41"')){
+            throw 'Do not publish V3.2.43 while V3.2.41 and V3.2.42 are not approved'
+          }
+      - name: V3.2.43 efficiency, V3.2.42 forecast, and F9 regression tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if($LASTEXITCODE -ne 0){throw 'F9 scheduling regression failed'}
+      - name: Durable F9 resume and quarantine safety regression
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'Durable F9 resume regression failed'}
+      - name: Windows main binary and F9 visual contract build
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'App restore failed'}
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'Windows app build failed'}
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if($LASTEXITCODE -ne 0){throw 'Visual F9 contract build failed'}
