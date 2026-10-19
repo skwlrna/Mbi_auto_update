@@ -462,7 +462,7 @@ public sealed partial class MainForm
                     if (control.Bounds != bounds) control.Bounds = bounds;
                 }
             }
-            finally { ResumeLayout(false); }
+            finally { ResumeLayout(true); }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
