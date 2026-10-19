@@ -59,9 +59,9 @@ internal sealed class MultiAlteringFacilityBottleneckTracker
             if (entry is null) return;
             entry.Depth = works.Count;
             entry.Completed = works.Count(x => x.IsCompleted);
-            // Confirmed work is evidence that an "empty and masked" episode
-            // ended; elapsed time or another facility's progress is not.
-            if (works.Count > 0) Clear(entry);
+            // Work may be an old already-completed slot. A nonempty count
+            // alone does NOT prove the recipe mask was lifted; only fresh
+            // selected-recipe evidence or leaving the mask path clears it.
         }
     }
 
@@ -512,6 +512,7 @@ internal sealed class MultiAlteringCoordinator
                 if (!laneReady && !initialVacancy)
                 {
                     deferrals.Reset(facility);
+                    Bottlenecks.ClearQueueBlock(facility);
                     continue;
                 }
 
