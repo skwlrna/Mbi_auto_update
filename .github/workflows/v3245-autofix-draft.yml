@@ -1,0 +1,83 @@
+name: V3.2.45 AutoFix Safe Draft Pipeline Validation
+
+# Stacked development PR. Never run real Codex, push a candidate or deploy.
+on:
+  push:
+    branches: [feat/v3245-autofix-draft-pipeline]
+  pull_request:
+    branches: [feat/v3244-repeat-error-quarantine]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  autofix-gates:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify draft-only and production-version safety
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $auto=Get-Content source/FishingAutomation/ai-autopilot/autopilot.py -Raw
+          $pub=Get-Content source/FishingAutomation/ai-autopilot/github_pr.py -Raw
+          $rules=Get-Content source/FishingAutomation/ai-autopilot/regression_policy.py -Raw
+          if(-not $auto.Contains('existing_draft_for_evidence') -or
+             -not $auto.Contains('publish_verified_draft_pr') -or
+             -not $auto.Contains('source/FishingAutomation/ai-autopilot/') -or
+             -not $pub.Contains('--draft') -or
+             -not $pub.Contains('safe_candidate_path') -or
+             -not $rules.Contains('CRITICAL_SOURCE_TESTS')){
+            throw 'Required protected repair and PR gates are missing'
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.2.45.md)){
+            throw 'Release notes required'
+          }
+          $updater=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if(-not $updater.Contains('CurrentVersion = "V3.2.41"')){
+            throw 'V3.2.45 must remain unpublished while predecessors unverified'
+          }
+      - name: V3.2.45 Draft PR, dedup and registered regression contract
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_v3245_pipeline.py' -v
+          if($LASTEXITCODE -ne 0){throw 'V3.2.45 candidate pipeline safety regressions failed'}
+      - name: Existing AI error watcher and AutoFix Python regressions
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_*.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Existing AI pipeline regression failed'}
+      - name: Existing F9 quarantine, scheduler and material forecasts
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if($LASTEXITCODE -ne 0){throw 'F9 altering regressions failed'}
+      - name: Durable F9 resume and consumption ledger
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'N02 durable resume failed'}
+          dotnet run --project tests/f05-consumption/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'F05 durable consumption failed'}
+      - name: Windows app and watchdog build
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'Windows app restore failed'}
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'Windows app build failed'}
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'Watchdog restore failed'}
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'Watchdog build failed'}
