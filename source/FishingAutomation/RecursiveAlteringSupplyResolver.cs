@@ -5,6 +5,113 @@ internal sealed record MultiAlteringSupplyPreflight(
     AlteringRecipe Recipe,
     int RemainingWorks);
 
+// V3.2.42: read-only *partial* forecast. MissingIngredients is NOT a
+// full bill of materials; it may be empty because of global queue_full.
+// Summed numbers must never be used as production/input authorization.
+internal sealed record MultiAlteringMaterialForecastItem(
+    string DisplayName, long EvidencedDemand, long FreshStock, long Shortage,
+    string AcquisitionRoute, int SelectedRecipes);
+
+internal static class MultiAlteringMaterialForecastPolicy
+{
+    // Diagnostic-only route classification, not a permission to click or gather.
+    internal const string SupportedBulk = "verified_bulk_screen";
+    internal const string MissingTool = "gathering_tool_unavailable";
+    internal const string QuestOnly = "quest_only_not_bulk_gatherable";
+    internal const string BulkUnverified = "bulk_route_unverified";
+    internal const string Ambiguous = "ambiguous_gathering_route";
+    internal const string Unverified = "acquisition_route_unverified";
+
+    internal static async Task<IReadOnlyList<MultiAlteringMaterialForecastItem>>
+        ForecastAsync(
+            IReadOnlyList<MultiAlteringSupplyPreflight> shortages,
+            IReadOnlyList<GatherableItem> gatheringCatalog,
+            Func<string, CancellationToken, Task<long>> readFreshStock,
+            CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(shortages);
+        ArgumentNullException.ThrowIfNull(gatheringCatalog);
+        ArgumentNullException.ThrowIfNull(readFreshStock);
+
+        // Only explicitly evidenced material lines enter the forecast.
+        // Reading the existing plan selection twice must not duplicate demand.
+        var seenPlans = new HashSet<string>(StringComparer.Ordinal);
+        var demandByItem = new Dictionary<string, long>(StringComparer.Ordinal);
+        var recipeKeysByItem = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var request in shortages)
+        {
+            ct.ThrowIfCancellationRequested();
+            ArgumentNullException.ThrowIfNull(request);
+            request.Plan.Validate();
+            if (request.RemainingWorks < 0 ||
+                request.RemainingWorks > request.Plan.RequiredWorks ||
+                request.Recipe.DisplayName != request.Plan.DisplayName ||
+                request.Recipe.ProducedPerWork != request.Plan.ProducedPerWork ||
+                AlteringFacilityResolver.Resolve(request.Recipe) != request.Plan.FacilityName)
+                throw new InvalidDataException("재료 예측 제법/남은 작업 증거 불일치");
+
+            string planKey = MultiAlteringBatchStore.Key(request.Plan);
+            if (!seenPlans.Add(planKey))
+                throw new InvalidDataException("재료 예측 품목 중복 · 부족 수량 중복 계산 방지");
+            if (request.RemainingWorks == 0) continue;
+
+            foreach (var missing in request.Recipe.MissingIngredients)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(missing.DisplayName) ||
+                    missing.Required < 0 || missing.Owned < 0)
+                    throw new InvalidDataException("재료 예측 CLI 부족 목록에 잘못된 수량/품목이 있습니다");
+                if (missing.Required == 0) continue;
+                long required = checked(missing.Required * request.RemainingWorks);
+                demandByItem[missing.DisplayName] = checked(
+                    demandByItem.GetValueOrDefault(missing.DisplayName) + required);
+                if (!recipeKeysByItem.TryGetValue(missing.DisplayName, out var usedBy))
+                {
+                    usedBy = new HashSet<string>(StringComparer.Ordinal);
+                    recipeKeysByItem.Add(missing.DisplayName, usedBy);
+                }
+                usedBy.Add(planKey);
+            }
+        }
+
+        // One *fresh* CLI stock read per distinct material. Owned fields from
+        // a selected or masked UI snapshot are never inventory authority.
+        var results = new List<MultiAlteringMaterialForecastItem>();
+        foreach (var item in demandByItem.OrderBy(x => x.Key, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            long live = await readFreshStock(item.Key, ct);
+            if (live < 0)
+                throw new InvalidDataException("재료 예측 음수 재고 · 과거 재고로 대체 금지");
+            long shortage = Math.Max(0, item.Value - live);
+            var routes = gatheringCatalog.Where(x =>
+                string.Equals(x.DisplayName, item.Key, StringComparison.Ordinal)).ToArray();
+            string route = LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item.Key)
+                ? QuestOnly
+                : routes.Length > 1
+                    ? Ambiguous
+                    : routes.Length == 0
+                        ? Unverified // May still have a recursive producer.
+                        : !routes[0].ToolOk
+                            ? MissingTool
+                            : LivingSkillGatheringCatalog.TryResolveBulk(item.Key, out _)
+                                ? SupportedBulk : BulkUnverified;
+            results.Add(new MultiAlteringMaterialForecastItem(
+                item.Key, item.Value, live, shortage, route,
+                recipeKeysByItem[item.Key].Count));
+        }
+
+        // Useful attention order ONLY. The existing F9 user-selected recipe
+        // sequence and the guarded resolver's virtual stock ledger are intact.
+        return results
+            .OrderByDescending(x => x.Shortage > 0)
+            .ThenByDescending(x => x.AcquisitionRoute == SupportedBulk)
+            .ThenByDescending(x => x.Shortage)
+            .ThenBy(x => x.DisplayName, StringComparer.Ordinal)
+            .ToArray();
+    }
+}
+
 internal static class MultiAlteringMaterialPreflightPolicy
 {
     internal static bool CanRun(bool hasResumableSession, bool hasSelectedFacilityWorks)

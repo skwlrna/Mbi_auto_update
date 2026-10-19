@@ -4,6 +4,118 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.42: the report is deliberately partial and read-only, with shared
+// stock allocated once across multiple selected recipes, not once per plan.
+var v3242Rice = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
+var v3242Oatmeal = new AlteringPlan("식재료 가공 시설", "오트밀", 3, 1, false);
+var v3242First = new AlteringRecipe("밥", false, 1,
+    "not_enough_ingredient", new[]
+    {
+        new AlteringIngredient("물이 든 병", 2, 999), // stale Owned must be ignored
+        new AlteringIngredient("석양 나비", 1, 0),
+        new AlteringIngredient("도구없는 식재료", 1, 0)
+    }, v3242Rice.FacilityName);
+var v3242Second = new AlteringRecipe("오트밀", false, 1,
+    "not_enough_ingredient", new[]
+    {
+        new AlteringIngredient("물이 든 병", 1, 0),
+        new AlteringIngredient("공급 경로 모름", 1, 0)
+    }, v3242Oatmeal.FacilityName);
+var v3242Stock = new Dictionary<string, long>(StringComparer.Ordinal)
+{
+    ["물이 든 병"] = 2, ["석양 나비"] = 0,
+    ["도구없는 식재료"] = 0, ["공급 경로 모름"] = 0
+};
+var v3242Reads = new Dictionary<string, int>(StringComparer.Ordinal);
+Task<long> V3242Read(string item, CancellationToken ct)
+{
+    ct.ThrowIfCancellationRequested();
+    v3242Reads[item] = v3242Reads.GetValueOrDefault(item) + 1;
+    return Task.FromResult(v3242Stock[item]);
+}
+var v3242Roots = new[]
+{
+    new MultiAlteringSupplyPreflight(v3242Rice, v3242First, 2),
+    new MultiAlteringSupplyPreflight(v3242Oatmeal, v3242Second, 3)
+};
+var v3242Forecast = await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+    v3242Roots, new[]
+    {
+        new GatherableItem("물이 든 병", true),
+        new GatherableItem("도구없는 식재료", false)
+    }, V3242Read, CancellationToken.None);
+var v3242Water = v3242Forecast.Single(x => x.DisplayName == "물이 든 병");
+Check(v3242Water.EvidencedDemand == 7 && v3242Water.FreshStock == 2 &&
+      v3242Water.Shortage == 5 && v3242Water.SelectedRecipes == 2 &&
+      v3242Water.AcquisitionRoute == MultiAlteringMaterialForecastPolicy.SupportedBulk &&
+      v3242Forecast[0].DisplayName == "물이 든 병" &&
+      v3242Reads.Values.All(count => count == 1),
+    "V3.2.42 shared ingredients are summed once and fresh stock is read once per item");
+Check(v3242Forecast.Single(x => x.DisplayName == "석양 나비").AcquisitionRoute ==
+          MultiAlteringMaterialForecastPolicy.QuestOnly &&
+      v3242Forecast.Single(x => x.DisplayName == "도구없는 식재료").AcquisitionRoute ==
+          MultiAlteringMaterialForecastPolicy.MissingTool &&
+      v3242Forecast.Single(x => x.DisplayName == "공급 경로 모름").AcquisitionRoute ==
+          MultiAlteringMaterialForecastPolicy.Unverified,
+    "V3.2.42 forecast distinguishes verified bulk, quest-only, missing tool and unknown acquisition");
+
+var v3242ReadsBefore = v3242Reads.Values.Sum();
+var v3242Masked = v3242First with
+{
+    Reason = "queue_full", MissingIngredients = Array.Empty<AlteringIngredient>()
+};
+Check((await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+    new[] { new MultiAlteringSupplyPreflight(v3242Rice, v3242Masked, 2) },
+    Array.Empty<GatherableItem>(), V3242Read, CancellationToken.None)).Count == 0 &&
+    v3242Reads.Values.Sum() == v3242ReadsBefore,
+    "V3.2.42 a masked or empty CLI recipe never invents a full bill of materials");
+
+bool v3242DuplicatesRejected = false;
+try
+{
+    await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+        new[] { v3242Roots[0], v3242Roots[0] }, Array.Empty<GatherableItem>(),
+        V3242Read, CancellationToken.None);
+}
+catch (InvalidDataException) { v3242DuplicatesRejected = true; }
+Check(v3242DuplicatesRejected, "V3.2.42 duplicate selected plan cannot double-charge material stock");
+
+bool v3242InvalidStockRejected = false;
+v3242Stock["물이 든 병"] = -1;
+try
+{
+    await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+        v3242Roots, Array.Empty<GatherableItem>(), V3242Read, CancellationToken.None);
+}
+catch (InvalidDataException) { v3242InvalidStockRejected = true; }
+Check(v3242InvalidStockRejected, "V3.2.42 negative live stock is never replaced with stale Owned evidence");
+v3242Stock["물이 든 병"] = 2;
+
+bool v3242OverflowRejected = false;
+try
+{
+    await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+        new[] { new MultiAlteringSupplyPreflight(v3242Rice,
+            v3242First with { MissingIngredients = new[]
+            { new AlteringIngredient("물이 든 병", long.MaxValue, 0) } }, 2) },
+        Array.Empty<GatherableItem>(), V3242Read, CancellationToken.None);
+}
+catch (OverflowException) { v3242OverflowRejected = true; }
+Check(v3242OverflowRejected, "V3.2.42 checked forecast prevents numeric wraparound");
+
+bool v3242Canceled = false;
+using (var v3242Cancel = new CancellationTokenSource())
+{
+    v3242Cancel.Cancel();
+    try
+    {
+        await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+            v3242Roots, Array.Empty<GatherableItem>(), V3242Read, v3242Cancel.Token);
+    }
+    catch (OperationCanceledException) { v3242Canceled = true; }
+}
+Check(v3242Canceled, "V3.2.42 F10 cancellation stops diagnostic stock reads promptly");
+
 // V3.2.41: durable quarantine is never an authorization to register a
 // previously held item until fresh live evidence removes it.
 var v3241Food = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);

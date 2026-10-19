@@ -361,6 +361,59 @@ public sealed partial class MainForm
                 _log.Write(
                     $"[다중가공] F9 전체 품목 선행채집 점검 · {plans.Count}종 중 " +
                     $"{initialShortages.Count}종 부족 재료 증거 · 빈/가득 찬 시설과 무관하게 현재 재고 재확인");
+                // V3.2.42: forecast only materials for which the CLI or the
+                // selected, exact-recipe shortage snapshot has evidence.
+                // A missing ingredient line is NOT a complete recipe BOM.
+                // The forecast may log a useful warning, but cannot authorize
+                // gathering, movement or registration. All actual inputs still
+                // go through the existing F9 guards and resolver.
+                if (initialShortages.Count == 0)
+                    _log.Write("[다중가공][재료 사전 예측] 확인된 부족 재료 없음 · 전체 재료 충분 의미 아님 · 실행 시 재검증");
+                else
+                {
+                    try
+                    {
+                        var forecastCatalog = await managerState.ReadWithRecoveryAsync(
+                            LifeSkillStage.Altering, "preflight-forecast-catalog",
+                            gatheringData.CatalogAsync, token);
+                        var forecast = await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+                            initialShortages, forecastCatalog,
+                            (item, ct) => managerState.ReadWithRecoveryAsync(
+                                LifeSkillStage.Altering, "preflight-forecast-inventory",
+                                inner => rawAlteringData.ItemCountAsync(item, inner), ct),
+                            token);
+                        _log.Write(
+                            $"[다중가공][재료 사전 예측] 부분 증거 {initialShortages.Count}/{plans.Count}품목 · " +
+                            $"식별 재료 {forecast.Count}종 · 신규 CLI 재고 각 1회 · " +
+                            "공유 재고 중복 차감 방지 · 표시 우선순위는 실행 순서를 변경하지 않음");
+                        foreach (var estimate in forecast.Take(20))
+                        {
+                            _log.Write(
+                                $"[다중가공][재료 사전 예측] {estimate.DisplayName} · " +
+                                $"필요 추정 {estimate.EvidencedDemand} / 현재 {estimate.FreshStock} / " +
+                                $"부족 {estimate.Shortage} · 사용 품목 {estimate.SelectedRecipes}종 · " +
+                                $"경로={estimate.AcquisitionRoute}");
+                        }
+                        if (forecast.Count > 20)
+                            _log.Write(
+                                $"[다중가공][재료 사전 예측] 나머지 {forecast.Count - 20}종은 로그 요약 생략");
+                        if (initialShortages.Count != plans.Count)
+                            _log.Write(
+                                $"[다중가공][재료 사전 예측] 정보 미확인 {plans.Count - initialShortages.Count}품목 · " +
+                                "CLI queue_full/원래 재료 목록 미노출 시 수량 추정 금지");
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        throw; // F10 is never swallowed by diagnostics.
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Write(
+                            $"[다중가공][재료 사전 예측] 읽기 전용 진단 실패({ex.GetType().Name}) · " +
+                            "추정 정보는 사용하지 않음 · 기존 F9 실행 직전 재검증 유지");
+                    }
+                }
+
                 if (initialShortages.Count > 0)
                 {
                     // Avoid sending a food plan with an unverified input route
