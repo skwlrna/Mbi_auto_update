@@ -197,7 +197,7 @@ public sealed partial class MainForm
 
             _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
 
-            var managerState = new LifeSkillManagerState();
+            managerState = new LifeSkillManagerState();
             managerState.Log += text => Ui(() => _log.Write(text));
             managerState.BeginStage(LifeSkillStage.Altering,
                 "F9 가공·채집 중간관리자 시작");
@@ -568,6 +568,7 @@ public sealed partial class MainForm
                     catch (Exception)
                     {
                         alteringWorkFence.MarkUncertain(workTicket, "alter_batch_unconfirmed");
+                managerState.RecordUncertainAction(LifeSkillStage.Altering, "alter_batch");
                         throw; // No blind replay of a possibly applied registration.
                     }
                 },
@@ -622,6 +623,11 @@ public sealed partial class MainForm
             _logExpanded = true;
             ApplyLogVisibility();
             _log.Write("[다중가공] 오류: " + ex.Message);
+            var recoveryDecision = LifeSkillRecoveryDecisionPolicy.ForIncident(ex);
+            managerState?.RecordUncertainAction(LifeSkillStage.Altering, "f9_failed");
+            _log.Write("[다중가공][복구 판단] 분류=" + recoveryDecision.Category +
+                " · 판단=" + recoveryDecision.Disposition +
+                " · 기존 장부/이미 실행한 입력을 자동 재실행하지 않음");
             // A bounded local read-only CLI incident snapshot helps explain
             // missed lanes and masked shortages, without retrying game inputs.
             // The report intentionally excludes character/account IDs and
@@ -637,7 +643,9 @@ public sealed partial class MainForm
                     Path.Combine(Environment.GetFolderPath(
                         Environment.SpecialFolder.LocalApplicationData),
                         "MabiAuto", "diagnostics", "altering"),
-                    snapshotTimeout.Token);
+                    snapshotTimeout.Token,
+                    recoveryPatterns: managerState?.RecoveryPatternsSnapshot(),
+                    recoveryDecision: recoveryDecision);
                 _log.Write("[다중가공][오류 진단] 로컬 상태 저장 · " +
                     Path.GetFileName(saved) + " · 자동 재등록/수령 없음");
             }
