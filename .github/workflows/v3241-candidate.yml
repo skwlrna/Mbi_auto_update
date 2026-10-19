@@ -1,0 +1,124 @@
+name: V3.2.41 Isolated Windows Candidate
+
+# A PR-only candidate, NOT a GitHub Release and NOT visible to the updater.
+# Public promotion is separately gated in release-v3241-auto-update.yml.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'source/**'
+      - 'tests/altering/**'
+      - 'tests/n02-resume/**'
+      - '.github/workflows/release-v3241-auto-update.yml'
+      - '.github/workflows/v3241-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Validate V3.2.41 version and source safety
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          $p=Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          if(-not $u.Contains('CurrentVersion = "V3.2.41"')){throw 'Updater version mismatch'}
+          foreach($tag in @('<Version>3.2.41</Version>','<AssemblyVersion>3.2.41.0</AssemblyVersion>','<FileVersion>3.2.41.0</FileVersion>')){
+            if(-not $p.Contains($tag)){throw "Project version mismatch: $tag"}
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.2.41.md)){throw 'Candidate notes missing'}
+          $g=Get-Content .github/workflows/release-v3241-auto-update.yml -Raw
+          if($g -notmatch 'workflow_dispatch' -or $g -match 'github.event.workflow_run'){
+            throw 'Public release must remain manually gated'
+          }
+      - name: Run durable recovery and altering regressions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE-ne0){throw 'N02 persistence tests failed'}
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'F9 altering tests failed'}
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Visual altering contract compile failed'}
+      - name: Build isolated Windows test binary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'App restore failed'}
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'Watchdog restore failed'}
+          New-Item artifacts/app,artifacts/watchdog -ItemType Directory -Force | Out-Null
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/app
+          if($LASTEXITCODE-ne0){throw 'App publish failed'}
+          dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
+          if($LASTEXITCODE-ne0){throw 'Watchdog publish failed'}
+          if((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.2.41.0'){throw 'Binary version mismatch'}
+          if(-not (Test-Path artifacts/watchdog/MacroWatchdog.exe)){throw 'Missing watchdog'}
+      - name: Package test-only ZIP and checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg=Join-Path $PWD 'artifacts/candidate'
+          $rel=Join-Path $pkg 'release'
+          $tools=Join-Path $pkg 'tools'
+          New-Item $rel,$tools -ItemType Directory -Force | Out-Null
+          Copy-Item artifacts/app/* $rel -Recurse -Force
+          Copy-Item artifacts/watchdog/MacroWatchdog.exe $rel -Force
+          Copy-Item source/FishingAutomation/interception.dll $rel -Force
+          Copy-Item source/tools/ApplyUpdate.ps1 $tools -Force
+          Copy-Item source/tools/RollbackPrevious.ps1 $tools -Force
+          Copy-Item source/START.cmd,source/ROLLBACK_PREVIOUS.cmd,source/REPAIR_AUTO_UPDATE.cmd $pkg -Force
+          Copy-Item source/RELEASE_NOTES_V3.2.41.md (Join-Path $pkg 'RELEASE_NOTES.md') -Force
+          New-Item (Join-Path $pkg 'FishingAutomation') -ItemType Directory -Force | Out-Null
+          'Legacy updater compatibility' | Set-Content (Join-Path $pkg 'FishingAutomation/.update_compat') -Encoding ASCII
+          @'
+          V3.2.41 TEST CANDIDATE - NOT A PUBLIC RELEASE.
+          Extract to an ISOLATED test directory. Do not overwrite the live installation.
+          Verify food shortage hold, F10, relaunch, explicit recent-batch resume,
+          same character, new read-only CLI recheck, and other-facility progress.
+          NEVER treat this artifact as real-game validated merely because CI passes.
+          '@ | Set-Content (Join-Path $pkg 'TEST_CANDIDATE_ONLY.txt') -Encoding UTF8
+          $required=@(
+            'release/FishingAutomation.exe','release/MacroWatchdog.exe',
+            'release/interception.dll','release/abyss/config/targets.json',
+            'release/abyss/config/scenario.json',
+            'release/abyss/templates/loot_v173/loot_hallucination_stone.png',
+            'release/ai-autopilot/autopilot.py',
+            'tools/ApplyUpdate.ps1','tools/RollbackPrevious.ps1',
+            'START.cmd','ROLLBACK_PREVIOUS.cmd','TEST_CANDIDATE_ONLY.txt'
+          )
+          foreach($entry in $required){if(-not (Test-Path (Join-Path $pkg $entry))){throw "Missing candidate content: $entry"}}
+          (git rev-parse HEAD).Trim() | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          $zip=Join-Path $PWD 'artifacts/MabiAuto_V3.2.41_Windows_Lite_RC.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($pkg,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try { 
+            $entries=@($archive.Entries | ForEach-Object FullName)
+            foreach($entry in $required){if($entry -notin $entries){throw "ZIP missing: $entry"}}
+          } finally { $archive.Dispose() }
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MabiAuto_V3.2.41_Windows_Lite_RC.zip" | Set-Content "$zip.sha256" -Encoding ASCII
+          Write-Host "Candidate ZIP SHA256: $hash"
+      - name: Upload isolated candidate for real-game verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: V3.2.41-windows-candidate-unverified
+          path: |
+            artifacts/MabiAuto_V3.2.41_Windows_Lite_RC.zip
+            artifacts/MabiAuto_V3.2.41_Windows_Lite_RC.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
