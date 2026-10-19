@@ -113,6 +113,7 @@ internal sealed class GatheringAutomation
             int idlePolls = 0;
             int travelPolls = 0;
             int combatPolls = 0;
+            var heartbeat = new LifeSkillLongRunHeartbeat();
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
@@ -125,10 +126,11 @@ internal sealed class GatheringAutomation
                 if (GatheringSafetyPolicy.ShouldWaitForCombat(activity))
                 {
                     combatPolls++;
+                    LifeSkillLongRunCombatPolicy.ThrowIfStalled(combatPolls, "채집 중");
                     idlePolls = 0;
                     travelPolls = 0;
-                    if (combatPolls == 1 || combatPolls % 5 == 0)
-                        Log?.Invoke($"[자동 채집] 전투 중 · 입력 없이 종료 대기 · {plan.DisplayName}");
+                    if (heartbeat.ShouldReport("combat", Gained))
+                        Log?.Invoke($"[자동 채집][장시간 감시] 전투 중 · 입력 없이 종료 대기 · {plan.DisplayName}");
                     await _delay(TimeSpan.FromSeconds(2), ct);
                     continue;
                 }
@@ -149,8 +151,8 @@ internal sealed class GatheringAutomation
                 if (activity.IsAutoTraveling && !activity.IsGathering && !activity.IsFishing)
                 {
                     idlePolls = 0;
-                    if (travelPolls == 1 || travelPolls % 10 == 0)
-                        Log?.Invoke($"[자동 채집] 이동 중 · 재고 CLI 조회 생략 · {plan.DisplayName}");
+                    if (heartbeat.ShouldReport("travel", Gained))
+                        Log?.Invoke($"[자동 채집][장시간 감시] 이동 중 · 재고 CLI 조회 생략 · {plan.DisplayName}");
                     await _delay(TimeSpan.FromSeconds(2), ct);
                     continue;
                 }
@@ -161,7 +163,8 @@ internal sealed class GatheringAutomation
                 if (gained < Gained) throw new InvalidOperationException("채집 중 재료가 소비되어 추가 수량 확인을 중단합니다.");
                 idlePolls = gained > Gained ? 0 : idlePolls + 1;
                 Gained = gained;
-                Log?.Invoke($"[자동 채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개");
+                if (heartbeat.ShouldReport("gathering", Gained))
+                    Log?.Invoke($"[자동 채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개 · 정체 관측 {idlePolls}/{_noProgressLimit}");
                 if (Gained >= plan.TargetQuantity) break;
                 await CheckToolAsync(plan, ct);
                 await CheckWeightAsync(ct);
@@ -236,11 +239,13 @@ internal sealed class GatheringAutomation
                 $"사망·대화·던전 등 채집을 계속할 수 없는 상태입니다. 상태: {DescribeActivity(state)}");
 
         int polls = 0;
+        var heartbeat = new LifeSkillLongRunHeartbeat();
         while (GatheringSafetyPolicy.ShouldWaitForCombat(state))
         {
             polls++;
-            if (polls == 1 || polls % 5 == 0)
-                Log?.Invoke($"[자동 채집] 전투 중 · 입력 없이 종료 대기 · {phase}");
+            LifeSkillLongRunCombatPolicy.ThrowIfStalled(polls, phase);
+            if (heartbeat.ShouldReport("precombat", 0))
+                Log?.Invoke($"[자동 채집][장시간 감시] 전투 중 · 입력 없이 종료 대기 · {phase}");
             await _delay(TimeSpan.FromSeconds(2), ct);
             state = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
             if (!GatheringSafetyPolicy.IsSafeField(state))
