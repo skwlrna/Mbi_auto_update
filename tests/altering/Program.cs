@@ -76,6 +76,43 @@ Check(v3236Calls == 2 &&
           x.Category == "state_conflict"),
     "V3.2.36 cross-skill manager records actual bounded recovery decisions");
 
+// V3.2.38: guarded attempts are not automatically completed outputs.
+var v3238Fence = new LifeSkillWorkFence();
+var v3238Pending = v3238Fence.Begin("craft:밥");
+var v3238Unknown = v3238Fence.Begin("gather:물이 든 병");
+var v3238Batch = v3238Fence.Begin("alter:food/밥/1");
+v3238Fence.ConfirmBatchReturn(v3238Batch, 0, false);
+var v3238BatchNext = v3238Fence.Begin("alter:food/밥/1");
+v3238Fence.ConfirmBatchReturn(v3238BatchNext, 1, true);
+var v3238Gather = v3238Fence.Begin("gather:철 광석");
+v3238Fence.ConfirmInventoryIncrease(v3238Gather, 4, 8, 4);
+v3238Fence.MarkUncertain(v3238Unknown, "not_confirmed");
+v3238Fence.MarkUncertain(v3238Unknown, "duplicate"); // duplicate must not double count
+var v3238Rows = v3238Fence.OutcomeSnapshot();
+var v3238G = v3238Rows.Single(x => x.Kind == LifeSkillWorkKind.Gathering);
+var v3238A = v3238Rows.Single(x => x.Kind == LifeSkillWorkKind.AlteringBatch);
+var v3238C = v3238Rows.Single(x => x.Kind == LifeSkillWorkKind.Crafting);
+Check(v3238G.Started == 2 && v3238G.OutputVerified == 1 &&
+      v3238G.Uncertain == 1 && v3238G.InFlight == 0 &&
+      v3238G.ConcludedOutputVerificationRate == 0.5 &&
+      v3238C.Started == 1 && v3238C.InFlight == 1 &&
+      v3238C.ConcludedOutputVerificationRate is null,
+    "V3.2.38 verified gathering, uncertain outcome and in-flight craft remain distinct");
+Check(v3238A.Started == 2 && v3238A.BatchCallbackVerified == 2 &&
+      v3238A.OutputVerified == 0 &&
+      v3238A.ConcludedOutputVerificationRate is null,
+    "V3.2.38 F9 batch return does not masquerade as confirmed output receipt");
+bool v3238MismatchedProof = false;
+try { v3238Fence.ConfirmBatchReturn(v3238Pending, 1, true); }
+catch (InvalidOperationException) { v3238MismatchedProof = true; }
+Check(v3238MismatchedProof && v3238Fence.OutcomeSnapshot()
+      .Single(x => x.Kind == LifeSkillWorkKind.Crafting).InFlight == 1,
+    "V3.2.38 cross-type proof cannot incorrectly complete crafting");
+v3238Fence.ConfirmInventoryIncrease(v3238Pending, 10, 12, 2);
+Check(v3238Fence.OutcomeSnapshot().Single(x => x.Kind == LifeSkillWorkKind.Crafting)
+      .ConcludedOutputVerificationRate == 1,
+    "V3.2.38 confirmed screen-plus-inventory craft contributes only after proof");
+
 // V3.2.35: make same-item CLI observations safe under overlapping reads.
 var v3235Logs = new List<string>();
 var v3235State = new LifeSkillManagerState(recoveryDelay: (_, _) => Task.CompletedTask);
