@@ -226,6 +226,37 @@ await new GatheringAutomation(combatDuringGather,combatDuringGather,(_,_)=>Task.
 Check(combatDuringGather.Starts==1 && combatDuringGather.Stops==1 && combatDuringGather.Owned>=105,
     "combat during gathering waits and resumes the same gathering flow afterward");
 
+// V3.2.34: a field-combat loop cannot silently keep a gather session alive forever.
+var v3234CombatLocked = new FakeWorld { PreStartCombatPolls =
+    LifeSkillLongRunCombatPolicy.MaximumConsecutivePolls + 1 };
+bool v3234CombatStopped = false;
+try
+{
+    await new GatheringAutomation(v3234CombatLocked, v3234CombatLocked,
+        (_, _) => Task.CompletedTask).RunAsync(plan, default);
+}
+catch (InvalidOperationException e)
+{
+    v3234CombatStopped = e.Message.Contains("장시간 정체", StringComparison.Ordinal);
+}
+Check(v3234CombatStopped && v3234CombatLocked.Starts == 0 &&
+      v3234CombatLocked.Stops == 0,
+    "long-lived pre-start combat safely aborts without start or stop input");
+
+// Even with a fast diagnostic-only poller, thousands of unchanged inventory
+// samples must not dispatch thousands of WinForms log updates.
+var v3234Quiet = new FakeWorld { Gain = 0 };
+var v3234QuietLog = new List<string>();
+var v3234QuietRun = new GatheringAutomation(v3234Quiet, v3234Quiet,
+    (_, _) => Task.CompletedTask, noProgressLimit: 75);
+v3234QuietRun.Log += v3234QuietLog.Add;
+bool v3234NoProgressStopped = false;
+try { await v3234QuietRun.RunAsync(plan, default); }
+catch (InvalidOperationException) { v3234NoProgressStopped = true; }
+Check(v3234NoProgressStopped && v3234Quiet.Starts == 1 &&
+      v3234QuietLog.Count(x => x.Contains("정체 관측", StringComparison.Ordinal)) == 1,
+    "unchanged gathering inventory is rate-limited without altering safe-stop threshold");
+
 var staleStopNoIcon = new FakeWorld { State = FakeWorld.Idle with { MainButtonState = "Stop", IsAutoPlaying = true } };
 await new GatheringAutomation(staleStopNoIcon,staleStopNoIcon,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(staleStopNoIcon.Starts == 1 && staleStopNoIcon.Owned >= 105,
