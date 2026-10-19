@@ -15,10 +15,13 @@ namespace FishingAutomation;
 // lane's full queue masks the recipe. Never registers, collects, or moves.
 internal sealed class MultiAlteringLaneDeferralTracker
 {
-    private sealed record Observation(DateTimeOffset Since, string Signature, bool Warned);
+    private sealed record Observation(DateTimeOffset Since, string Signature, DateTimeOffset? LastReportedAt);
     private readonly Dictionary<string, Observation> _blocked = new(StringComparer.Ordinal);
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeSpan _threshold;
+    // Keep stalled but otherwise silent facilities visible in overnight logs
+    // without spamming the UI or mistaking read-only polls for progress.
+    private static readonly TimeSpan ReminderInterval = TimeSpan.FromMinutes(10);
 
     internal MultiAlteringLaneDeferralTracker(
         TimeSpan? threshold = null, Func<DateTimeOffset>? now = null)
@@ -46,15 +49,25 @@ internal sealed class MultiAlteringLaneDeferralTracker
         if (!_blocked.TryGetValue(facility, out var last) ||
             !string.Equals(signature, last.Signature, StringComparison.Ordinal))
         {
-            _blocked[facility] = new(now, signature, false);
+            _blocked[facility] = new(now, signature, null);
             return null;
         }
-        if (last.Warned || now - last.Since < _threshold) return null;
-        _blocked[facility] = last with { Warned = true };
+        // A system clock adjustment cannot make stale evidence appear fresh.
+        if (now < last.Since ||
+            (last.LastReportedAt.HasValue && now < last.LastReportedAt.Value))
+        {
+            _blocked[facility] = new(now, signature, null);
+            return null;
+        }
+        if (now - last.Since < _threshold ||
+            (last.LastReportedAt.HasValue &&
+             now - last.LastReportedAt.Value < ReminderInterval)) return null;
+        _blocked[facility] = last with { LastReportedAt = now };
         return $"[다중가공][시설 누락 감시] {facility} · {recipe} · " +
             $"시설 작업 0/7 · 대기 {Math.Max(0, (now - last.Since).TotalSeconds):0}초 · " +
             $"타 시설 포화 {otherFullFacilities}개 · CLI Reason={reason} · " +
-            "재료 목록 미확정 · 읽기 전용 재조회 지속 · 임의 클릭/모두 받기 금지";
+            "재료 목록 미확정 · 읽기 전용 재조회 지속 · 임의 클릭/모두 받기 금지 · " +
+            (last.LastReportedAt.HasValue ? "장시간 보류 재알림" : "최초 보류 경고");
     }
 
     internal void Reset(string facility) => _blocked.Remove(facility);

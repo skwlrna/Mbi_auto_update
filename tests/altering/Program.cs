@@ -4,6 +4,67 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.34: long-run heartbeat is diagnostic-only and bounded.
+var v3234Now = DateTimeOffset.Parse("2026-10-19T00:00:00+00:00");
+var v3234Heartbeat = new LifeSkillLongRunHeartbeat(
+    TimeSpan.FromMinutes(1), () => v3234Now);
+Check(v3234Heartbeat.ShouldReport("gathering", 0) &&
+      !v3234Heartbeat.ShouldReport("gathering", 0),
+    "V3.2.34 logs first gathering state but suppresses identical polls");
+v3234Now += TimeSpan.FromSeconds(59);
+Check(!v3234Heartbeat.ShouldReport("gathering", 0),
+    "V3.2.34 suppresses repeated inventory logs under the heartbeat interval");
+v3234Now += TimeSpan.FromSeconds(2);
+Check(v3234Heartbeat.ShouldReport("gathering", 0),
+    "V3.2.34 emits a periodic diagnostic heartbeat without changing inventory");
+Check(v3234Heartbeat.ShouldReport("gathering", 1) &&
+      v3234Heartbeat.ShouldReport("combat", 1),
+    "V3.2.34 never hides confirmed progress or a gathering/combat transition");
+v3234Now -= TimeSpan.FromMinutes(2);
+Check(v3234Heartbeat.ShouldReport("combat", 1),
+    "V3.2.34 resets logging after a wall-clock rollback");
+bool v3234InvalidQuantity = false;
+try { _ = v3234Heartbeat.ShouldReport("gathering", -1); }
+catch (InvalidDataException) { v3234InvalidQuantity = true; }
+Check(v3234InvalidQuantity, "V3.2.34 does not bless negative diagnostic inventory");
+LifeSkillLongRunCombatPolicy.ThrowIfStalled(
+    LifeSkillLongRunCombatPolicy.MaximumConsecutivePolls - 1, "field");
+bool v3234CombatTimeout = false;
+try
+{
+    LifeSkillLongRunCombatPolicy.ThrowIfStalled(
+        LifeSkillLongRunCombatPolicy.MaximumConsecutivePolls, "field");
+}
+catch (InvalidOperationException) { v3234CombatTimeout = true; }
+Check(v3234CombatTimeout,
+    "V3.2.34 detects excessive combat-only polling without issuing inputs");
+
+// An F9 facility stuck behind another full queue must not go silent overnight.
+var v3234LaneNow = DateTimeOffset.Parse("2026-10-19T00:00:00+00:00");
+var v3234Deferrals = new MultiAlteringLaneDeferralTracker(
+    TimeSpan.FromMinutes(2), () => v3234LaneNow);
+Check(v3234Deferrals.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "V3.2.34 starts a blocked facility observation without game input");
+v3234LaneNow += TimeSpan.FromMinutes(2);
+var v3234First = v3234Deferrals.ObserveBlocked(
+    "식재료 가공 시설", "밥", "queue_full", 0, 2);
+v3234LaneNow += TimeSpan.FromMinutes(9);
+Check(v3234First?.Contains("최초 보류 경고", StringComparison.Ordinal) == true &&
+      v3234Deferrals.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "V3.2.34 limits blocked-lane diagnostic rate");
+v3234LaneNow += TimeSpan.FromMinutes(1);
+var v3234Reminder = v3234Deferrals.ObserveBlocked(
+    "식재료 가공 시설", "밥", "queue_full", 0, 2);
+Check(v3234Reminder?.Contains("장시간 보류 재알림", StringComparison.Ordinal) == true &&
+      v3234Reminder.Contains("대기 720초", StringComparison.Ordinal),
+    "V3.2.34 re-reports persistent empty-lane starvation every ten minutes");
+v3234LaneNow -= TimeSpan.FromMinutes(20);
+Check(v3234Deferrals.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "V3.2.34 resets uncertain elapsed time after wall-clock adjustment");
+v3234LaneNow += TimeSpan.FromMinutes(1);
+Check(v3234Deferrals.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 1, 2) is null,
+    "V3.2.34 clears starvation on confirmed live F9 work");
+
 // V3.2.33: no blind replay of a screen action after uncertain outcome.
 var v3233Fence = new LifeSkillWorkFence();
 var v3233Log = new List<string>();
