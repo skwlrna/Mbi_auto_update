@@ -57,6 +57,12 @@ class DraftPrSafetyTests(unittest.TestCase):
     def test_draft_pr_only_after_all_gates(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
+            # Real candidate publisher now also requires regular existing
+            # files before GitHub access; mocks must honor that safety gate.
+            for name in CHANGED:
+                candidate = directory / name
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text("offline candidate fixture", encoding="utf-8")
             calls = []
             def fake_run(argv, cwd, timeout=60):
                 calls.append(argv)
@@ -93,6 +99,10 @@ class DraftPrSafetyTests(unittest.TestCase):
 
     def test_draft_refuses_mismatched_remote(self):
         with tempfile.TemporaryDirectory() as temp:
+            for name in CHANGED:
+                candidate = Path(temp) / name
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text("offline candidate fixture", encoding="utf-8")
             with mock.patch.object(github_pr, "user_opted_in", return_value=True), \
                  mock.patch.object(github_pr.shutil, "which", return_value="gh"), \
                  mock.patch.object(github_pr, "run",

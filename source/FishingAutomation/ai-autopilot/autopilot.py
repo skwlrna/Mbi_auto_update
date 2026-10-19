@@ -28,6 +28,7 @@ from quota_handoff import (exhausted as codex_quota_exhausted,
                            pause_record, resume_authorized, handoff_manifest)
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr, user_opted_in
+from draft_dedup import existing_draft_for_evidence
 from pipeline_readiness import readiness
 from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
@@ -352,6 +353,13 @@ def valid_edit(path: str, prefixes: list[str]) -> bool:
     p = PurePosixPath(path.replace("\\", "/"))
     norm = str(p)
     if p.is_absolute() or ".." in p.parts or len(p.parts) < 2:
+        return False
+    # An AI-proposed fix must not change its own host, candidate publisher,
+    # offline safety contracts, or installed production updater.
+    if (norm.startswith("source/FishingAutomation/ai-autopilot/") or
+        norm.startswith("source/tools/") or
+        norm in ("source/FishingAutomation/UpdateManager.cs",
+                 "source/FishingAutomation/FishingAutomation.csproj")):
         return False
     if any(piece.lower() in ("bin", "obj", ".git", ".github", "runtime") for piece in p.parts):
         return False
@@ -1155,6 +1163,37 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 state.setdefault("processed", []).append({
                     "id": eid, "date": dt.date.today().isoformat(),
                     "status": "duplicate_skipped", "signature": signature,
+                    "evidence_mtime": folder.stat().st_mtime
+                })
+                write_json(statefile, state)
+                continue
+
+            # A different MCP folder with byte-identical evidence must not
+            # launch another Codex candidate while a previous verified draft
+            # is already awaiting human review. Unlike 10-minute rapid-event
+            # suppression, this requires an on-disk verified Draft PR record.
+            prior_draft = (existing_draft_for_evidence(
+                signature, state.get("processed", []), results_dir,
+                folder.stat().st_mtime) if signature else None)
+            if prior_draft is not None:
+                result_dir = results_dir / eid
+                result_dir.mkdir(parents=True, exist_ok=True)
+                write_json(result_dir / "result.json", {
+                    "event": folder.name, "event_id": eid,
+                    "started": now(), "ended": now(),
+                    "status": "existing_draft_review_skipped",
+                    "reason": "identical_evidence_pending_review_24h",
+                    "existing_draft_pr": prior_draft["url"],
+                    "note": "Evidence kept; no new Codex call, game input or patch."
+                })
+                print("동일 오류의 검증된 Draft PR이 검토 대기 중 · 신규 수정 생략:",
+                      prior_draft["url"], flush=True)
+                seen.add(eid)
+                state["seen"] = sorted(seen)
+                state.setdefault("processed", []).append({
+                    "id": eid, "date": dt.date.today().isoformat(),
+                    "status": "existing_draft_review_skipped",
+                    "signature": signature,
                     "evidence_mtime": folder.stat().st_mtime
                 })
                 write_json(statefile, state)
