@@ -1,0 +1,58 @@
+name: V3.2.42 Forecast Safety Validation
+
+# Independent PR CI for a feature based on the still-unreleased V3.2.41.
+# No public GitHub Release, tag or updater package is generated here.
+on:
+  push:
+    branches: [feat/v3242-material-forecast]
+  pull_request:
+    branches: [feat/v3241-durable-food-hold-recovery]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  forecast-safety:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify forecast is diagnostic-only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $forecast=Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
+          $runner=Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          if($forecast -notmatch 'class MultiAlteringMaterialForecastPolicy' -or
+             $forecast -notmatch 'readFreshStock' -or
+             $runner -notmatch 'preflight-forecast-inventory' -or
+             $runner -notmatch '기존 F9 실행 직전 재검증 유지'){
+            throw 'Read-only forecast and safe fallback are required'
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.2.42.md)){throw 'Candidate notes missing'}
+          $version=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if($version -notmatch 'CurrentVersion = "V3\.2\.41"'){
+            throw 'Do not publish 3.2.42 before 3.2.41 is validated and released'
+          }
+      - name: V3.2.42 and existing F9 altering regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if($LASTEXITCODE -ne 0){throw 'Altering forecast regression failed'}
+      - name: V3.2.41 F9 durable resume regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'Durable F9 resume regression failed'}
+      - name: Windows main program and visual test build
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'App restore failed'}
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'Windows application build failed'}
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if($LASTEXITCODE -ne 0){throw 'Visual altering harness build failed'}
