@@ -32,6 +32,98 @@ internal static class LifeSkillReadRecoveryPolicy
 }
 
 
+// Per-run fence for non-idempotent screen operations. A CLI inventory read,
+// cached observation, or a timeout NEVER authorizes replaying an uncertain action.
+// This is deliberately not persisted: resuming F9 is governed by its durable
+// batch/receipt ledger, not by these in-memory diagnostics.
+internal sealed record LifeSkillWorkTicket(string Key, long Attempt);
+internal sealed class LifeSkillWorkFence
+{
+    private enum Phase { InFlight, Verified, Uncertain }
+    private sealed record Entry(long Attempt, Phase State);
+    private readonly object _gate = new();
+    private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private long _nextAttempt;
+
+    internal event Action<string>? Log;
+
+    internal LifeSkillWorkTicket Begin(string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        LifeSkillWorkTicket ticket;
+        lock (_gate)
+        {
+            if (_entries.TryGetValue(key, out var previous) &&
+                previous.State is Phase.InFlight or Phase.Uncertain)
+                throw new InvalidOperationException(
+                    $"[중간관리자][중복 차단] {key} · " +
+                    (previous.State == Phase.InFlight
+                        ? "동일 작업이 아직 진행 중이므로 중복 실행하지 않습니다."
+                        : "이전 실행 결과가 미확정이므로 자동 재실행하지 않습니다."));
+            ticket = new LifeSkillWorkTicket(key, ++_nextAttempt);
+            _entries[key] = new Entry(ticket.Attempt, Phase.InFlight);
+        }
+        Log?.Invoke($"[중간관리자][작업 검증] {key} · 실행 구간 진입 · 중복 입력 차단");
+        return ticket;
+    }
+
+    // Only use AFTER the existing screen completion proof and a fresh CLI
+    // observation. Inventory alone is not proof that an action completed.
+    internal void ConfirmInventoryIncrease(LifeSkillWorkTicket ticket,
+        long before, long after, long minimumIncrease)
+    {
+        if (before < 0 || after < 0 || minimumIncrease <= 0 || after < before ||
+            after - before < minimumIncrease)
+            throw new InvalidOperationException(
+                "[중간관리자][누락 감지] 작업 완료 후 재고 증가 근거가 부족합니다. 자동 재실행하지 않습니다.");
+        Confirm(ticket, $"화면 완료 및 신규 CLI 재고 확인 · {before}→{after} · 최소 +{minimumIncrease}");
+    }
+
+    // The existing F9 durable registration/receipt state remains authoritative.
+    // A successful coordinator return is only evidence that a batch invocation
+    // ended; do not claim inventory or receipt confirmation from this method.
+    internal void ConfirmBatchReturn(LifeSkillWorkTicket ticket,
+        int confirmedRegistrations, bool terminal)
+    {
+        if (confirmedRegistrations < 0)
+            throw new InvalidOperationException(
+                "[중간관리자][누락 감지] 확정 등록 증가량이 음수입니다. 자동 재실행하지 않습니다.");
+        Confirm(ticket, $"기존 F9 배치 반환 확인 · 확정 등록 +{confirmedRegistrations} · 종료={terminal} · 수령 확정은 기존 장부 기준");
+    }
+
+    private void Confirm(LifeSkillWorkTicket ticket, string evidence)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+        lock (_gate)
+        {
+            if (!_entries.TryGetValue(ticket.Key, out var entry) ||
+                entry.Attempt != ticket.Attempt || entry.State != Phase.InFlight)
+                throw new InvalidOperationException(
+                    "[중간관리자][중복 차단] 이전 작업 또는 미확정 작업의 늦은 검증을 폐기합니다.");
+            _entries[ticket.Key] = entry with { State = Phase.Verified };
+        }
+        Log?.Invoke($"[중간관리자][작업 검증] {ticket.Key} · {evidence}");
+    }
+
+    internal void MarkUncertain(LifeSkillWorkTicket ticket, string category)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+        ArgumentException.ThrowIfNullOrWhiteSpace(category);
+        bool changed = false;
+        lock (_gate)
+        {
+            if (_entries.TryGetValue(ticket.Key, out var entry) &&
+                entry.Attempt == ticket.Attempt && entry.State == Phase.InFlight)
+            {
+                _entries[ticket.Key] = entry with { State = Phase.Uncertain };
+                changed = true;
+            }
+        }
+        if (changed)
+            Log?.Invoke($"[중간관리자][작업 미확정] {ticket.Key} · 분류={category} · 중복 실행 차단 · 기존 진단/안전 정지로 이관");
+    }
+}
+
 // Per-run observation ledger for the existing middle manager. Never authorizes
 // GUI input; all action paths continue their own fresh CLI and visual checks.
 internal enum LifeSkillStage { Altering, Gathering, Crafting }
@@ -48,6 +140,7 @@ internal sealed class LifeSkillManagerState
     private LifeSkillStage? _current;
     private long _epoch;
     internal event Action<string>? Log;
+    internal LifeSkillWorkFence WorkFence { get; } = new();
 
     internal LifeSkillManagerState(
         Func<DateTimeOffset>? now = null, TimeSpan? ttl = null,
@@ -56,6 +149,7 @@ internal sealed class LifeSkillManagerState
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _ttl = ttl ?? TimeSpan.FromSeconds(5);
         _recoveryDelay = recoveryDelay ?? Task.Delay;
+        WorkFence.Log += message => Log?.Invoke(message);
         if (_ttl <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(ttl));
     }
 
