@@ -568,7 +568,7 @@ public sealed partial class MainForm
                     catch (Exception)
                     {
                         alteringWorkFence.MarkUncertain(workTicket, "alter_batch_unconfirmed");
-                managerState.RecordUncertainAction(LifeSkillStage.Altering, "alter_batch");
+                        managerState.RecordUncertainAction(LifeSkillStage.Altering, "alter_batch");
                         throw; // No blind replay of a possibly applied registration.
                     }
                 },
