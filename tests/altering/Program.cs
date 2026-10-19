@@ -113,6 +113,54 @@ Check(v3238Fence.OutcomeSnapshot().Single(x => x.Kind == LifeSkillWorkKind.Craft
       .ConcludedOutputVerificationRate == 1,
     "V3.2.38 confirmed screen-plus-inventory craft contributes only after proof");
 
+// V3.2.39: repeated facility bottlenecks are inferred from independent
+// confirmed episodes, not each read-only poll or a guessed missing item.
+var v3239Now = DateTimeOffset.Parse("2026-10-19T00:00:00+00:00");
+var v3239Monitor = new MultiAlteringFacilityBottleneckTracker(() => v3239Now);
+const string v3239FoodFacility = "식재료 가공 시설";
+v3239Monitor.ObserveWorks(v3239FoodFacility, Array.Empty<AlteringWork>());
+v3239Monitor.NoteBlockedRecipe(v3239FoodFacility, "queue_full");
+v3239Now += TimeSpan.FromSeconds(135);
+v3239Monitor.NoteBlockedRecipe(v3239FoodFacility, "queue_full");
+var v3239Snapshot = v3239Monitor.Snapshot().Single();
+Check(v3239Snapshot.QueueFullEpisodes == 1 &&
+      v3239Snapshot.BlockedSeconds == 135 &&
+      v3239Snapshot.CurrentlyBlocked &&
+      !v3239Snapshot.RepeatedIssue,
+    "V3.2.39 repeated queue_full polling is one facility episode, not new omission");
+v3239Monitor.ObserveWorks(v3239FoodFacility,
+    new[] { new AlteringWork("기존 밥", v3239FoodFacility, "Completed", true, 0) });
+v3239Monitor.NoteBlockedRecipe(v3239FoodFacility, "queue_full");
+Check(v3239Monitor.Snapshot().Single().QueueFullEpisodes == 1,
+    "V3.2.39 old completed slot does not falsely resolve masked recipe");
+v3239Now -= TimeSpan.FromMinutes(4);
+Check(v3239Monitor.Snapshot().Single().BlockedSeconds == 0,
+    "V3.2.39 wall clock rollback never yields negative bottleneck duration");
+v3239Monitor.ClearQueueBlock(v3239FoodFacility);
+v3239Now += TimeSpan.FromMinutes(6);
+v3239Monitor.NoteBlockedRecipe(v3239FoodFacility, "queue_full");
+Check(v3239Monitor.Snapshot().Single().QueueFullEpisodes == 2 &&
+      v3239Monitor.Snapshot().Single().RepeatedIssue,
+    "V3.2.39 a new blocked episode after verified clearance counts as recurrence");
+v3239Monitor.NoteBlockedRecipe(v3239FoodFacility, "invalid_recipe_state");
+v3239Monitor.NoteStalledWork(v3239FoodFacility);
+v3239Monitor.NoteUncertainBatch(v3239FoodFacility);
+v3239Snapshot = v3239Monitor.Snapshot().Single();
+Check(v3239Snapshot.RecipeUnavailableEpisodes == 1 &&
+      v3239Snapshot.StalledWorkEvents == 1 &&
+      v3239Snapshot.UncertainBatchAttempts == 1 &&
+      v3239Snapshot.LastKnownQueueDepth == 1 &&
+      v3239Snapshot.LastKnownCompleted == 1,
+    "V3.2.39 distinguishes unavailable recipe, stall, uncertain batch and CLI queue snapshot");
+Check(v3239Monitor.Snapshot().Count == 1,
+    "V3.2.39 local tracker never creates duplicate entries for repeated facility");
+for (int v3239Index = 0; v3239Index < 24; v3239Index++)
+    v3239Monitor.NoteStalledWork("시설-" + v3239Index);
+Check(v3239Monitor.Snapshot().Count == 16,
+    "V3.2.39 limits incident memory to sixteen distinct facilities");
+
+// V3.2.39: real scheduler masked-food evidence must be reflected in the
+// per-facility tracker, without authorizing any registration.
 // V3.2.35: make same-item CLI observations safe under overlapping reads.
 var v3235Logs = new List<string>();
 var v3235State = new LifeSkillManagerState(recoveryDelay: (_, _) => Task.CompletedTask);
@@ -663,11 +711,13 @@ Check(independentRecipeReads > 0 &&
 
 int blockedFoodRuns = 0;
 var maskedLogs = new List<string>();
+var maskedBottleneckScheduler = new MultiAlteringCoordinator(
+    deferOtherLanesWhileQueueFull: true);
 using (var stopOnMaskedFood = new CancellationTokenSource())
 {
     try
     {
-        var scheduler = new MultiAlteringCoordinator(deferOtherLanesWhileQueueFull: true);
+        var scheduler = maskedBottleneckScheduler;
         scheduler.Log += maskedLogs.Add;
         await scheduler.RunAsync(
             new[] { deferredPlan, clothPlan, foodPlan },
@@ -688,6 +738,10 @@ Check(blockedFoodRuns == 0 &&
       maskedLogs.Any(x => x.Contains("독립 시설 보류", StringComparison.Ordinal) &&
           x.Contains("queue_full", StringComparison.Ordinal)),
     "F9 still refuses rice click while CLI only reports queue_full, and logs explicit skip reason");
+Check(maskedBottleneckScheduler.Bottlenecks.Snapshot().Any(x =>
+      x.Facility == foodPlan.FacilityName && x.QueueFullEpisodes == 1 &&
+      x.UncertainBatchAttempts == 0),
+    "V3.2.39 masked food lane appears in scheduler diagnostic without clicking");
 
 int missingRecipeRuns = 0;
 bool recipeIdentityBlocked = false;
@@ -836,7 +890,11 @@ try
         incidentDir, CancellationToken.None,
         recoveryPatterns: v3236History,
         recoveryDecision: LifeSkillRecoveryDecisionPolicy.ForIncident(
-            new InvalidOperationException("sensitive exception detail")));
+            new InvalidOperationException("sensitive exception detail")),
+        facilityBottlenecks: new[] {
+            v3239Monitor.Snapshot().Single(x => x.Facility == v3239FoodFacility)
+        }.Concat(v3239Monitor.Snapshot().Where(x => x.Facility != v3239FoodFacility))
+         .ToArray());
     var snapshot = File.ReadAllText(snapshotPath);
     using var parsedSnapshot = System.Text.Json.JsonDocument.Parse(snapshot);
     var rootSnapshot = parsedSnapshot.RootElement;
@@ -857,6 +915,15 @@ try
           snapshot.Contains("unconfirmed_action", StringComparison.Ordinal) &&
           !snapshot.Contains("sensitive exception detail", StringComparison.Ordinal),
         "V3.2.36 incident links bounded recovery labels without raw exception text or claimed game validation");
+    var facilityEvidence = rootSnapshot.GetProperty("facilityBottlenecks");
+    Check(facilityEvidence.GetArrayLength() == 8 &&
+          facilityEvidence[0].GetProperty("facility").GetString() == v3239FoodFacility &&
+          facilityEvidence[0].GetProperty("queueFullEpisodes").GetInt64() == 2 &&
+          facilityEvidence[0].GetProperty("repeatedIssue").GetBoolean() &&
+          !facilityEvidence[0].GetProperty("confirmedOmission").GetBoolean() &&
+          !facilityEvidence[0].GetProperty("permitsGameAction").GetBoolean() &&
+          !snapshot.Contains("invalid_recipe_state", StringComparison.Ordinal),
+        "V3.2.39 F9 incident stores bounded facility diagnoses without raw reason or fictional proof");
     var readFailure = await MultiAlteringIncidentSnapshot.CaptureAsync(
         new[] { foodPlan }, nameof(InvalidOperationException),
         _ => throw new InvalidDataException("secret payload"),

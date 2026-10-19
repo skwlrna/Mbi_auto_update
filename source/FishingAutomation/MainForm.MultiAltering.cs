@@ -37,6 +37,7 @@ public sealed partial class MainForm
         MultiAlteringBatchStore? verifiedBatchLease = null;
         LifeSkillManagerState? managerState = null;
         LifeSkillWorkFence? alteringWorkFence = null;
+        MultiAlteringFacilityBottleneckTracker? facilityBottlenecks = null;
         bool singleCharacterMode = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
@@ -501,6 +502,7 @@ public sealed partial class MainForm
                 restoreCompleted: batchStore.FinishedPlans,
                 fillInitialVacancies: true,
                 deferOtherLanesWhileQueueFull: queueFullAtStart);
+            facilityBottlenecks = coordinator.Bottlenecks;
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
@@ -569,6 +571,7 @@ public sealed partial class MainForm
                     catch (Exception)
                     {
                         alteringWorkFence.MarkUncertain(workTicket, "alter_batch_unconfirmed");
+                        facilityBottlenecks?.NoteUncertainBatch(plan.FacilityName);
                         managerState.RecordUncertainAction(LifeSkillStage.Altering, "alter_batch");
                         throw; // No blind replay of a possibly applied registration.
                     }
@@ -649,7 +652,8 @@ public sealed partial class MainForm
                     recoveryDecision: recoveryDecision,
                     recoveryMetrics: managerState?.RecoveryOutcomeSnapshot(),
                     batchWorkOutcomes: alteringWorkFence?.OutcomeSnapshot(),
-                    sharedWorkOutcomes: managerState?.WorkFence.OutcomeSnapshot());
+                    sharedWorkOutcomes: managerState?.WorkFence.OutcomeSnapshot(),
+                    facilityBottlenecks: facilityBottlenecks?.Snapshot());
                 _log.Write("[다중가공][오류 진단] 로컬 상태 저장 · " +
                     Path.GetFileName(saved) + " · 자동 재등록/수령 없음");
             }
@@ -663,6 +667,25 @@ public sealed partial class MainForm
         }
         finally
         {
+            // Read-only evidence only. Repeated blocked episodes are hints for
+            // review; neither an inferred omission nor permission to click.
+            if (facilityBottlenecks is not null)
+            {
+                foreach (var lane in facilityBottlenecks.Snapshot()
+                    .Where(x => x.QueueFullEpisodes + x.RecipeUnavailableEpisodes +
+                        x.StalledWorkEvents + x.UncertainBatchAttempts > 0))
+                {
+                    _log.Write($"[중간관리자][시설 병목] {lane.Facility} · " +
+                        $"queue_full 의심 {lane.QueueFullEpisodes}회 · " +
+                        $"제법 조회 불가 {lane.RecipeUnavailableEpisodes}회 · " +
+                        $"실제 CLI 정체 경고 {lane.StalledWorkEvents}회 · " +
+                        $"배치 결과 미확정 {lane.UncertainBatchAttempts}회 · " +
+                        $"현재 보류 {lane.CurrentlyBlocked} · " +
+                        $"보류 경과 {(lane.BlockedSeconds?.ToString() ?? "미측정")}초 · " +
+                        $"반복 진단 {(lane.RepeatedIssue ? "필요" : "관찰")} · " +
+                        "실제 누락/수령 미확정 · 자동 재실행 없음");
+                }
+            }
             // Ticket outcomes summarize guarded attempts, not the durable
             // F05 receipt ledger or completed target quantities.
             foreach (var metrics in (alteringWorkFence?.OutcomeSnapshot() ??
