@@ -35,6 +35,7 @@ public sealed partial class MainForm
         bool completed = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
+        LifeSkillManagerState? managerState = null;
         bool singleCharacterMode = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
