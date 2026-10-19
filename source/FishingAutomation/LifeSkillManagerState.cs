@@ -204,11 +204,64 @@ internal static class LifeSkillRecoveryOutcomePolicy
 // cached observation, or a timeout NEVER authorizes replaying an uncertain action.
 // This is deliberately not persisted: resuming F9 is governed by its durable
 // batch/receipt ledger, not by these in-memory diagnostics.
+// A ticket is an attempt, not automatically a completed production item.
+// An F9 coordinator return confirms its callback ended, NOT that goods were
+// received. Only screen completion + fresh CLI output counts as output proof.
+internal enum LifeSkillWorkKind { AlteringBatch, Gathering, Crafting }
+internal sealed record LifeSkillWorkOutcomeMetrics(
+    LifeSkillWorkKind Kind, long Started, long OutputVerified,
+    long BatchCallbackVerified, long Uncertain, long InFlight,
+    double? ConcludedOutputVerificationRate);
+
 internal sealed record LifeSkillWorkTicket(string Key, long Attempt);
 internal sealed class LifeSkillWorkFence
 {
     private enum Phase { InFlight, Verified, Uncertain }
     private sealed record Entry(long Attempt, Phase State);
+    private sealed class Counts
+    {
+        internal long Started, OutputVerified, BatchCallbackVerified, Uncertain;
+    }
+    private readonly Dictionary<LifeSkillWorkKind, Counts> _counts = new();
+    private static LifeSkillWorkKind KindFor(string key) =>
+        key.StartsWith("alter:", StringComparison.Ordinal)
+            ? LifeSkillWorkKind.AlteringBatch
+            : key.StartsWith("gather:", StringComparison.Ordinal)
+                ? LifeSkillWorkKind.Gathering
+                : key.StartsWith("craft:", StringComparison.Ordinal)
+                    ? LifeSkillWorkKind.Crafting
+                    : throw new ArgumentException("중간관리자 작업 구분을 확인할 수 없습니다.", nameof(key));
+    private Counts ForKind(LifeSkillWorkKind kind)
+    {
+        if (!_counts.TryGetValue(kind, out var counts))
+        {
+            counts = new Counts();
+            _counts[kind] = counts;
+        }
+        return counts;
+    }
+    // Snapshot is diagnostic only; it does not confer permission to retry.
+    // F9's durable registration/receipt ledger remains authoritative.
+    internal IReadOnlyList<LifeSkillWorkOutcomeMetrics> OutcomeSnapshot()
+    {
+        lock (_gate)
+        {
+            return Enum.GetValues<LifeSkillWorkKind>().Select(kind =>
+            {
+                _counts.TryGetValue(kind, out var counts);
+                long started = counts?.Started ?? 0;
+                long output = counts?.OutputVerified ?? 0;
+                long batch = counts?.BatchCallbackVerified ?? 0;
+                long uncertain = counts?.Uncertain ?? 0;
+                long pending = Math.Max(0, started - output - batch - uncertain);
+                long concluded = output + uncertain;
+                return new LifeSkillWorkOutcomeMetrics(
+                    kind, started, output, batch, uncertain, pending,
+                    kind != LifeSkillWorkKind.AlteringBatch && concluded > 0
+                        ? (double)output / concluded : null);
+            }).ToArray();
+        }
+    }
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private long _nextAttempt;
@@ -218,6 +271,7 @@ internal sealed class LifeSkillWorkFence
     internal LifeSkillWorkTicket Begin(string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        LifeSkillWorkKind kind = KindFor(key);
         LifeSkillWorkTicket ticket;
         lock (_gate)
         {
@@ -230,6 +284,7 @@ internal sealed class LifeSkillWorkFence
                         : "이전 실행 결과가 미확정이므로 자동 재실행하지 않습니다."));
             ticket = new LifeSkillWorkTicket(key, ++_nextAttempt);
             _entries[key] = new Entry(ticket.Attempt, Phase.InFlight);
+            ForKind(kind).Started++;
         }
         Log?.Invoke($"[중간관리자][작업 검증] {key} · 실행 구간 진입 · 중복 입력 차단");
         return ticket;
@@ -244,7 +299,8 @@ internal sealed class LifeSkillWorkFence
             after - before < minimumIncrease)
             throw new InvalidOperationException(
                 "[중간관리자][누락 감지] 작업 완료 후 재고 증가 근거가 부족합니다. 자동 재실행하지 않습니다.");
-        Confirm(ticket, $"화면 완료 및 신규 CLI 재고 확인 · {before}→{after} · 최소 +{minimumIncrease}");
+        Confirm(ticket, $"화면 완료 및 신규 CLI 재고 확인 · {before}→{after} · 최소 +{minimumIncrease}",
+            LifeSkillWorkKind.Gathering, LifeSkillWorkKind.Crafting);
     }
 
     // The existing F9 durable registration/receipt state remains authoritative.
@@ -256,12 +312,18 @@ internal sealed class LifeSkillWorkFence
         if (confirmedRegistrations < 0)
             throw new InvalidOperationException(
                 "[중간관리자][누락 감지] 확정 등록 증가량이 음수입니다. 자동 재실행하지 않습니다.");
-        Confirm(ticket, $"기존 F9 배치 반환 확인 · 확정 등록 +{confirmedRegistrations} · 종료={terminal} · 수령 확정은 기존 장부 기준");
+        Confirm(ticket, $"기존 F9 배치 반환 확인 · 확정 등록 +{confirmedRegistrations} · 종료={terminal} · 수령 확정은 기존 장부 기준",
+            LifeSkillWorkKind.AlteringBatch);
     }
 
-    private void Confirm(LifeSkillWorkTicket ticket, string evidence)
+    private void Confirm(LifeSkillWorkTicket ticket, string evidence,
+        params LifeSkillWorkKind[] allowedKinds)
     {
         ArgumentNullException.ThrowIfNull(ticket);
+        var kind = KindFor(ticket.Key);
+        if (!allowedKinds.Contains(kind))
+            throw new InvalidOperationException(
+                "[중간관리자][검증 유형 불일치] 배치 반환과 재고 증가 근거를 혼동하지 않습니다.");
         lock (_gate)
         {
             if (!_entries.TryGetValue(ticket.Key, out var entry) ||
@@ -269,6 +331,11 @@ internal sealed class LifeSkillWorkFence
                 throw new InvalidOperationException(
                     "[중간관리자][중복 차단] 이전 작업 또는 미확정 작업의 늦은 검증을 폐기합니다.");
             _entries[ticket.Key] = entry with { State = Phase.Verified };
+            var counts = ForKind(kind);
+            if (kind == LifeSkillWorkKind.AlteringBatch)
+                counts.BatchCallbackVerified++;
+            else
+                counts.OutputVerified++;
         }
         Log?.Invoke($"[중간관리자][작업 검증] {ticket.Key} · {evidence}");
     }
@@ -284,6 +351,7 @@ internal sealed class LifeSkillWorkFence
                 entry.Attempt == ticket.Attempt && entry.State == Phase.InFlight)
             {
                 _entries[ticket.Key] = entry with { State = Phase.Uncertain };
+                ForKind(KindFor(ticket.Key)).Uncertain++;
                 changed = true;
             }
         }
