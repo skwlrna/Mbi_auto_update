@@ -138,6 +138,100 @@ internal sealed class MultiAlteringFacilityBottleneckTracker
     }
 }
 
+// V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
+// that the game item can never be acquired. No purchase, CLI write or click.
+internal sealed record MaterialSupplyHold(
+    string Item, long Required, long Observed, string Category);
+
+internal sealed class MaterialSupplyHoldException : InvalidOperationException
+{
+    internal MaterialSupplyHold Evidence { get; }
+    internal MaterialSupplyHoldException(MaterialSupplyHold evidence)
+        : base("현재 허용된 자동 확보 경로 미확인 · " + evidence.Category)
+        => Evidence = evidence;
+}
+
+internal static class MaterialSupplyRoutePolicy
+{
+    // Scan the currently selected recipe and recursive *known* producers
+    // without relying on an absent catalog entry as proof of impossibility.
+    // All counts are fresh read-only game CLI calls; no cached UI labels.
+    internal static async Task<MaterialSupplyHold?> FindHoldAsync(
+        AlteringPlan plan,
+        AlteringRecipe selected,
+        IReadOnlyList<AlteringRecipe> recipes,
+        IReadOnlyList<GatherableItem> gathering,
+        Func<string, CancellationToken, Task<long>> readCount,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(selected);
+        ArgumentNullException.ThrowIfNull(recipes);
+        ArgumentNullException.ThrowIfNull(gathering);
+        ArgumentNullException.ThrowIfNull(readCount);
+        var path = new HashSet<string>(StringComparer.Ordinal);
+        async Task<MaterialSupplyHold?> InspectAsync(
+            string item, long required, int depth)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (required <= 0) return null;
+            long current = await readCount(item, ct);
+            if (current < 0)
+                throw new InvalidDataException("확인되지 않은 음수 재고는 재료 경로 판정에 사용하지 않습니다.");
+            if (current >= required) return null;
+            if (depth >= 6 || !path.Add(item))
+                return new(item, required, current, "recursive_route_unverified");
+            try
+            {
+                var matches = gathering.Where(x =>
+                    string.Equals(x.DisplayName, item, StringComparison.Ordinal)).ToArray();
+                if (matches.Length > 1)
+                    return new(item, required, current, "ambiguous_gathering_route");
+                if (matches.Length == 1)
+                {
+                    if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item))
+                        return new(item, required, current, "quest_only_not_bulk_gatherable");
+                    return matches[0].ToolOk ? null
+                        : new(item, required, current, "gathering_tool_unavailable");
+                }
+
+                var producers = recipes.Where(x =>
+                    string.Equals(x.DisplayName, item, StringComparison.Ordinal) ||
+                    string.Equals(System.Text.RegularExpressions.Regex.Replace(
+                        x.DisplayName, @"\([^()]*\)$", "").Trim(), item,
+                        StringComparison.Ordinal)).ToArray();
+                if (producers.Length == 0)
+                    return new(item, required, current, "acquisition_route_unverified");
+                if (producers.Length != 1)
+                    return new(item, required, current, "producer_identity_ambiguous");
+                var producer = producers[0];
+                if (producer.Alterable) return null;
+                if (producer.ProducedPerWork <= 0 ||
+                    producer.MissingIngredients.Count == 0)
+                    return new(item, required, current, "producer_state_unverified");
+                long works = checked((required - current + producer.ProducedPerWork - 1)
+                    / producer.ProducedPerWork);
+                foreach (var child in producer.MissingIngredients)
+                {
+                    long needed = checked((long)child.Required * works);
+                    var hold = await InspectAsync(child.DisplayName, needed, depth + 1);
+                    if (hold is not null) return hold;
+                }
+                return null; // existing producer screen/CLI checks remain necessary
+            }
+            finally { path.Remove(item); }
+        }
+
+        foreach (var ingredient in selected.MissingIngredients)
+        {
+            long needed = checked((long)ingredient.Required * plan.RequiredWorks);
+            var hold = await InspectAsync(ingredient.DisplayName, needed, 0);
+            if (hold is not null) return hold;
+        }
+        return null;
+    }
+}
+
 internal sealed class MultiAlteringLaneDeferralTracker
 {
     private sealed record Observation(DateTimeOffset Since, string Signature, DateTimeOffset? LastReportedAt);
