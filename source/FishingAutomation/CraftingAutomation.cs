@@ -116,6 +116,7 @@ internal sealed class CraftingAutomation
             catch (Exception)
             {
                 _workFence.MarkUncertain(workTicket, "craft_result_unconfirmed");
+                _managerState?.RecordUncertainAction(LifeSkillStage.Crafting, "craft");
                 throw; // Never replay an uncertain craft click.
             }
 

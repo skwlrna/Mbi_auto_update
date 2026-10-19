@@ -12,7 +12,9 @@ internal static class MultiAlteringIncidentSnapshot
         IReadOnlyList<AlteringPlan> plans, string errorType,
         Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>> readRecipes,
         Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
-        string directory, CancellationToken ct)
+        string directory, CancellationToken ct,
+        IReadOnlyList<LifeSkillRecoveryPattern>? recoveryPatterns = null,
+        LifeSkillRecoveryDecision? recoveryDecision = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(readRecipes);
@@ -78,6 +80,20 @@ internal static class MultiAlteringIncidentSnapshot
             mode = "multi-altering",
             errorType = errorType.Length > 70 ? errorType[..70] : errorType,
             recipeRead, workRead,
+            // Heuristic categorization, not proof of a fixed game state.
+            recovery = new
+            {
+                category = recoveryDecision?.Category ?? "unclassified",
+                disposition = recoveryDecision?.Disposition.ToString() ?? "SafeStopAndDiagnose",
+                gameValidated = false,
+                historicalPatterns = (recoveryPatterns ?? []).Take(16)
+                    .Select(x => new
+                    {
+                        stage = x.Stage.ToString(), operation = x.Operation,
+                        category = x.Category, disposition = x.Disposition.ToString(),
+                        occurrences = x.Occurrences
+                    }).ToArray()
+            },
             selected, lanes
         }, new JsonSerializerOptions { WriteIndented = true });
         Directory.CreateDirectory(directory);

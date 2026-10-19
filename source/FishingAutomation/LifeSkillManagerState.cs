@@ -32,6 +32,100 @@ internal static class LifeSkillReadRecoveryPolicy
 }
 
 
+// V3.2.36: deterministic, evidence-limited recovery decisions shared by
+// altering, gathering and crafting. Previous AI patches and diagnostic
+// similarity are NEVER permission for a GUI action or an extra CLI retry.
+internal enum LifeSkillRecoveryDisposition { RetryReadOnlyOnce, ContinueAfterVerifiedRead, SafeStopAndDiagnose, Cancel }
+internal sealed record LifeSkillRecoveryDecision(
+    string Category, LifeSkillRecoveryDisposition Disposition);
+
+internal static class LifeSkillRecoveryDecisionPolicy
+{
+    internal static LifeSkillRecoveryDecision ForReadFailure(
+        Exception error, int attempt, bool cancellationRequested = false)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        if (cancellationRequested || error is OperationCanceledException)
+            return new("cancelled", LifeSkillRecoveryDisposition.Cancel);
+        if (LifeSkillReadRecoveryPolicy.IsTransient(error))
+            return attempt == 0
+                ? new("transient_read", LifeSkillRecoveryDisposition.RetryReadOnlyOnce)
+                : new("transient_read_exhausted", LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
+        return new(LifeSkillReadRecoveryPolicy.Category(error),
+            LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
+    }
+
+    internal static LifeSkillRecoveryDecision ForUncertainAction()
+        => new("unconfirmed_action", LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
+
+    internal static LifeSkillRecoveryDecision ForIncident(Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        // An incident is reached after the active stage failed. Even a
+        // transient read at this point cannot authorize retrying F9/F05.
+        var category = error switch
+        {
+            OperationCanceledException => "cancelled",
+            _ when LifeSkillReadRecoveryPolicy.IsTransient(error) => "transient_read_exhausted",
+            _ => LifeSkillReadRecoveryPolicy.Category(error)
+        };
+        return new(category, error is OperationCanceledException
+            ? LifeSkillRecoveryDisposition.Cancel
+            : LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
+    }
+}
+
+// Bounded, local session metadata. It has no reference to user IDs,
+// packet bytes, screen coordinates or full exception messages. It is diagnostic
+// input for existing incident review, not a learned game-action policy.
+internal sealed record LifeSkillRecoveryPattern(
+    LifeSkillStage Stage, string Operation, string Category,
+    LifeSkillRecoveryDisposition Disposition, int Occurrences);
+
+internal sealed class LifeSkillRecoveryJournal
+{
+    private const int MaxPatterns = 24;
+    private readonly object _gate = new();
+    private readonly List<LifeSkillRecoveryPattern> _patterns = [];
+
+    internal LifeSkillRecoveryPattern Note(
+        LifeSkillStage stage, string operation, LifeSkillRecoveryDecision decision)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentNullException.ThrowIfNull(decision);
+        // Operation is a small internal read tag, not untrusted error text.
+        string tag = operation.Length <= 40 &&
+            operation.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-')
+            ? operation : "other";
+        lock (_gate)
+        {
+            int index = _patterns.FindIndex(x => x.Stage == stage &&
+                x.Operation == tag && x.Category == decision.Category &&
+                x.Disposition == decision.Disposition);
+            if (index >= 0)
+            {
+                var previous = _patterns[index];
+                var updated = previous with
+                {
+                    Occurrences = Math.Min(1000000, previous.Occurrences + 1)
+                };
+                _patterns[index] = updated;
+                return updated;
+            }
+            if (_patterns.Count == MaxPatterns) _patterns.RemoveAt(0);
+            var entry = new LifeSkillRecoveryPattern(
+                stage, tag, decision.Category, decision.Disposition, 1);
+            _patterns.Add(entry);
+            return entry;
+        }
+    }
+
+    internal IReadOnlyList<LifeSkillRecoveryPattern> Snapshot()
+    {
+        lock (_gate) return _patterns.ToArray();
+    }
+}
+
 // Per-run fence for non-idempotent screen operations. A CLI inventory read,
 // cached observation, or a timeout NEVER authorizes replaying an uncertain action.
 // This is deliberately not persisted: resuming F9 is governed by its durable
@@ -210,6 +304,7 @@ internal sealed class LifeSkillManagerState
     private long _epoch;
     internal event Action<string>? Log;
     internal LifeSkillWorkFence WorkFence { get; } = new();
+    internal LifeSkillRecoveryJournal RecoveryJournal { get; } = new();
 
     internal LifeSkillManagerState(
         Func<DateTimeOffset>? now = null, TimeSpan? ttl = null,
@@ -225,6 +320,33 @@ internal sealed class LifeSkillManagerState
     internal LifeSkillReadDiagnostics DiagnosticsSnapshot()
     {
         lock (_gate) return _readDiagnostics;
+    }
+
+    internal IReadOnlyList<LifeSkillRecoveryPattern> RecoveryPatternsSnapshot()
+        => RecoveryJournal.Snapshot();
+
+    // Call only after a non-idempotent screen operation became uncertain.
+    // A history match or a recent inventory count may NEVER clear this flag.
+    internal void RecordUncertainAction(LifeSkillStage stage, string operation)
+    {
+        NoteRecovery(stage, operation,
+            LifeSkillRecoveryDecisionPolicy.ForUncertainAction());
+    }
+
+    internal void RecordIncident(LifeSkillStage stage, Exception error)
+        => NoteRecovery(stage, "incident", LifeSkillRecoveryDecisionPolicy.ForIncident(error));
+
+    private void NoteRecovery(LifeSkillStage stage, string operation,
+        LifeSkillRecoveryDecision decision)
+    {
+        var observed = RecoveryJournal.Note(stage, operation, decision);
+        // First occurrence and sparse repetition only. Do not flood UI during
+        // overnight polling or misreport a prior offline patch as confirmed.
+        if (observed.Occurrences is 1 or 3 or 10 ||
+            (observed.Occurrences > 10 && observed.Occurrences % 50 == 0))
+            Log?.Invoke($"[중간관리자][복구 판단] {stage}/{observed.Operation} · " +
+                $"분류={observed.Category} · 판단={observed.Disposition} · " +
+                $"반복={observed.Occurrences} · 과거 유사 사례는 실행 허가 아님");
     }
 
     private static string Summary(LifeSkillStage stage, LifeSkillReadDiagnostics diagnostics)
@@ -327,6 +449,8 @@ internal sealed class LifeSkillManagerState
                 if (attempt > 0)
                 {
                     NoteRead(stage, epoch, d => d with { Recovered = d.Recovered + 1 });
+                    NoteRecovery(stage, operation, new(
+                        "transient_read_recovered", LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead));
                     Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
                         "새 CLI 응답 확인 · 기존 작업/장부 유지");
                 }
@@ -339,7 +463,9 @@ internal sealed class LifeSkillManagerState
                 // read of the old stage even if the transport error is transient.
                 ct.ThrowIfCancellationRequested();
                 AssertEpoch(stage, epoch);
-                if (attempt == 0 && LifeSkillReadRecoveryPolicy.IsTransient(error))
+                var decision = LifeSkillRecoveryDecisionPolicy.ForReadFailure(error, attempt);
+                NoteRecovery(stage, operation, decision);
+                if (decision.Disposition == LifeSkillRecoveryDisposition.RetryReadOnlyOnce)
                 {
                     Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
                         "일시적인 CLI 조회 실패 · 300ms 뒤 읽기 전용 1회 재조회 · 화면 입력 없음");
@@ -348,7 +474,7 @@ internal sealed class LifeSkillManagerState
                 }
                 NoteRead(stage, epoch, d => d with { Failed = d.Failed + 1 });
                 Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
-                    $"분류={LifeSkillReadRecoveryPolicy.Category(error)} · " +
+                    $"분류={decision.Category} · " +
                     "안전 정지 · 클릭/등록/수령 자동 반복 없음");
                 throw;
             }
