@@ -158,6 +158,10 @@ internal sealed class LifeSkillManagerState
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(item);
         ArgumentNullException.ThrowIfNull(read);
+        // Preserve the original epoch through the post-query evidence commit.
+        // Otherwise an Altering -> Gathering -> Altering transition could
+        // accidentally commit an observation under the newer Altering epoch.
+        long expectedEpoch = CaptureEpoch(stage);
         // A negative count is a semantic CLI inconsistency, never a transient
         // transport issue. Validation occurs before the evidence is committed.
         long count = await ReadWithRecoveryAsync(stage, "inventory",
@@ -170,9 +174,9 @@ internal sealed class LifeSkillManagerState
             }, ct);
         lock (_gate)
         {
-            if (_current != stage)
+            if (_current != stage || _epoch != expectedEpoch)
                 throw new InvalidOperationException(
-                    "중간관리자 재고 기록 직전 작업 단계 변경 · 해당 증거 폐기");
+                    "중간관리자 재고 기록 직전 작업 단계/epoch 변경 · 해당 증거 폐기");
             // A new read cannot stand in for a committed queue/receipt; it is
             // diagnostic evidence only, never click authorization.
             _inventory[item] = new(stage, _epoch, count, _now());

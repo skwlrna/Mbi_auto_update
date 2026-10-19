@@ -28,7 +28,7 @@ v3232Reads = 0;
 bool v3232Persistent = false;
 try
 {
-    _ = await v3232Manager.ReadWithRecoveryAsync(
+    _ = await v3232Manager.ReadWithRecoveryAsync<long>(
         LifeSkillStage.Gathering, "activity",
         ct => { v3232Reads++; throw new IOException("link unstable"); },
         CancellationToken.None);
@@ -42,7 +42,7 @@ v3232Reads = 0;
 bool v3232Mismatch = false;
 try
 {
-    _ = await v3232Manager.ReadWithRecoveryAsync(
+    _ = await v3232Manager.ReadWithRecoveryAsync<long>(
         LifeSkillStage.Gathering, "activity",
         ct => { v3232Reads++; throw new InvalidOperationException("state mismatch"); },
         CancellationToken.None);
@@ -89,7 +89,7 @@ using (var v3232Cancel = new CancellationTokenSource())
     bool cancellationProtected = false;
     try
     {
-        _ = await v3232WithCancel.ReadWithRecoveryAsync(
+        _ = await v3232WithCancel.ReadWithRecoveryAsync<long>(
             LifeSkillStage.Altering, "recipes",
             _ => { v3232CancelledReads++; throw new TimeoutException(); },
             v3232Cancel.Token);
