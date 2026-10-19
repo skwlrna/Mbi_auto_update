@@ -795,7 +795,10 @@ try
         }),
         _ => Task.FromResult<IReadOnlyList<AlteringWork>>(new[]
         { new AlteringWork("밥", foodPlan.FacilityName, "InProgress", false, 60) }),
-        incidentDir, CancellationToken.None);
+        incidentDir, CancellationToken.None,
+        recoveryPatterns: v3236History,
+        recoveryDecision: LifeSkillRecoveryDecisionPolicy.ForIncident(
+            new InvalidOperationException("sensitive exception detail")));
     var snapshot = File.ReadAllText(snapshotPath);
     using var parsedSnapshot = System.Text.Json.JsonDocument.Parse(snapshot);
     var rootSnapshot = parsedSnapshot.RootElement;
@@ -807,6 +810,15 @@ try
           !snapshot.Contains("AccountCode", StringComparison.Ordinal) &&
           !snapshot.Contains("CharacterId", StringComparison.Ordinal),
         "error incident keeps local read-only recipe/queue evidence without user identity");
+    Check(rootSnapshot.GetProperty("recovery").GetProperty("category").GetString()
+              == "state_conflict" &&
+          rootSnapshot.GetProperty("recovery").GetProperty("gameValidated").GetBoolean()
+              == false &&
+          rootSnapshot.GetProperty("recovery").GetProperty("historicalPatterns")
+              .GetArrayLength() > 0 &&
+          snapshot.Contains("unconfirmed_action", StringComparison.Ordinal) &&
+          !snapshot.Contains("sensitive exception detail", StringComparison.Ordinal),
+        "V3.2.36 incident links bounded recovery labels without raw exception text or claimed game validation");
     var readFailure = await MultiAlteringIncidentSnapshot.CaptureAsync(
         new[] { foodPlan }, nameof(InvalidOperationException),
         _ => throw new InvalidDataException("secret payload"),
