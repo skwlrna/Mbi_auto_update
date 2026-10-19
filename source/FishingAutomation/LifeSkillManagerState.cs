@@ -124,6 +124,64 @@ internal sealed class LifeSkillWorkFence
     }
 }
 
+// V3.2.34 bounded, diagnostic-only heartbeat for long unattended sessions.
+// The clock is injectable for deterministic regression tests. A heartbeat
+// never approves input and it never resets any existing no-progress watchdog.
+internal sealed class LifeSkillLongRunHeartbeat
+{
+    private readonly Func<DateTimeOffset> _now;
+    private readonly TimeSpan _interval;
+    private DateTimeOffset? _lastReport;
+    private string? _lastPhase;
+    private long? _lastQuantity;
+
+    internal LifeSkillLongRunHeartbeat(
+        TimeSpan? interval = null, Func<DateTimeOffset>? now = null)
+    {
+        _interval = interval ?? TimeSpan.FromMinutes(1);
+        if (_interval <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(interval));
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    internal bool ShouldReport(string phase, long confirmedQuantity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(phase);
+        if (confirmedQuantity < 0)
+            throw new InvalidDataException("장시간 진단 수량이 음수입니다.");
+        DateTimeOffset observedAt = _now();
+        TimeSpan elapsed = _lastReport.HasValue
+            ? observedAt - _lastReport.Value
+            : TimeSpan.MaxValue;
+        bool report = !_lastReport.HasValue ||
+            !string.Equals(_lastPhase, phase, StringComparison.Ordinal) ||
+            !_lastQuantity.HasValue || _lastQuantity.Value != confirmedQuantity ||
+            elapsed >= _interval || elapsed < TimeSpan.Zero;
+        if (!report) return false;
+        _lastReport = observedAt;
+        _lastPhase = phase;
+        _lastQuantity = confirmedQuantity;
+        return true;
+    }
+}
+
+// A real combat state is not permission to press Start/Stop or Space again.
+// Two-second polling for 15 minutes without returning to the field is
+// an anomalous state; hand it off to existing safe-stop diagnostics.
+internal static class LifeSkillLongRunCombatPolicy
+{
+    internal const int MaximumConsecutivePolls = 450;
+
+    internal static void ThrowIfStalled(int consecutivePolls, string phase)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(phase);
+        if (consecutivePolls < MaximumConsecutivePolls) return;
+        throw new InvalidOperationException(
+            $"[중간관리자][장시간 정체] {phase} · 전투 상태가 " +
+            $"{MaximumConsecutivePolls}회 연속 확인됨 · 화면 입력 없이 안전 정지");
+    }
+}
+
 // Per-run observation ledger for the existing middle manager. Never authorizes
 // GUI input; all action paths continue their own fresh CLI and visual checks.
 internal enum LifeSkillStage { Altering, Gathering, Crafting }
