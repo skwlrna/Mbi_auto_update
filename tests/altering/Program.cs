@@ -4,6 +4,104 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.35: make same-item CLI observations safe under overlapping reads.
+var v3235Logs = new List<string>();
+var v3235State = new LifeSkillManagerState(recoveryDelay: (_, _) => Task.CompletedTask);
+v3235State.Log += v3235Logs.Add;
+v3235State.BeginStage(LifeSkillStage.Gathering, "overlapping CLI inventory");
+var v3235SlowResult = new TaskCompletionSource<long>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var v3235Old = v3235State.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "물이 든 병",
+    (_, _) => v3235SlowResult.Task, CancellationToken.None);
+long v3235New = await v3235State.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "물이 든 병",
+    (_, _) => Task.FromResult(19L), CancellationToken.None);
+v3235SlowResult.SetResult(11);
+bool v3235LateDiscarded = false;
+try { _ = await v3235Old; }
+catch (InvalidOperationException ex)
+{
+    v3235LateDiscarded =
+        ex.Message.Contains("이전 CLI 응답을 폐기", StringComparison.Ordinal);
+}
+Check(v3235New == 19 && v3235LateDiscarded &&
+      v3235State.TryGetFreshEvidence(
+          LifeSkillStage.Gathering, "물이 든 병", out var v3235Evidence) &&
+      v3235Evidence?.Quantity == 19,
+    "V3.2.35 preserves the newer same-item CLI read and rejects a late old reply");
+var v3235Snapshot = v3235State.DiagnosticsSnapshot();
+Check(v3235Snapshot.Requests == 2 && v3235Snapshot.Attempts == 2 &&
+      v3235Snapshot.StaleInventoryReplies == 1 &&
+      v3235Snapshot.Recovered == 0 && v3235Snapshot.Failed == 0,
+    "V3.2.35 read statistics distinguish requests, attempts and stale results");
+
+var v3235OtherSlow = new TaskCompletionSource<long>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var v3235Independent = v3235State.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "쇠고기",
+    (_, _) => v3235OtherSlow.Task, CancellationToken.None);
+long v3235Parallel = await v3235State.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "달걀",
+    (_, _) => Task.FromResult(8L), CancellationToken.None);
+v3235OtherSlow.SetResult(7);
+Check(v3235Parallel == 8 && await v3235Independent == 7 &&
+      v3235State.TryGetFreshEvidence(
+          LifeSkillStage.Gathering, "쇠고기", out var v3235Beef) &&
+      v3235Beef?.Quantity == 7,
+    "V3.2.35 unrelated item observations can finish independently");
+
+int v3235ReadCalls = 0;
+long v3235Recovered = await v3235State.ReadWithRecoveryAsync<long>(
+    LifeSkillStage.Gathering, "activity",
+    _ => { if (++v3235ReadCalls == 1) throw new TimeoutException();
+           return Task.FromResult(1L); },
+    CancellationToken.None);
+Check(v3235Recovered == 1 && v3235ReadCalls == 2 &&
+      v3235State.DiagnosticsSnapshot().Recovered == 1 &&
+      v3235State.DiagnosticsSnapshot().Attempts == 6,
+    "V3.2.35 recovered read requires exactly one additional CLI attempt");
+
+int v3235InvalidCalls = 0;
+bool v3235Invalid = false;
+try
+{
+    _ = await v3235State.ReadWithRecoveryAsync<long>(
+        LifeSkillStage.Gathering, "invalid-recipe",
+        _ => { v3235InvalidCalls++; throw new InvalidDataException("semantic mismatch"); },
+        CancellationToken.None);
+}
+catch (InvalidDataException) { v3235Invalid = true; }
+Check(v3235Invalid && v3235InvalidCalls == 1 &&
+      v3235State.DiagnosticsSnapshot().Failed == 1,
+    "V3.2.35 semantic state failures do not cause unsafe transport retries");
+
+v3235State.BeginStage(LifeSkillStage.Crafting, "handoff");
+Check(v3235Logs.Any(x => x.Contains("[조회 통계]", StringComparison.Ordinal) &&
+      x.Contains("늦은 재고 응답 폐기 1", StringComparison.Ordinal)) &&
+      v3235State.DiagnosticsSnapshot().Requests == 0 &&
+      !v3235State.TryGetFreshEvidence(
+          LifeSkillStage.Gathering, "물이 든 병", out _),
+    "V3.2.35 reports previous-stage diagnostics and invalidates observations on handoff");
+
+var v3235DelayManager = new LifeSkillManagerState(
+    recoveryDelay: (_, _) => Task.CompletedTask);
+v3235DelayManager.BeginStage(LifeSkillStage.Altering, "late retry test");
+int v3235LateReads = 0;
+bool v3235RetryRejected = false;
+try
+{
+    _ = await v3235DelayManager.ReadWithRecoveryAsync<long>(
+        LifeSkillStage.Altering, "scheduler-works",
+        _ => { v3235LateReads++;
+               v3235DelayManager.BeginStage(LifeSkillStage.Crafting, "handoff");
+               throw new IOException("transient-but-stale"); },
+        CancellationToken.None);
+}
+catch (InvalidOperationException) { v3235RetryRejected = true; }
+Check(v3235RetryRejected && v3235LateReads == 1,
+    "V3.2.35 refuses transient retry after a stage switch");
+
 // V3.2.34: long-run heartbeat is diagnostic-only and bounded.
 var v3234Now = DateTimeOffset.Parse("2026-10-19T00:00:00+00:00");
 var v3234Heartbeat = new LifeSkillLongRunHeartbeat(
