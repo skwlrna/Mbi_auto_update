@@ -43,9 +43,9 @@ def safe_branch(branch: str) -> bool:
 
 def safe_candidate_path(name: str) -> bool:
     """Independent host-side allowlist, checked again before GitHub upload."""
-    if not isinstance(name, str) or not name or "\\x00" in name:
+    if not isinstance(name, str) or not name or chr(0) in name:
         return False
-    if "\\\\" in name or name.startswith("./"):
+    if chr(92) in name or name.startswith("./"):
         return False
     path = PurePosixPath(name)
     if (path.is_absolute() or len(path.parts) < 2 or ".." in path.parts
