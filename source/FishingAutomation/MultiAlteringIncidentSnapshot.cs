@@ -15,7 +15,9 @@ internal static class MultiAlteringIncidentSnapshot
         string directory, CancellationToken ct,
         IReadOnlyList<LifeSkillRecoveryPattern>? recoveryPatterns = null,
         LifeSkillRecoveryDecision? recoveryDecision = null,
-        LifeSkillRecoveryOutcomeMetrics? recoveryMetrics = null)
+        LifeSkillRecoveryOutcomeMetrics? recoveryMetrics = null,
+        IReadOnlyList<LifeSkillWorkOutcomeMetrics>? batchWorkOutcomes = null,
+        IReadOnlyList<LifeSkillWorkOutcomeMetrics>? sharedWorkOutcomes = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(readRecipes);
@@ -109,6 +111,19 @@ internal static class MultiAlteringIncidentSnapshot
                         occurrences = x.Occurrences
                     }).ToArray()
             },
+            // Ticket accounting only. A successful F9 batch callback is
+            // neither a confirmed goods receipt nor a completed target.
+            workOutcomeScope = "guarded_attempts_not_durable_receipts",
+            workOutcomes = (batchWorkOutcomes ?? []).Concat(sharedWorkOutcomes ?? [])
+                .Take(6).Select(x => new
+                {
+                    kind = x.Kind.ToString(), started = x.Started,
+                    outputVerified = x.OutputVerified,
+                    batchCallbackVerified = x.BatchCallbackVerified,
+                    omissionSuspectedOrUncertain = x.Uncertain,
+                    stillUnconfirmed = x.InFlight,
+                    concludedOutputVerificationRate = x.ConcludedOutputVerificationRate
+                }).ToArray(),
             selected, lanes
         }, new JsonSerializerOptions { WriteIndented = true });
         Directory.CreateDirectory(directory);
