@@ -335,6 +335,9 @@ internal sealed class LifeSkillManagerState
             LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false));
     }
 
+    internal void RecordIncident(LifeSkillStage stage, Exception error)
+        => NoteRecovery(stage, "incident", LifeSkillRecoveryDecisionPolicy.ForIncident(error));
+
     private void NoteRecovery(LifeSkillStage stage, string operation,
         LifeSkillRecoveryDecision decision)
     {
