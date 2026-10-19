@@ -200,6 +200,10 @@ public sealed partial class MainForm
             managerState.Log += text => Ui(() => _log.Write(text));
             managerState.BeginStage(LifeSkillStage.Altering,
                 "F9 가공·채집 중간관리자 시작");
+            // Separate per-batch execution fence: the durable F9 receipt and
+            // registration ledger still decides actual completion/resume.
+            var alteringWorkFence = new LifeSkillWorkFence();
+            alteringWorkFence.Log += text => Ui(() => _log.Write(text));
             var laneState = new FacilityLaneState(currentWorks);
             // M3: reloading sessions and existing CLI works never restores
             // physical onsite proof. This fresh in-memory manager owns all
@@ -532,21 +536,39 @@ public sealed partial class MainForm
                     coordinatorToken.ThrowIfCancellationRequested();
                     var key = (plan.FacilityName, plan.DisplayName, plan.RecipeOrdinal);
                     var automation = automations[key];
-                    int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
-                    var result = await automation.RunBatchAsync(
-                        plan,
-                        slotBudget,
-                        coordinatorToken);
-                    int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
-                    laneState.NoteRegistration(
-                        plan,
-                        FacilityLaneOwner.Main,
-                        registered);
-                    bool finished = result is AlteringRunResult.Completed or
-                        AlteringRunResult.RawMaterialExhausted;
-                    if (finished)
-                        consumptionLedger.UnregisterProducer(plan);
-                    return finished;
+                    var workTicket = alteringWorkFence.Begin(
+                        $"alter:{plan.FacilityName}/{plan.DisplayName}/{plan.RecipeOrdinal}");
+                    try
+                    {
+                        int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
+                        var result = await automation.RunBatchAsync(
+                            plan,
+                            slotBudget,
+                            coordinatorToken);
+                        int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
+                        if (registered < 0)
+                            throw new InvalidOperationException(
+                                "다중가공 확정 등록량이 역행했습니다. 중복 등록 없이 정지합니다.");
+                        laneState.NoteRegistration(
+                            plan,
+                            FacilityLaneOwner.Main,
+                            registered);
+                        bool finished = result is AlteringRunResult.Completed or
+                            AlteringRunResult.RawMaterialExhausted;
+                        if (finished)
+                            consumptionLedger.UnregisterProducer(plan);
+                        // Invocation ended without an unhandled action failure.
+                        // Receipt/output confirmation remains in existing F05/
+                        // durable batch store; this does not invent queue proof.
+                        alteringWorkFence.ConfirmBatchReturn(
+                            workTicket, registered, finished);
+                        return finished;
+                    }
+                    catch (Exception)
+                    {
+                        alteringWorkFence.MarkUncertain(workTicket, "alter_batch_unconfirmed");
+                        throw; // No blind replay of a possibly applied registration.
+                    }
                 },
                 ct => managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "scheduler-works",
