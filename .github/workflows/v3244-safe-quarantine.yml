@@ -1,0 +1,59 @@
+name: V3.2.44 Safe Read Quarantine Validation
+
+# Stacked development PR. No stable tag, game input, updater or GitHub Release.
+on:
+  push:
+    branches: [feat/v3244-repeat-error-quarantine]
+  pull_request:
+    branches: [feat/v3243-facility-efficiency-scheduling]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quarantine-safety:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify explicit read-only boundary and version gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content source/FishingAutomation/MainForm.MultiAltering.cs -Raw
+          $c=Get-Content source/FishingAutomation/MultiAlteringCoordinator.cs -Raw
+          $q=Get-Content source/FishingAutomation/MultiAlteringReadQuarantine.cs -Raw
+          if(-not $m.Contains('ReadBeforeInputAsync') -or
+             -not $m.Contains('VerifyReadQuarantineAsync') -or
+             -not $c.Contains('catch (SafePreInputReadException transient)') -or
+             -not $c.Contains('facilityWorks.Length == 0') -or
+             -not $q.Contains('autoFixReviewOnly = true')){
+            throw 'Safe-read boundary/diagnostic gate missing'
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.2.44.md)){throw 'Notes missing'}
+          $v=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if(-not $v.Contains('CurrentVersion = "V3.2.41"')){
+            throw 'No V3.2.44 public updater before predecessor verification'
+          }
+      - name: Safe repeated-read recovery and all F9 regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'F9 quarantine tests failed'}
+      - name: N02 durable receipt/resume tests
+        shell: pwsh
+        run: |
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE-ne0){throw 'Durable F9 regressions failed'}
+      - name: Windows app and altering visual contract build
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'Windows restore failed'}
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE-ne0){throw 'Windows app build failed'}
+          dotnet build tests/altering-visual/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Visual altering contract failed'}
