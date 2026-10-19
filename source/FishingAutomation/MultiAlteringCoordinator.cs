@@ -449,8 +449,10 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
     }
 
     internal static string Readiness(
-        IReadOnlyList<AlteringWork> works, bool held, bool initialVacancy)
+        IReadOnlyList<AlteringWork> works, bool held, bool initialVacancy,
+        bool readQuarantined = false)
     {
+        if (readQuarantined) return "read_quarantine";
         if (held) return "material_hold";
         if (works.Count > 0 && works.All(x => x.IsCompleted))
             return "completed_batch";
@@ -461,16 +463,16 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
 
     internal void Observe(
         string facility, IReadOnlyList<AlteringWork> works, bool held,
-        bool initialVacancy)
+        bool initialVacancy, bool readQuarantined = false)
     {
         var entry = Get(facility);
         entry.ObservedPasses++;
-        entry.State = Readiness(works, held, initialVacancy);
+        entry.State = Readiness(works, held, initialVacancy, readQuarantined);
         entry.ReadyThisPass = entry.State is "completed_batch" or "empty" or
             "initial_vacancy";
         entry.ServedThisPass = false;
         if (entry.ReadyThisPass) entry.ReadyPasses++;
-        else if (held) entry.HeldPasses++;
+        else if (held || readQuarantined) entry.HeldPasses++;
         else entry.RunningPasses++;
     }
 
@@ -488,7 +490,7 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
             "completed_batch" => 0,
             "empty" => 1,
             "initial_vacancy" => 2,
-            "material_hold" => 3,
+            "material_hold" or "read_quarantine" => 3,
             _ => 4
         };
         return selectedFacilities.Select((facility, index) => new
@@ -768,7 +770,8 @@ internal sealed class MultiAlteringCoordinator
                 if (PendingCount(facility) == 0) continue;
                 var current = works.Where(x => x.FacilityName == facility).ToArray();
                 Efficiency.Observe(facility, current, held.ContainsKey(facility),
-                    startupVacancies.Contains(facility) && current.Length is > 0 and < 7);
+                    startupVacancies.Contains(facility) && current.Length is > 0 and < 7,
+                    readQuarantined: ReadQuarantine.HasUnverified(facility));
             }
             var facilityOrder = Efficiency.Order(orderedFacilities,
                 _optimizeFacilityOrder);
