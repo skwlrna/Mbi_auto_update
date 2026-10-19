@@ -28,7 +28,7 @@ Check(LifeSkillRecoveryDecisionPolicy.ForReadFailure(
 Check(LifeSkillRecoveryDecisionPolicy.ForIncident(
         new TimeoutException()).Disposition ==
         LifeSkillRecoveryDisposition.SafeStopAndDiagnose &&
-      LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false).Category ==
+      LifeSkillRecoveryDecisionPolicy.ForUncertainAction().Category ==
         "unconfirmed_action",
     "V3.2.36 incident history cannot authorize GUI replay");
 var v3236Journal = new LifeSkillRecoveryJournal();
@@ -41,7 +41,7 @@ Check(v3236Journal.Snapshot().Single().Occurrences == 3 &&
     "V3.2.36 repeated read patterns are counted, not replayed");
 v3236Journal.Note(LifeSkillStage.Crafting,
     "UserAccount-raw-exception-with-sensitive-text-too-long",
-    LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false));
+    LifeSkillRecoveryDecisionPolicy.ForUncertainAction());
 Check(v3236Journal.Snapshot().Last().Operation == "other",
     "V3.2.36 arbitrary raw operation strings are not kept in diagnostic patterns");
 for (int i = 0; i < 30; i++)
@@ -68,7 +68,8 @@ var v3236History = v3236State.RecoveryPatternsSnapshot();
 Check(v3236Calls == 2 &&
       v3236History.Any(x => x.Category == "transient_read" &&
           x.Disposition == LifeSkillRecoveryDisposition.RetryReadOnlyOnce) &&
-      v3236History.Any(x => x.Category == "transient_read_recovered") &&
+      v3236History.Any(x => x.Category == "transient_read_recovered" &&
+          x.Disposition == LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead) &&
       v3236History.Any(x => x.Category == "unconfirmed_action" &&
           x.Operation == "craft") &&
       v3236History.Any(x => x.Operation == "incident" &&
