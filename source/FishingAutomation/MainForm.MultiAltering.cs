@@ -36,6 +36,7 @@ public sealed partial class MainForm
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
         LifeSkillManagerState? managerState = null;
+        LifeSkillWorkFence? alteringWorkFence = null;
         bool singleCharacterMode = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
@@ -203,7 +204,7 @@ public sealed partial class MainForm
                 "F9 가공·채집 중간관리자 시작");
             // Separate per-batch execution fence: the durable F9 receipt and
             // registration ledger still decides actual completion/resume.
-            var alteringWorkFence = new LifeSkillWorkFence();
+            alteringWorkFence = new LifeSkillWorkFence();
             alteringWorkFence.Log += text => Ui(() => _log.Write(text));
             var laneState = new FacilityLaneState(currentWorks);
             // M3: reloading sessions and existing CLI works never restores
@@ -646,7 +647,9 @@ public sealed partial class MainForm
                     snapshotTimeout.Token,
                     recoveryPatterns: managerState?.RecoveryPatternsSnapshot(),
                     recoveryDecision: recoveryDecision,
-                    recoveryMetrics: managerState?.RecoveryOutcomeSnapshot());
+                    recoveryMetrics: managerState?.RecoveryOutcomeSnapshot(),
+                    batchWorkOutcomes: alteringWorkFence?.OutcomeSnapshot(),
+                    sharedWorkOutcomes: managerState?.WorkFence.OutcomeSnapshot());
                 _log.Write("[다중가공][오류 진단] 로컬 상태 저장 · " +
                     Path.GetFileName(saved) + " · 자동 재등록/수령 없음");
             }
@@ -660,6 +663,24 @@ public sealed partial class MainForm
         }
         finally
         {
+            // Ticket outcomes summarize guarded attempts, not the durable
+            // F05 receipt ledger or completed target quantities.
+            foreach (var metrics in (alteringWorkFence?.OutcomeSnapshot() ??
+                     Array.Empty<LifeSkillWorkOutcomeMetrics>())
+                     .Concat(managerState?.WorkFence.OutcomeSnapshot() ??
+                         Array.Empty<LifeSkillWorkOutcomeMetrics>()))
+            {
+                if (metrics.Started == 0) continue;
+                string verifiedRate = metrics.ConcludedOutputVerificationRate.HasValue
+                    ? (metrics.ConcludedOutputVerificationRate.Value * 100).ToString("0.0") + "%"
+                    : "산출 불가";
+                _log.Write($"[중간관리자][작업 결과] {metrics.Kind} · 시도 {metrics.Started} · " +
+                    $"새 CLI+화면 출력 확인 {metrics.OutputVerified} · " +
+                    $"F9 콜백 반환 {metrics.BatchCallbackVerified} · " +
+                    $"누락 의심/미확정 {metrics.Uncertain} · 진행 미확정 {metrics.InFlight} · " +
+                    $"출력 검증률 {verifiedRate} (종료된 채집/제작 시도만) · " +
+                    "F9 수령 완료율은 영속 장부 기준 · 자동 재실행 없음");
+            }
             _multiAlteringRunning = false;
             _multiAlteringCts?.Dispose();
             _multiAlteringCts = null;
