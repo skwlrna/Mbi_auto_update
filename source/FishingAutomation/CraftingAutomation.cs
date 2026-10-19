@@ -20,6 +20,7 @@ internal sealed class CraftingAutomation
     private readonly ICraftingScreen _screen;
     private readonly RecursiveAlteringSupplyResolver _alteringResolver;
     private readonly IAlteringData? _altering;
+    private readonly LifeSkillManagerState? _managerState;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     internal event Action<string>? Log;
@@ -33,19 +34,23 @@ internal sealed class CraftingAutomation
         ICraftingScreen screen,
         RecursiveAlteringSupplyResolver alteringResolver,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        IAlteringData? altering = null)
+        IAlteringData? altering = null,
+        LifeSkillManagerState? managerState = null)
     {
         _data = data;
         _gathering = gathering;
         _screen = screen;
         _alteringResolver = alteringResolver;
         _altering = altering;
+        _managerState = managerState;
         _delay = delay ?? Task.Delay;
     }
 
     internal async Task RunAsync(CraftingPlan plan, CancellationToken ct)
     {
         plan.Validate();
+        _managerState?.BeginStage(LifeSkillStage.Crafting,
+            "제작 퀘스트 시작 · 화면 확인 유지");
         Gained = 0;
         CompletedCrafts = 0;
 
@@ -221,7 +226,14 @@ internal sealed class CraftingAutomation
                 Log?.Invoke(
                     $"[제작] 재료명 OCR 미확인 · 부족 행 {deficit.Current}/{deficit.Required} · " +
                     $"행Y={deficit.RowY} · 이름은 보조정보로만 사용하고 해당 부족 행 자체를 처리");
-                await _screen.GatherQuestDeficitAsync(deficit, ct);
+                _managerState?.BeginStage(LifeSkillStage.Gathering,
+                    "제작 이름 미확인 부족 행 채집");
+                try { await _screen.GatherQuestDeficitAsync(deficit, ct); }
+                finally
+                {
+                    _managerState?.BeginStage(LifeSkillStage.Crafting,
+                        "제작 퀘스트 행 재조회");
+                }
                 continue;
             }
 
@@ -245,7 +257,14 @@ internal sealed class CraftingAutomation
                     (gatherable is null
                         ? "독립 채집 미지원/퀘스트 전용 재료도 추천 획득처로 처리"
                         : "제작 퀘스트 추천 획득처 사용"));
-                await _screen.GatherQuestDeficitAsync(deficit, ct);
+                _managerState?.BeginStage(LifeSkillStage.Gathering,
+                    "제작 퀘스트 재료 확보: " + deficit.DisplayName);
+                try { await _screen.GatherQuestDeficitAsync(deficit, ct); }
+                finally
+                {
+                    _managerState?.BeginStage(LifeSkillStage.Crafting,
+                        "제작 퀘스트 재료 확인 복귀");
+                }
                 continue;
             }
 
@@ -253,7 +272,18 @@ internal sealed class CraftingAutomation
             await _screen.CloseOverlayAsync(ct);
             Log?.Invoke(
                 $"[제작] 중간 가공 재료 · {deficit.DisplayName} 부족 {shortage}개 · 자동 가공 연결");
-            await _alteringResolver.ResolveExternalAsync(deficit.DisplayName, shortage, ct);
+            _managerState?.BeginStage(LifeSkillStage.Altering,
+                "제작 중간재료 가공 전환: " + deficit.DisplayName);
+            try
+            {
+                await _alteringResolver.ResolveExternalAsync(
+                    deficit.DisplayName, shortage, ct);
+            }
+            finally
+            {
+                _managerState?.BeginStage(LifeSkillStage.Crafting,
+                    "제작 퀘스트 중간재료 재확인");
+            }
             Log?.Invoke($"[제작] 중간 가공 완료 · {deficit.DisplayName} 재확인");
             await _delay(TimeSpan.FromMilliseconds(500), ct);
         }

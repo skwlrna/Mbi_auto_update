@@ -66,10 +66,14 @@ public sealed partial class MainForm
             var gatheringScreen = new ZeroWingGatheringScreen(rawGathering, _cli, identity);
             var craftingScreen = new ZeroWingCraftingScreen(rawCrafting, _cli, identity);
 
+            var managerState = new LifeSkillManagerState();
+            managerState.Log += text => Ui(() => _log.Write(text));
             var resolver = new RecursiveAlteringSupplyResolver(
-                rawAlteringData, gatheringData, alteringScreen, gatheringScreen);
+                rawAlteringData, gatheringData, alteringScreen, gatheringScreen,
+                managerState: managerState);
             var automation = new CraftingAutomation(
-                craftingData, gatheringData, craftingScreen, resolver, altering: rawAlteringData);
+                craftingData, gatheringData, craftingScreen, resolver,
+                altering: rawAlteringData, managerState: managerState);
 
             rawAltering.Log += text => Ui(() => _log.Write(text));
             rawGathering.Log += text => Ui(() => _log.Write(text));

@@ -117,6 +117,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
     private readonly int _verificationAttempts;
     private readonly IAlteringDependencyScheduler? _dependencyScheduler;
     private readonly FacilityLaneState? _laneState;
+    private readonly LifeSkillManagerState? _managerState;
     private readonly HashSet<string> _active = new(StringComparer.Ordinal);
 
     internal event Action<string>? Log;
@@ -130,7 +131,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         int verificationAttempts = 120,
         IAlteringDependencyScheduler? dependencyScheduler = null,
-        FacilityLaneState? laneState = null)
+        FacilityLaneState? laneState = null,
+        LifeSkillManagerState? managerState = null)
     {
         _altering = altering;
         _gathering = gathering;
@@ -141,6 +143,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         _verificationAttempts = Math.Clamp(verificationAttempts, 1, 120);
         _dependencyScheduler = dependencyScheduler;
         _laneState = laneState;
+        _managerState = managerState;
     }
 
     // The resolver does not decide where to move. It only reports a confirmed
@@ -202,9 +205,11 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             Log?.Invoke("[재료 해결] 다중 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
 
             var coordinator = new MultiGatheringCoordinator(
-                _gathering, _gatheringScreen, _delay, _verificationAttempts);
+                _gathering, _gatheringScreen, _delay, _verificationAttempts, _managerState);
             coordinator.Log += text => Log?.Invoke(text);
             await coordinator.RunAsync(multiGather, ct);
+            _managerState?.BeginStage(LifeSkillStage.Altering,
+                "다중 원재료 채집 완료 · 가공 복귀 시 재검증");
         }
 
         foreach (var missing in blockedRecipe.MissingIngredients)
@@ -259,9 +264,11 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         Log?.Invoke("[재료 해결] 전체 품목 통합 채집 전 가공 UI 종료 · 일반 필드 복귀 확인");
 
         var coordinator = new MultiGatheringCoordinator(
-            _gathering, _gatheringScreen, _delay, _verificationAttempts);
+            _gathering, _gatheringScreen, _delay, _verificationAttempts, _managerState);
         coordinator.Log += text => Log?.Invoke(text);
         await coordinator.RunAsync(multiGather, ct);
+        _managerState?.BeginStage(LifeSkillStage.Altering,
+            "통합 선행 채집 완료 · 가공 재검증");
 
         Log?.Invoke(
             "[재료 해결] 전체 품목 통합 채집 완료 · 각 품목 시작 직전 실제 재고/부족분을 다시 검증");
@@ -314,7 +321,7 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 long currentBeforeFallback = await _gathering.ItemCountAsync(itemName, ct);
                 long fallbackTargetTotal = checked(currentBeforeFallback + quantity);
                 var coordinator = new MultiGatheringCoordinator(
-                    _gathering, _gatheringScreen, _delay, _verificationAttempts);
+                    _gathering, _gatheringScreen, _delay, _verificationAttempts, _managerState);
                 coordinator.Log += text => Log?.Invoke(text);
                 await coordinator.RunAsync(
                     new[]
@@ -325,6 +332,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                             sourceRecipe with { AllowPaidButton = false })
                     },
                     ct);
+                _managerState?.BeginStage(LifeSkillStage.Altering,
+                    "재귀 원재료 채집 후 가공 복귀");
                 return;
             }
 
@@ -376,7 +385,13 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                     throw new InvalidOperationException($"{subPlan.DisplayName} 하위 재료 확보 후에도 가공 불가 상태입니다.");
             }
 
-            long outputBefore = await _altering.ItemCountAsync(subPlan.OutputName, ct);
+            _managerState?.BeginStage(LifeSkillStage.Altering,
+                "중간가공 " + subPlan.DisplayName);
+            long outputBefore = _managerState is null
+                ? await _altering.ItemCountAsync(subPlan.OutputName, ct)
+                : await _managerState.ReadFreshCountAsync(
+                    LifeSkillStage.Altering, subPlan.OutputName,
+                    _altering.ItemCountAsync, ct);
             Log?.Invoke($"[재료 해결] 중간 가공 시작 · {subPlan.DisplayName} 추가 {quantity}개 · 정령의 날개 0개 원칙");
 
             if (_dependencyScheduler is not null)
@@ -406,7 +421,11 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 await nested.RunAsync(subPlan, ct);
             }
 
-            long outputAfter = await _altering.ItemCountAsync(subPlan.OutputName, ct);
+            long outputAfter = _managerState is null
+                ? await _altering.ItemCountAsync(subPlan.OutputName, ct)
+                : await _managerState.ReadFreshCountAsync(
+                    LifeSkillStage.Altering, subPlan.OutputName,
+                    _altering.ItemCountAsync, ct);
             if (outputAfter - outputBefore < quantity)
                 throw new InvalidOperationException(
                     $"{subPlan.OutputName} 중간 가공 후 수량 검증 실패: +{outputAfter - outputBefore} / 필요 +{quantity}");
