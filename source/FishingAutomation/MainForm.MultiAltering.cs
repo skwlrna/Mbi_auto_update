@@ -38,6 +38,7 @@ public sealed partial class MainForm
         LifeSkillManagerState? managerState = null;
         LifeSkillWorkFence? alteringWorkFence = null;
         MultiAlteringFacilityBottleneckTracker? facilityBottlenecks = null;
+        MultiAlteringFacilityEfficiencyTracker? facilityEfficiency = null;
         bool singleCharacterMode = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
@@ -633,8 +634,10 @@ public sealed partial class MainForm
                 FacilityLaneOwner.Main,
                 restoreCompleted: batchStore.FinishedPlans,
                 fillInitialVacancies: true,
-                deferOtherLanesWhileQueueFull: queueFullAtStart);
+                deferOtherLanesWhileQueueFull: queueFullAtStart,
+                optimizeFacilityOrder: true);
             facilityBottlenecks = coordinator.Bottlenecks;
+            facilityEfficiency = coordinator.Efficiency;
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
@@ -807,6 +810,22 @@ public sealed partial class MainForm
         }
         finally
         {
+            // These are in-memory diagnostic pass counters. A manager callback
+            // returning without an error is not proof of a completed receipt.
+            foreach (var lane in facilityEfficiency?.Snapshot() ??
+                Array.Empty<MultiAlteringFacilityEfficiencySnapshot>())
+            {
+                string verifiedRate = lane.BatchCalls == 0 ? "산출 불가" :
+                    ((double)lane.VerifiedProgressTurns / lane.BatchCalls * 100)
+                        .ToString("0.0") + "%";
+                _log.Write(
+                    $"[중간관리자][시설 효율] {lane.Facility} · 관찰 {lane.ObservedPasses}주기 · " +
+                    $"즉시 처리 후보 {lane.ReadyPasses}회 · 처리 중 {lane.RunningPasses}회 · " +
+                    $"재료 보류 {lane.HeldPasses}회 · 준비 상태로 미선택 {lane.UnservedReadyPasses}회 · " +
+                    $"실행 콜백 {lane.BatchCalls}회 · 확인된 진척 콜백 {lane.VerifiedProgressTurns}회 · " +
+                    $"완료 품목 {lane.CompletedPlanTurns}회 · 검증 진척 비율 {verifiedRate} " +
+                    "(영속 수령 성공률 아님 · 읽기 전용 분석)");
+            }
             // Read-only evidence only. Repeated blocked episodes are hints for
             // review; neither an inferred omission nor permission to click.
             if (facilityBottlenecks is not null)

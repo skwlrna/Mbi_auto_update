@@ -415,6 +415,136 @@ internal sealed class MultiAlteringWaitWatchdog
         => _last.Remove(facility);
 }
 
+// V3.2.43: observation-only facility efficiency. These counters are local
+// to this run, are NOT durable work receipts, and cannot authorize input.
+// Within each facility the user's recipe order is deliberately untouched.
+internal sealed record MultiAlteringFacilityEfficiencySnapshot(
+    string Facility, long ObservedPasses, long ReadyPasses,
+    long RunningPasses, long HeldPasses, long UnservedReadyPasses,
+    long BatchCalls, long VerifiedProgressTurns, long CompletedPlanTurns,
+    int ReadyWaitPasses, string CurrentReadiness);
+
+internal sealed class MultiAlteringFacilityEfficiencyTracker
+{
+    private sealed class Entry
+    {
+        internal long ObservedPasses, ReadyPasses, RunningPasses, HeldPasses;
+        internal long UnservedReadyPasses, BatchCalls, VerifiedProgressTurns;
+        internal long CompletedPlanTurns;
+        internal int ReadyWaitPasses;
+        internal string State = "unobserved";
+        internal bool ReadyThisPass, ServedThisPass;
+    }
+
+    private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+
+    private Entry Get(string facility)
+    {
+        if (!_entries.TryGetValue(facility, out var e))
+        {
+            e = new Entry();
+            _entries.Add(facility, e);
+        }
+        return e;
+    }
+
+    internal static string Readiness(
+        IReadOnlyList<AlteringWork> works, bool held, bool initialVacancy)
+    {
+        if (held) return "material_hold";
+        if (works.Count > 0 && works.All(x => x.IsCompleted))
+            return "completed_batch";
+        if (works.Count == 0) return "empty";
+        if (initialVacancy && works.Count < 7) return "initial_vacancy";
+        return "running_or_partial";
+    }
+
+    internal void Observe(
+        string facility, IReadOnlyList<AlteringWork> works, bool held,
+        bool initialVacancy)
+    {
+        var entry = Get(facility);
+        entry.ObservedPasses++;
+        entry.State = Readiness(works, held, initialVacancy);
+        entry.ReadyThisPass = entry.State is "completed_batch" or "empty" or
+            "initial_vacancy";
+        entry.ServedThisPass = false;
+        if (entry.ReadyThisPass) entry.ReadyPasses++;
+        else if (held) entry.HeldPasses++;
+        else entry.RunningPasses++;
+    }
+
+    // Reordering only independent facilities. All original CLI/onsite/7-slot/
+    // F05 input fences remain in the exact same per-facility execution block.
+    // Collectable complete queues before idle ones can free an occupied lane.
+    // Within a readiness class older unserved lanes go first (stable tie-break).
+    internal IReadOnlyList<string> Order(
+        IReadOnlyList<string> selectedFacilities,
+        bool optimize)
+    {
+        if (!optimize) return selectedFacilities.ToArray();
+        static int Rank(string readiness) => readiness switch
+        {
+            "completed_batch" => 0,
+            "empty" => 1,
+            "initial_vacancy" => 2,
+            "material_hold" => 3,
+            _ => 4
+        };
+        return selectedFacilities.Select((facility, index) => new
+            {
+                Facility = facility,
+                Index = index,
+                Entry = Get(facility)
+            })
+            .OrderBy(x => Rank(x.Entry.State))
+            .ThenByDescending(x => x.Entry.ReadyWaitPasses)
+            .ThenBy(x => x.Index)
+            .Select(x => x.Facility).ToArray();
+    }
+
+    internal void NoteBatchAttempt(string facility)
+    {
+        var entry = Get(facility);
+        entry.BatchCalls++;
+        entry.ServedThisPass = true;
+        entry.ReadyWaitPasses = 0;
+    }
+
+    internal void NoteVerifiedProgress(string facility, bool completedPlan)
+    {
+        var entry = Get(facility);
+        entry.VerifiedProgressTurns++;
+        if (completedPlan) entry.CompletedPlanTurns++;
+    }
+
+    internal void EndPass()
+    {
+        foreach (var entry in _entries.Values)
+        {
+            if (entry.ReadyThisPass && !entry.ServedThisPass)
+            {
+                entry.UnservedReadyPasses++;
+                entry.ReadyWaitPasses = Math.Min(1000,
+                    entry.ReadyWaitPasses + 1);
+            }
+            else if (!entry.ReadyThisPass)
+                entry.ReadyWaitPasses = 0;
+            entry.ReadyThisPass = false;
+            entry.ServedThisPass = false;
+        }
+    }
+
+    internal IReadOnlyList<MultiAlteringFacilityEfficiencySnapshot> Snapshot()
+        => _entries.OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => new MultiAlteringFacilityEfficiencySnapshot(
+                x.Key, x.Value.ObservedPasses, x.Value.ReadyPasses,
+                x.Value.RunningPasses, x.Value.HeldPasses,
+                x.Value.UnservedReadyPasses, x.Value.BatchCalls,
+                x.Value.VerifiedProgressTurns, x.Value.CompletedPlanTurns,
+                x.Value.ReadyWaitPasses, x.Value.State)).ToArray();
+}
+
 internal sealed class MultiAlteringCoordinator
 {
     private readonly FacilityLaneState? _laneState;
@@ -424,9 +554,11 @@ internal sealed class MultiAlteringCoordinator
     private readonly Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? _restoreCompleted;
     private readonly bool _fillInitialVacancies;
     private readonly bool _deferOtherLanesWhileQueueFull;
+    private readonly bool _optimizeFacilityOrder;
 
     internal event Action<string>? Log;
     internal MultiAlteringFacilityBottleneckTracker Bottlenecks { get; }
+    internal MultiAlteringFacilityEfficiencyTracker Efficiency { get; } = new();
 
     internal MultiAlteringCoordinator(
         FacilityLaneState? laneState = null,
@@ -435,7 +567,8 @@ internal sealed class MultiAlteringCoordinator
         TimeSpan? idleThreshold = null,
         Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null,
         bool fillInitialVacancies = false,
-        bool deferOtherLanesWhileQueueFull = false)
+        bool deferOtherLanesWhileQueueFull = false,
+        bool optimizeFacilityOrder = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
@@ -445,6 +578,7 @@ internal sealed class MultiAlteringCoordinator
         _restoreCompleted = restoreCompleted;
         _fillInitialVacancies = fillInitialVacancies;
         _deferOtherLanesWhileQueueFull = deferOtherLanesWhileQueueFull;
+        _optimizeFacilityOrder = optimizeFacilityOrder;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -510,6 +644,7 @@ internal sealed class MultiAlteringCoordinator
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
+        string? lastOptimizedOrder = null;
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
         var startupVacancies = new HashSet<string>(
@@ -621,7 +756,30 @@ internal sealed class MultiAlteringCoordinator
                 }
             }
 
+            // Performance-based ordering changes ONLY which independent lane
+            // receives a turn first. Same-facility recipe order is fixed, and
+            // all existing receipt/registration guards still run afterward.
             foreach (string facility in orderedFacilities)
+            {
+                if (PendingCount(facility) == 0) continue;
+                var current = works.Where(x => x.FacilityName == facility).ToArray();
+                Efficiency.Observe(facility, current, held.ContainsKey(facility),
+                    startupVacancies.Contains(facility) && current.Length is > 0 and < 7);
+            }
+            var facilityOrder = Efficiency.Order(orderedFacilities,
+                _optimizeFacilityOrder);
+            if (_optimizeFacilityOrder)
+            {
+                string signature = string.Join(" -> ", facilityOrder);
+                if (!facilityOrder.SequenceEqual(orderedFacilities) &&
+                    signature != lastOptimizedOrder)
+                    Log?.Invoke(
+                        "[다중가공][시설 효율] CLI 완료 배치 수령 우선 → 빈 시설 → 최초 빈칸 → " +
+                        "재료 보류/진행 중 대기 · 독립 시설 순서만 조정 · " +
+                        signature + " · 실제 이동/등록/수령은 기존 검증 유지");
+                lastOptimizedOrder = signature;
+            }
+            foreach (string facility in facilityOrder)
             {
                 ct.ThrowIfCancellationRequested();
                 if (PendingCount(facility) == 0)
@@ -839,6 +997,7 @@ internal sealed class MultiAlteringCoordinator
                         // A failed/cancelled preparation never authorizes a click.
                         prepared.Add(Key(plan));
                     }
+                    Efficiency.NoteBatchAttempt(facility);
                     bool planCompleted = await runBatch(plan, 1, ct);
                     acted = true;
 
@@ -868,6 +1027,10 @@ internal sealed class MultiAlteringCoordinator
                         registrationAfter is not null &&
                         (registrationAfter.MainRegisteredWorks > registrationBefore.MainRegisteredWorks ||
                          registrationAfter.IntermediateRegisteredWorks > registrationBefore.IntermediateRegisteredWorks);
+                    // Count-only deltas are observations, not durable progress
+                    // proof. They must never inflate the verified efficiency rate.
+                    if (planCompleted || confirmedRegistration)
+                        Efficiency.NoteVerifiedProgress(facility, planCompleted);
 
                     if (planCompleted || confirmedRegistration || afterCount != beforeCount)
                     {
@@ -931,6 +1094,7 @@ internal sealed class MultiAlteringCoordinator
                 }
             }
 
+            Efficiency.EndPass();
             if (completed.Count >= plans.Count)
                 break;
 

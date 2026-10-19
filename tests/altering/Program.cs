@@ -4,6 +4,112 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.43: read-only facility ordering prefers a fully completed batch
+// over a new empty lane. A held lane never becomes input permission.
+var v3243Tracker = new MultiAlteringFacilityEfficiencyTracker();
+var v3243Metal = "금속 가공 시설";
+var v3243Wood = "목재 가공 시설";
+var v3243Food = "식재료 가공 시설";
+var v3243CompletedWood = new[]
+{
+    new AlteringWork("목재", v3243Wood, "Completed", true, 0)
+};
+v3243Tracker.Observe(v3243Metal, Array.Empty<AlteringWork>(), false, false);
+v3243Tracker.Observe(v3243Wood, v3243CompletedWood, false, false);
+v3243Tracker.Observe(v3243Food, Array.Empty<AlteringWork>(), true, false);
+var v3243InputOrder = new[] { v3243Metal, v3243Wood, v3243Food };
+Check(v3243Tracker.Order(v3243InputOrder, false).SequenceEqual(v3243InputOrder),
+    "V3.2.43 existing callers default to original facility order");
+Check(v3243Tracker.Order(v3243InputOrder, true).SequenceEqual(
+    new[] { v3243Wood, v3243Metal, v3243Food }),
+    "V3.2.43 completed batch prioritized, held lane remains last");
+v3243Tracker.NoteBatchAttempt(v3243Wood);
+v3243Tracker.NoteVerifiedProgress(v3243Wood, true);
+v3243Tracker.EndPass();
+var v3243Metrics = v3243Tracker.Snapshot();
+Check(v3243Metrics.Single(x => x.Facility == v3243Wood).BatchCalls == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Wood).VerifiedProgressTurns == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Wood).CompletedPlanTurns == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Food).HeldPasses == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Metal).UnservedReadyPasses == 1,
+    "V3.2.43 facility metrics separate read-only pass, held lane and verified completion");
+
+var v3243Fabric = "옷감 가공 시설";
+var v3243Fair = new MultiAlteringFacilityEfficiencyTracker();
+v3243Fair.Observe(v3243Metal, Array.Empty<AlteringWork>(), false, false);
+v3243Fair.Observe(v3243Fabric, new[]
+{
+    new AlteringWork("실", v3243Fabric, "InProgress", false, 60)
+}, false, false);
+v3243Fair.EndPass();
+v3243Fair.Observe(v3243Metal, Array.Empty<AlteringWork>(), false, false);
+v3243Fair.Observe(v3243Fabric, Array.Empty<AlteringWork>(), false, false);
+Check(v3243Fair.Order(new[] { v3243Fabric, v3243Metal }, true)
+        .SequenceEqual(new[] { v3243Metal, v3243Fabric }),
+    "V3.2.43 repeatedly unserved ready lane wins tie without changing recipe order");
+
+var v3243First = new AlteringPlan(v3243Metal, "철괴", 1, 1, false);
+var v3243Second = new AlteringPlan(v3243Wood, "목재", 1, 1, false);
+var v3243WoodNext = new AlteringPlan(v3243Wood, "목재+", 1, 1, false);
+var v3243Calls = new List<string>();
+var v3243Scheduler = new MultiAlteringCoordinator(optimizeFacilityOrder: true);
+await v3243Scheduler.RunAsync(
+    new[] { v3243First, v3243Second, v3243WoodNext },
+    (p, slot, ct) =>
+    {
+        Check(slot == 1, "V3.2.43 retains original one-slot guarded batch budget");
+        v3243Calls.Add(p.DisplayName);
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(v3243CompletedWood),
+    (time, ct) => Task.CompletedTask,
+    CancellationToken.None);
+Check(v3243Calls.SequenceEqual(new[] { "목재", "목재+", "철괴" }) &&
+      v3243Scheduler.Efficiency.Snapshot().Sum(x => x.CompletedPlanTurns) == 3,
+    "V3.2.43 independent lane reorder never reorders two recipes inside the same facility");
+
+var v3243HeldPlan = new AlteringPlan(v3243Food, "밥", 1, 1, false);
+var v3243SafeMetal = new AlteringPlan(v3243Metal, "철괴", 1, 1, false);
+int v3243UnsafeFoodCalls = 0, v3243IndependentMetalCalls = 0,
+    v3243PersistedHolds = 0;
+using (var v3243Cancel = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(optimizeFacilityOrder: true).RunAsync(
+            new[] { v3243HeldPlan, v3243SafeMetal },
+            (p, slot, ct) =>
+            {
+                if (p.FacilityName == v3243Food) v3243UnsafeFoodCalls++;
+                else v3243IndependentMetalCalls++;
+                return Task.FromResult(true);
+            },
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(
+                Array.Empty<AlteringWork>()),
+            (_, ct) =>
+            {
+                v3243Cancel.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            v3243Cancel.Token,
+            preparePlan: (p, ct) =>
+            {
+                if (p.FacilityName == v3243Food)
+                    throw new MaterialSupplyHoldException(
+                        new("미확인 재료", 3, 0, "acquisition_route_unverified"));
+                return Task.CompletedTask;
+            },
+            recheckUnavailableRoute: (p, prior, ct) =>
+                Task.FromResult<MaterialSupplyHold?>(prior),
+            persistMaterialHold: (p, hold) => v3243PersistedHolds++);
+    }
+    catch (OperationCanceledException) { }
+}
+Check(v3243UnsafeFoodCalls == 0 && v3243IndependentMetalCalls == 1 &&
+      v3243PersistedHolds == 1,
+    "V3.2.43 priority cannot bypass food hold or stall independent facility");
+
 // V3.2.42: the report is deliberately partial and read-only, with shared
 // stock allocated once across multiple selected recipes, not once per plan.
 var v3242Rice = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
