@@ -554,9 +554,11 @@ internal sealed class MultiAlteringCoordinator
     private readonly Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? _restoreCompleted;
     private readonly bool _fillInitialVacancies;
     private readonly bool _deferOtherLanesWhileQueueFull;
+    private readonly bool _optimizeFacilityOrder;
 
     internal event Action<string>? Log;
     internal MultiAlteringFacilityBottleneckTracker Bottlenecks { get; }
+    internal MultiAlteringFacilityEfficiencyTracker Efficiency { get; } = new();
 
     internal MultiAlteringCoordinator(
         FacilityLaneState? laneState = null,
@@ -565,7 +567,8 @@ internal sealed class MultiAlteringCoordinator
         TimeSpan? idleThreshold = null,
         Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null,
         bool fillInitialVacancies = false,
-        bool deferOtherLanesWhileQueueFull = false)
+        bool deferOtherLanesWhileQueueFull = false,
+        bool optimizeFacilityOrder = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
@@ -575,6 +578,7 @@ internal sealed class MultiAlteringCoordinator
         _restoreCompleted = restoreCompleted;
         _fillInitialVacancies = fillInitialVacancies;
         _deferOtherLanesWhileQueueFull = deferOtherLanesWhileQueueFull;
+        _optimizeFacilityOrder = optimizeFacilityOrder;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -640,6 +644,7 @@ internal sealed class MultiAlteringCoordinator
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
+        string? lastOptimizedOrder = null;
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
         var startupVacancies = new HashSet<string>(
@@ -751,7 +756,30 @@ internal sealed class MultiAlteringCoordinator
                 }
             }
 
+            // Performance-based ordering changes ONLY which independent lane
+            // receives a turn first. Same-facility recipe order is fixed, and
+            // all existing receipt/registration guards still run afterward.
             foreach (string facility in orderedFacilities)
+            {
+                if (PendingCount(facility) == 0) continue;
+                var current = works.Where(x => x.FacilityName == facility).ToArray();
+                Efficiency.Observe(facility, current, held.ContainsKey(facility),
+                    startupVacancies.Contains(facility) && current.Length is > 0 and < 7);
+            }
+            var facilityOrder = Efficiency.Order(orderedFacilities,
+                _optimizeFacilityOrder);
+            if (_optimizeFacilityOrder)
+            {
+                string signature = string.Join(" -> ", facilityOrder);
+                if (!facilityOrder.SequenceEqual(orderedFacilities) &&
+                    signature != lastOptimizedOrder)
+                    Log?.Invoke(
+                        "[다중가공][시설 효율] CLI 완료 배치 수령 우선 → 빈 시설 → 최초 빈칸 → " +
+                        "재료 보류/진행 중 대기 · 독립 시설 순서만 조정 · " +
+                        signature + " · 실제 이동/등록/수령은 기존 검증 유지");
+                lastOptimizedOrder = signature;
+            }
+            foreach (string facility in facilityOrder)
             {
                 ct.ThrowIfCancellationRequested();
                 if (PendingCount(facility) == 0)
@@ -969,6 +997,7 @@ internal sealed class MultiAlteringCoordinator
                         // A failed/cancelled preparation never authorizes a click.
                         prepared.Add(Key(plan));
                     }
+                    Efficiency.NoteBatchAttempt(facility);
                     bool planCompleted = await runBatch(plan, 1, ct);
                     acted = true;
 
@@ -998,6 +1027,10 @@ internal sealed class MultiAlteringCoordinator
                         registrationAfter is not null &&
                         (registrationAfter.MainRegisteredWorks > registrationBefore.MainRegisteredWorks ||
                          registrationAfter.IntermediateRegisteredWorks > registrationBefore.IntermediateRegisteredWorks);
+                    // Count-only deltas are observations, not durable progress
+                    // proof. They must never inflate the verified efficiency rate.
+                    if (planCompleted || confirmedRegistration)
+                        Efficiency.NoteVerifiedProgress(facility, planCompleted);
 
                     if (planCompleted || confirmedRegistration || afterCount != beforeCount)
                     {
@@ -1061,6 +1094,7 @@ internal sealed class MultiAlteringCoordinator
                 }
             }
 
+            Efficiency.EndPass();
             if (completed.Count >= plans.Count)
                 break;
 
