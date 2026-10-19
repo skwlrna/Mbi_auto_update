@@ -10,6 +10,38 @@ internal static class MultiAlteringMaterialPreflightPolicy
     internal static bool CanRun(bool hasResumableSession, bool hasSelectedFacilityWorks)
         => !hasResumableSession && !hasSelectedFacilityWorks;
 
+    // Evidence summary is diagnostic only. "No known shortage" is not a
+    // complete bill of materials, and queue_full never proves that stock is
+    // sufficient. Runtime resolver and input guards remain authoritative.
+    internal static IReadOnlyList<string> DescribeSelectedEvidence(
+        IReadOnlyList<AlteringPlan> plans,
+        IReadOnlyList<AlteringRecipe> freshRecipes,
+        IReadOnlyList<AlteringWork> works)
+    {
+        var result = new List<string>();
+        foreach (var plan in plans)
+        {
+            var recipe = freshRecipes.Where(x => x.DisplayName == plan.DisplayName)
+                .ElementAtOrDefault(plan.RecipeOrdinal - 1);
+            int occupied = works.Count(w => w.FacilityName == plan.FacilityName);
+            if (recipe is null)
+            {
+                result.Add($"{plan.DisplayName} · 제법 없음 · 등록 금지");
+                continue;
+            }
+            string state = recipe.MissingIngredients.Count > 0
+                ? "CLI 확정 부족 " + string.Join(", ", recipe.MissingIngredients
+                    .Take(8).Select(x => $"{x.DisplayName}({x.Owned}/{x.Required})"))
+                : string.Equals(recipe.Reason, "queue_full", StringComparison.Ordinal)
+                    ? "queue_full · 부족 재료 정보 가려짐/미확정"
+                    : recipe.Alterable
+                        ? "첫 작업 가공 가능 · 이후 재료는 실행 직전 재검증"
+                        : $"가공 보류 Reason={recipe.Reason ?? "unknown"} · 부족 정보 없음";
+            result.Add($"{plan.FacilityName} · {plan.DisplayName} · {occupied}/7칸 · {state}");
+        }
+        return result;
+    }
+
     // Global F9 free-gather preflight is independent of the order in which
     // facilities are serviced. It never receives jobs or registers production.
     // Existing per-recipe preflight is retained for later rechecks.

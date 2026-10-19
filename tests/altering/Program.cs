@@ -287,6 +287,97 @@ catch (InvalidOperationException ex) when (ex.Message.Contains("제법 동일성
 Check(recipeIdentityBlocked && missingRecipeRuns == 0,
     "F9 fails closed when a live recipe cannot be uniquely identified before independent registration");
 
+// V3.2.30: unattended empty food lane is observable without any new input.
+var observedTime = DateTimeOffset.Parse("2026-10-19T00:00:00+00:00");
+var laneDeferral = new MultiAlteringLaneDeferralTracker(
+    TimeSpan.FromMinutes(2), () => observedTime);
+Check(laneDeferral.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "starvation timer starts on first confirmed empty blocked food lane");
+observedTime += TimeSpan.FromSeconds(119);
+Check(laneDeferral.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "starvation timer does not invent early progress or game input");
+observedTime += TimeSpan.FromSeconds(2);
+string? stalledFood = laneDeferral.ObserveBlocked(
+    "식재료 가공 시설", "밥", "queue_full", 0, 2);
+Check(stalledFood is not null &&
+      stalledFood.Contains("시설 누락 감시", StringComparison.Ordinal) &&
+      stalledFood.Contains("타 시설 포화 2개", StringComparison.Ordinal) &&
+      laneDeferral.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "blocked empty food lane produces exactly one diagnostic warning at threshold");
+laneDeferral.Reset("식재료 가공 시설");
+observedTime += TimeSpan.FromSeconds(121);
+Check(laneDeferral.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 2) is null,
+    "a verified lane reset prevents stale starvation warning");
+observedTime += TimeSpan.FromSeconds(121);
+Check(laneDeferral.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 1, 2) is null,
+    "live food job is not misdiagnosed as an empty lane");
+observedTime += TimeSpan.FromSeconds(121);
+Check(laneDeferral.ObserveBlocked("식재료 가공 시설", "밥", "queue_full", 0, 0) is null,
+    "absence of other full facilities clears queue_full starvation evidence");
+
+// Each selected recipe must appear in the preflight evidence without
+// guessing materials that the CLI has not exposed.
+var stateEvidence = MultiAlteringMaterialPreflightPolicy.DescribeSelectedEvidence(
+    new[] { deferredPlan, foodPlan },
+    new[] { deferredRecipe with { Reason = "queue_full" },
+        readyFoodRecipe with { Alterable = false, Reason = "not_enough_ingredient",
+            MissingIngredients = new[] { new AlteringIngredient("물이 든 병", 2, 0) } } },
+    fullLane);
+Check(stateEvidence.Count == 2 &&
+      stateEvidence[0].Contains("queue_full", StringComparison.Ordinal) &&
+      stateEvidence[0].Contains("미확정", StringComparison.Ordinal) &&
+      stateEvidence[1].Contains("물이 든 병", StringComparison.Ordinal) &&
+      stateEvidence[1].Contains("CLI 확정 부족", StringComparison.Ordinal),
+    "global preflight reports masked recipe separately from confirmed food shortage");
+
+// Local incident evidence must be bounded and must not include identity,
+// arbitrary exception messages or the full CLI payload.
+string incidentDir = Path.Combine(Path.GetTempPath(),
+    "mabiauto-v3230-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var snapshotPath = await MultiAlteringIncidentSnapshot.CaptureAsync(
+        new[] { foodPlan }, nameof(InvalidOperationException),
+        _ => Task.FromResult<IReadOnlyList<AlteringRecipe>>(new[]
+        {
+            readyFoodRecipe with { Alterable = false,
+                Reason = "not_enough_ingredient",
+                MissingIngredients = new[]
+                { new AlteringIngredient("물이 든 병", 2, 0) } }
+        }),
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(new[]
+        { new AlteringWork("밥", foodPlan.FacilityName, "InProgress", false, 60) }),
+        incidentDir, CancellationToken.None);
+    var snapshot = File.ReadAllText(snapshotPath);
+    Check(snapshot.Contains("물이 든 병", StringComparison.Ordinal) &&
+          snapshot.Contains("식재료 가공 시설", StringComparison.Ordinal) &&
+          snapshot.Contains("recipeRead", StringComparison.Ordinal) &&
+          !snapshot.Contains("AccountCode", StringComparison.Ordinal) &&
+          !snapshot.Contains("CharacterId", StringComparison.Ordinal),
+        "error incident keeps local read-only recipe/queue evidence without user identity");
+    var readFailure = await MultiAlteringIncidentSnapshot.CaptureAsync(
+        new[] { foodPlan }, nameof(InvalidOperationException),
+        _ => throw new InvalidDataException("secret payload"),
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        incidentDir, CancellationToken.None);
+    var failureText = File.ReadAllText(readFailure);
+    Check(failureText.Contains("InvalidDataException", StringComparison.Ordinal) &&
+          !failureText.Contains("secret payload", StringComparison.Ordinal),
+        "failed CLI read retains failure category only, never raw failure payload");
+    for (int i = 0; i < 21; i++)
+        _ = await MultiAlteringIncidentSnapshot.CaptureAsync(
+            new[] { foodPlan }, "Synthetic",
+            _ => Task.FromResult<IReadOnlyList<AlteringRecipe>>(Array.Empty<AlteringRecipe>()),
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+            incidentDir, CancellationToken.None);
+    Check(Directory.GetFiles(incidentDir, "incident-*.json").Length == 20,
+        "local incident retention limits on-disk snapshots to last 20");
+}
+finally
+{
+    if (Directory.Exists(incidentDir)) Directory.Delete(incidentDir, recursive: true);
+}
+
 // 2026-10-11 11:53/11:54 F9 runtime stop: do not reject a stale Reviving
 // flag after the move when the pre-click field guard already tolerates it.
 var travelIdle = new GatheringActivity(
