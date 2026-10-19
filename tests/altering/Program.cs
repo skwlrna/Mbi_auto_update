@@ -891,7 +891,10 @@ try
         recoveryPatterns: v3236History,
         recoveryDecision: LifeSkillRecoveryDecisionPolicy.ForIncident(
             new InvalidOperationException("sensitive exception detail")),
-        facilityBottlenecks: v3239Monitor.Snapshot());
+        facilityBottlenecks: new[] {
+            v3239Monitor.Snapshot().Single(x => x.Facility == v3239FoodFacility)
+        }.Concat(v3239Monitor.Snapshot().Where(x => x.Facility != v3239FoodFacility))
+         .ToArray());
     var snapshot = File.ReadAllText(snapshotPath);
     using var parsedSnapshot = System.Text.Json.JsonDocument.Parse(snapshot);
     var rootSnapshot = parsedSnapshot.RootElement;
