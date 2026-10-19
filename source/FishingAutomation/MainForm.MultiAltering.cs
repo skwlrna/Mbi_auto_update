@@ -624,7 +624,7 @@ public sealed partial class MainForm
             ApplyLogVisibility();
             _log.Write("[다중가공] 오류: " + ex.Message);
             var recoveryDecision = LifeSkillRecoveryDecisionPolicy.ForIncident(ex);
-            managerState?.RecordUncertainAction(LifeSkillStage.Altering, "f9_failed");
+            managerState?.RecordIncident(LifeSkillStage.Altering, ex);
             _log.Write("[다중가공][복구 판단] 분류=" + recoveryDecision.Category +
                 " · 판단=" + recoveryDecision.Disposition +
                 " · 기존 장부/이미 실행한 입력을 자동 재실행하지 않음");
