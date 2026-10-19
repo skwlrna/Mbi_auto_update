@@ -16,13 +16,6 @@ namespace FishingAutomation;
 // V3.2.39 per-facility read-only bottleneck evidence. A repeated episode
 // is NOT a proven missing item. No game input or durable receipt changes.
 // Stored only for the active F9 run; never store raw CLI payloads.
-internal enum FacilityBottleneckCause { QueueFullMasked, RecipeUnavailable, StalledWork, UncertainBatch }
-internal sealed record FacilityBottleneckSnapshot(
-    string Facility, long QueueFullEpisodes, long RecipeUnavailableEpisodes,
-    long StalledWorkEvents, long UncertainBatchAttempts, bool CurrentlyBlocked,
-    long? BlockedSeconds, int LastKnownQueueDepth, int LastKnownCompleted,
-    bool RepeatedIssue);
-
 internal sealed class MultiAlteringFacilityBottleneckTracker
 {
     private const int MaxFacilities = 16;
