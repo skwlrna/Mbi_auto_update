@@ -4,6 +4,77 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.36: deterministic rule-based middle-manager recovery decisions.
+Check(LifeSkillRecoveryDecisionPolicy.ForReadFailure(
+        new TimeoutException(), 0).Disposition ==
+        LifeSkillRecoveryDisposition.RetryReadOnlyOnce &&
+      LifeSkillRecoveryDecisionPolicy.ForReadFailure(
+        new TimeoutException(), 1).Disposition ==
+        LifeSkillRecoveryDisposition.SafeStopAndDiagnose,
+    "V3.2.36 limits transient read-only recovery to one retry");
+Check(LifeSkillRecoveryDecisionPolicy.ForReadFailure(
+        new InvalidDataException("secret"), 0).Category == "invalid_cli_data" &&
+      LifeSkillRecoveryDecisionPolicy.ForReadFailure(
+        new InvalidDataException("secret"), 0).Disposition ==
+        LifeSkillRecoveryDisposition.SafeStopAndDiagnose,
+    "V3.2.36 semantic invalid inventory never retries");
+Check(LifeSkillRecoveryDecisionPolicy.ForReadFailure(
+        new TimeoutException(), 0, cancellationRequested: true).Disposition ==
+        LifeSkillRecoveryDisposition.Cancel &&
+      LifeSkillRecoveryDecisionPolicy.ForReadFailure(
+        new OperationCanceledException(), 0).Disposition ==
+        LifeSkillRecoveryDisposition.Cancel,
+    "V3.2.36 cancellation always outranks a transient transport error");
+Check(LifeSkillRecoveryDecisionPolicy.ForIncident(
+        new TimeoutException()).Disposition ==
+        LifeSkillRecoveryDisposition.SafeStopAndDiagnose &&
+      LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false).Category ==
+        "unconfirmed_action",
+    "V3.2.36 incident history cannot authorize GUI replay");
+var v3236Journal = new LifeSkillRecoveryJournal();
+for (int i = 0; i < 3; i++)
+    v3236Journal.Note(LifeSkillStage.Gathering, "inventory",
+        LifeSkillRecoveryDecisionPolicy.ForReadFailure(new IOException(), 0));
+Check(v3236Journal.Snapshot().Single().Occurrences == 3 &&
+      v3236Journal.Snapshot().Single().Disposition ==
+        LifeSkillRecoveryDisposition.RetryReadOnlyOnce,
+    "V3.2.36 repeated read patterns are counted, not replayed");
+v3236Journal.Note(LifeSkillStage.Crafting,
+    "UserAccount-raw-exception-with-sensitive-text-too-long",
+    LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false));
+Check(v3236Journal.Snapshot().Last().Operation == "other",
+    "V3.2.36 arbitrary raw operation strings are not kept in diagnostic patterns");
+for (int i = 0; i < 30; i++)
+    v3236Journal.Note(LifeSkillStage.Altering, "op" + i,
+        LifeSkillRecoveryDecisionPolicy.ForIncident(new InvalidOperationException()));
+Check(v3236Journal.Snapshot().Count == 24 &&
+      v3236Journal.Snapshot().All(x => x.Occurrences >= 1),
+    "V3.2.36 recovery history remains bounded to 24 in-memory patterns");
+
+var v3236State = new LifeSkillManagerState(
+    recoveryDelay: (_, _) => Task.CompletedTask);
+v3236State.BeginStage(LifeSkillStage.Crafting, "V3.2.36 regression");
+int v3236Calls = 0;
+_ = await v3236State.ReadWithRecoveryAsync(
+    LifeSkillStage.Crafting, "inventory",
+    _ =>
+    {
+        if (++v3236Calls == 1) throw new IOException("sample");
+        return Task.FromResult(5L);
+    }, CancellationToken.None);
+v3236State.RecordUncertainAction(LifeSkillStage.Crafting, "craft");
+v3236State.RecordIncident(LifeSkillStage.Crafting, new InvalidOperationException());
+var v3236History = v3236State.RecoveryPatternsSnapshot();
+Check(v3236Calls == 2 &&
+      v3236History.Any(x => x.Category == "transient_read" &&
+          x.Disposition == LifeSkillRecoveryDisposition.RetryReadOnlyOnce) &&
+      v3236History.Any(x => x.Category == "transient_read_recovered") &&
+      v3236History.Any(x => x.Category == "unconfirmed_action" &&
+          x.Operation == "craft") &&
+      v3236History.Any(x => x.Operation == "incident" &&
+          x.Category == "state_conflict"),
+    "V3.2.36 cross-skill manager records actual bounded recovery decisions");
+
 // V3.2.35: make same-item CLI observations safe under overlapping reads.
 var v3235Logs = new List<string>();
 var v3235State = new LifeSkillManagerState(recoveryDelay: (_, _) => Task.CompletedTask);
