@@ -300,7 +300,8 @@ public sealed partial class MainForm
             // Missing from the gathering catalog is NOT proof that an item is
             // unobtainable; unknown routes are held without purchases or clicks.
             async Task<MaterialSupplyHold?> InspectFoodRouteAsync(
-                AlteringPlan plan, CancellationToken ct)
+                AlteringPlan plan, CancellationToken ct,
+                AlteringRecipe? selectedShortageEvidence = null)
             {
                 if (!string.Equals(plan.FacilityName, "식재료 가공 시설",
                     StringComparison.Ordinal)) return null;
@@ -314,13 +315,25 @@ public sealed partial class MainForm
                     AlteringFacilityResolver.Resolve(selected) != plan.FacilityName)
                     throw new InvalidOperationException(
                         "음식 재료 확인 중 제법 동일성이 불명확해 기존 입력을 중단합니다.");
-                if (selected.Alterable || selected.MissingIngredients.Count == 0)
-                    return null; // queue_full without shortages is NOT a hold.
+                if (selected.Alterable) return null;
+                // The current global CLI may mask a concrete previously
+                // selected shortage behind queue_full from another facility.
+                // Only reuse a same-recipe CLI/UI shortage to detect a HOLD;
+                // stock quantities are always queried again.
+                var evidence = selected.MissingIngredients.Count > 0 ? selected
+                    : selectedShortageEvidence is not null &&
+                      selectedShortageEvidence.DisplayName == selected.DisplayName &&
+                      selectedShortageEvidence.ProducedPerWork == selected.ProducedPerWork &&
+                      AlteringFacilityResolver.Resolve(selectedShortageEvidence) == plan.FacilityName &&
+                      selectedShortageEvidence.MissingIngredients.Count > 0
+                        ? selectedShortageEvidence : selected;
+                if (evidence.MissingIngredients.Count == 0)
+                    return null; // no identifiable shortage: existing guards prevail.
                 var catalog = await managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "food-route-catalog",
                     gatheringData.CatalogAsync, ct);
                 return await MaterialSupplyRoutePolicy.FindHoldAsync(
-                    plan, selected, liveRecipes, catalog,
+                    plan, evidence, liveRecipes, catalog,
                     (name, token) => managerState.ReadWithRecoveryAsync(
                         LifeSkillStage.Altering, "food-route-inventory",
                         inner => rawAlteringData.ItemCountAsync(name, inner), token),
@@ -356,7 +369,8 @@ public sealed partial class MainForm
                     var supported = new List<MultiAlteringSupplyPreflight>();
                     foreach (var shortage in initialShortages)
                     {
-                        var hold = await InspectFoodRouteAsync(shortage.Plan, token);
+                        var hold = await InspectFoodRouteAsync(
+                            shortage.Plan, token, shortage.Recipe);
                         if (hold is null) supported.Add(shortage);
                         else _log.Write(
                             $"[다중가공][식재료 확보 경로 미확인] {shortage.Plan.DisplayName} · " +
@@ -543,6 +557,21 @@ public sealed partial class MainForm
                     $"[다중가공] {plan.DisplayName} 품목별 선행 채집 완료 · 등록 중 부족 재검증 유지"));
             }
 
+            async Task<MaterialSupplyHold?> RecheckFoodHoldAsync(
+                AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
+            {
+                long now = await managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "food-hold-recheck",
+                    inner => rawAlteringData.ItemCountAsync(prior.Item, inner), ct);
+                if (now < 0)
+                    throw new InvalidDataException("음식 재료 재고 음수 · 보류 유지 및 안전 정지");
+                if (now < prior.Required)
+                    return prior with { Observed = now };
+                // Previously missing stock is now present, but no stale UI
+                // observation can directly authorize a game action.
+                return await InspectFoodRouteAsync(plan, ct);
+            }
+
             bool queueFullAtStart = plans.Any(plan =>
                 recipes.Where(x => x.DisplayName == plan.DisplayName)
                     .ElementAtOrDefault(plan.RecipeOrdinal - 1)?.Reason == "queue_full");
@@ -637,7 +666,7 @@ public sealed partial class MainForm
                 readRecipes: ct => managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "scheduler-recipes",
                     rawAlteringData.RecipesAsync, ct),
-                checkUnavailableRoute: InspectFoodRouteAsync), token);
+                recheckUnavailableRoute: RecheckFoodHoldAsync), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
