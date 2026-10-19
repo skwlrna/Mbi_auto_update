@@ -191,8 +191,11 @@ internal static class MaterialSupplyRoutePolicy
                 {
                     if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item))
                         return new(item, required, current, "quest_only_not_bulk_gatherable");
-                    return matches[0].ToolOk ? null
-                        : new(item, required, current, "gathering_tool_unavailable");
+                    if (!matches[0].ToolOk)
+                        return new(item, required, current, "gathering_tool_unavailable");
+                    if (!LivingSkillGatheringCatalog.TryResolveBulk(item, out _))
+                        return new(item, required, current, "bulk_route_unverified");
+                    return null;
                 }
 
                 if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item))
