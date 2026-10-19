@@ -5,6 +5,81 @@ try
 int checks=0;
 void Check(bool ok,string label) { if(!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
 var log = new AppLog(Path.Combine(AppContext.BaseDirectory,"gathering-test.log"), 1000000);
+
+var outcomeJournal = new LifeSkillRecoveryJournal();
+Check(outcomeJournal.OutcomeSnapshot().CompletedReadRecoveryRate is null,
+    "V3.2.37 cannot invent a CLI read recovery rate without concluded attempts");
+outcomeJournal.Note(LifeSkillStage.Gathering, "inventory",
+    LifeSkillRecoveryDecisionPolicy.ForReadFailure(new TimeoutException(), 0));
+Check(outcomeJournal.OutcomeSnapshot().CompletedReadRecoveryRate is null,
+    "V3.2.37 a pending read-only retry is excluded from recovery success denominator");
+outcomeJournal.Note(LifeSkillStage.Gathering, "inventory",
+    new LifeSkillRecoveryDecision("transient_read_recovered",
+        LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead));
+outcomeJournal.Note(LifeSkillStage.Altering, "works",
+    LifeSkillRecoveryDecisionPolicy.ForReadFailure(new IOException(), 0));
+outcomeJournal.Note(LifeSkillStage.Altering, "works",
+    LifeSkillRecoveryDecisionPolicy.ForReadFailure(new IOException(), 1));
+outcomeJournal.Note(LifeSkillStage.Crafting, "craft",
+    LifeSkillRecoveryDecisionPolicy.ForUncertainAction());
+var outcome = outcomeJournal.OutcomeSnapshot();
+Check(outcome.ReadRetryAttempts == 2 &&
+      outcome.VerifiedReadRecoveries == 1 &&
+      outcome.ExhaustedReadRetries == 1 &&
+      outcome.CompletedReadRecoveryRate == 0.5 &&
+      outcome.UncertainActions == 1,
+    "V3.2.37 CLI retry success counts only verified reads, never crafting actions");
+outcomeJournal.Note(LifeSkillStage.Crafting, "craft",
+    LifeSkillRecoveryDecisionPolicy.ForUncertainAction());
+Check(outcomeJournal.OutcomeSnapshot().SameSessionRepeatedObservations == 1 &&
+      outcomeJournal.OutcomeSnapshot().UncertainActions == 2,
+    "V3.2.37 repeated uncertain actions are not mistaken for recovered operations");
+for(int i=0;i<30;i++)
+    outcomeJournal.Note(LifeSkillStage.Altering, "tag"+i,
+        LifeSkillRecoveryDecisionPolicy.ForIncident(new InvalidDataException()));
+outcome = outcomeJournal.OutcomeSnapshot();
+Check(outcomeJournal.Snapshot().Count == 24 &&
+      outcome.DistinctPatterns == 24 &&
+      outcome.ReadRetryAttempts == 2 &&
+      outcome.VerifiedReadRecoveries == 1 &&
+      outcome.ExhaustedReadRetries == 1 &&
+      outcome.TotalObservations == 36 &&
+      outcome.CompletedReadRecoveryRate == 0.5,
+    "V3.2.37 cumulative read metrics survive bounded pattern eviction");
+var outcomeManager = new LifeSkillManagerState(recoveryDelay: (_, _) => Task.CompletedTask);
+outcomeManager.BeginStage(LifeSkillStage.Gathering, "outcome");
+int outcomeReads = 0;
+_ = await outcomeManager.ReadWithRecoveryAsync(
+    LifeSkillStage.Gathering, "activity",
+    _ => {
+        if(++outcomeReads == 1) throw new TimeoutException();
+        return Task.FromResult("fresh");
+    }, CancellationToken.None);
+outcomeManager.RecordUncertainAction(LifeSkillStage.Crafting, "craft");
+Check(outcomeReads == 2 &&
+      outcomeManager.RecoveryOutcomeSnapshot().VerifiedReadRecoveries == 1 &&
+      outcomeManager.RecoveryOutcomeSnapshot().UncertainActions == 1 &&
+      outcomeManager.RecoveryOutcomeSnapshot().CompletedReadRecoveryRate == 1,
+    "V3.2.37 verified CLI recovery is independent of an uncertain craft");
+var outcomeDir=Path.Combine(Path.GetTempPath(),
+    "mabiauto-v3237-"+Guid.NewGuid().ToString("N"));
+try {
+    var outcomePath=await MultiAlteringIncidentSnapshot.CaptureAsync(
+        Array.Empty<AlteringPlan>(), nameof(TimeoutException),
+        _ => Task.FromResult<IReadOnlyList<AlteringRecipe>>(Array.Empty<AlteringRecipe>()),
+        _ => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        outcomeDir, CancellationToken.None,
+        recoveryMetrics: outcomeJournal.OutcomeSnapshot());
+    using var document=System.Text.Json.JsonDocument.Parse(File.ReadAllText(outcomePath));
+    var metric=document.RootElement.GetProperty("recovery").GetProperty("metrics");
+    Check(metric.GetProperty("completedReadRecoveryRate").GetDouble() == 0.5 &&
+          metric.GetProperty("uncertainActions").GetInt64() == 2 &&
+          !metric.GetProperty("gameRepairRateAvailable").GetBoolean(),
+       "V3.2.37 local F9 report cannot claim live-game repair verification");
+} finally {
+    if(Directory.Exists(outcomeDir)) Directory.Delete(outcomeDir, recursive: true);
+}
+
 int launches=0;
 foreach(bool zeroWing in new[]{true,false})
 {

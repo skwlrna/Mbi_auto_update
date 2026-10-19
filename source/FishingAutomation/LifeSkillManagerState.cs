@@ -87,6 +87,20 @@ internal sealed class LifeSkillRecoveryJournal
     private const int MaxPatterns = 24;
     private readonly object _gate = new();
     private readonly List<LifeSkillRecoveryPattern> _patterns = [];
+    // Totals survive eviction of old pattern details (the detail window is 24).
+    private long _totalEvents, _repeatedEvents, _retryAttempts, _recoveredReads,
+        _exhaustedReads, _uncertainActions;
+
+    internal LifeSkillRecoveryOutcomeMetrics OutcomeSnapshot()
+    {
+        lock (_gate)
+        {
+            long concluded = _recoveredReads + _exhaustedReads;
+            return new(_retryAttempts, _recoveredReads, _exhaustedReads,
+                _uncertainActions, _repeatedEvents, _totalEvents, _patterns.Count,
+                concluded > 0 ? (double)_recoveredReads / concluded : null);
+        }
+    }
 
     internal LifeSkillRecoveryPattern Note(
         LifeSkillStage stage, string operation, LifeSkillRecoveryDecision decision)
@@ -99,11 +113,24 @@ internal sealed class LifeSkillRecoveryJournal
             ? operation : "other";
         lock (_gate)
         {
+            _totalEvents++;
+            if (decision.Category == "transient_read" &&
+                decision.Disposition == LifeSkillRecoveryDisposition.RetryReadOnlyOnce)
+                _retryAttempts++;
+            else if (decision.Category == "transient_read_recovered" &&
+                decision.Disposition == LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead)
+                _recoveredReads++;
+            else if (decision.Category == "transient_read_exhausted" &&
+                decision.Disposition == LifeSkillRecoveryDisposition.SafeStopAndDiagnose)
+                _exhaustedReads++;
+            else if (decision.Category == "unconfirmed_action")
+                _uncertainActions++;
             int index = _patterns.FindIndex(x => x.Stage == stage &&
                 x.Operation == tag && x.Category == decision.Category &&
                 x.Disposition == decision.Disposition);
             if (index >= 0)
             {
+                _repeatedEvents++;
                 var previous = _patterns[index];
                 var updated = previous with
                 {
@@ -123,6 +150,53 @@ internal sealed class LifeSkillRecoveryJournal
     internal IReadOnlyList<LifeSkillRecoveryPattern> Snapshot()
     {
         lock (_gate) return _patterns.ToArray();
+    }
+}
+
+// V3.2.37 read recovery statistics. This is not the live-game repair rate:
+// only a previously failed, read-only CLI query which later returned a fresh
+// value is a verified recovery. Outstanding attempts remain outside the
+// denominator. "Repeated" means same signature within this run only.
+internal sealed record LifeSkillRecoveryOutcomeMetrics(
+    long ReadRetryAttempts,
+    long VerifiedReadRecoveries,
+    long ExhaustedReadRetries,
+    long UncertainActions,
+    long SameSessionRepeatedObservations,
+    long TotalObservations,
+    int DistinctPatterns,
+    double? CompletedReadRecoveryRate);
+
+internal static class LifeSkillRecoveryOutcomePolicy
+{
+    internal static LifeSkillRecoveryOutcomeMetrics Summarize(
+        IReadOnlyList<LifeSkillRecoveryPattern> patterns)
+    {
+        ArgumentNullException.ThrowIfNull(patterns);
+        long retries = 0, recovered = 0, exhausted = 0, uncertain = 0;
+        long repeated = 0, total = 0;
+        foreach (var pattern in patterns)
+        {
+            if (pattern.Occurrences <= 0) continue;
+            long count = pattern.Occurrences;
+            total += count;
+            repeated += count - 1;
+            if (pattern.Category == "transient_read" &&
+                pattern.Disposition == LifeSkillRecoveryDisposition.RetryReadOnlyOnce)
+                retries += count;
+            else if (pattern.Category == "transient_read_recovered" &&
+                pattern.Disposition == LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead)
+                recovered += count;
+            else if (pattern.Category == "transient_read_exhausted" &&
+                pattern.Disposition == LifeSkillRecoveryDisposition.SafeStopAndDiagnose)
+                exhausted += count;
+            else if (pattern.Category == "unconfirmed_action")
+                uncertain += count;
+        }
+        long concluded = recovered + exhausted;
+        return new(retries, recovered, exhausted, uncertain,
+            repeated, total, patterns.Count, concluded > 0
+                ? (double)recovered / concluded : null);
     }
 }
 
@@ -325,6 +399,9 @@ internal sealed class LifeSkillManagerState
     internal IReadOnlyList<LifeSkillRecoveryPattern> RecoveryPatternsSnapshot()
         => RecoveryJournal.Snapshot();
 
+    internal LifeSkillRecoveryOutcomeMetrics RecoveryOutcomeSnapshot()
+        => RecoveryJournal.OutcomeSnapshot();
+
     // Call only after a non-idempotent screen operation became uncertain.
     // A history match or a recent inventory count may NEVER clear this flag.
     internal void RecordUncertainAction(LifeSkillStage stage, string operation)
@@ -347,6 +424,19 @@ internal sealed class LifeSkillManagerState
             Log?.Invoke($"[중간관리자][복구 판단] {stage}/{observed.Operation} · " +
                 $"분류={observed.Category} · 판단={observed.Disposition} · " +
                 $"반복={observed.Occurrences} · 과거 유사 사례는 실행 허가 아님");
+    }
+
+    private string RecoverySummary(LifeSkillStage stage)
+    {
+        var metrics = RecoveryOutcomeSnapshot();
+        string rate = metrics.CompletedReadRecoveryRate.HasValue
+            ? (metrics.CompletedReadRecoveryRate.Value * 100).ToString("0.0") + "%"
+            : "산출 불가";
+        return $"[중간관리자][복구 결과] {stage} · 실행 세션 누적 CLI 재조회 시도 {metrics.ReadRetryAttempts} · " +
+            $"새 응답 확인 {metrics.VerifiedReadRecoveries} · 재조회 소진 {metrics.ExhaustedReadRetries} · " +
+            $"CLI 복구율 {rate} (확정된 조회만) · 결과 미확정 작업 {metrics.UncertainActions} · " +
+            $"동일 세션 반복 관측 {metrics.SameSessionRepeatedObservations} · " +
+            "실게임 오류 해결률/패치 검증률과는 별개 · 진단 전용";
     }
 
     private static string Summary(LifeSkillStage stage, LifeSkillReadDiagnostics diagnostics)
@@ -382,6 +472,7 @@ internal sealed class LifeSkillManagerState
             _readDiagnostics = new(0, 0, 0, 0, 0);
         }
         if (previousSummary is not null) Log?.Invoke(previousSummary);
+        Log?.Invoke(RecoverySummary(stage));
         Log?.Invoke($"[중간관리자] 단계 전환 {stage} · epoch={epoch} · " +
             $"기존 재고 관측 무효화 · 새로운 CLI 재조회 · {reason}");
     }

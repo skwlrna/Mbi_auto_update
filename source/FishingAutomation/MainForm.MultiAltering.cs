@@ -645,7 +645,8 @@ public sealed partial class MainForm
                         "MabiAuto", "diagnostics", "altering"),
                     snapshotTimeout.Token,
                     recoveryPatterns: managerState?.RecoveryPatternsSnapshot(),
-                    recoveryDecision: recoveryDecision);
+                    recoveryDecision: recoveryDecision,
+                    recoveryMetrics: managerState?.RecoveryOutcomeSnapshot());
                 _log.Write("[다중가공][오류 진단] 로컬 상태 저장 · " +
                     Path.GetFileName(saved) + " · 자동 재등록/수령 없음");
             }

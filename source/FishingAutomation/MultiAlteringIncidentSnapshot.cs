@@ -14,7 +14,8 @@ internal static class MultiAlteringIncidentSnapshot
         Func<CancellationToken, Task<IReadOnlyList<AlteringWork>>> readWorks,
         string directory, CancellationToken ct,
         IReadOnlyList<LifeSkillRecoveryPattern>? recoveryPatterns = null,
-        LifeSkillRecoveryDecision? recoveryDecision = null)
+        LifeSkillRecoveryDecision? recoveryDecision = null,
+        LifeSkillRecoveryOutcomeMetrics? recoveryMetrics = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(readRecipes);
@@ -86,6 +87,20 @@ internal static class MultiAlteringIncidentSnapshot
                 category = recoveryDecision?.Category ?? "unclassified",
                 disposition = recoveryDecision?.Disposition.ToString() ?? "SafeStopAndDiagnose",
                 gameValidated = false,
+                // This is read-only CLI retry effectiveness, never proof of
+                // successful item production or live-game AI patch repair.
+                metrics = recoveryMetrics is null ? null : new
+                {
+                    readRetryAttempts = recoveryMetrics.ReadRetryAttempts,
+                    verifiedReadRecoveries = recoveryMetrics.VerifiedReadRecoveries,
+                    exhaustedReadRetries = recoveryMetrics.ExhaustedReadRetries,
+                    uncertainActions = recoveryMetrics.UncertainActions,
+                    repeatedObservations = recoveryMetrics.SameSessionRepeatedObservations,
+                    retainedPatternCount = recoveryMetrics.DistinctPatterns,
+                    completedReadRecoveryRate = recoveryMetrics.CompletedReadRecoveryRate,
+                    measurementScope = "bounded_local_cli_read_only",
+                    gameRepairRateAvailable = false
+                },
                 historicalPatterns = (recoveryPatterns ?? []).Take(16)
                     .Select(x => new
                     {
