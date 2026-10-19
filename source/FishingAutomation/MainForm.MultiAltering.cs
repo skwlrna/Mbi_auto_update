@@ -666,7 +666,14 @@ public sealed partial class MainForm
                 readRecipes: ct => managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "scheduler-recipes",
                     rawAlteringData.RecipesAsync, ct),
-                recheckUnavailableRoute: RecheckFoodHoldAsync), token);
+                recheckUnavailableRoute: RecheckFoodHoldAsync,
+                // Only the existing F9 manifest persists the hold. No side
+                // car files, automatic character selection or unattended
+                // F10/crash input replay. The explicit recent-run verifier
+                // must have accepted this batch before the coordinator starts.
+                restoreMaterialHolds: batchStore.RestoreMaterialHolds,
+                persistMaterialHold: batchStore.RecordMaterialHold,
+                clearMaterialHold: batchStore.ClearMaterialHold), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
