@@ -56,7 +56,9 @@ Check(v3244MetalCalls == 1 && v3244FoodCalls == 1 &&
       !v3244Reports[0].VerifiedRecovered &&
       v3244Reports[1].VerifiedRecovered &&
       v3244Runner.ReadQuarantine.Snapshot(new[] { v3244Food, v3244Metal })
-        .Single().VerifiedRecovered,
+        .Single().VerifiedRecovered &&
+      v3244Runner.Efficiency.Snapshot().Single(x =>
+        x.Facility == v3244Food.FacilityName).HeldPasses >= 1,
     "V3.2.44 repeated safe read failure isolated, healthy lane ran, fresh read recovered");
 
 var v3244Dir = Path.Combine(Path.GetTempPath(),
