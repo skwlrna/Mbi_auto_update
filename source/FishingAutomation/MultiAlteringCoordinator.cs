@@ -195,6 +195,9 @@ internal static class MaterialSupplyRoutePolicy
                         : new(item, required, current, "gathering_tool_unavailable");
                 }
 
+                if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item))
+                    return new(item, required, current, "quest_only_not_bulk_gatherable");
+
                 var producers = recipes.Where(x =>
                     string.Equals(x.DisplayName, item, StringComparison.Ordinal) ||
                     string.Equals(System.Text.RegularExpressions.Regex.Replace(
@@ -456,7 +459,7 @@ internal sealed class MultiAlteringCoordinator
         Func<CancellationToken, Task>? onIdleAbyssRound = null,
         long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds,
         Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null,
-        Func<AlteringPlan, CancellationToken, Task<MaterialSupplyHold?>>? checkUnavailableRoute = null)
+        Func<AlteringPlan, MaterialSupplyHold, CancellationToken, Task<MaterialSupplyHold?>>? recheckUnavailableRoute = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -593,7 +596,7 @@ internal sealed class MultiAlteringCoordinator
 
                 if (held.TryGetValue(facility, out var waiting))
                 {
-                    if (checkUnavailableRoute is null)
+                    if (recheckUnavailableRoute is null)
                         throw new InvalidOperationException(
                             "보류 재료 재확인 경로가 없어 자동 재개하지 않습니다.");
                     if (_now() < waiting.NextCheck)
@@ -602,7 +605,8 @@ internal sealed class MultiAlteringCoordinator
                     // hold must re-verify stock and recipe identity. Old UI
                     // evidence, time alone or another lane's completion cannot
                     // unblock this plan.
-                    var unresolved = await checkUnavailableRoute(waiting.Plan, ct);
+                    var unresolved = await recheckUnavailableRoute(
+                        waiting.Plan, waiting.Reason, ct);
                     if (unresolved is not null)
                     {
                         held[facility] = (waiting.Plan, unresolved,
@@ -775,7 +779,7 @@ internal sealed class MultiAlteringCoordinator
                                 await preparePlan(plan, ct);
                             }
                             catch (MaterialSupplyHoldException unavailable)
-                                when (checkUnavailableRoute is not null)
+                                when (recheckUnavailableRoute is not null)
                             {
                                 // Must be raised BEFORE any input for this plan.
                                 // No completion, no work ticket and no next
