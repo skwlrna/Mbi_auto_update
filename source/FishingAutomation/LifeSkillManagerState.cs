@@ -35,7 +35,7 @@ internal static class LifeSkillReadRecoveryPolicy
 // V3.2.36: deterministic, evidence-limited recovery decisions shared by
 // altering, gathering and crafting. Previous AI patches and diagnostic
 // similarity are NEVER permission for a GUI action or an extra CLI retry.
-internal enum LifeSkillRecoveryDisposition { RetryReadOnlyOnce, SafeStopAndDiagnose, Cancel }
+internal enum LifeSkillRecoveryDisposition { RetryReadOnlyOnce, ContinueAfterVerifiedRead, SafeStopAndDiagnose, Cancel }
 internal sealed record LifeSkillRecoveryDecision(
     string Category, LifeSkillRecoveryDisposition Disposition);
 
@@ -55,10 +55,8 @@ internal static class LifeSkillRecoveryDecisionPolicy
             LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
     }
 
-    internal static LifeSkillRecoveryDecision ForActionOutcome(bool confirmed)
-        => confirmed
-            ? new("verified_action", LifeSkillRecoveryDisposition.SafeStopAndDiagnose)
-            : new("unconfirmed_action", LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
+    internal static LifeSkillRecoveryDecision ForUncertainAction()
+        => new("unconfirmed_action", LifeSkillRecoveryDisposition.SafeStopAndDiagnose);
 
     internal static LifeSkillRecoveryDecision ForIncident(Exception error)
     {
@@ -332,7 +330,7 @@ internal sealed class LifeSkillManagerState
     internal void RecordUncertainAction(LifeSkillStage stage, string operation)
     {
         NoteRecovery(stage, operation,
-            LifeSkillRecoveryDecisionPolicy.ForActionOutcome(false));
+            LifeSkillRecoveryDecisionPolicy.ForUncertainAction());
     }
 
     internal void RecordIncident(LifeSkillStage stage, Exception error)
@@ -452,7 +450,7 @@ internal sealed class LifeSkillManagerState
                 {
                     NoteRead(stage, epoch, d => d with { Recovered = d.Recovered + 1 });
                     NoteRecovery(stage, operation, new(
-                        "transient_read_recovered", LifeSkillRecoveryDisposition.SafeStopAndDiagnose));
+                        "transient_read_recovered", LifeSkillRecoveryDisposition.ContinueAfterVerifiedRead));
                     Log?.Invoke($"[중간관리자][조회 복구] {stage}/{operation} · " +
                         "새 CLI 응답 확인 · 기존 작업/장부 유지");
                 }
