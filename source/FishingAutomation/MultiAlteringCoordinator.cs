@@ -13,6 +13,138 @@ namespace FishingAutomation;
 // new screen input, receipt or a facility move.
 // A read-only diagnostic for selected facilities left empty while another
 // lane's full queue masks the recipe. Never registers, collects, or moves.
+// V3.2.39 per-facility read-only bottleneck evidence. A repeated episode
+// is NOT a proven missing item. No game input or durable receipt changes.
+// Stored only for the active F9 run; never store raw CLI payloads.
+internal enum FacilityBottleneckCause { QueueFullMasked, RecipeUnavailable, StalledWork, UncertainBatch }
+internal sealed record FacilityBottleneckSnapshot(
+    string Facility, long QueueFullEpisodes, long RecipeUnavailableEpisodes,
+    long StalledWorkEvents, long UncertainBatchAttempts, bool CurrentlyBlocked,
+    long? BlockedSeconds, int LastKnownQueueDepth, int LastKnownCompleted,
+    bool RepeatedIssue);
+
+internal sealed class MultiAlteringFacilityBottleneckTracker
+{
+    private const int MaxFacilities = 16;
+    private sealed class Entry
+    {
+        internal long QueueFull, Unavailable, Stalled, Uncertain;
+        internal FacilityBottleneckCause? ActiveBlock;
+        internal DateTimeOffset? BlockedSince;
+        internal int Depth, Completed;
+    }
+    private readonly object _gate = new();
+    private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private readonly Func<DateTimeOffset> _now;
+
+    internal MultiAlteringFacilityBottleneckTracker(Func<DateTimeOffset>? now = null)
+        => _now = now ?? (() => DateTimeOffset.UtcNow);
+
+    private Entry? Get(string facility)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facility);
+        if (_entries.TryGetValue(facility, out var entry)) return entry;
+        if (_entries.Count >= MaxFacilities) return null;
+        entry = new Entry();
+        _entries[facility] = entry;
+        return entry;
+    }
+
+    internal void ObserveWorks(string facility, IReadOnlyList<AlteringWork> works)
+    {
+        ArgumentNullException.ThrowIfNull(works);
+        lock (_gate)
+        {
+            var entry = Get(facility);
+            if (entry is null) return;
+            entry.Depth = works.Count;
+            entry.Completed = works.Count(x => x.IsCompleted);
+            // Confirmed work is evidence that an "empty and masked" episode
+            // ended; elapsed time or another facility's progress is not.
+            if (works.Count > 0) Clear(entry);
+        }
+    }
+
+    private static void Clear(Entry entry)
+    {
+        entry.ActiveBlock = null;
+        entry.BlockedSince = null;
+    }
+
+    internal void ClearQueueBlock(string facility)
+    {
+        lock (_gate)
+        {
+            if (_entries.TryGetValue(facility, out var entry))
+                Clear(entry);
+        }
+    }
+
+    internal void NoteBlockedRecipe(string facility, string? cliReason)
+    {
+        var cause = string.Equals(cliReason, "queue_full", StringComparison.Ordinal)
+            ? FacilityBottleneckCause.QueueFullMasked
+            : FacilityBottleneckCause.RecipeUnavailable;
+        lock (_gate)
+        {
+            var entry = Get(facility);
+            if (entry is null) return;
+            DateTimeOffset now = _now();
+            // A clock rollback invalidates the elapsed-time evidence, but is
+            // never permission to treat a repeated poll as a new incident.
+            if (entry.ActiveBlock == cause)
+            {
+                if (entry.BlockedSince > now) entry.BlockedSince = now;
+                return;
+            }
+            entry.ActiveBlock = cause;
+            entry.BlockedSince = now;
+            if (cause == FacilityBottleneckCause.QueueFullMasked) entry.QueueFull++;
+            else entry.Unavailable++;
+        }
+    }
+
+    internal void NoteStalledWork(string facility)
+    {
+        lock (_gate)
+        {
+            var entry = Get(facility);
+            if (entry is not null) entry.Stalled++;
+        }
+    }
+
+    internal void NoteUncertainBatch(string facility)
+    {
+        lock (_gate)
+        {
+            var entry = Get(facility);
+            if (entry is not null) entry.Uncertain++;
+        }
+    }
+
+    internal IReadOnlyList<FacilityBottleneckSnapshot> Snapshot()
+    {
+        lock (_gate)
+        {
+            var now = _now();
+            return _entries.OrderBy(x => x.Key, StringComparer.Ordinal)
+                .Select(x =>
+                {
+                    var entry = x.Value;
+                    long events = entry.QueueFull + entry.Unavailable +
+                        entry.Stalled + entry.Uncertain;
+                    long? seconds = entry.BlockedSince.HasValue
+                        ? (long)Math.Max(0, (now - entry.BlockedSince.Value).TotalSeconds)
+                        : null;
+                    return new FacilityBottleneckSnapshot(
+                        x.Key, entry.QueueFull, entry.Unavailable, entry.Stalled,
+                        entry.Uncertain, entry.ActiveBlock.HasValue,
+                        seconds, entry.Depth, entry.Completed, events >= 2);
+                }).ToArray();
+        }
+    }
+}
+
 internal sealed class MultiAlteringLaneDeferralTracker
 {
     private sealed record Observation(DateTimeOffset Since, string Signature, DateTimeOffset? LastReportedAt);
@@ -204,6 +336,7 @@ internal sealed class MultiAlteringCoordinator
     private readonly bool _deferOtherLanesWhileQueueFull;
 
     internal event Action<string>? Log;
+    internal MultiAlteringFacilityBottleneckTracker Bottlenecks { get; }
 
     internal MultiAlteringCoordinator(
         FacilityLaneState? laneState = null,
@@ -217,6 +350,7 @@ internal sealed class MultiAlteringCoordinator
         _laneState = laneState;
         _laneOwner = laneOwner;
         _now = now ?? (() => DateTimeOffset.UtcNow);
+        Bottlenecks = new MultiAlteringFacilityBottleneckTracker(_now);
         _idleThreshold = idleThreshold ?? TimeSpan.FromMinutes(2);
         _restoreCompleted = restoreCompleted;
         _fillInitialVacancies = fillInitialVacancies;
@@ -337,6 +471,7 @@ internal sealed class MultiAlteringCoordinator
                     continue;
                 }
                 var observed = works.Where(x => x.FacilityName == facility).ToArray();
+                Bottlenecks.ObserveWorks(facility, observed);
                 try
                 {
                     // An all-completed lane needs one guarded manager turn for
@@ -349,6 +484,7 @@ internal sealed class MultiAlteringCoordinator
                     // A stalled facility is no longer a safe onsite assumption.
                     // Invalidate its shared authority and surface the CLI-only
                     // diagnostic; never start an autonomous movement or receipt.
+                    Bottlenecks.NoteStalledWork(facility);
                     _laneState?.InvalidateOnsite(
                         $"시설별 대기 정체 · {facility} · 화면 재확인 필요");
                     Log?.Invoke($"[다중가공] {ex.Message}");
@@ -429,6 +565,7 @@ internal sealed class MultiAlteringCoordinator
                                 "다음 대기 주기에 실제 제법 재조회 · 무확인 등록 클릭 금지");
                         }
                         globalQueueUnblocked.Remove(facility);
+                        Bottlenecks.NoteBlockedRecipe(facility, refusal);
                         string? starvation = deferrals.ObserveBlocked(
                             facility, nextPlan.DisplayName, refusal,
                             facilityWorks.Length, otherFullLanes);
@@ -437,6 +574,7 @@ internal sealed class MultiAlteringCoordinator
                     }
 
                     deferrals.Reset(facility);
+                    Bottlenecks.ClearQueueBlock(facility);
                     globalQueueBlocked.Remove(facility);
                     if (globalQueueUnblocked.Add(facility))
                         Log?.Invoke(
@@ -448,7 +586,10 @@ internal sealed class MultiAlteringCoordinator
 
                 if (!(_deferOtherLanesWhileQueueFull &&
                     facilityWorks.Length < 7 && anotherFullLane))
+                {
                     deferrals.Reset(facility);
+                    Bottlenecks.ClearQueueBlock(facility);
+                }
 
                 if (initialVacancy)
                     Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} " +
@@ -573,6 +714,7 @@ internal sealed class MultiAlteringCoordinator
                         }
                         catch (InvalidOperationException)
                         {
+                            Bottlenecks.NoteStalledWork(facility);
                             _laneState?.InvalidateOnsite(
                                 "시설별 대기 정체 · " + facility + " · 화면 재확인 필요");
                             throw;
