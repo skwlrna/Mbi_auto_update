@@ -52,7 +52,7 @@ internal sealed class MultiAlteringLaneDeferralTracker
         if (last.Warned || now - last.Since < _threshold) return null;
         _blocked[facility] = last with { Warned = true };
         return $"[다중가공][시설 누락 감시] {facility} · {recipe} · " +
-            $"빈 슬롯 0/7 · 대기 {Math.Max(0, (now - last.Since).TotalSeconds):0}초 · " +
+            $"시설 작업 0/7 · 대기 {Math.Max(0, (now - last.Since).TotalSeconds):0}초 · " +
             $"타 시설 포화 {otherFullFacilities}개 · CLI Reason={reason} · " +
             "재료 목록 미확정 · 읽기 전용 재조회 지속 · 임의 클릭/모두 받기 금지";
     }

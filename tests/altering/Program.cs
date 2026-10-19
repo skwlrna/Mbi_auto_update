@@ -349,9 +349,13 @@ try
         { new AlteringWork("밥", foodPlan.FacilityName, "InProgress", false, 60) }),
         incidentDir, CancellationToken.None);
     var snapshot = File.ReadAllText(snapshotPath);
-    Check(snapshot.Contains("물이 든 병", StringComparison.Ordinal) &&
-          snapshot.Contains("식재료 가공 시설", StringComparison.Ordinal) &&
-          snapshot.Contains("recipeRead", StringComparison.Ordinal) &&
+    using var parsedSnapshot = System.Text.Json.JsonDocument.Parse(snapshot);
+    var rootSnapshot = parsedSnapshot.RootElement;
+    Check(rootSnapshot.GetProperty("selected")[0].GetProperty("missing")[0]
+              .GetProperty("name").GetString() == "물이 든 병" &&
+          rootSnapshot.GetProperty("lanes")[0].GetProperty("facility")
+              .GetString() == "식재료 가공 시설" &&
+          rootSnapshot.GetProperty("recipeRead").GetString() == "ok" &&
           !snapshot.Contains("AccountCode", StringComparison.Ordinal) &&
           !snapshot.Contains("CharacterId", StringComparison.Ordinal),
         "error incident keeps local read-only recipe/queue evidence without user identity");
