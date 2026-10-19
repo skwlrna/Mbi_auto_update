@@ -890,7 +890,8 @@ try
         incidentDir, CancellationToken.None,
         recoveryPatterns: v3236History,
         recoveryDecision: LifeSkillRecoveryDecisionPolicy.ForIncident(
-            new InvalidOperationException("sensitive exception detail")));
+            new InvalidOperationException("sensitive exception detail")),
+        facilityBottlenecks: v3239Monitor.Snapshot());
     var snapshot = File.ReadAllText(snapshotPath);
     using var parsedSnapshot = System.Text.Json.JsonDocument.Parse(snapshot);
     var rootSnapshot = parsedSnapshot.RootElement;
@@ -911,6 +912,15 @@ try
           snapshot.Contains("unconfirmed_action", StringComparison.Ordinal) &&
           !snapshot.Contains("sensitive exception detail", StringComparison.Ordinal),
         "V3.2.36 incident links bounded recovery labels without raw exception text or claimed game validation");
+    var facilityEvidence = rootSnapshot.GetProperty("facilityBottlenecks");
+    Check(facilityEvidence.GetArrayLength() == 8 &&
+          facilityEvidence[0].GetProperty("facility").GetString() == v3239FoodFacility &&
+          facilityEvidence[0].GetProperty("queueFullEpisodes").GetInt64() == 2 &&
+          facilityEvidence[0].GetProperty("repeatedIssue").GetBoolean() &&
+          !facilityEvidence[0].GetProperty("confirmedOmission").GetBoolean() &&
+          !facilityEvidence[0].GetProperty("permitsGameAction").GetBoolean() &&
+          !snapshot.Contains("invalid_recipe_state", StringComparison.Ordinal),
+        "V3.2.39 F9 incident stores bounded facility diagnoses without raw reason or fictional proof");
     var readFailure = await MultiAlteringIncidentSnapshot.CaptureAsync(
         new[] { foodPlan }, nameof(InvalidOperationException),
         _ => throw new InvalidDataException("secret payload"),
