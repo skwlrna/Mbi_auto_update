@@ -226,6 +226,32 @@ def related_attempts(results_dir: Path, context: str, exclude: str = "",
     return [item for _, item in scored[:min(3, max(0, limit))]]
 
 
+def feedback_outcome_summary(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Counts EXPLICIT live-game user feedback only, not offline patch success.
+
+    Results are from the already-bounded similar-case list, not a population
+    sample or the game's real-world recovery rate. No raw logs are needed.
+    """
+    related = matches[:3]
+    confirmed = sum(v.get("manual_feedback") == "resolved" for v in related)
+    recurred = sum(v.get("manual_feedback") == "recurred" for v in related)
+    unverified = len(related) - confirmed - recurred
+    observed = confirmed + recurred
+    return {
+        "related_attempts": len(related),
+        "live_user_resolved": confirmed,
+        "live_user_recurred": recurred,
+        "without_live_confirmation": unverified,
+        "manual_feedback_resolution_rate": (
+            round(confirmed / observed, 4) if observed else None
+        ),
+        "denominator": observed,
+        "scope": "related_manual_feedback_only",
+        "authorizes_game_input": False,
+        "authorizes_auto_merge": False,
+    }
+
+
 def context_hint(matches: list[dict[str, Any]]) -> str:
     if not matches:
         return ""
@@ -237,6 +263,20 @@ def context_hint(matches: list[dict[str, Any]]) -> str:
         "Do not blindly repeat a previous FAILED or RECURRED candidate; "
         "independently analyze the cause and add new regression tests.",
     ]
+    feedback_summary = feedback_outcome_summary(matches)
+    rate = feedback_summary["manual_feedback_resolution_rate"]
+    rate_text = (f"{rate * 100:.1f}% of {feedback_summary['denominator']} "
+                 "explicit reviewed cases" if rate is not None
+                 else "not measurable (no explicit reviewed cases)")
+    lines.append("Similar AI attempt outcomes (NOT live-game automatic "
+                 "recovery performance): user-confirmed resolved=" +
+                 str(feedback_summary["live_user_resolved"]) +
+                 ", user-reported recurrence=" +
+                 str(feedback_summary["live_user_recurred"]) +
+                 ", unverified=" +
+                 str(feedback_summary["without_live_confirmation"]) +
+                 ", manual-feedback ratio=" + rate_text +
+                 ". None authorizes input, automatic approval or deployment.")
     for v in matches:
         files = ", ".join(v["changed_files"]) or "(no patch)"
         feedback = v.get("manual_feedback", "unverified")
