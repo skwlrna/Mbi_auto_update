@@ -4,6 +4,62 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.33: no blind replay of a screen action after uncertain outcome.
+var v3233Fence = new LifeSkillWorkFence();
+var v3233Log = new List<string>();
+v3233Fence.Log += v3233Log.Add;
+var pendingCraft = v3233Fence.Begin("craft:밥");
+bool v3233ConcurrentBlocked = false;
+try { _ = v3233Fence.Begin("craft:밥"); }
+catch (InvalidOperationException) { v3233ConcurrentBlocked = true; }
+Check(v3233ConcurrentBlocked, "V3.2.33 blocks overlapping craft on the same item");
+
+bool v3233MissingBlocked = false;
+try { v3233Fence.ConfirmInventoryIncrease(pendingCraft, 5, 6, 2); }
+catch (InvalidOperationException) { v3233MissingBlocked = true; }
+Check(v3233MissingBlocked, "V3.2.33 rejects insufficient inventory gain instead of claiming completion");
+v3233Fence.MarkUncertain(pendingCraft, "craft_result_unconfirmed");
+bool v3233UncertainBlocked = false;
+try { _ = v3233Fence.Begin("craft:밥"); }
+catch (InvalidOperationException) { v3233UncertainBlocked = true; }
+Check(v3233UncertainBlocked &&
+      v3233Log.Any(x => x.Contains("중복 실행 차단", StringComparison.Ordinal)),
+    "V3.2.33 quarantines an uncertain craft action without retry");
+
+var knownGather = v3233Fence.Begin("gather:물이 든 병");
+v3233Fence.ConfirmInventoryIncrease(knownGather, 5, 9, 3);
+var nextKnownGather = v3233Fence.Begin("gather:물이 든 병");
+bool v3233OldReplyBlocked = false;
+try { v3233Fence.ConfirmInventoryIncrease(knownGather, 5, 12, 3); }
+catch (InvalidOperationException) { v3233OldReplyBlocked = true; }
+Check(v3233OldReplyBlocked, "V3.2.33 rejects late confirmation from an earlier attempt");
+v3233Fence.ConfirmInventoryIncrease(nextKnownGather, 9, 12, 3);
+Check(true, "V3.2.33 permits a second gathering only after previous positive proof");
+
+var noMutationF9 = v3233Fence.Begin("alter:food/밥/1");
+v3233Fence.ConfirmBatchReturn(noMutationF9, 0, false);
+var nextF9 = v3233Fence.Begin("alter:food/밥/1");
+v3233Fence.ConfirmBatchReturn(nextF9, 1, false);
+Check(true, "V3.2.33 preserves existing F9 nonterminal scheduling and confirmed registration evidence");
+
+var brokenF9 = v3233Fence.Begin("alter:metal/철/1");
+bool v3233NegativeRegistration = false;
+try { v3233Fence.ConfirmBatchReturn(brokenF9, -1, false); }
+catch (InvalidOperationException) { v3233NegativeRegistration = true; }
+v3233Fence.MarkUncertain(brokenF9, "alter_batch_unconfirmed");
+bool v3233FailedF9Blocked = false;
+try { _ = v3233Fence.Begin("alter:metal/철/1"); }
+catch (InvalidOperationException) { v3233FailedF9Blocked = true; }
+Check(v3233NegativeRegistration && v3233FailedF9Blocked,
+    "V3.2.33 blocks invalid registration deltas and refuses blind F9 replay");
+
+bool v3233NegativeInventory = false;
+var invalidGather = v3233Fence.Begin("gather:쇠고기");
+try { v3233Fence.ConfirmInventoryIncrease(invalidGather, -1, 10, 1); }
+catch (InvalidOperationException) { v3233NegativeInventory = true; }
+v3233Fence.MarkUncertain(invalidGather, "invalid_inventory");
+Check(v3233NegativeInventory, "V3.2.33 rejects invalid or negative CLI inventory evidence");
+
 // V3.2.32: per-stage transport recovery never reissues a game action.
 var v3232Log = new List<string>();
 var v3232Manager = new LifeSkillManagerState(
