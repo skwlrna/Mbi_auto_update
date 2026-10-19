@@ -23,8 +23,8 @@ public sealed partial class MainForm
             }, "home", "nav");
             AddButton("자동화 실행", new(16, 181, 200, 49), () => SelectMode(0), "play", "nav");
             AddButton("던전 / 어비스", new(16, 239, 200, 49), () => ShowMenu(
-                new[] { "던전", "어비스", "페카 심층" },
-                i => SelectMode(new[] { 1, 2, 3 }[i]), 228, 239), "swords", "nav");
+                new[] { "던전", "어비스" },
+                i => SelectMode(new[] { 1, 2 }[i]), 228, 239), "swords", "nav");
             AddButton("생활 생산", new(16, 297, 200, 49), () => ShowMenu(
                 new[] { "자동 가공", "자동 채집", "제작" },
                 i => SelectMode(new[] { 4, 5, 6 }[i]), 228, 297), "leaf", "nav");
