@@ -138,6 +138,106 @@ internal sealed class MultiAlteringFacilityBottleneckTracker
     }
 }
 
+// V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
+// that the game item can never be acquired. No purchase, CLI write or click.
+internal sealed record MaterialSupplyHold(
+    string Item, long Required, long Observed, string Category);
+
+internal sealed class MaterialSupplyHoldException : InvalidOperationException
+{
+    internal MaterialSupplyHold Evidence { get; }
+    internal MaterialSupplyHoldException(MaterialSupplyHold evidence)
+        : base("현재 허용된 자동 확보 경로 미확인 · " + evidence.Category)
+        => Evidence = evidence;
+}
+
+internal static class MaterialSupplyRoutePolicy
+{
+    // Scan the currently selected recipe and recursive *known* producers
+    // without relying on an absent catalog entry as proof of impossibility.
+    // All counts are fresh read-only game CLI calls; no cached UI labels.
+    internal static async Task<MaterialSupplyHold?> FindHoldAsync(
+        AlteringPlan plan,
+        AlteringRecipe selected,
+        IReadOnlyList<AlteringRecipe> recipes,
+        IReadOnlyList<GatherableItem> gathering,
+        Func<string, CancellationToken, Task<long>> readCount,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(selected);
+        ArgumentNullException.ThrowIfNull(recipes);
+        ArgumentNullException.ThrowIfNull(gathering);
+        ArgumentNullException.ThrowIfNull(readCount);
+        var path = new HashSet<string>(StringComparer.Ordinal);
+        async Task<MaterialSupplyHold?> InspectAsync(
+            string item, long required, int depth)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (required <= 0) return null;
+            long current = await readCount(item, ct);
+            if (current < 0)
+                throw new InvalidDataException("확인되지 않은 음수 재고는 재료 경로 판정에 사용하지 않습니다.");
+            if (current >= required) return null;
+            if (depth >= 6 || !path.Add(item))
+                return new(item, required, current, "recursive_route_unverified");
+            try
+            {
+                var matches = gathering.Where(x =>
+                    string.Equals(x.DisplayName, item, StringComparison.Ordinal)).ToArray();
+                if (matches.Length > 1)
+                    return new(item, required, current, "ambiguous_gathering_route");
+                if (matches.Length == 1)
+                {
+                    if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item))
+                        return new(item, required, current, "quest_only_not_bulk_gatherable");
+                    if (!matches[0].ToolOk)
+                        return new(item, required, current, "gathering_tool_unavailable");
+                    if (!LivingSkillGatheringCatalog.TryResolveBulk(item, out _))
+                        return new(item, required, current, "bulk_route_unverified");
+                    return null;
+                }
+
+                if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item))
+                    return new(item, required, current, "quest_only_not_bulk_gatherable");
+
+                var producers = recipes.Where(x =>
+                    string.Equals(x.DisplayName, item, StringComparison.Ordinal) ||
+                    string.Equals(System.Text.RegularExpressions.Regex.Replace(
+                        x.DisplayName, @"\([^()]*\)$", "").Trim(), item,
+                        StringComparison.Ordinal)).ToArray();
+                if (producers.Length == 0)
+                    return new(item, required, current, "acquisition_route_unverified");
+                if (producers.Length != 1)
+                    return new(item, required, current, "producer_identity_ambiguous");
+                var producer = producers[0];
+                if (producer.Alterable) return null;
+                if (producer.ProducedPerWork <= 0 ||
+                    producer.MissingIngredients.Count == 0)
+                    return new(item, required, current, "producer_state_unverified");
+                long works = checked((required - current + producer.ProducedPerWork - 1)
+                    / producer.ProducedPerWork);
+                foreach (var child in producer.MissingIngredients)
+                {
+                    long needed = checked((long)child.Required * works);
+                    var hold = await InspectAsync(child.DisplayName, needed, depth + 1);
+                    if (hold is not null) return hold;
+                }
+                return null; // existing producer screen/CLI checks remain necessary
+            }
+            finally { path.Remove(item); }
+        }
+
+        foreach (var ingredient in selected.MissingIngredients)
+        {
+            long needed = checked((long)ingredient.Required * plan.RequiredWorks);
+            var hold = await InspectAsync(ingredient.DisplayName, needed, 0);
+            if (hold is not null) return hold;
+        }
+        return null;
+    }
+}
+
 internal sealed class MultiAlteringLaneDeferralTracker
 {
     private sealed record Observation(DateTimeOffset Since, string Signature, DateTimeOffset? LastReportedAt);
@@ -361,7 +461,8 @@ internal sealed class MultiAlteringCoordinator
         Func<AlteringPlan, CancellationToken, Task>? preparePlan = null,
         Func<CancellationToken, Task>? onIdleAbyssRound = null,
         long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds,
-        Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null)
+        Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null,
+        Func<AlteringPlan, MaterialSupplyHold, CancellationToken, Task<MaterialSupplyHold?>>? recheckUnavailableRoute = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -398,6 +499,11 @@ internal sealed class MultiAlteringCoordinator
             StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
         var prepared = new HashSet<(string Facility, string Display, int Ordinal)>();
+        // A held recipe does not become a completed plan or permit the next
+        // recipe in the same lane. Only independent facilities keep working.
+        var held = new Dictionary<string,
+            (AlteringPlan Plan, MaterialSupplyHold Reason, DateTimeOffset NextCheck)>(
+                StringComparer.Ordinal);
         // Keep diagnostic evidence when the CLI refusal reason changes. Avoid
         // repeating an identical line every 30-second observation cycle.
         var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -490,6 +596,30 @@ internal sealed class MultiAlteringCoordinator
                 ct.ThrowIfCancellationRequested();
                 if (PendingCount(facility) == 0)
                     continue;
+
+                if (held.TryGetValue(facility, out var waiting))
+                {
+                    if (recheckUnavailableRoute is null)
+                        throw new InvalidOperationException(
+                            "보류 재료 재확인 경로가 없어 자동 재개하지 않습니다.");
+                    if (_now() < waiting.NextCheck)
+                        continue;
+                    // The same fresh read-only classification that caused the
+                    // hold must re-verify stock and recipe identity. Old UI
+                    // evidence, time alone or another lane's completion cannot
+                    // unblock this plan.
+                    var unresolved = await recheckUnavailableRoute(
+                        waiting.Plan, waiting.Reason, ct);
+                    if (unresolved is not null)
+                    {
+                        held[facility] = (waiting.Plan, unresolved,
+                            _now() + TimeSpan.FromSeconds(30));
+                        continue;
+                    }
+                    held.Remove(facility);
+                    Log?.Invoke($"[다중가공][재료 재확인] {facility} · {waiting.Plan.DisplayName} · " +
+                        "부족 상태 재조회 완료 · 기존 F9 장부/화면 등록 검증을 다시 수행");
+                }
 
                 var facilityWorks = works
                     .Where(x => x.FacilityName == facility)
@@ -647,7 +777,26 @@ internal sealed class MultiAlteringCoordinator
                         if (preparePlan is not null)
                         {
                             Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} · {plan.DisplayName} 새 품목 재료 점검");
-                            await preparePlan(plan, ct);
+                            try
+                            {
+                                await preparePlan(plan, ct);
+                            }
+                            catch (MaterialSupplyHoldException unavailable)
+                                when (recheckUnavailableRoute is not null)
+                            {
+                                // Must be raised BEFORE any input for this plan.
+                                // No completion, no work ticket and no next
+                                // recipe in this same facility may be claimed.
+                                held[facility] = (plan, unavailable.Evidence,
+                                    _now() + TimeSpan.FromSeconds(30));
+                                Log?.Invoke($"[다중가공][재료 확보 대기] {facility} · " +
+                                    $"{plan.DisplayName} · {unavailable.Evidence.Item} " +
+                                    $"{unavailable.Evidence.Observed}/{unavailable.Evidence.Required} · " +
+                                    $"분류={unavailable.Evidence.Category} · " +
+                                    "다른 시설 진행 · 재고/제법 30초 간격 재검증 · " +
+                                    "자동 구매·재등록 없음");
+                                break;
+                            }
                         }
                         // A failed/cancelled preparation never authorizes a click.
                         prepared.Add(Key(plan));

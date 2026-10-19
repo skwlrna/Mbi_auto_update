@@ -4,6 +4,137 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.40: unknown food inputs are held, never invented as gatherable.
+var v3240Food = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
+var v3240Recipe = new AlteringRecipe("밥", false, 1,
+    "not_enough_ingredient",
+    new[] { new AlteringIngredient("확보경로 미확인 재료", 2, 0) }, v3240Food.FacilityName);
+var v3240Counts = new Dictionary<string, long>(StringComparer.Ordinal)
+{ ["확보경로 미확인 재료"] = 0 };
+Task<long> V3240Count(string item, CancellationToken ct)
+{
+    ct.ThrowIfCancellationRequested();
+    return Task.FromResult(v3240Counts.GetValueOrDefault(item));
+}
+var v3240NoRoute = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240Recipe, new[] { v3240Recipe },
+    Array.Empty<GatherableItem>(), V3240Count, CancellationToken.None);
+Check(v3240NoRoute?.Category == "acquisition_route_unverified" &&
+      v3240NoRoute.Required == 4 && v3240NoRoute.Observed == 0,
+    "V3.2.40 an item absent from gather and recipe listings is a hold, not a proven impossibility");
+v3240Counts["확보경로 미확인 재료"] = 4;
+Check(await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240Recipe, new[] { v3240Recipe },
+    Array.Empty<GatherableItem>(), V3240Count, CancellationToken.None) is null,
+    "V3.2.40 fresh inventory sufficient for selected food works clears an unknown-route shortage");
+v3240Counts["확보경로 미확인 재료"] = 0;
+var v3240UnsupportedBulk = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240Recipe, new[] { v3240Recipe },
+    new[] { new GatherableItem("확보경로 미확인 재료", true) },
+    V3240Count, CancellationToken.None);
+Check(v3240UnsupportedBulk?.Category == "bulk_route_unverified",
+    "V3.2.40 a CLI gatherable not supported by bulk screen remains safely held");
+var v3240KnownGather = v3240Recipe with
+{
+    MissingIngredients = new[] { new AlteringIngredient("물이 든 병", 2, 0) }
+};
+Check(await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240KnownGather, new[] { v3240KnownGather },
+    new[] { new GatherableItem("물이 든 병", true) },
+    V3240Count, CancellationToken.None) is null,
+    "V3.2.40 known bulk-supported well water keeps existing guarded gathering flow");
+var v3240NoTool = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240Recipe, new[] { v3240Recipe },
+    new[] { new GatherableItem("확보경로 미확인 재료", false) },
+    V3240Count, CancellationToken.None);
+Check(v3240NoTool?.Category == "gathering_tool_unavailable",
+    "V3.2.40 missing tool blocks the food lane instead of guessing another route");
+var v3240Insect = v3240Recipe with {
+    MissingIngredients = new[] { new AlteringIngredient("석양 나비", 1, 0) } };
+var v3240QuestHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    v3240Food, v3240Insect, new[] { v3240Insect },
+    Array.Empty<GatherableItem>(), V3240Count, CancellationToken.None);
+Check(v3240QuestHold?.Category == "quest_only_not_bulk_gatherable",
+    "V3.2.40 known quest-only insects must not start standalone F9 bulk gathering");
+
+var v3240Metal = new AlteringPlan("금속 가공 시설", "철괴", 1, 1, false);
+var v3240Cheese = new AlteringPlan("식재료 가공 시설", "치즈", 1, 1, false);
+var v3240Now = DateTimeOffset.Parse("2026-10-20T00:00:00+00:00");
+int v3240FoodActions = 0, v3240CheeseActions = 0, v3240MetalActions = 0,
+    v3240PrepAttempts = 0, v3240FreshRechecks = 0;
+long v3240Available = 0;
+var v3240Logs = new List<string>();
+var v3240Scheduler = new MultiAlteringCoordinator(now: () => v3240Now);
+v3240Scheduler.Log += v3240Logs.Add;
+await v3240Scheduler.RunAsync(
+    new[] { v3240Food, v3240Cheese, v3240Metal },
+    (p, _, ct) =>
+    {
+        ct.ThrowIfCancellationRequested();
+        if (p.FacilityName == v3240Metal.FacilityName)
+        {
+            v3240MetalActions++;
+            Check(v3240FoodActions == 0 && v3240CheeseActions == 0,
+                "V3.2.40 independent metal progresses while food and following same-lane recipe are held");
+            v3240Available = 4;
+            v3240Now += TimeSpan.FromSeconds(31);
+        }
+        else if (p.DisplayName == "밥") v3240FoodActions++;
+        else v3240CheeseActions++;
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+    (interval, ct) => { v3240Now += interval; return Task.CompletedTask; },
+    CancellationToken.None,
+    preparePlan: (plan, ct) =>
+    {
+        if (plan.DisplayName == "밥" && ++v3240PrepAttempts == 1)
+            throw new MaterialSupplyHoldException(
+                new("확보경로 미확인 재료", 4, 0, "acquisition_route_unverified"));
+        return Task.CompletedTask;
+    },
+    recheckUnavailableRoute: (plan, previous, ct) =>
+    {
+        v3240FreshRechecks++;
+        return Task.FromResult<MaterialSupplyHold?>(
+            v3240Available < previous.Required
+                ? previous with { Observed = v3240Available } : null);
+    });
+Check(v3240MetalActions == 1 && v3240FoodActions == 1 &&
+      v3240CheeseActions == 1 && v3240FreshRechecks >= 1 &&
+      v3240Logs.Any(x => x.Contains("[재료 확보 대기]", StringComparison.Ordinal)) &&
+      v3240Logs.Any(x => x.Contains("[재료 재확인]", StringComparison.Ordinal)),
+    "V3.2.40 quarantined food resumes after material verification and preserves same-lane recipe order");
+
+// F10 during unresolved material hold must remain responsive and never click.
+var v3240Cancel = new CancellationTokenSource();
+var v3240Stopped = false;
+var v3240Queued = 0;
+var v3240WaitCycles = 0;
+var v3240Clock = v3240Now;
+try
+{
+    await new MultiAlteringCoordinator(now: () => v3240Clock).RunAsync(
+        new[] { v3240Food },
+        (p, n, ct) => { v3240Queued++; return Task.FromResult(true); },
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (span, ct) =>
+        {
+            v3240Clock += span;
+            if (++v3240WaitCycles >= 3) v3240Cancel.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }, v3240Cancel.Token,
+        preparePlan: (p, ct) => throw new MaterialSupplyHoldException(
+            new("확보경로 미확인 재료", 4, 0, "acquisition_route_unverified")),
+        recheckUnavailableRoute: (p, prior, ct) =>
+            Task.FromResult<MaterialSupplyHold?>(prior));
+}
+catch (OperationCanceledException) when (v3240Cancel.IsCancellationRequested)
+{ v3240Stopped = true; }
+Check(v3240Stopped && v3240Queued == 0,
+    "V3.2.40 F10 cancels a held food lane without replaying an unknown action");
+
 // V3.2.36: deterministic rule-based middle-manager recovery decisions.
 Check(LifeSkillRecoveryDecisionPolicy.ForReadFailure(
         new TimeoutException(), 0).Disposition ==
