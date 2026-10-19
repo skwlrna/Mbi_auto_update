@@ -296,6 +296,37 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
+            // V3.2.40: inspect food supply using current read-only CLI evidence.
+            // Missing from the gathering catalog is NOT proof that an item is
+            // unobtainable; unknown routes are held without purchases or clicks.
+            async Task<MaterialSupplyHold?> InspectFoodRouteAsync(
+                AlteringPlan plan, CancellationToken ct)
+            {
+                if (!string.Equals(plan.FacilityName, "식재료 가공 시설",
+                    StringComparison.Ordinal)) return null;
+                var liveRecipes = await managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "food-route-recipes",
+                    rawAlteringData.RecipesAsync, ct);
+                var selected = liveRecipes.Where(x =>
+                    string.Equals(x.DisplayName, plan.DisplayName,
+                        StringComparison.Ordinal)).ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                if (selected is null || selected.ProducedPerWork != plan.ProducedPerWork ||
+                    AlteringFacilityResolver.Resolve(selected) != plan.FacilityName)
+                    throw new InvalidOperationException(
+                        "음식 재료 확인 중 제법 동일성이 불명확해 기존 입력을 중단합니다.");
+                if (selected.Alterable || selected.MissingIngredients.Count == 0)
+                    return null; // queue_full without shortages is NOT a hold.
+                var catalog = await managerState.ReadWithRecoveryAsync(
+                    LifeSkillStage.Altering, "food-route-catalog",
+                    gatheringData.CatalogAsync, ct);
+                return await MaterialSupplyRoutePolicy.FindHoldAsync(
+                    plan, selected, liveRecipes, catalog,
+                    (name, token) => managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "food-route-inventory",
+                        inner => rawAlteringData.ItemCountAsync(name, inner), token),
+                    ct);
+            }
+
             // Prepare provable raw shortages across ALL selected recipes before
             // servicing the first full lane. Otherwise an unrelated wood/metal
             // failure can prevent food materials (e.g. well water) from ever
@@ -319,8 +350,22 @@ public sealed partial class MainForm
                     $"{initialShortages.Count}종 부족 재료 증거 · 빈/가득 찬 시설과 무관하게 현재 재고 재확인");
                 if (initialShortages.Count > 0)
                 {
-                    await resolver.PreGatherKnownShortagesAsync(initialShortages, token);
-                    _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 이후 시설별 등록 시 부족 재검증");
+                    // Avoid sending a food plan with an unverified input route
+                    // into the global gather pass. It will instead enter the
+                    // coordinator's isolated food hold when selected.
+                    var supported = new List<MultiAlteringSupplyPreflight>();
+                    foreach (var shortage in initialShortages)
+                    {
+                        var hold = await InspectFoodRouteAsync(shortage.Plan, token);
+                        if (hold is null) supported.Add(shortage);
+                        else _log.Write(
+                            $"[다중가공][식재료 확보 경로 미확인] {shortage.Plan.DisplayName} · " +
+                            $"{hold.Item} {hold.Observed}/{hold.Required} · " +
+                            $"분류={hold.Category} · 선행채집 제외 · 다른 시설 유지");
+                    }
+                    if (supported.Count > 0)
+                        await resolver.PreGatherKnownShortagesAsync(supported, token);
+                    _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 음식 보류 대상은 시설별 재확인");
                 }
             }
 
@@ -453,6 +498,11 @@ public sealed partial class MainForm
                 // Leather is raw material: do not pre-gather or recursively
                 // manufacture a replacement. The batch engine records a normal
                 // partial terminal state once already-queued works finish.
+                // A safe read-only hold must be decided BEFORE material
+                // gathering, movement or any processing registration.
+                var unavailable = await InspectFoodRouteAsync(plan, ct);
+                if (unavailable is not null)
+                    throw new MaterialSupplyHoldException(unavailable);
                 if (LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
                 {
                     Ui(() => _log.Write(
@@ -586,7 +636,8 @@ public sealed partial class MainForm
                 minimumAbyssWaitSeconds: minimumAbyssWaitSeconds,
                 readRecipes: ct => managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "scheduler-recipes",
-                    rawAlteringData.RecipesAsync, ct)), token);
+                    rawAlteringData.RecipesAsync, ct),
+                checkUnavailableRoute: InspectFoodRouteAsync), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
