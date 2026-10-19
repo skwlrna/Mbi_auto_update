@@ -296,6 +296,12 @@ public sealed partial class MainForm
                 var initialShortages =
                     MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
                         plans, freshForPreflight, queuedMaterialEvidence);
+                // Report ALL selected facilities, not only the first lane that
+                // happens to be serviced. This has no game input side effects.
+                var preflightWorks = await rawAlteringData.WorksAsync(token);
+                foreach (string state in MultiAlteringMaterialPreflightPolicy
+                    .DescribeSelectedEvidence(plans, freshForPreflight, preflightWorks))
+                    _log.Write("[다중가공][선행재료 진단] " + state);
                 _log.Write(
                     $"[다중가공] F9 전체 품목 선행채집 점검 · {plans.Count}종 중 " +
                     $"{initialShortages.Count}종 부족 재료 증거 · 빈/가득 찬 시설과 무관하게 현재 재고 재확인");
@@ -580,6 +586,30 @@ public sealed partial class MainForm
             _logExpanded = true;
             ApplyLogVisibility();
             _log.Write("[다중가공] 오류: " + ex.Message);
+            // A bounded local read-only CLI incident snapshot helps explain
+            // missed lanes and masked shortages, without retrying game inputs.
+            // The report intentionally excludes character/account IDs and
+            // any raw packet or full runtime log payload.
+            try
+            {
+                using var snapshotTimeout = new CancellationTokenSource(
+                    TimeSpan.FromSeconds(5));
+                var diagnostics = new AlteringCliData(_cli);
+                string saved = await MultiAlteringIncidentSnapshot.CaptureAsync(
+                    plans, ex.GetType().Name,
+                    diagnostics.RecipesAsync, diagnostics.WorksAsync,
+                    Path.Combine(Environment.GetFolderPath(
+                        Environment.SpecialFolder.LocalApplicationData),
+                        "MabiAuto", "diagnostics", "altering"),
+                    snapshotTimeout.Token);
+                _log.Write("[다중가공][오류 진단] 로컬 상태 저장 · " +
+                    Path.GetFileName(saved) + " · 자동 재등록/수령 없음");
+            }
+            catch (Exception diagnosticError)
+            {
+                _log.Write("[다중가공][오류 진단] 상태 저장 실패 · " +
+                    diagnosticError.GetType().Name + " · 원래 오류/장부 보존");
+            }
             SetStatus("다중가공 오류: " + ex.Message, Color.Salmon);
             _ = SendRuntimeAlertAsync("다중가공 오류", ex.Message, true);
         }

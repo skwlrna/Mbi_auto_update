@@ -11,6 +11,55 @@ namespace FishingAutomation;
 // facility is tracked independently, so healthy progress elsewhere cannot
 // hide a stalled seven-slot lane. Read-only CLI observations never authorize
 // new screen input, receipt or a facility move.
+// A read-only diagnostic for selected facilities left empty while another
+// lane's full queue masks the recipe. Never registers, collects, or moves.
+internal sealed class MultiAlteringLaneDeferralTracker
+{
+    private sealed record Observation(DateTimeOffset Since, string Signature, bool Warned);
+    private readonly Dictionary<string, Observation> _blocked = new(StringComparer.Ordinal);
+    private readonly Func<DateTimeOffset> _now;
+    private readonly TimeSpan _threshold;
+
+    internal MultiAlteringLaneDeferralTracker(
+        TimeSpan? threshold = null, Func<DateTimeOffset>? now = null)
+    {
+        _threshold = threshold ?? TimeSpan.FromMinutes(2);
+        if (_threshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(threshold));
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    internal string? ObserveBlocked(string facility, string recipe, string reason,
+        int localWorks, int otherFullFacilities)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facility);
+        ArgumentException.ThrowIfNullOrWhiteSpace(recipe);
+        // A lane containing live work is not "missing"; let the normal
+        // facility watchdog handle that work's countdown.
+        if (localWorks != 0 || otherFullFacilities <= 0)
+        {
+            Reset(facility);
+            return null;
+        }
+        var signature = recipe + "|" + reason;
+        var now = _now();
+        if (!_blocked.TryGetValue(facility, out var last) ||
+            !string.Equals(signature, last.Signature, StringComparison.Ordinal))
+        {
+            _blocked[facility] = new(now, signature, false);
+            return null;
+        }
+        if (last.Warned || now - last.Since < _threshold) return null;
+        _blocked[facility] = last with { Warned = true };
+        return $"[다중가공][시설 누락 감시] {facility} · {recipe} · " +
+            $"시설 작업 0/7 · 대기 {Math.Max(0, (now - last.Since).TotalSeconds):0}초 · " +
+            $"타 시설 포화 {otherFullFacilities}개 · CLI Reason={reason} · " +
+            "재료 목록 미확정 · 읽기 전용 재조회 지속 · 임의 클릭/모두 받기 금지";
+    }
+
+    internal void Reset(string facility) => _blocked.Remove(facility);
+}
+
 internal sealed class MultiAlteringWaitWatchdog
 {
     private sealed record Checkpoint(
@@ -214,6 +263,7 @@ internal sealed class MultiAlteringCoordinator
         var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
+        var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
         var startupVacancies = new HashSet<string>(
@@ -269,7 +319,10 @@ internal sealed class MultiAlteringCoordinator
             foreach (string facility in orderedFacilities)
             {
                 if (PendingCount(facility) == 0)
+                {
+                    deferrals.Reset(facility);
                     continue;
+                }
                 var observed = works.Where(x => x.FacilityName == facility).ToArray();
                 try
                 {
@@ -308,7 +361,10 @@ internal sealed class MultiAlteringCoordinator
                     facilityWorks.Length is > 0 and < 7;
 
                 if (!laneReady && !initialVacancy)
+                {
+                    deferrals.Reset(facility);
                     continue;
+                }
 
                 // The first F9 CLI snapshot may report global queue_full just
                 // because an unrelated facility has seven works. It is NOT a
@@ -318,9 +374,10 @@ internal sealed class MultiAlteringCoordinator
                 // MissingIngredients authorizes the existing resolver, NEVER
                 // a registration click; AlteringAutomation rechecks Alterable
                 // and live works before each actual UI operation.
-                bool anotherFullLane = orderedFacilities.Any(other =>
+                int otherFullLanes = orderedFacilities.Count(other =>
                     !string.Equals(other, facility, StringComparison.Ordinal) &&
                     works.Count(w => w.FacilityName == other) == 7);
+                bool anotherFullLane = otherFullLanes > 0;
                 if (_deferOtherLanesWhileQueueFull &&
                     facilityWorks.Length < 7 && anotherFullLane)
                 {
@@ -359,9 +416,14 @@ internal sealed class MultiAlteringCoordinator
                                 "다음 대기 주기에 실제 제법 재조회 · 무확인 등록 클릭 금지");
                         }
                         globalQueueUnblocked.Remove(facility);
+                        string? starvation = deferrals.ObserveBlocked(
+                            facility, nextPlan.DisplayName, refusal,
+                            facilityWorks.Length, otherFullLanes);
+                        if (starvation is not null) Log?.Invoke(starvation);
                         continue;
                     }
 
+                    deferrals.Reset(facility);
                     globalQueueBlocked.Remove(facility);
                     if (globalQueueUnblocked.Add(facility))
                         Log?.Invoke(
@@ -370,6 +432,10 @@ internal sealed class MultiAlteringCoordinator
                             $"해당 시설 {facilityWorks.Length}/7칸 · " +
                             "기존 화면·재료·등록 안전 검증 유지");
                 }
+
+                if (!(_deferOtherLanesWhileQueueFull &&
+                    facilityWorks.Length < 7 && anotherFullLane))
+                    deferrals.Reset(facility);
 
                 if (initialVacancy)
                     Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} " +
