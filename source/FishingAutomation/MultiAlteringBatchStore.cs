@@ -23,6 +23,11 @@ internal sealed record MultiAlteringReceiptSnapshot
     public int TotalFacilityWorks { get; init; }
 }
 
+// Shared read-only evidence belongs with the journal because visual-test
+// harnesses include the journal but do not compile the F9 coordinator.
+internal sealed record MaterialSupplyHold(
+    string Item, long Required, long Observed, string Category);
+
 // Read-only shortage evidence. This is NOT a work ticket or registration authority.
 // Persisted in the same atomic batch manifest as other F9 checkpoints.
 internal sealed record MultiAlteringMaterialHoldCheckpoint
