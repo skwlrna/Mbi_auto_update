@@ -140,9 +140,6 @@ internal sealed class MultiAlteringFacilityBottleneckTracker
 
 // V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
 // that the game item can never be acquired. No purchase, CLI write or click.
-internal sealed record MaterialSupplyHold(
-    string Item, long Required, long Observed, string Category);
-
 internal sealed class MaterialSupplyHoldException : InvalidOperationException
 {
     internal MaterialSupplyHold Evidence { get; }
