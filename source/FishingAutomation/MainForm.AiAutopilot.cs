@@ -19,15 +19,17 @@ public sealed partial class MainForm
 
     private Control BuildAiAutopilotPanel()
     {
-        var row = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = Color.FromArgb(245, 248, 253),
+        var row = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = PanelBg,
             Padding = new Padding(12, 6, 12, 6) };
         var title = new Label { Text = "AI 오류 관리", Dock = DockStyle.Left, Width = 110,
             TextAlign = ContentAlignment.MiddleLeft, ForeColor = TitleText,
             Font = new Font("맑은 고딕", 9f, FontStyle.Bold) };
         _aiToggle = new Button { Text = "AI 분석 시작", Dock = DockStyle.Right, Width = 111,
-            BackColor = Color.White, ForeColor = TitleText, FlatStyle = FlatStyle.Flat,
+            BackColor = CardBg2, ForeColor = TitleText, FlatStyle = FlatStyle.Flat,
+            UseVisualStyleBackColor = false,
             Font = new Font("맑은 고딕", 8.5f), Cursor = Cursors.Hand };
         _aiToggle.FlatAppearance.BorderColor = Border;
+        _aiToggle.FlatAppearance.MouseOverBackColor = AccentSoft;
         _aiToggle.Click += (_, _) => ToggleAiAutopilot();
         _aiStartWithApp = new CheckBox { Text = "다음 실행부터 자동 시작", Dock = DockStyle.Right,
             Width = 184, ForeColor = TitleText, BackColor = row.BackColor,
@@ -58,11 +60,12 @@ public sealed partial class MainForm
         var dashboard = new Button
         {
             Text = "오류 시간별 내역", Dock = DockStyle.Right, Width = 120,
-            BackColor = Color.White, ForeColor = TitleText,
-            FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand,
+            BackColor = CardBg2, ForeColor = TitleText,
+            FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false, Cursor = Cursors.Hand,
             Font = new Font("맑은 고딕", 8.5f)
         };
         dashboard.FlatAppearance.BorderColor = Border;
+        dashboard.FlatAppearance.MouseOverBackColor = AccentSoft;
         dashboard.Click += (_, _) =>
         {
             if (_aiDashboard is { IsDisposed: false })
@@ -77,7 +80,7 @@ public sealed partial class MainForm
             _aiDashboard.Show(this); // modeless: F9/F10 and primary controls remain accessible
         };
         _aiState = new Label { Text = "AI 분석이 켜지면 오류 일부를 Codex가 검토합니다", Dock = DockStyle.Fill,
-            AutoEllipsis = true, ForeColor = Color.FromArgb(82, 99, 120),
+            AutoEllipsis = true, ForeColor = Muted,
             TextAlign = ContentAlignment.MiddleLeft, Font = new Font("맑은 고딕", 8f) };
         row.Controls.Add(_aiState);
         row.Controls.Add(_aiStartWithApp);
