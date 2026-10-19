@@ -9,6 +9,15 @@ namespace FishingAutomation;
 /// </summary>
 internal sealed class AiAutopilotDashboard : Form
 {
+    private static readonly Color UiBackground = Color.FromArgb(23, 23, 24);
+    private static readonly Color UiPanel = Color.FromArgb(30, 30, 32);
+    private static readonly Color UiButton = Color.FromArgb(38, 38, 40);
+    private static readonly Color UiText = Color.FromArgb(238, 238, 244);
+    private static readonly Color UiMuted = Color.FromArgb(181, 185, 196);
+    private static readonly Color UiBorder = Color.FromArgb(53, 53, 57);
+    private static readonly Color UiAccentSoft = Color.FromArgb(54, 44, 74);
+    private static readonly Color UiError = Color.FromArgb(255, 159, 151);
+
     private readonly Func<bool> _isWatcherRunning;
     private readonly Func<string> _watcherStatus;
     private readonly Label _overview;
@@ -39,26 +48,27 @@ internal sealed class AiAutopilotDashboard : Form
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(1080, 550);
         ClientSize = new Size(1140, 720);
-        BackColor = Color.FromArgb(246, 248, 252);
+        BackColor = UiBackground;
+        ForeColor = UiText;
         Font = new Font("맑은 고딕", 9f);
 
         var heading = new Label
         {
             Text = "AI 오류 내역 · 발생 시간순", Dock = DockStyle.Top, Height = 49,
             Font = new Font("맑은 고딕", 14f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(23, 32, 51),
+            ForeColor = UiText,
             Padding = new Padding(17, 10, 0, 0)
         };
         _overview = new Label
         {
             Dock = DockStyle.Top, Height = 76, AutoEllipsis = true,
-            ForeColor = Color.FromArgb(51, 68, 91),
+            ForeColor = UiMuted,
             Padding = new Padding(18, 6, 12, 0)
         };
         _pipeline = new Label
         {
             Dock = DockStyle.Top, Height = 72, AutoEllipsis = true,
-            ForeColor = Color.FromArgb(40, 61, 82), BackColor = Color.White,
+            ForeColor = UiText, BackColor = UiPanel,
             Font = new Font("맑은 고딕", 9f),
             Padding = new Padding(18, 8, 10, 4),
             Text = "AI 단계별 현황: 오류 대기 중"
@@ -66,7 +76,7 @@ internal sealed class AiAutopilotDashboard : Form
         _counts = new Label
         {
             Dock = DockStyle.Top, Height = 54,
-            ForeColor = Color.FromArgb(23, 32, 51),
+            ForeColor = UiText,
             Font = new Font("맑은 고딕", 9.5f, FontStyle.Bold),
             Padding = new Padding(18, 5, 12, 0)
         };
@@ -74,64 +84,70 @@ internal sealed class AiAutopilotDashboard : Form
         {
             Text = "초기 후보 로컬 테스트 ≠ 최종 PR CI ≠ 실게임 해결. 세 단계는 별개입니다.",
             Dock = DockStyle.Top, Height = 34,
-            ForeColor = Color.FromArgb(70, 89, 112),
+            ForeColor = UiMuted,
             Padding = new Padding(18, 5, 12, 0)
         };
-        var foot = new Panel { Dock = DockStyle.Bottom, Height = 51 };
+        var foot = new Panel { Dock = DockStyle.Bottom, Height = 51, BackColor = UiBackground };
         _updated = new Label
         {
             Text = "최근 기록을 표시합니다 · 게임에 자동 적용하지 않습니다.",
-            Dock = DockStyle.Fill, ForeColor = Color.FromArgb(82, 99, 120),
+            Dock = DockStyle.Fill, ForeColor = UiMuted,
             TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(18, 0, 0, 0)
         };
         var confirmed = new Button
         {
             Text = "적용 후 해결 확인", Dock = DockStyle.Right, Width = 137,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         confirmed.Click += (_, _) => SubmitGameFeedback("resolved");
         var recurred = new Button
         {
             Text = "적용 후 재발", Dock = DockStyle.Right, Width = 137,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         recurred.Click += (_, _) => SubmitGameFeedback("recurred");
         var reset = new Button
         {
             Text = "확인 취소", Dock = DockStyle.Right, Width = 93,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         reset.Click += (_, _) => SubmitGameFeedback("unverified");
         var handoff = new Button
         {
             Text = "ChatGPT로 이어가기", Dock = DockStyle.Right, Width = 137,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         handoff.Click += (_, _) => CopyChatGptHandoff();
         var resumeCodex = new Button
         {
             Text = "Codex 재개", Dock = DockStyle.Right, Width = 125,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         resumeCodex.Click += (_, _) => RequestQuotaResume();
         var retryInterrupted = new Button
         {
             Text = "중단 작업 재분석", Dock = DockStyle.Right, Width = 140,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retryInterrupted.Click += (_, _) => RequestInterruptedRetry();
         var retryQuota = new Button
         {
             Text = "한도 오류 재분석", Dock = DockStyle.Right, Width = 130,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retryQuota.Click += (_, _) => RequestQuotaRetry();
         var refresh = new Button
         {
             Text = "새로고침", Dock = DockStyle.Right, Width = 105,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat,
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand
         };
+        foreach (var button in new[] { confirmed, recurred, reset, handoff, resumeCodex,
+            retryInterrupted, retryQuota, refresh })
+        {
+            button.FlatAppearance.BorderColor = UiBorder;
+            button.FlatAppearance.MouseOverBackColor = UiAccentSoft;
+        }
         refresh.Click += (_, _) => Reload();
         foot.Controls.Add(_updated);
         foot.Controls.Add(refresh);
@@ -150,7 +166,30 @@ internal sealed class AiAutopilotDashboard : Form
             AllowUserToResizeRows = false, RowHeadersVisible = false,
             MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            BackgroundColor = Color.White, GridColor = Color.FromArgb(224, 232, 242)
+            BackgroundColor = UiBackground, GridColor = UiBorder
+        };
+        _recent.EnableHeadersVisualStyles = false;
+        _recent.BackColor = UiPanel;
+        _recent.ForeColor = UiText;
+        _recent.DefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = UiPanel, ForeColor = UiText,
+            SelectionBackColor = UiAccentSoft, SelectionForeColor = UiText
+        };
+        _recent.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = UiButton, ForeColor = UiText,
+            SelectionBackColor = UiAccentSoft, SelectionForeColor = UiText
+        };
+        _recent.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = UiButton, ForeColor = UiText,
+            SelectionBackColor = UiButton, SelectionForeColor = UiText
+        };
+        _recent.RowHeadersDefaultCellStyle = new DataGridViewCellStyle
+        {
+            BackColor = UiButton, ForeColor = UiText,
+            SelectionBackColor = UiAccentSoft, SelectionForeColor = UiText
         };
         _recent.ColumnHeadersHeight = 39;
         _recent.RowTemplate.Height = 35;
@@ -187,8 +226,8 @@ internal sealed class AiAutopilotDashboard : Form
         {
             Text = "오류를 선택하면 원인과 다음에 할 일을 아래에서 볼 수 있습니다.",
             Dock = DockStyle.Bottom, Height = 90,
-            ForeColor = Color.FromArgb(40, 61, 82),
-            BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
+            ForeColor = UiText,
+            BackColor = UiPanel, BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(15, 7, 10, 6), AutoEllipsis = true
         };
         _recent.SelectionChanged += (_, _) =>
@@ -201,12 +240,13 @@ internal sealed class AiAutopilotDashboard : Form
         {
             Text = "최신 오류가 위에 나옵니다. 한 줄을 누르면 자세히 볼 수 있고, 수정안이 있으면 두 번 눌러 GitHub에서 엽니다.",
             Dock = DockStyle.Top, Height = 30, Padding = new Padding(18, 0, 0, 0),
-            ForeColor = Color.FromArgb(82, 99, 120)
+            ForeColor = UiMuted
         };
-        var rangeBar = new Panel { Dock = DockStyle.Top, Height = 39 };
+        var rangeBar = new Panel { Dock = DockStyle.Top, Height = 39, BackColor = UiBackground };
         _range = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList, Width = 140,
+            BackColor = UiButton, ForeColor = UiText, FlatStyle = FlatStyle.Flat,
             Location = new Point(18, 6), Font = new Font("맑은 고딕", 9f)
         };
         _range.Items.AddRange(new object[] { "전체 내역", "오늘", "최근 7일" });
@@ -216,26 +256,31 @@ internal sealed class AiAutopilotDashboard : Form
         {
             Text = "발생 시간 기준 · PC에 기록된 오류와 Codex 분석 결과",
             Location = new Point(175, 8), AutoSize = true,
-            ForeColor = Color.FromArgb(82, 99, 120)
+            ForeColor = UiMuted
         };
         var checkPipeline = new Button
         {
             Text = "AI 사전 점검 (실행 없음)", Dock = DockStyle.Right, Width = 195,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         checkPipeline.Click += async (_, _) => await RequestPipelineCheckAsync();
         var retentionCleanup = new Button
         {
             Text = "작업공간 안전 정리", Dock = DockStyle.Right, Width = 155,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retentionCleanup.Click += (_, _) => RequestRetentionCleanup();
         var retentionRetry = new Button
         {
             Text = "공간 한도 재분석", Dock = DockStyle.Right, Width = 145,
-            BackColor = Color.White, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retentionRetry.Click += (_, _) => RequestRetentionRetry();
+        foreach (var button in new[] { checkPipeline, retentionCleanup, retentionRetry })
+        {
+            button.FlatAppearance.BorderColor = UiBorder;
+            button.FlatAppearance.MouseOverBackColor = UiAccentSoft;
+        }
         rangeBar.Controls.Add(checkPipeline);
         rangeBar.Controls.Add(retentionCleanup);
         rangeBar.Controls.Add(retentionRetry);
@@ -1094,7 +1139,7 @@ internal sealed class AiAutopilotDashboard : Form
                     item.Id, item.Title, item.Detail, item.Status, item.Next);
                 _recent.Rows[row].Cells[2].ToolTipText = item.Detail;
                 if (item.Status.Contains("중단") || item.Status.Contains("실패"))
-                    _recent.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(150, 65, 53);
+                    _recent.Rows[row].DefaultCellStyle.ForeColor = UiError;
             }
             _recent.ClearSelection();
             string retentionLabel = "작업공간 상태 미확인";
