@@ -17,7 +17,8 @@ internal static class MultiAlteringIncidentSnapshot
         LifeSkillRecoveryDecision? recoveryDecision = null,
         LifeSkillRecoveryOutcomeMetrics? recoveryMetrics = null,
         IReadOnlyList<LifeSkillWorkOutcomeMetrics>? batchWorkOutcomes = null,
-        IReadOnlyList<LifeSkillWorkOutcomeMetrics>? sharedWorkOutcomes = null)
+        IReadOnlyList<LifeSkillWorkOutcomeMetrics>? sharedWorkOutcomes = null,
+        IReadOnlyList<FacilityBottleneckSnapshot>? facilityBottlenecks = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(readRecipes);
@@ -123,6 +124,25 @@ internal static class MultiAlteringIncidentSnapshot
                     omissionSuspectedOrUncertain = x.Uncertain,
                     stillUnconfirmed = x.InFlight,
                     concludedOutputVerificationRate = x.ConcludedOutputVerificationRate
+                }).ToArray(),
+            // Observed incidents, not verified missing goods. Names are the
+            // already-selected F9 facilities; never persist raw CLI errors.
+            facilityBottleneckScope = "current_F9_run_evidence_only",
+            facilityBottlenecks = (facilityBottlenecks ?? []).Take(8)
+                .Select(x => new
+                {
+                    facility = x.Facility,
+                    queueFullEpisodes = x.QueueFullEpisodes,
+                    recipeUnavailableEpisodes = x.RecipeUnavailableEpisodes,
+                    stalledWorkEvents = x.StalledWorkEvents,
+                    uncertainBatchAttempts = x.UncertainBatchAttempts,
+                    currentlyBlocked = x.CurrentlyBlocked,
+                    blockedSeconds = x.BlockedSeconds,
+                    lastKnownQueueDepth = x.LastKnownQueueDepth,
+                    lastKnownCompleted = x.LastKnownCompleted,
+                    repeatedIssue = x.RepeatedIssue,
+                    confirmedOmission = false,
+                    permitsGameAction = false
                 }).ToArray(),
             selected, lanes
         }, new JsonSerializerOptions { WriteIndented = true });
