@@ -54,7 +54,11 @@ internal sealed class CraftingAutomation
         Gained = 0;
         CompletedCrafts = 0;
 
-        var exact = await _data.ExactAsync(plan.DisplayName, ct);
+        var exact = _managerState is null
+            ? await _data.ExactAsync(plan.DisplayName, ct)
+            : await _managerState.ReadWithRecoveryAsync(
+                LifeSkillStage.Crafting, "craft-recipe",
+                t => _data.ExactAsync(plan.DisplayName, t), ct);
         plan = plan with { ProducedPerCraft = exact.ProducedPerCraft };
         plan.Validate();
 
@@ -298,7 +302,11 @@ internal sealed class CraftingAutomation
         if (_altering is null)
             return false;
 
-        var recipes = await _altering.RecipesAsync(ct);
+        var recipes = _managerState is null
+            ? await _altering.RecipesAsync(ct)
+            : await _managerState.ReadWithRecoveryAsync(
+                LifeSkillStage.Crafting, "material-recipe",
+                _altering.RecipesAsync, ct);
         return recipes.Any(recipe =>
             string.Equals(recipe.DisplayName, displayName, StringComparison.Ordinal) ||
             string.Equals(

@@ -107,7 +107,8 @@ public sealed partial class MainForm
             var screen = new ZeroWingGatheringScreen(visual, _cli, identity);
             var managerState = new LifeSkillManagerState();
             managerState.Log += text => Ui(() => _log.Write(text));
-            var automation = new GatheringAutomation(data, screen);
+            var automation = new GatheringAutomation(
+                data, screen, managerState: managerState);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
             _activeMode = "채집"; _mode.Enabled = false;

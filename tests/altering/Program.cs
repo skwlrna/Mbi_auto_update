@@ -4,6 +4,101 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.32: per-stage transport recovery never reissues a game action.
+var v3232Log = new List<string>();
+var v3232Manager = new LifeSkillManagerState(
+    recoveryDelay: (_, _) => Task.CompletedTask);
+v3232Manager.Log += v3232Log.Add;
+v3232Manager.BeginStage(LifeSkillStage.Gathering, "gather");
+int v3232Reads = 0;
+long v3232Recovered = await v3232Manager.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "물이 든 병",
+    (_, _) =>
+    {
+        v3232Reads++;
+        if (v3232Reads == 1) throw new TimeoutException("transient CLI");
+        return Task.FromResult(4L);
+    }, CancellationToken.None);
+Check(v3232Recovered == 4 && v3232Reads == 2 &&
+      v3232Log.Any(x => x.Contains("화면 입력 없음", StringComparison.Ordinal)) &&
+      v3232Log.Any(x => x.Contains("새 CLI 응답 확인", StringComparison.Ordinal)),
+    "shared manager retries only a transient read once and logs fresh recovery");
+
+v3232Reads = 0;
+bool v3232Persistent = false;
+try
+{
+    _ = await v3232Manager.ReadWithRecoveryAsync(
+        LifeSkillStage.Gathering, "activity",
+        ct => { v3232Reads++; throw new IOException("link unstable"); },
+        CancellationToken.None);
+}
+catch (IOException) { v3232Persistent = true; }
+Check(v3232Persistent && v3232Reads == 2 &&
+      v3232Log.Any(x => x.Contains("분류=transient_read", StringComparison.Ordinal)),
+    "persistent CLI I/O failure stops after two reads and retains error category");
+
+v3232Reads = 0;
+bool v3232Mismatch = false;
+try
+{
+    _ = await v3232Manager.ReadWithRecoveryAsync(
+        LifeSkillStage.Gathering, "activity",
+        ct => { v3232Reads++; throw new InvalidOperationException("state mismatch"); },
+        CancellationToken.None);
+}
+catch (InvalidOperationException) { v3232Mismatch = true; }
+Check(v3232Mismatch && v3232Reads == 1 &&
+      v3232Log.Any(x => x.Contains("분류=state_conflict", StringComparison.Ordinal)),
+    "game state conflict never becomes an automatic retry");
+
+int v3232NegativeReads = 0;
+bool v3232InvalidData = false;
+try
+{
+    _ = await v3232Manager.ReadFreshCountAsync(
+        LifeSkillStage.Gathering, "물이 든 병",
+        (_, _) => { v3232NegativeReads++; return Task.FromResult(-1L); },
+        CancellationToken.None);
+}
+catch (InvalidDataException) { v3232InvalidData = true; }
+Check(v3232InvalidData && v3232NegativeReads == 1,
+    "semantically invalid inventory cannot be masked by transport recovery");
+
+var v3232Tcs = new TaskCompletionSource<long>(
+    TaskCreationOptions.RunContinuationsAsynchronously);
+var v3232Pending = v3232Manager.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "물이 든 병", (_, _) => v3232Tcs.Task,
+    CancellationToken.None);
+v3232Manager.BeginStage(LifeSkillStage.Crafting, "handoff to crafting");
+v3232Tcs.SetResult(77);
+bool v3232Late = false;
+try { _ = await v3232Pending; }
+catch (InvalidOperationException) { v3232Late = true; }
+Check(v3232Late &&
+      !v3232Manager.TryGetFreshEvidence(LifeSkillStage.Crafting, "물이 든 병", out _),
+    "late gathering result does not pollute new crafting epoch");
+
+int v3232CancelledReads = 0;
+using (var v3232Cancel = new CancellationTokenSource())
+{
+    v3232Manager.BeginStage(LifeSkillStage.Altering, "retry cancellation");
+    var v3232WithCancel = new LifeSkillManagerState(
+        recoveryDelay: (_, token) => { v3232Cancel.Cancel(); return Task.CompletedTask; });
+    v3232WithCancel.BeginStage(LifeSkillStage.Altering, "retry cancellation");
+    bool cancellationProtected = false;
+    try
+    {
+        _ = await v3232WithCancel.ReadWithRecoveryAsync(
+            LifeSkillStage.Altering, "recipes",
+            _ => { v3232CancelledReads++; throw new TimeoutException(); },
+            v3232Cancel.Token);
+    }
+    catch (OperationCanceledException) { cancellationProtected = true; }
+    Check(cancellationProtected && v3232CancelledReads == 1,
+        "F10 cancellation prevents a second read and does not retry input");
+}
+
 // Deferred queue configuration must not authorize a game operation.
 // F9 checks a fresh CLI recipe snapshot before any screen input.
 var deferredPlan = new AlteringPlan("목재 가공 시설", "목재+", 12, 3, false);
