@@ -455,7 +455,8 @@ internal sealed class MultiAlteringCoordinator
         Func<AlteringPlan, CancellationToken, Task>? preparePlan = null,
         Func<CancellationToken, Task>? onIdleAbyssRound = null,
         long minimumAbyssWaitSeconds = AbyssAlteringSchedulePolicy.MinimumUsefulWaitSeconds,
-        Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null)
+        Func<CancellationToken, Task<IReadOnlyList<AlteringRecipe>>>? readRecipes = null,
+        Func<AlteringPlan, CancellationToken, Task<MaterialSupplyHold?>>? checkUnavailableRoute = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -492,6 +493,11 @@ internal sealed class MultiAlteringCoordinator
             StringComparer.Ordinal);
         var completed = new HashSet<(string Facility, string Display, int Ordinal)>();
         var prepared = new HashSet<(string Facility, string Display, int Ordinal)>();
+        // A held recipe does not become a completed plan or permit the next
+        // recipe in the same lane. Only independent facilities keep working.
+        var held = new Dictionary<string,
+            (AlteringPlan Plan, MaterialSupplyHold Reason, DateTimeOffset NextCheck)>(
+                StringComparer.Ordinal);
         // Keep diagnostic evidence when the CLI refusal reason changes. Avoid
         // repeating an identical line every 30-second observation cycle.
         var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -584,6 +590,29 @@ internal sealed class MultiAlteringCoordinator
                 ct.ThrowIfCancellationRequested();
                 if (PendingCount(facility) == 0)
                     continue;
+
+                if (held.TryGetValue(facility, out var waiting))
+                {
+                    if (checkUnavailableRoute is null)
+                        throw new InvalidOperationException(
+                            "보류 재료 재확인 경로가 없어 자동 재개하지 않습니다.");
+                    if (_now() < waiting.NextCheck)
+                        continue;
+                    // The same fresh read-only classification that caused the
+                    // hold must re-verify stock and recipe identity. Old UI
+                    // evidence, time alone or another lane's completion cannot
+                    // unblock this plan.
+                    var unresolved = await checkUnavailableRoute(waiting.Plan, ct);
+                    if (unresolved is not null)
+                    {
+                        held[facility] = (waiting.Plan, unresolved,
+                            _now() + TimeSpan.FromSeconds(30));
+                        continue;
+                    }
+                    held.Remove(facility);
+                    Log?.Invoke($"[다중가공][재료 재확인] {facility} · {waiting.Plan.DisplayName} · " +
+                        "부족 상태 재조회 완료 · 기존 F9 장부/화면 등록 검증을 다시 수행");
+                }
 
                 var facilityWorks = works
                     .Where(x => x.FacilityName == facility)
@@ -741,7 +770,26 @@ internal sealed class MultiAlteringCoordinator
                         if (preparePlan is not null)
                         {
                             Log?.Invoke($"[다중가공] {facility.Replace(" 시설", "")} · {plan.DisplayName} 새 품목 재료 점검");
-                            await preparePlan(plan, ct);
+                            try
+                            {
+                                await preparePlan(plan, ct);
+                            }
+                            catch (MaterialSupplyHoldException unavailable)
+                                when (checkUnavailableRoute is not null)
+                            {
+                                // Must be raised BEFORE any input for this plan.
+                                // No completion, no work ticket and no next
+                                // recipe in this same facility may be claimed.
+                                held[facility] = (plan, unavailable.Evidence,
+                                    _now() + TimeSpan.FromSeconds(30));
+                                Log?.Invoke($"[다중가공][재료 확보 대기] {facility} · " +
+                                    $"{plan.DisplayName} · {unavailable.Evidence.Item} " +
+                                    $"{unavailable.Evidence.Observed}/{unavailable.Evidence.Required} · " +
+                                    $"분류={unavailable.Evidence.Category} · " +
+                                    "다른 시설 진행 · 재고/제법 30초 간격 재검증 · " +
+                                    "자동 구매·재등록 없음");
+                                break;
+                            }
                         }
                         // A failed/cancelled preparation never authorizes a click.
                         prepared.Add(Key(plan));
