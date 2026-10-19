@@ -105,6 +105,8 @@ public sealed partial class MainForm
             var visual = new InventoryBulkGatheringScreen(
                 windows[0].Handle, settings, Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, data);
             var screen = new ZeroWingGatheringScreen(visual, _cli, identity);
+            var managerState = new LifeSkillManagerState();
+            managerState.Log += text => Ui(() => _log.Write(text));
             var automation = new GatheringAutomation(data, screen);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
@@ -132,7 +134,15 @@ public sealed partial class MainForm
                 {
                     try
                     {
+                        managerState.BeginStage(LifeSkillStage.Gathering,
+                            "단독 채집 시작");
+                        _ = await managerState.ReadFreshCountAsync(
+                            LifeSkillStage.Gathering, plan.DisplayName,
+                            data.ItemCountAsync, token);
                         await automation.RunAsync(plan, token);
+                        _ = await managerState.ReadFreshCountAsync(
+                            LifeSkillStage.Gathering, plan.DisplayName,
+                            data.ItemCountAsync, token);
                         Ui(() =>
                         {
                             _dungeonCompleted = checked((int)Math.Min(automation.Gained,int.MaxValue));

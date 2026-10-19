@@ -287,6 +287,73 @@ catch (InvalidOperationException ex) when (ex.Message.Contains("제법 동일성
 Check(recipeIdentityBlocked && missingRecipeRuns == 0,
     "F9 fails closed when a live recipe cannot be uniquely identified before independent registration");
 
+
+// V3.2.31: one observation epoch for gathering, intermediate processing,
+// and crafting. The evidence is never permission to click.
+var sharedClock = new DateTimeOffset(2026, 10, 19, 8, 0, 0, TimeSpan.Zero);
+var sharedManager = new LifeSkillManagerState(
+    () => sharedClock, TimeSpan.FromSeconds(3));
+int observedReads = 0;
+Task<long> ReadObserved(string _, CancellationToken ct)
+{
+    ct.ThrowIfCancellationRequested();
+    observedReads++;
+    return Task.FromResult(7L);
+}
+sharedManager.BeginStage(LifeSkillStage.Altering, "F9");
+_ = await sharedManager.ReadFreshCountAsync(
+    LifeSkillStage.Altering, "물이 든 병", ReadObserved, CancellationToken.None);
+Check(sharedManager.TryGetFreshEvidence(
+    LifeSkillStage.Altering, "물이 든 병", out var previous) &&
+    previous?.Quantity == 7, "confirmed CLI count is evidence in altering stage");
+sharedManager.BeginStage(LifeSkillStage.Gathering, "raw gather");
+Check(!sharedManager.TryGetFreshEvidence(
+    LifeSkillStage.Altering, "물이 든 병", out _), "gathering handoff clears old inventory state");
+bool stageMismatch = false;
+try
+{
+    await sharedManager.ReadFreshCountAsync(LifeSkillStage.Altering,
+        "물이 든 병", ReadObserved, CancellationToken.None);
+}
+catch (InvalidOperationException) { stageMismatch = true; }
+Check(stageMismatch && observedReads == 1,
+    "wrong stage blocks using old CLI state before requesting more data");
+_ = await sharedManager.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "물이 든 병", ReadObserved, CancellationToken.None);
+sharedClock = sharedClock.AddSeconds(4);
+Check(!sharedManager.TryGetFreshEvidence(
+    LifeSkillStage.Gathering, "물이 든 병", out _),
+    "old observations expire and cannot masquerade as fresh state");
+sharedManager.BeginStage(LifeSkillStage.Crafting, "quest resume");
+_ = await sharedManager.ReadFreshCountAsync(
+    LifeSkillStage.Crafting, "물이 든 병", ReadObserved, CancellationToken.None);
+Check(observedReads == 3 &&
+    sharedManager.TryGetFreshEvidence(LifeSkillStage.Crafting, "물이 든 병", out _),
+    "crafting sees fresh source data after handoff");
+bool lateReplyBlocked = false;
+sharedManager.BeginStage(LifeSkillStage.Altering, "intermediate");
+try
+{
+    await sharedManager.ReadFreshCountAsync(
+        LifeSkillStage.Altering, "물이 든 병",
+        (_, _) => { sharedManager.BeginStage(LifeSkillStage.Gathering, "overlap");
+            return Task.FromResult(12L); }, CancellationToken.None);
+}
+catch (InvalidOperationException) { lateReplyBlocked = true; }
+Check(lateReplyBlocked && !sharedManager.TryGetFreshEvidence(
+    LifeSkillStage.Altering, "물이 든 병", out _),
+    "out-of-order reply after a stage switch fails closed");
+sharedManager.Invalidate("F10 stop");
+Check(!sharedManager.TryGetFreshEvidence(
+    LifeSkillStage.Gathering, "물이 든 병", out _),
+    "cancelled or unknown location invalidates shared evidence");
+bool impossibleCountRejected = false;
+sharedManager.BeginStage(LifeSkillStage.Gathering, "fresh read");
+try { await sharedManager.ReadFreshCountAsync(
+    LifeSkillStage.Gathering, "물이 든 병",
+    (_, _) => Task.FromResult(-1L), CancellationToken.None); }
+catch (InvalidDataException) { impossibleCountRejected = true; }
+Check(impossibleCountRejected, "negative CLI inventory cannot be trusted");
 // V3.2.30: unattended empty food lane is observable without any new input.
 var observedTime = DateTimeOffset.Parse("2026-10-19T00:00:00+00:00");
 var laneDeferral = new MultiAlteringLaneDeferralTracker(

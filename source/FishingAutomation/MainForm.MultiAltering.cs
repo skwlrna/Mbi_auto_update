@@ -196,6 +196,10 @@ public sealed partial class MainForm
 
             _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
 
+            var managerState = new LifeSkillManagerState();
+            managerState.Log += text => Ui(() => _log.Write(text));
+            managerState.BeginStage(LifeSkillStage.Altering,
+                "F9 가공·채집 중간관리자 시작");
             var laneState = new FacilityLaneState(currentWorks);
             // M3: reloading sessions and existing CLI works never restores
             // physical onsite proof. This fresh in-memory manager owns all
@@ -233,7 +237,8 @@ public sealed partial class MainForm
                 screen,
                 gatheringScreen,
                 dependencyScheduler: dependencyScheduler,
-                laneState: laneState);
+                laneState: laneState,
+                managerState: managerState);
 
             visualAltering.Log += text => Ui(() =>
             {

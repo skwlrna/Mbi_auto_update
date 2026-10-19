@@ -16,6 +16,7 @@ internal sealed class MultiGatheringCoordinator
     private readonly IGatheringScreen _screen;
     private readonly Func<TimeSpan, CancellationToken, Task>? _delay;
     private readonly int _verificationAttempts;
+    private readonly LifeSkillManagerState? _managerState;
 
     internal event Action<string>? Log;
 
@@ -23,8 +24,10 @@ internal sealed class MultiGatheringCoordinator
         IGatheringData data,
         IGatheringScreen screen,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        int verificationAttempts = 120)
+        int verificationAttempts = 120,
+        LifeSkillManagerState? managerState = null)
     {
+        _managerState = managerState;
         _data = data;
         _screen = screen;
         _delay = delay;
@@ -54,13 +57,19 @@ internal sealed class MultiGatheringCoordinator
         {
             ct.ThrowIfCancellationRequested();
 
+            _managerState?.BeginStage(LifeSkillStage.Gathering,
+                "원재료 채집 시작: " + request.DisplayName);
             // Re-read immediately before this material. Previous gathering or a
             // manual inventory change may already have satisfied part of the plan.
             long before = await _data.ItemCountAsync(request.DisplayName, ct);
             long targetTotal = request.TargetTotal;
 
             // One more fresh read keeps "start-time inventory is authority" explicit.
-            long fresh = await _data.ItemCountAsync(request.DisplayName, ct);
+            long fresh = _managerState is null
+                ? await _data.ItemCountAsync(request.DisplayName, ct)
+                : await _managerState.ReadFreshCountAsync(
+                    LifeSkillStage.Gathering, request.DisplayName,
+                    _data.ItemCountAsync, ct);
             long remaining = Math.Max(0, targetTotal - fresh);
             if (remaining == 0)
             {
@@ -86,7 +95,11 @@ internal sealed class MultiGatheringCoordinator
             automation.Log += text => Log?.Invoke(text);
             await automation.RunAsync(plan, ct);
 
-            long after = await _data.ItemCountAsync(request.DisplayName, ct);
+            long after = _managerState is null
+                ? await _data.ItemCountAsync(request.DisplayName, ct)
+                : await _managerState.ReadFreshCountAsync(
+                    LifeSkillStage.Gathering, request.DisplayName,
+                    _data.ItemCountAsync, ct);
             if (after < targetTotal)
                 throw new InvalidOperationException(
                     $"{request.DisplayName} 다중 채집 후 재고 검증 실패: {after}/{targetTotal}");

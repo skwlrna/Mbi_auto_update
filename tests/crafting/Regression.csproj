@@ -17,6 +17,7 @@
     <Compile Include="../../source/FishingAutomation/CraftingAutomation.cs" Link="CraftingAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingScreenContract.cs" Link="CraftingScreenContract.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringCliData.cs" Link="GatheringCliData.cs" />
+    <Compile Include="../../source/FishingAutomation/LifeSkillManagerState.cs" Link="LifeSkillManagerState.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringQueries.cs" Link="GatheringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringSafetyPolicy.cs" Link="GatheringSafetyPolicy.cs" />
