@@ -92,6 +92,9 @@ public sealed partial class MainForm
         private readonly ToolTip _tips = new();
         private ContextMenuStrip? _openMenu;
         private readonly Font _baseFont = new("맑은 고딕", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
+        // The dashboard paints many captions every refresh. Reuse GDI fonts by
+        // integer pixel size instead of creating one for every text draw.
+        private readonly Dictionary<(int Pixels, bool Bold), Font> _textFonts = new();
         private readonly Color _text = TitleText;
         private readonly Color _cyan = Blue;
         private readonly Color _green = Green;
@@ -448,11 +451,18 @@ public sealed partial class MainForm
         {
             base.OnResize(e);
             if (_positions is null) return;
-            foreach (var (control, r) in _positions)
+            float sx = ScaleX, sy = ScaleY;
+            SuspendLayout();
+            try
             {
-                control.Bounds = Rectangle.Round(new RectangleF(r.X * ScaleX, r.Y * ScaleY, r.Width * ScaleX, r.Height * ScaleY));
-                control.Invalidate();
+                foreach (var (control, r) in _positions)
+                {
+                    var bounds = Rectangle.Round(new RectangleF(r.X * sx, r.Y * sy, r.Width * sx, r.Height * sy));
+                    // Avoid repeatedly invalidating unchanged child surfaces.
+                    if (control.Bounds != bounds) control.Bounds = bounds;
+                }
             }
+            finally { ResumeLayout(false); }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -514,8 +524,14 @@ public sealed partial class MainForm
             var bounds = Rectangle.FromLTRB((int)Math.Round(points[0].X), (int)Math.Round(points[0].Y),
                 (int)Math.Round(points[1].X), (int)Math.Round(points[1].Y));
             float scale = Math.Min(Math.Abs(transform.Elements[0]), Math.Abs(transform.Elements[3]));
-            float pixels = Math.Max(size >= 18 ? 13f : 12f, (float)Math.Round(size * scale));
-            using var font = new Font(_baseFont.FontFamily, pixels, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+            int pixels = (int)Math.Max(size >= 18 ? 13f : 12f, Math.Round(size * scale));
+            var key = (pixels, bold);
+            if (!_textFonts.TryGetValue(key, out var font))
+            {
+                font = new Font(_baseFont.FontFamily, pixels,
+                    bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+                _textFonts.Add(key, font);
+            }
             var state = g.Save();
             try
             {
@@ -752,6 +768,8 @@ public sealed partial class MainForm
                 try { _openMenu?.Dispose(); } catch { }
                 _art.Dispose();
                 foreach (var preview in _dungeonPreviews) preview?.Dispose();
+                foreach (var font in _textFonts.Values) font.Dispose();
+                _textFonts.Clear();
                 _baseFont.Dispose();
                 _tips.Dispose();
             }
