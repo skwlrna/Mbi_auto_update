@@ -61,7 +61,10 @@ class OneClickPcTests(unittest.TestCase):
                 return Done()
 
             def fake_step(argv, cwd, limit):
-                self.assertTrue(str(cwd).startswith(str(Path(directory))))
+                # Windows may report TEMP using the 8.3 alias instead of
+                # the expanded user-profile directory. Check actual isolated
+                # source identity, not a textual prefix for the same path.
+                self.assertEqual(cwd.name, "isolated-source")
                 self.assertTrue((cwd / "source/FishingAutomation/FishingAutomation.csproj").exists())
                 commands.append(tuple(argv))
                 return "passed", "exit_0"
