@@ -76,7 +76,7 @@ class PinnedSourceTests(TestCase):
             git(["commit", "-m", "rc candidate"], upstream)
             candidate = git(["rev-parse", "HEAD"], upstream).stdout.strip()
             git(["checkout", "main"], upstream)
-            marker.write_text(candidate + "\\n", encoding="ascii")
+            marker.write_text(candidate + "\n", encoding="ascii")
 
             trusted.add(str(upstream))
             release_source.SOURCE_URL = str(upstream)
