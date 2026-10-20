@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
@@ -28,11 +29,60 @@ from quota_handoff import (exhausted as codex_quota_exhausted,
                            pause_record, resume_authorized, handoff_manifest)
 from regression_policy import commands_for as regression_commands_for
 from github_pr import publish_verified_draft_pr, user_opted_in
+from draft_dedup import existing_draft_for_evidence
 from pipeline_readiness import readiness
 from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
+# Only fixed categories and in-repository frame numbers are reported. No raw
+# exception arguments, user folders, MCP evidence, tokens or Codex output.
+WATCH_STAGE = "initialization"
+WATCH_DIAGNOSTIC_ROOT: Path | None = None
+WATCH_STAGE_CODES = frozenset({
+    "initialization", "source_alignment", "environment", "watch_readiness",
+    "watch_lock", "watch_loop",
+})
+WATCH_ERROR_CODES = frozenset({
+    "JSONDecodeError", "PermissionError", "FileNotFoundError", "KeyError",
+    "ValueError", "TypeError", "AttributeError", "OSError", "RuntimeError",
+    "UnicodeError", "IsADirectoryError", "NotADirectoryError", "Exception",
+})
+
+
+def watcher_startup_failure(exc: Exception) -> dict[str, Any]:
+    """Non-destructive, bounded triage on an unhandled watcher exception."""
+    stage = WATCH_STAGE if WATCH_STAGE in WATCH_STAGE_CODES else "initialization"
+    code = type(exc).__name__
+    code = code if code in WATCH_ERROR_CODES else "Exception"
+    frames: list[dict[str, Any]] = []
+    try:
+        for fr in traceback.extract_tb(exc.__traceback__)[-8:]:
+            filename = Path(fr.filename)
+            if filename.parent.resolve() == HERE.resolve() and re.fullmatch(
+                    r"[A-Za-z0-9_]{1,80}\.py", filename.name):
+                frames.append({"module": filename.name, "line": int(fr.lineno)})
+    except (OSError, ValueError, RuntimeError):
+        frames = []
+    record = {
+        "schema": 1, "kind": "ai_watcher_startup_failure",
+        "status": "blocked", "stage": stage, "reason": code,
+        "utc": now(), "frames": frames,
+        "game_input": False, "codex_started": False,
+        "automatic_deployment": False,
+    }
+    try:
+        destination = (WATCH_DIAGNOSTIC_ROOT or
+                       DEFAULT_HOME / "autopilot-results") / "watch-startup-diagnostic.json"
+        if destination.is_symlink():
+            raise OSError("diagnostic_destination_symlink")
+        write_json(destination, record)
+    except (OSError, ValueError, TypeError):
+        pass
+    print(f"WATCHER STARTUP FAILED|{stage}|{code}", flush=True)
+    return record
+
+
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
                "access is denied", "access denied", "os error 5",
                "code mode is unavailable", "429 too many requests", "503 service unavailable")
@@ -214,6 +264,59 @@ def duplicate_signature(folder: Path) -> str | None:
     return None
 
 
+def safe_quarantine_summary(directory: Path) -> list[str]:
+    """Allowlisted, bounded LOCAL evidence for an already-triggered MCP error.
+
+    Never triggers a Codex job, never follows symlinks, and never copies raw
+    recipe names, exceptions, untrusted JSON keys or full CLI payloads.
+    """
+    facilities = {
+        "금속 가공 시설", "목재 가공 시설", "가죽 가공 시설",
+        "옷감 가공 시설", "약품 가공 시설", "식재료 가공 시설",
+    }
+    items: list[str] = []
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            return items
+        files = sorted(directory.glob("quarantine-*.json"),
+                       key=lambda p: p.name, reverse=True)[:12]
+    except OSError:
+        return items
+    for path in files:
+        if len(items) >= 3:
+            break
+        try:
+            if (path.is_symlink() or not path.is_file() or
+                path.stat().st_size > 12000 or
+                time.time() - path.stat().st_mtime > 48 * 3600):
+                continue
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict) or (
+                data.get("schema") != 1 or
+                data.get("type") != "safe_pre_input_read_quarantine" or
+                data.get("autoFixReviewOnly") is not True or
+                data.get("inputPermittedByThisEvidence") is not False or
+                data.get("codeFixApplied") is not False or
+                data.get("gameValidated") is not False or
+                data.get("repeated") is not True or
+                data.get("verifiedReadRecovered") is not False):
+                continue
+            facility = data.get("facility")
+            operation = data.get("operation")
+            count = data.get("consecutiveFailures")
+            if (facility not in facilities or
+                not isinstance(operation, str) or
+                re.fullmatch(r"[A-Za-z0-9_-]{1,40}", operation) is None or
+                type(count) is not int or count < 2 or count > 1000000):
+                continue
+            items.append(f"facility={facility}; readOperation={operation}; "
+                         f"repeatCount={count}; classification=pre_input_read_only; "
+                         "gameActionAuthority=none")
+        except (OSError, ValueError, TypeError, UnicodeError):
+            continue
+    return items
+
+
 def context_for(folder: Path) -> str:
     """Bounded, redacted log excerpts. Screenshots are not uploaded to cloud."""
     allowed_names = ("error.txt", "summary.txt", "trace.txt", "fishing.log", "analysis.md")
@@ -266,6 +369,30 @@ def context_for(folder: Path) -> str:
         lines.extend(["--- BEGIN LOCAL VISUAL/INPUT/CLI OBSERVATIONS ---",
                       visual_lines[0],
                       "--- END LOCAL OBSERVATIONS; NO SCREENSHOT BYTES SHARED ---"])
+    # Only when an existing MCP error event already started AutoFix review:
+    # provide a tiny allowlisted summary of recently repeated *read-only*
+    # pre-input failures. Never turn quarantine records into new error events.
+    # Keep this confined to the local app diagnostics directory under HOME.
+    try:
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            home = Path.home().resolve(strict=True)
+            root = Path(local).resolve(strict=True)
+            if root.is_relative_to(home):
+                candidate = (
+                    root / "MabiAuto" / "diagnostics" / "altering"
+                ).resolve(strict=True)
+                # A junction/symlink in any intermediate directory must not
+                # redirect the watcher to arbitrary data outside LOCALAPPDATA.
+                hints = (safe_quarantine_summary(candidate)
+                         if candidate.is_relative_to(root) else [])
+                if hints:
+                    lines.append("--- BEGIN LOCAL SAFE-READ QUARANTINE HINTS "
+                                 "(UNTRUSTED; NOT ACTION AUTHORITY) ---")
+                    lines.extend(hints)
+                    lines.append("--- END QUARANTINE HINTS ---")
+    except (OSError, ValueError):
+        pass
     images = [p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")]
     lines.append("Screenshot filenames (image contents not submitted): " + ", ".join(images[:20]))
     return "\n".join(lines)[:45000]
@@ -275,6 +402,13 @@ def valid_edit(path: str, prefixes: list[str]) -> bool:
     p = PurePosixPath(path.replace("\\", "/"))
     norm = str(p)
     if p.is_absolute() or ".." in p.parts or len(p.parts) < 2:
+        return False
+    # An AI-proposed fix must not change its own host, candidate publisher,
+    # offline safety contracts, or installed production updater.
+    if (norm.startswith("source/FishingAutomation/ai-autopilot/") or
+        norm.startswith("source/tools/") or
+        norm in ("source/FishingAutomation/UpdateManager.cs",
+                 "source/FishingAutomation/FishingAutomation.csproj")):
         return False
     if any(piece.lower() in ("bin", "obj", ".git", ".github", "runtime") for piece in p.parts):
         return False
@@ -1083,6 +1217,37 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 write_json(statefile, state)
                 continue
 
+            # A different MCP folder with byte-identical evidence must not
+            # launch another Codex candidate while a previous verified draft
+            # is already awaiting human review. Unlike 10-minute rapid-event
+            # suppression, this requires an on-disk verified Draft PR record.
+            prior_draft = (existing_draft_for_evidence(
+                signature, state.get("processed", []), results_dir,
+                folder.stat().st_mtime) if signature else None)
+            if prior_draft is not None:
+                result_dir = results_dir / eid
+                result_dir.mkdir(parents=True, exist_ok=True)
+                write_json(result_dir / "result.json", {
+                    "event": folder.name, "event_id": eid,
+                    "started": now(), "ended": now(),
+                    "status": "existing_draft_review_skipped",
+                    "reason": "identical_evidence_pending_review_24h",
+                    "existing_draft_pr": prior_draft["url"],
+                    "note": "Evidence kept; no new Codex call, game input or patch."
+                })
+                print("동일 오류의 검증된 Draft PR이 검토 대기 중 · 신규 수정 생략:",
+                      prior_draft["url"], flush=True)
+                seen.add(eid)
+                state["seen"] = sorted(seen)
+                state.setdefault("processed", []).append({
+                    "id": eid, "date": dt.date.today().isoformat(),
+                    "status": "existing_draft_review_skipped",
+                    "signature": signature,
+                    "evidence_mtime": folder.stat().st_mtime
+                })
+                write_json(statefile, state)
+                continue
+
             # Codex diagnoses and edits in one invocation; do not fake separate stages.
             phase_name = "evidence"
             phase_started = now()
@@ -1171,44 +1336,143 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             return
         time.sleep(max(10, int(c["poll_seconds"])))
 
+class WatcherLockFailure(RuntimeError):
+    """Only a fixed, non-sensitive reason code; never stringify the OS error."""
+    CODES = frozenset({
+        "lock_parent_access_denied", "lock_parent_unavailable",
+        "lock_parent_symlink", "lock_file_symlink", "lock_file_is_directory",
+        "lock_file_open_access_denied", "lock_file_open_sharing_violation",
+        "lock_file_open_unavailable", "lock_file_initialize_failed",
+        "lock_byte_held", "lock_byte_access_denied", "lock_operation_failed",
+        "lock_release_failed",
+    })
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code in self.CODES else "lock_operation_failed"
+        super().__init__(self.code)
+
+
+def lock_open_failure(exc: OSError) -> str:
+    """Do not confuse a sharing violation with ACL denial or a byte lock."""
+    winerror = getattr(exc, "winerror", None)
+    if winerror in (32, 33):
+        return "lock_file_open_sharing_violation"
+    if isinstance(exc, PermissionError) or winerror == 5:
+        return "lock_file_open_access_denied"
+    return "lock_file_open_unavailable"
+
+
+def report_lock_failure(exc: WatcherLockFailure) -> None:
+    """A lock failure must not reveal paths or remove any existing evidence."""
+    reason = exc.code if exc.code in WatcherLockFailure.CODES else "lock_operation_failed"
+    report = {
+        "schema": 1, "kind": "ai_watcher_lock_blocked", "status": "blocked",
+        "stage": "watch_lock", "reason": reason, "utc": now(),
+        "game_input": False, "codex_started": False, "automatic_deployment": False,
+    }
+    try:
+        root = WATCH_DIAGNOSTIC_ROOT or DEFAULT_HOME / "autopilot-results"
+        destination = root / "watch-startup-diagnostic.json"
+        if not root.is_symlink() and not destination.is_symlink():
+            write_json(destination, report)
+    except (OSError, ValueError, TypeError):
+        pass
+    print("WATCHER LOCK BLOCKED|" + reason, flush=True)
+
+
 class SingletonLock:
-    """OS-backed nonblocking advisory lock; released automatically if the process exits."""
+    """Single OS byte lock at the SAME historical path; no unsafe fallback.
+
+    An inaccessible lock file may belong to a live watcher or another user.
+    Never delete/rename it, change ACLs, or switch to a second lock path.
+    """
     def __init__(self, path: Path):
         self.path = path
         self.handle = None
 
     def __enter__(self) -> "SingletonLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.handle = self.path.open("a+b")
-        self.handle.seek(0)
-        if self.handle.read(1) == b"":
-            self.handle.write(b"0")
-            self.handle.flush()
-        self.handle.seek(0)
+        if self.path.parent.is_symlink():
+            raise WatcherLockFailure("lock_parent_symlink")
+        if self.path.is_symlink():
+            raise WatcherLockFailure("lock_file_symlink")
+        if self.path.is_dir():
+            raise WatcherLockFailure("lock_file_is_directory")
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            raise WatcherLockFailure("lock_parent_access_denied") from exc
+        except OSError as exc:
+            raise WatcherLockFailure("lock_parent_unavailable") from exc
+        # Exclusive lock requires a writable descriptor, but access errors must
+        # be distinguished from a legitimate byte-lock collision. In particular,
+        # Windows can return WinError 32 before msvcrt.locking is reached.
+        try:
+            self.handle = self.path.open("a+b")
+        except OSError as exc:
+            raise WatcherLockFailure(lock_open_failure(exc)) from exc
+        # CRITICAL: Windows denies even reading a byte that another process
+        # has locked. Always acquire the byte lock BEFORE touching that byte.
+        # LockFile/LockFileEx permits locking a range beyond EOF; initialising
+        # an empty lock file is safe only AFTER the lock is held.
+        try:
+            self.handle.seek(0)
             if os.name == "nt":
                 import msvcrt
                 msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as e:
+        except OSError as exc:
             self.handle.close()
             self.handle = None
-            raise RuntimeError("autopilot_already_running") from e
+            if getattr(exc, "winerror", None) in (32, 33) or exc.errno in (11, 13):
+                code = "lock_byte_held"
+            elif isinstance(exc, PermissionError):
+                code = "lock_byte_access_denied"
+            else:
+                code = "lock_operation_failed"
+            raise WatcherLockFailure(code) from exc
+        try:
+            # SEEK_END does not access the locked region; preserve every
+            # existing lock file byte. Never truncate or rewrite a live lock.
+            self.handle.seek(0, os.SEEK_END)
+            if self.handle.tell() == 0:
+                self.handle.write(b"0")
+                self.handle.flush()
+            self.handle.seek(0)
+        except OSError as exc:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            finally:
+                self.handle.close()
+                self.handle = None
+            raise WatcherLockFailure("lock_file_initialize_failed") from exc
         return self
 
     def __exit__(self, *_: Any) -> None:
-        if self.handle is not None:
-            self.handle.seek(0)
+        if self.handle is None:
+            return
+        handle = self.handle
+        self.handle = None
+        try:
+            handle.seek(0)
             if os.name == "nt":
                 import msvcrt
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
-            self.handle.close()
-
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            raise WatcherLockFailure("lock_release_failed") from exc
+        finally:
+            handle.close()
 
 def watch_readiness(c: dict[str, Any]) -> bool:
     """Block watch startup if the previous Abyss repair fails its dedicated gate.
@@ -1236,6 +1500,8 @@ def watch_readiness(c: dict[str, Any]) -> bool:
 
 
 def main() -> int:
+    global WATCH_STAGE, WATCH_DIAGNOSTIC_ROOT
+    WATCH_STAGE = "initialization"
     parser = argparse.ArgumentParser(description="MabiAuto safe AI repair companion")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only environment preflight")
@@ -1251,6 +1517,8 @@ def main() -> int:
     if a.retry_cli_error and not (a.once and a.latest):
         parser.error("--retry-cli-error requires --once --latest")
     c = config()
+    if a.watch or a.once:
+        WATCH_DIAGNOSTIC_ROOT = expand(str(c["results_dir"]))
     if a.check:
         return 0 if status_check(c) else 2
     if a.pipeline_check:
@@ -1269,6 +1537,7 @@ def main() -> int:
             print(v.get("started"), v.get("event"), v.get("status"), v.get("reason", ""))
         return 0
     # Only watch/once modes may prepare new source; read-only modes never clone.
+    WATCH_STAGE = "source_alignment"
     try:
         selected = prepare_source(c)
         c["original_repo"] = c["repo"]
@@ -1283,14 +1552,21 @@ def main() -> int:
         print("WATCHER BLOCKED: release_source_alignment:" +
               type(exc).__name__ + ":" + str(exc), flush=True)
         return 2
+    WATCH_STAGE = "environment"
     if not status_check(c):
         print("사전 검사 실패. config.json 경로 또는 Git 상태를 확인하세요.")
         return 2
     if a.watch:
+        WATCH_STAGE = "watch_readiness"
         watch_readiness(c)  # Advisory for history; candidate Abyss patches still fail closed.
+    WATCH_STAGE = "watch_lock"
     try:
         with SingletonLock(expand(str(c["results_dir"])) / "autopilot.lock"):
+            WATCH_STAGE = "watch_loop"
             poll(c, single=a.once, latest=a.latest, retry_cli_error=a.retry_cli_error)
+    except WatcherLockFailure as exc:
+        report_lock_failure(exc)
+        return 2
     except RuntimeError as exc:
         print("실행 차단:", str(exc))
         return 2
@@ -1303,3 +1579,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("종료했습니다. 운영 중인 MabiAuto는 변경되지 않았습니다.")
         sys.exit(130)
+    except Exception as exc:
+        watcher_startup_failure(exc)
+        sys.exit(2)

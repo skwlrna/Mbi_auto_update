@@ -38,6 +38,8 @@ public sealed partial class MainForm
         LifeSkillManagerState? managerState = null;
         LifeSkillWorkFence? alteringWorkFence = null;
         MultiAlteringFacilityBottleneckTracker? facilityBottlenecks = null;
+        MultiAlteringFacilityEfficiencyTracker? facilityEfficiency = null;
+        MultiAlteringReadQuarantineTracker? facilityReadQuarantine = null;
         bool singleCharacterMode = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
@@ -361,6 +363,59 @@ public sealed partial class MainForm
                 _log.Write(
                     $"[다중가공] F9 전체 품목 선행채집 점검 · {plans.Count}종 중 " +
                     $"{initialShortages.Count}종 부족 재료 증거 · 빈/가득 찬 시설과 무관하게 현재 재고 재확인");
+                // V3.2.42: forecast only materials for which the CLI or the
+                // selected, exact-recipe shortage snapshot has evidence.
+                // A missing ingredient line is NOT a complete recipe BOM.
+                // The forecast may log a useful warning, but cannot authorize
+                // gathering, movement or registration. All actual inputs still
+                // go through the existing F9 guards and resolver.
+                if (initialShortages.Count == 0)
+                    _log.Write("[다중가공][재료 사전 예측] 확인된 부족 재료 없음 · 전체 재료 충분 의미 아님 · 실행 시 재검증");
+                else
+                {
+                    try
+                    {
+                        var forecastCatalog = await managerState.ReadWithRecoveryAsync(
+                            LifeSkillStage.Altering, "preflight-forecast-catalog",
+                            gatheringData.CatalogAsync, token);
+                        var forecast = await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+                            initialShortages, forecastCatalog,
+                            (item, ct) => managerState.ReadWithRecoveryAsync(
+                                LifeSkillStage.Altering, "preflight-forecast-inventory",
+                                inner => rawAlteringData.ItemCountAsync(item, inner), ct),
+                            token);
+                        _log.Write(
+                            $"[다중가공][재료 사전 예측] 부분 증거 {initialShortages.Count}/{plans.Count}품목 · " +
+                            $"식별 재료 {forecast.Count}종 · 신규 CLI 재고 각 1회 · " +
+                            "공유 재고 중복 차감 방지 · 표시 우선순위는 실행 순서를 변경하지 않음");
+                        foreach (var estimate in forecast.Take(20))
+                        {
+                            _log.Write(
+                                $"[다중가공][재료 사전 예측] {estimate.DisplayName} · " +
+                                $"필요 추정 {estimate.EvidencedDemand} / 현재 {estimate.FreshStock} / " +
+                                $"부족 {estimate.Shortage} · 사용 품목 {estimate.SelectedRecipes}종 · " +
+                                $"경로={estimate.AcquisitionRoute}");
+                        }
+                        if (forecast.Count > 20)
+                            _log.Write(
+                                $"[다중가공][재료 사전 예측] 나머지 {forecast.Count - 20}종은 로그 요약 생략");
+                        if (initialShortages.Count != plans.Count)
+                            _log.Write(
+                                $"[다중가공][재료 사전 예측] 정보 미확인 {plans.Count - initialShortages.Count}품목 · " +
+                                "CLI queue_full/원래 재료 목록 미노출 시 수량 추정 금지");
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        throw; // F10 is never swallowed by diagnostics.
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Write(
+                            $"[다중가공][재료 사전 예측] 읽기 전용 진단 실패({ex.GetType().Name}) · " +
+                            "추정 정보는 사용하지 않음 · 기존 F9 실행 직전 재검증 유지");
+                    }
+                }
+
                 if (initialShortages.Count > 0)
                 {
                     // Avoid sending a food plan with an unverified input route
@@ -491,13 +546,31 @@ public sealed partial class MainForm
             UpdateStats();
             RefreshProductionDashboard();
 
+            // The only failures converted to per-lane quarantine are transient
+            // read-only queries BEFORE gathering, travel, screen work or tickets.
+            // Do not wrap the later resolver.PreGatherKnownShortagesAsync call.
+            async Task<T> ReadBeforeInputAsync<T>(
+                string operation, Func<Task<T>> read, CancellationToken ct)
+            {
+                ct.ThrowIfCancellationRequested();
+                try { return await read(); }
+                catch (Exception ex) when (
+                    !ct.IsCancellationRequested &&
+                    LifeSkillReadRecoveryPolicy.IsTransient(ex))
+                {
+                    throw new SafePreInputReadException(operation);
+                }
+            }
+
             // Materials are prepared only when the next recipe becomes active.
             // CLI reports known shortages only: still recheck on registration.
             async Task PreparePlanMaterialsAsync(AlteringPlan plan, CancellationToken ct)
             {
-                var freshRecipes = await managerState.ReadWithRecoveryAsync(
-                    LifeSkillStage.Altering, "preflight-recipes",
-                    rawAlteringData.RecipesAsync, ct);
+                var freshRecipes = await ReadBeforeInputAsync(
+                    "preflight-recipes",
+                    () => managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "preflight-recipes",
+                        rawAlteringData.RecipesAsync, ct), ct);
                 var matching = freshRecipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
                 if (matching.Length < plan.RecipeOrdinal ||
                     matching[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork)
@@ -505,16 +578,19 @@ public sealed partial class MainForm
                         $"{plan.DisplayName} 재료 점검 직전 제법이 변경되었습니다. 목록을 새로고침하세요.");
 
                 var recipe = matching[plan.RecipeOrdinal - 1];
-                var liveWorks = await managerState.ReadWithRecoveryAsync(
-                    LifeSkillStage.Altering, "preflight-works",
-                    rawAlteringData.WorksAsync, ct);
+                var liveWorks = await ReadBeforeInputAsync(
+                    "preflight-works",
+                    () => managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "preflight-works",
+                        rawAlteringData.WorksAsync, ct), ct);
                 bool occupied = liveWorks.Any(x => x.FacilityName == plan.FacilityName);
                 // Leather is raw material: do not pre-gather or recursively
                 // manufacture a replacement. The batch engine records a normal
                 // partial terminal state once already-queued works finish.
                 // A safe read-only hold must be decided BEFORE material
                 // gathering, movement or any processing registration.
-                var unavailable = await InspectFoodRouteAsync(plan, ct);
+                var unavailable = await ReadBeforeInputAsync(
+                    "preflight-food-route", () => InspectFoodRouteAsync(plan, ct), ct);
                 if (unavailable is not null)
                     throw new MaterialSupplyHoldException(unavailable);
                 if (LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
@@ -557,6 +633,53 @@ public sealed partial class MainForm
                     $"[다중가공] {plan.DisplayName} 품목별 선행 채집 완료 · 등록 중 부족 재검증 유지"));
             }
 
+            // This callback is *strictly read-only*. The scheduler also
+            // checks the fresh queue before and after it and then reruns all
+            // existing prepare/registration/receipt guards.
+            async Task VerifyReadQuarantineAsync(AlteringPlan plan, CancellationToken ct)
+            {
+                var liveRecipes = await ReadBeforeInputAsync(
+                    "preflight-recipes",
+                    () => managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "safe-read-recheck-recipes",
+                        rawAlteringData.RecipesAsync, ct), ct);
+                var matches = liveRecipes.Where(x =>
+                    string.Equals(x.DisplayName, plan.DisplayName,
+                        StringComparison.Ordinal)).ToArray();
+                if (matches.Length < plan.RecipeOrdinal ||
+                    matches[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork ||
+                    AlteringFacilityResolver.Resolve(matches[plan.RecipeOrdinal - 1]) !=
+                        plan.FacilityName)
+                    throw new InvalidOperationException(
+                        "읽기 격리 해제 시 제법/시설 식별이 변경됨 · 안전 정지");
+                var liveWorks = await ReadBeforeInputAsync(
+                    "preflight-works",
+                    () => managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "safe-read-recheck-works",
+                        rawAlteringData.WorksAsync, ct), ct);
+                if (liveWorks.Any(x => x.FacilityName == plan.FacilityName))
+                    throw new InvalidOperationException(
+                        "읽기 격리 해제 시 기존/외부 등록 대기열 발견 · 안전 정지");
+            }
+
+            void RecordReadQuarantineDiagnostic(MultiAlteringReadQuarantineSnapshot evidence)
+            {
+                try
+                {
+                    string directory = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "MabiAuto", "diagnostics", "altering");
+                    string saved = MultiAlteringReadQuarantineAudit.Write(directory, evidence);
+                    _log.Write("[다중가공][반복 오류 진단] 로컬 AutoFix 검토 자료: " +
+                        Path.GetFileName(saved) + " · 게임 입력/코드 수정 권한 없음");
+                }
+                catch (Exception ex)
+                {
+                    _log.Write("[다중가공][반복 오류 진단] 로컬 저장 실패: " +
+                        ex.GetType().Name + " · 격리 및 입력 안전 가드 유지");
+                }
+            }
+
             async Task<MaterialSupplyHold?> RecheckFoodHoldAsync(
                 AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
             {
@@ -580,8 +703,11 @@ public sealed partial class MainForm
                 FacilityLaneOwner.Main,
                 restoreCompleted: batchStore.FinishedPlans,
                 fillInitialVacancies: true,
-                deferOtherLanesWhileQueueFull: queueFullAtStart);
+                deferOtherLanesWhileQueueFull: queueFullAtStart,
+                optimizeFacilityOrder: true);
             facilityBottlenecks = coordinator.Bottlenecks;
+            facilityEfficiency = coordinator.Efficiency;
+            facilityReadQuarantine = coordinator.ReadQuarantine;
             coordinator.Log += text => Ui(() =>
             {
                 _log.Write(text);
@@ -666,7 +792,16 @@ public sealed partial class MainForm
                 readRecipes: ct => managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "scheduler-recipes",
                     rawAlteringData.RecipesAsync, ct),
-                recheckUnavailableRoute: RecheckFoodHoldAsync), token);
+                recheckUnavailableRoute: RecheckFoodHoldAsync,
+                // Only the existing F9 manifest persists the hold. No side
+                // car files, automatic character selection or unattended
+                // F10/crash input replay. The explicit recent-run verifier
+                // must have accepted this batch before the coordinator starts.
+                restoreMaterialHolds: batchStore.RestoreMaterialHolds,
+                persistMaterialHold: batchStore.RecordMaterialHold,
+                clearMaterialHold: batchStore.ClearMaterialHold,
+                verifySafePreInputRead: VerifyReadQuarantineAsync,
+                reportReadQuarantine: RecordReadQuarantineDiagnostic), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
@@ -747,6 +882,29 @@ public sealed partial class MainForm
         }
         finally
         {
+            foreach (var entry in facilityReadQuarantine?.Snapshot(plans) ??
+                Array.Empty<MultiAlteringReadQuarantineSnapshot>())
+                _log.Write(
+                    $"[중간관리자][읽기 격리 요약] {entry.Facility} · {entry.Recipe} · " +
+                    $"유형={entry.Operation} · 연속 실패 {entry.ConsecutiveFailures}회 · " +
+                    $"반복={entry.Repeated} · 신규 CLI 회복 확인={entry.VerifiedRecovered} · " +
+                    "불확실한 게임 입력 자동 재실행 없음");
+            // These are in-memory diagnostic pass counters. A manager callback
+            // returning without an error is not proof of a completed receipt.
+            foreach (var lane in facilityEfficiency?.Snapshot() ??
+                Array.Empty<MultiAlteringFacilityEfficiencySnapshot>())
+            {
+                string verifiedRate = lane.BatchCalls == 0 ? "산출 불가" :
+                    ((double)lane.VerifiedProgressTurns / lane.BatchCalls * 100)
+                        .ToString("0.0") + "%";
+                _log.Write(
+                    $"[중간관리자][시설 효율] {lane.Facility} · 관찰 {lane.ObservedPasses}주기 · " +
+                    $"즉시 처리 후보 {lane.ReadyPasses}회 · 처리 중 {lane.RunningPasses}회 · " +
+                    $"재료 보류 {lane.HeldPasses}회 · 준비 상태로 미선택 {lane.UnservedReadyPasses}회 · " +
+                    $"실행 콜백 {lane.BatchCalls}회 · 확인된 진척 콜백 {lane.VerifiedProgressTurns}회 · " +
+                    $"완료 품목 {lane.CompletedPlanTurns}회 · 검증 진척 비율 {verifiedRate} " +
+                    "(영속 수령 성공률 아님 · 읽기 전용 분석)");
+            }
             // Read-only evidence only. Repeated blocked episodes are hints for
             // review; neither an inferred omission nor permission to click.
             if (facilityBottlenecks is not null)

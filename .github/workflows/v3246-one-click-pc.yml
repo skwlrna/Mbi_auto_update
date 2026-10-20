@@ -1,0 +1,79 @@
+name: V3.2.46 One Click PC Safety Validation
+
+# Offline candidate tests only; no game login or deployment.
+on:
+  push:
+    branches: [feat/v3246-one-click-safe-pc-tests]
+  pull_request:
+    branches: [feat/v3245-autofix-draft-pipeline]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  one-click-safe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Read-only UI and offline runner safety guards
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $form=Get-Content source/FishingAutomation/MainForm.AiAutopilot.cs -Raw
+          $hostScript=Get-Content source/FishingAutomation/AiOneClickTestHost.cs -Raw
+          $runner=Get-Content source/FishingAutomation/ai-autopilot/one_click_test.py -Raw
+          if(-not $form.Contains('PC 원클릭 안전 테스트') -or
+             -not $form.Contains('if (AnyRunning || _activeMode is not null)') -or
+             -not $hostScript.Contains('UseShellExecute = false') -or
+             -not $runner.Contains('safe_extract_archive') -or
+             -not $runner.Contains('check_checkout') -or
+             -not $runner.Contains('gameInputSent')){
+            throw 'One click offline / no-game-input safety conditions missing'
+          }
+          $updater=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if(-not $updater.Contains('CurrentVersion = "V3.2.41"')){
+            throw 'No stable promotion before predecessor actual game validation'
+          }
+      - name: One-click runner archive isolation and UI wiring tests
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_one_click_pc.py' -v
+          if($LASTEXITCODE -ne 0){throw 'One-click offline test contract failed'}
+      - name: Existing AutoFix and UI Python tests
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_*.py' -v
+          if($LASTEXITCODE -ne 0){throw 'AutoFix Python regression failed'}
+          python -m unittest discover -s tests/mobilay-ui -p 'test_mobilay_ui_contract.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Main UI regression failed'}
+      - name: Windows executable and watchdog build
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'App restore failed'}
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'App build failed'}
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'Watchdog restore failed'}
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'Watchdog build failed'}
+      - name: F9 and durable safety regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'F9 altering failed'}
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'N02 F9 resume failed'}
+          dotnet run --project tests/f05-consumption/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'F05 durable ledger failed'}

@@ -2,7 +2,8 @@
 
 Only the installed package's BUILD_COMMIT.txt may select the source revision.
 Never update the user's original repo, previous worktrees, results or errors.
-A new snapshot is cloned to a temporary directory and published atomically,
+The exact installed source SHA is fetched from the fixed official GitHub origin
+into a temporary directory and published atomically,
 or analysis remains blocked. No checkout is allowed from an untrusted origin.
 """
 from __future__ import annotations
@@ -107,7 +108,32 @@ def prepare_source(config: dict, marker: Path = RELEASE_MARKER) -> dict:
             raise SourceBlocked("snapshot_clone_failed")
         valid, why = check_checkout(staging, expected)
         if not valid:
-            raise SourceBlocked("fetched_main_does_not_match_installed_release:" + why)
+            # The installed release may have been built from an approved RC
+            # commit, or main may have advanced since its publication.
+            # Fetch ONLY the exact 40-hex SHA recorded by BUILD_COMMIT.txt.
+            # We NEVER trust a configured branch, search result or local head.
+            if why != "source_head_not_release":
+                raise SourceBlocked("fetched_main_source_untrusted:" + why)
+            fetched = run_git(["fetch", "--no-tags", "--depth", "1",
+                               "origin", expected], staging, timeout=180)
+            if fetched.returncode:
+                # GitHub servers can deny direct want-by-SHA for RC commits.
+                # The known release candidate is exposed by its official
+                # GitHub pull ref. Fetching that ref is NOT authorization:
+                # checkout still must equal the installed immutable SHA.
+                pulled = run_git(["fetch", "--no-tags", "--depth", "100",
+                                  "origin", "refs/pull/255/head"],
+                                 staging, timeout=180)
+                if pulled.returncode:
+                    raise SourceBlocked("pinned_release_commit_unavailable")
+            detached = run_git(["-c", "advice.detachedHead=false",
+                                "checkout", "--detach", expected],
+                               staging, timeout=90)
+            if detached.returncode:
+                raise SourceBlocked("pinned_release_commit_not_reachable")
+            valid, why = check_checkout(staging, expected)
+            if not valid:
+                raise SourceBlocked("pinned_release_source_not_verified:" + why)
         # Atomic promotion; other watcher has an OS singleton lock.
         staging.rename(target)
         staging = None

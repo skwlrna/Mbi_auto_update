@@ -4,6 +4,448 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// V3.2.44: safe pre-input transient reads isolate only the empty lane.
+var v3244Food = new AlteringPlan("식재료 가공 시설", "밥", 1, 1, false);
+var v3244Metal = new AlteringPlan("금속 가공 시설", "철괴", 1, 1, false);
+int v3244MetalCalls = 0, v3244FoodCalls = 0, v3244Verifications = 0,
+    v3244FoodPrep = 0;
+var v3244Reports = new List<MultiAlteringReadQuarantineSnapshot>();
+DateTimeOffset v3244Now = new(2026, 10, 20, 0, 0, 0, TimeSpan.Zero);
+var v3244Runner = new MultiAlteringCoordinator(now: () => v3244Now,
+    optimizeFacilityOrder: true);
+await v3244Runner.RunAsync(
+    new[] { v3244Food, v3244Metal },
+    (p, count, ct) =>
+    {
+        if (p.FacilityName == v3244Food.FacilityName)
+        {
+            Check(v3244Verifications == 2,
+                "V3.2.44 no food registration before verified fresh read");
+            v3244FoodCalls++;
+        }
+        else v3244MetalCalls++;
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+    (_, ct) =>
+    {
+        v3244Now += TimeSpan.FromSeconds(31);
+        return Task.CompletedTask;
+    }, CancellationToken.None,
+    preparePlan: (p, ct) =>
+    {
+        if (p.FacilityName == v3244Food.FacilityName &&
+            ++v3244FoodPrep == 1)
+            throw new SafePreInputReadException("preflight-recipes");
+        return Task.CompletedTask;
+    },
+    verifySafePreInputRead: (p, ct) =>
+    {
+        v3244Verifications++;
+        if (v3244Verifications == 1)
+            throw new SafePreInputReadException("preflight-recipes");
+        // Even after read success, the normal preparation and batch guards
+        // must be executed again; a read is not an input authorization.
+        return Task.CompletedTask;
+    },
+    reportReadQuarantine: record => v3244Reports.Add(record));
+Check(v3244MetalCalls == 1 && v3244FoodCalls == 1 &&
+      v3244FoodPrep == 2 && v3244Verifications == 2 &&
+      v3244Reports.Count == 2 && v3244Reports[0].Repeated &&
+      v3244Reports[0].ConsecutiveFailures == 2 &&
+      !v3244Reports[0].VerifiedRecovered &&
+      v3244Reports[1].VerifiedRecovered &&
+      v3244Runner.ReadQuarantine.Snapshot(new[] { v3244Food, v3244Metal })
+        .Single().VerifiedRecovered &&
+      v3244Runner.Efficiency.Snapshot().Single(x =>
+        x.Facility == v3244Food.FacilityName).HeldPasses >= 1,
+    "V3.2.44 repeated safe read failure isolated, healthy lane ran, fresh read recovered");
+
+var v3244Dir = Path.Combine(Path.GetTempPath(),
+    "mabiauto-v3244-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var diagnostic = MultiAlteringReadQuarantineAudit.Write(
+        v3244Dir, v3244Reports[0]);
+    var evidenceText = File.ReadAllText(diagnostic);
+    Check(evidenceText.Contains("safe_pre_input_read_quarantine", StringComparison.Ordinal) &&
+          evidenceText.Contains("autoFixReviewOnly", StringComparison.Ordinal) &&
+          evidenceText.Contains("inputPermittedByThisEvidence", StringComparison.Ordinal) &&
+          !evidenceText.Contains("CharacterId", StringComparison.Ordinal) &&
+          !evidenceText.Contains("AccountCode", StringComparison.Ordinal) &&
+          !evidenceText.Contains("exceptionMessage", StringComparison.Ordinal),
+        "V3.2.44 sanitized bounded incident is AI review only, never game authority");
+}
+finally { if (Directory.Exists(v3244Dir)) Directory.Delete(v3244Dir, true); }
+
+bool v3244StateErrorStopped = false;
+int v3244StateInputCalls = 0;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3244Food },
+        (p, n, ct) =>
+        {
+            v3244StateInputCalls++;
+            return Task.FromResult(true);
+        },
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (_, ct) => Task.CompletedTask,
+        CancellationToken.None,
+        preparePlan: (p, ct) => throw new InvalidOperationException("unverified state"),
+        verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+}
+catch (InvalidOperationException) { v3244StateErrorStopped = true; }
+Check(v3244StateErrorStopped && v3244StateInputCalls == 0,
+    "V3.2.44 unknown state conflict still halts whole coordinator without game input");
+
+bool v3244ExistingWorkStopped = false;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3244Food },
+        (p, n, ct) => Task.FromResult(true),
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(new[]
+        {
+            new AlteringWork("밥", v3244Food.FacilityName, "Completed", true, 0)
+        }),
+        (_, ct) => Task.CompletedTask, CancellationToken.None,
+        preparePlan: (p, ct) => throw new SafePreInputReadException("preflight-works"),
+        verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+}
+catch (SafePreInputReadException) { v3244ExistingWorkStopped = true; }
+Check(v3244ExistingWorkStopped,
+    "V3.2.44 even typed read failure does not isolate occupied or already-completed lane");
+
+bool v3244PostInputStopped = false;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3244Food },
+        (p, n, ct) => throw new InvalidOperationException("unconfirmed registration"),
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (_, ct) => Task.CompletedTask, CancellationToken.None,
+        verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+}
+catch (InvalidOperationException) { v3244PostInputStopped = true; }
+Check(v3244PostInputStopped,
+    "V3.2.44 post-input errors are never converted to recoverable read quarantine");
+
+bool v3244Cancelled = false;
+using (var v3244Cts = new CancellationTokenSource())
+{
+    v3244Cts.Cancel();
+    try
+    {
+        await new MultiAlteringCoordinator().RunAsync(
+            new[] { v3244Food }, (p, n, ct) => Task.FromResult(true),
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+            (_, ct) => Task.CompletedTask, v3244Cts.Token,
+            verifySafePreInputRead: (p, ct) => Task.CompletedTask);
+    }
+    catch (OperationCanceledException) { v3244Cancelled = true; }
+}
+Check(v3244Cancelled, "V3.2.44 F10 cancellation is not swallowed by lane isolation");
+
+// V3.2.43: read-only facility ordering prefers a fully completed batch
+// over a new empty lane. A held lane never becomes input permission.
+var v3243Tracker = new MultiAlteringFacilityEfficiencyTracker();
+var v3243Metal = "금속 가공 시설";
+var v3243Wood = "목재 가공 시설";
+var v3243Food = "식재료 가공 시설";
+var v3243CompletedWood = new[]
+{
+    new AlteringWork("목재", v3243Wood, "Completed", true, 0)
+};
+v3243Tracker.Observe(v3243Metal, Array.Empty<AlteringWork>(), false, false);
+v3243Tracker.Observe(v3243Wood, v3243CompletedWood, false, false);
+v3243Tracker.Observe(v3243Food, Array.Empty<AlteringWork>(), true, false);
+var v3243InputOrder = new[] { v3243Metal, v3243Wood, v3243Food };
+Check(v3243Tracker.Order(v3243InputOrder, false).SequenceEqual(v3243InputOrder),
+    "V3.2.43 existing callers default to original facility order");
+Check(v3243Tracker.Order(v3243InputOrder, true).SequenceEqual(
+    new[] { v3243Wood, v3243Metal, v3243Food }),
+    "V3.2.43 completed batch prioritized, held lane remains last");
+v3243Tracker.NoteBatchAttempt(v3243Wood);
+v3243Tracker.NoteVerifiedProgress(v3243Wood, true);
+v3243Tracker.EndPass();
+var v3243Metrics = v3243Tracker.Snapshot();
+Check(v3243Metrics.Single(x => x.Facility == v3243Wood).BatchCalls == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Wood).VerifiedProgressTurns == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Wood).CompletedPlanTurns == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Food).HeldPasses == 1 &&
+      v3243Metrics.Single(x => x.Facility == v3243Metal).UnservedReadyPasses == 1,
+    "V3.2.43 facility metrics separate read-only pass, held lane and verified completion");
+
+var v3243Fabric = "옷감 가공 시설";
+var v3243Fair = new MultiAlteringFacilityEfficiencyTracker();
+v3243Fair.Observe(v3243Metal, Array.Empty<AlteringWork>(), false, false);
+v3243Fair.Observe(v3243Fabric, new[]
+{
+    new AlteringWork("실", v3243Fabric, "InProgress", false, 60)
+}, false, false);
+v3243Fair.EndPass();
+v3243Fair.Observe(v3243Metal, Array.Empty<AlteringWork>(), false, false);
+v3243Fair.Observe(v3243Fabric, Array.Empty<AlteringWork>(), false, false);
+Check(v3243Fair.Order(new[] { v3243Fabric, v3243Metal }, true)
+        .SequenceEqual(new[] { v3243Metal, v3243Fabric }),
+    "V3.2.43 repeatedly unserved ready lane wins tie without changing recipe order");
+
+var v3243First = new AlteringPlan(v3243Metal, "철괴", 1, 1, false);
+var v3243Second = new AlteringPlan(v3243Wood, "목재", 1, 1, false);
+var v3243WoodNext = new AlteringPlan(v3243Wood, "목재+", 1, 1, false);
+var v3243Calls = new List<string>();
+var v3243Scheduler = new MultiAlteringCoordinator(optimizeFacilityOrder: true);
+await v3243Scheduler.RunAsync(
+    new[] { v3243First, v3243Second, v3243WoodNext },
+    (p, slot, ct) =>
+    {
+        Check(slot == 1, "V3.2.43 retains original one-slot guarded batch budget");
+        v3243Calls.Add(p.DisplayName);
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(v3243CompletedWood),
+    (time, ct) => Task.CompletedTask,
+    CancellationToken.None);
+Check(v3243Calls.SequenceEqual(new[] { "목재", "목재+", "철괴" }) &&
+      v3243Scheduler.Efficiency.Snapshot().Sum(x => x.CompletedPlanTurns) == 3,
+    "V3.2.43 independent lane reorder never reorders two recipes inside the same facility");
+
+var v3243HeldPlan = new AlteringPlan(v3243Food, "밥", 1, 1, false);
+var v3243SafeMetal = new AlteringPlan(v3243Metal, "철괴", 1, 1, false);
+int v3243UnsafeFoodCalls = 0, v3243IndependentMetalCalls = 0,
+    v3243PersistedHolds = 0;
+using (var v3243Cancel = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(optimizeFacilityOrder: true).RunAsync(
+            new[] { v3243HeldPlan, v3243SafeMetal },
+            (p, slot, ct) =>
+            {
+                if (p.FacilityName == v3243Food) v3243UnsafeFoodCalls++;
+                else v3243IndependentMetalCalls++;
+                return Task.FromResult(true);
+            },
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(
+                Array.Empty<AlteringWork>()),
+            (_, ct) =>
+            {
+                v3243Cancel.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            v3243Cancel.Token,
+            preparePlan: (p, ct) =>
+            {
+                if (p.FacilityName == v3243Food)
+                    throw new MaterialSupplyHoldException(
+                        new("미확인 재료", 3, 0, "acquisition_route_unverified"));
+                return Task.CompletedTask;
+            },
+            recheckUnavailableRoute: (p, prior, ct) =>
+                Task.FromResult<MaterialSupplyHold?>(prior),
+            persistMaterialHold: (p, hold) => v3243PersistedHolds++);
+    }
+    catch (OperationCanceledException) { }
+}
+Check(v3243UnsafeFoodCalls == 0 && v3243IndependentMetalCalls == 1 &&
+      v3243PersistedHolds == 1,
+    "V3.2.43 priority cannot bypass food hold or stall independent facility");
+
+// V3.2.42: the report is deliberately partial and read-only, with shared
+// stock allocated once across multiple selected recipes, not once per plan.
+var v3242Rice = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
+var v3242Oatmeal = new AlteringPlan("식재료 가공 시설", "오트밀", 3, 1, false);
+var v3242First = new AlteringRecipe("밥", false, 1,
+    "not_enough_ingredient", new[]
+    {
+        new AlteringIngredient("물이 든 병", 2, 999), // stale Owned must be ignored
+        new AlteringIngredient("석양 나비", 1, 0),
+        new AlteringIngredient("도구없는 식재료", 1, 0)
+    }, v3242Rice.FacilityName);
+var v3242Second = new AlteringRecipe("오트밀", false, 1,
+    "not_enough_ingredient", new[]
+    {
+        new AlteringIngredient("물이 든 병", 1, 0),
+        new AlteringIngredient("공급 경로 모름", 1, 0)
+    }, v3242Oatmeal.FacilityName);
+var v3242Stock = new Dictionary<string, long>(StringComparer.Ordinal)
+{
+    ["물이 든 병"] = 2, ["석양 나비"] = 0,
+    ["도구없는 식재료"] = 0, ["공급 경로 모름"] = 0
+};
+var v3242Reads = new Dictionary<string, int>(StringComparer.Ordinal);
+Task<long> V3242Read(string item, CancellationToken ct)
+{
+    ct.ThrowIfCancellationRequested();
+    v3242Reads[item] = v3242Reads.GetValueOrDefault(item) + 1;
+    return Task.FromResult(v3242Stock[item]);
+}
+var v3242Roots = new[]
+{
+    new MultiAlteringSupplyPreflight(v3242Rice, v3242First, 2),
+    new MultiAlteringSupplyPreflight(v3242Oatmeal, v3242Second, 3)
+};
+var v3242Forecast = await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+    v3242Roots, new[]
+    {
+        new GatherableItem("물이 든 병", true),
+        new GatherableItem("도구없는 식재료", false)
+    }, V3242Read, CancellationToken.None);
+var v3242Water = v3242Forecast.Single(x => x.DisplayName == "물이 든 병");
+Check(v3242Water.EvidencedDemand == 7 && v3242Water.FreshStock == 2 &&
+      v3242Water.Shortage == 5 && v3242Water.SelectedRecipes == 2 &&
+      v3242Water.AcquisitionRoute == MultiAlteringMaterialForecastPolicy.SupportedBulk &&
+      v3242Forecast[0].DisplayName == "물이 든 병" &&
+      v3242Reads.Values.All(count => count == 1),
+    "V3.2.42 shared ingredients are summed once and fresh stock is read once per item");
+Check(v3242Forecast.Single(x => x.DisplayName == "석양 나비").AcquisitionRoute ==
+          MultiAlteringMaterialForecastPolicy.QuestOnly &&
+      v3242Forecast.Single(x => x.DisplayName == "도구없는 식재료").AcquisitionRoute ==
+          MultiAlteringMaterialForecastPolicy.MissingTool &&
+      v3242Forecast.Single(x => x.DisplayName == "공급 경로 모름").AcquisitionRoute ==
+          MultiAlteringMaterialForecastPolicy.Unverified,
+    "V3.2.42 forecast distinguishes verified bulk, quest-only, missing tool and unknown acquisition");
+
+var v3242ReadsBefore = v3242Reads.Values.Sum();
+var v3242Masked = v3242First with
+{
+    Reason = "queue_full", MissingIngredients = Array.Empty<AlteringIngredient>()
+};
+Check((await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+    new[] { new MultiAlteringSupplyPreflight(v3242Rice, v3242Masked, 2) },
+    Array.Empty<GatherableItem>(), V3242Read, CancellationToken.None)).Count == 0 &&
+    v3242Reads.Values.Sum() == v3242ReadsBefore,
+    "V3.2.42 a masked or empty CLI recipe never invents a full bill of materials");
+
+bool v3242DuplicatesRejected = false;
+try
+{
+    await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+        new[] { v3242Roots[0], v3242Roots[0] }, Array.Empty<GatherableItem>(),
+        V3242Read, CancellationToken.None);
+}
+catch (InvalidDataException) { v3242DuplicatesRejected = true; }
+Check(v3242DuplicatesRejected, "V3.2.42 duplicate selected plan cannot double-charge material stock");
+
+bool v3242InvalidStockRejected = false;
+v3242Stock["물이 든 병"] = -1;
+try
+{
+    await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+        v3242Roots, Array.Empty<GatherableItem>(), V3242Read, CancellationToken.None);
+}
+catch (InvalidDataException) { v3242InvalidStockRejected = true; }
+Check(v3242InvalidStockRejected, "V3.2.42 negative live stock is never replaced with stale Owned evidence");
+v3242Stock["물이 든 병"] = 2;
+
+bool v3242OverflowRejected = false;
+try
+{
+    await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+        new[] { new MultiAlteringSupplyPreflight(v3242Rice,
+            v3242First with { MissingIngredients = new[]
+            { new AlteringIngredient("물이 든 병", long.MaxValue, 0) } }, 2) },
+        Array.Empty<GatherableItem>(), V3242Read, CancellationToken.None);
+}
+catch (OverflowException) { v3242OverflowRejected = true; }
+Check(v3242OverflowRejected, "V3.2.42 checked forecast prevents numeric wraparound");
+
+bool v3242Canceled = false;
+using (var v3242Cancel = new CancellationTokenSource())
+{
+    v3242Cancel.Cancel();
+    try
+    {
+        await MultiAlteringMaterialForecastPolicy.ForecastAsync(
+            v3242Roots, Array.Empty<GatherableItem>(), V3242Read, v3242Cancel.Token);
+    }
+    catch (OperationCanceledException) { v3242Canceled = true; }
+}
+Check(v3242Canceled, "V3.2.42 F10 cancellation stops diagnostic stock reads promptly");
+
+// V3.2.41: durable quarantine is never an authorization to register a
+// previously held item until fresh live evidence removes it.
+var v3241Food = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
+var v3241Metal = new AlteringPlan("금속 가공 시설", "철괴", 2, 1, false);
+var v3241Plans = new[] { v3241Food, v3241Metal };
+var v3241Saved = new MultiAlteringMaterialHoldCheckpoint
+{
+    FacilityName = v3241Food.FacilityName,
+    PlanKey = MultiAlteringBatchStore.Key(v3241Food),
+    Item = "미확인 재료", Required = 3, Observed = 0,
+    Category = "acquisition_route_unverified",
+    FirstHeldAt = DateTimeOffset.UtcNow, LastCheckedAt = DateTimeOffset.UtcNow
+};
+var v3241Clock = DateTimeOffset.Parse("2026-10-20T00:00:00+00:00");
+int v3241Rechecks = 0, v3241FoodInputs = 0, v3241MetalInputs = 0;
+var v3241Events = new List<string>();
+var v3241Coordinator = new MultiAlteringCoordinator(now: () => v3241Clock);
+v3241Coordinator.Log += v3241Events.Add;
+await v3241Coordinator.RunAsync(
+    v3241Plans,
+    (p, _, ct) =>
+    {
+        if (p == v3241Food)
+        {
+            Check(v3241Rechecks >= 2 && v3241MetalInputs == 1,
+                "V3.2.41 stale restored hold cannot execute food input");
+            v3241FoodInputs++;
+        }
+        else v3241MetalInputs++;
+        return Task.FromResult(true);
+    },
+    ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+    (interval, ct) => { v3241Clock += interval; return Task.CompletedTask; },
+    CancellationToken.None,
+    recheckUnavailableRoute: (plan, prior, ct) =>
+    {
+        v3241Rechecks++;
+        return Task.FromResult<MaterialSupplyHold?>(
+            v3241Rechecks == 1 ? prior with { Observed = 1 } : null);
+    },
+    restoreMaterialHolds: _ => new[] { v3241Saved },
+    persistMaterialHold: (plan, evidence) =>
+    {
+        Check(v3241FoodInputs == 0 && evidence.Observed == 1,
+            "V3.2.41 hold remains isolated during first live poll");
+    },
+    clearMaterialHold: plan =>
+    {
+        Check(v3241Rechecks == 2 && v3241FoodInputs == 0,
+            "V3.2.41 clearing requires new live stock check first");
+    });
+Check(v3241Rechecks == 2 && v3241MetalInputs == 1 && v3241FoodInputs == 1 &&
+      v3241Events.Any(x => x.Contains("[보류 복원]", StringComparison.Ordinal)),
+    "V3.2.41 food hold restart makes progress only after fresh verified release");
+
+// Failing to commit the hold is fatal BEFORE any queue input is attempted.
+var v3241BlockedInputs = 0;
+bool v3241DiskFailureStopped = false;
+try
+{
+    await new MultiAlteringCoordinator().RunAsync(
+        new[] { v3241Food },
+        (plan, _, ct) =>
+        {
+            v3241BlockedInputs++;
+            return Task.FromResult(true);
+        },
+        ct => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>()),
+        (_, ct) => Task.CompletedTask,
+        CancellationToken.None,
+        preparePlan: (plan, ct) => throw new MaterialSupplyHoldException(
+            new("미확인 재료", 3, 0, "acquisition_route_unverified")),
+        recheckUnavailableRoute: (plan, prior, ct) =>
+            Task.FromResult<MaterialSupplyHold?>(prior),
+        persistMaterialHold: (plan, evidence) => throw new IOException("atomic hold failure"));
+}
+catch (IOException ex) when (ex.Message == "atomic hold failure")
+{ v3241DiskFailureStopped = true; }
+Check(v3241DiskFailureStopped && v3241BlockedInputs == 0,
+    "V3.2.41 hold journal failure safely stops without registration");
+
 // V3.2.40: unknown food inputs are held, never invented as gatherable.
 var v3240Food = new AlteringPlan("식재료 가공 시설", "밥", 2, 1, false);
 var v3240Recipe = new AlteringRecipe("밥", false, 1,

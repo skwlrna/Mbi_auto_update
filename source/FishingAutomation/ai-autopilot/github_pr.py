@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -41,6 +41,30 @@ def safe_branch(branch: str) -> bool:
     return bool(re.fullmatch(r"ai/autopilot-[0-9a-f]{16}", branch))
 
 
+def safe_candidate_path(name: str) -> bool:
+    """Independent host-side allowlist, checked again before GitHub upload."""
+    if not isinstance(name, str) or not name or chr(0) in name:
+        return False
+    if chr(92) in name or name.startswith("./"):
+        return False
+    path = PurePosixPath(name)
+    if (path.is_absolute() or len(path.parts) < 2 or ".." in path.parts
+            or "." in path.parts or str(path) != name):
+        return False
+    if any(part.lower() in {"bin", "obj", ".git", ".github", "runtime"}
+           for part in path.parts):
+        return False
+    if path.suffix.lower() in {".ps1", ".cmd", ".bat", ".sh", ".exe",
+                               ".dll", ".pfx", ".key"}:
+        return False
+    if (name.startswith("source/FishingAutomation/ai-autopilot/") or
+            name.startswith("source/tools/") or
+            name in {"source/FishingAutomation/UpdateManager.cs",
+                     "source/FishingAutomation/FishingAutomation.csproj"}):
+        return False
+    return name.startswith(("source/", "tests/", "changes/tests/"))
+
+
 def run(argv: list[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", shell=False,
@@ -55,10 +79,15 @@ def publish_verified_draft_pr(
         return {"status": "disabled", "reason": "user_opt_in_required"}
     if not safe_branch(branch) or not re.fullmatch(r"[0-9a-f]{16}", event_id):
         return {"status": "blocked", "reason": "untrusted_branch_or_event"}
-    if not changed or len(changed) > 8 or any(not (
-        name.startswith("source/") or name.startswith("tests/") or
-        name.startswith("changes/tests/")) for name in changed):
+    if (not changed or len(changed) > 8 or len(set(changed)) != len(changed)
+            or any(not safe_candidate_path(name) for name in changed)):
         return {"status": "blocked", "reason": "changed_file_allowlist_failed"}
+    root = worktree.resolve()
+    for name in changed:
+        target = worktree / name
+        if target.is_symlink() or not target.is_file() or (
+                not target.resolve().is_relative_to(root)):
+            return {"status": "blocked", "reason": "candidate_path_not_regular_file"}
     if not verified_tests or not all(item.get("ok") is True for item in verified_tests):
         return {"status": "blocked", "reason": "tests_not_verified"}
     if not shutil.which("gh"):
