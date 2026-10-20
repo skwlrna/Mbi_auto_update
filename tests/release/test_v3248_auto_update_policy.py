@@ -82,9 +82,9 @@ class StableReleaseSafetyContract(unittest.TestCase):
                          "Real-game testing or rollback not verified; auto-update blocked",
                          "Required update/rollback asset missing"):
             self.assertIn(required, source)
-        self.assertLess(source.index("Require game signoff OR explicitly accepted"),
+        self.assertLess(source.index("Require game signoff OR direct-user-requested"),
                         source.index("Publish verified Windows binaries"))
-        self.assertLess(source.index("Require game signoff OR explicitly accepted"),
+        self.assertLess(source.index("Require game signoff OR direct-user-requested"),
                         source.index("Publish public auto-update Release"))
 
     def test_powershell_warning_quote_is_balanced(self):
