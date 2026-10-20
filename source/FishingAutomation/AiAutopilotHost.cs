@@ -116,7 +116,51 @@ internal sealed class AiAutopilotHost : IDisposable
     {
         // Do not surface raw MCP error evidence into the app; only the
         // watcher's own activity/status lines may be shown.
-        if (message.StartsWith("Git 저장소: MISSING", StringComparison.Ordinal))
+        if (message.StartsWith("WATCHER STARTUP FAILED|", StringComparison.Ordinal))
+        {
+            // Python emits ONLY fixed stage/type enums. No exception strings,
+            // local paths, Codex output, tokens or MCP content reach the UI.
+            string[] parts = message.Split('|');
+            if (parts.Length != 3 || parts[1].Length > 30 || parts[2].Length > 40)
+                return;
+            string phase = parts[1] switch
+            {
+                "initialization" => "Python 초기화",
+                "source_alignment" => "배포 SHA·소스 확인",
+                "environment" => "실행 환경",
+                "watch_readiness" => "AI 감시 사전 검사",
+                "watch_lock" => "중복 실행 잠금",
+                "watch_loop" => "기존 오류 기록·감시 초기화",
+                _ => "시작 단계 확인 불가"
+            };
+            string error = parts[2] switch
+            {
+                "JSONDecodeError" => "JSON 기록 형식 오류",
+                "PermissionError" => "로컬 파일 접근 권한 오류",
+                "FileNotFoundError" => "필수 파일 없음",
+                "KeyError" => "기존 기록 필수 항목 누락",
+                "ValueError" => "기존 기록 값 오류",
+                "TypeError" => "기존 기록 타입 오류",
+                "AttributeError" => "기존 기록 구조 오류",
+                "OSError" => "로컬 파일/프로세스 오류",
+                "RuntimeError" => "실행 안전 조건 차단",
+                "UnicodeError" => "파일 텍스트 인코딩 오류",
+                "IsADirectoryError" or "NotADirectoryError" => "로컬 파일 경로 구조 오류",
+                "Exception" => "분류되지 않은 내부 예외",
+                _ => "분류되지 않은 예외"
+            };
+            Publish("AI 시작 불가 · " + phase + " · " + error +
+                    " · watch-startup-diagnostic.json 확인");
+        }
+        else if (message.StartsWith("ModuleNotFoundError:", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · Python 모듈 불러오기 실패 · 배포 패키지 확인");
+        else if (message.StartsWith("SyntaxError:", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · Python 코드 문법 오류 · 배포 패키지 확인");
+        else if (message.StartsWith("JSONDecodeError:", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · 기존 JSON 기록 형식 오류 · 원본 보존");
+        else if (message.StartsWith("PermissionError:", StringComparison.Ordinal))
+            Publish("AI 시작 불가 · Python 파일 접근 권한 오류");
+        else if (message.StartsWith("Git 저장소: MISSING", StringComparison.Ordinal))
             Publish("AI 시작 불가 · 작업용 소스 폴더가 없습니다 (MabiAutoAI/repo)");
         else if (message.StartsWith("WATCHER BLOCKED: release_source_alignment", StringComparison.Ordinal))
             Publish("AI 시작 불가 · 배포 SHA와 작업용 소스 불일치 / 새 스냅샷 검증 실패");
