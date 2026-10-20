@@ -48,6 +48,7 @@ internal sealed class GatheringAutomation
     private readonly LifeSkillWorkFence _workFence;
     internal event Action<string>? Log;
     internal long Gained { get; private set; }
+    private bool _bagWeightWarningSent;
 
     internal GatheringAutomation(IGatheringData data, IGatheringScreen screen,
         Func<TimeSpan, CancellationToken, Task>? delay = null, int noProgressLimit = 150,
@@ -72,7 +73,7 @@ internal sealed class GatheringAutomation
 
     internal async Task RunAsync(GatheringPlan plan, CancellationToken ct)
     {
-        plan.Validate(); Gained = 0;
+        plan.Validate(); Gained = 0; _bagWeightWarningSent = false;
         await CheckToolAsync(plan, ct);
         var initial = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
         Log?.Invoke("[자동 채집] 시작 전 상태 · " + DescribeActivity(initial));
@@ -97,7 +98,7 @@ internal sealed class GatheringAutomation
 
             Log?.Invoke("[자동 채집] CLI MainButton=Stop 잔상 확인 · 화면 Stop 버튼 2회 부재로 다음 재료 시작 허용");
         }
-        await CheckWeightAsync(ct);
+        await CheckWeightAsync(plan, 0, ct);
         long baseline = await ReadGatheringCountAsync(plan.DisplayName, ct);
         bool started = false;
         LifeSkillWorkTicket? workTicket = null;
@@ -167,7 +168,7 @@ internal sealed class GatheringAutomation
                     Log?.Invoke($"[자동 채집] {plan.DisplayName} +{Gained}/{plan.TargetQuantity}개 · 정체 관측 {idlePolls}/{_noProgressLimit}");
                 if (Gained >= plan.TargetQuantity) break;
                 await CheckToolAsync(plan, ct);
-                await CheckWeightAsync(ct);
+                await CheckWeightAsync(plan, Gained, ct);
                 if (idlePolls >= _noProgressLimit)
                     throw new InvalidOperationException("일정 시간 채집 수량이 증가하지 않아 추가 조작 없이 정지합니다.");
                 await _delay(TimeSpan.FromSeconds(2), ct);
@@ -278,9 +279,30 @@ internal sealed class GatheringAutomation
         if (item is null) throw new InvalidOperationException("현재 생활 레벨에서 선택한 품목을 채집할 수 없습니다.");
         if (!item.ToolOk) throw new InvalidOperationException("채집 도구가 없거나 내구도가 부족합니다.");
     }
-    private async Task CheckWeightAsync(CancellationToken ct)
+    private async Task CheckWeightAsync(GatheringPlan plan, long gained, CancellationToken ct)
     {
-        var weight = await ReadGatheringAsync("weight", _data.WeightAsync, ct);
-        if (weight.Current >= weight.Maximum) throw new InvalidOperationException("가방 무게가 가득 차 채집을 정지합니다.");
+        // Only read fresh, permitted CLI data. A 100-action gathering route can
+        // gain several units between polls; the 10% margin reduces (but cannot
+        // eliminate) the chance of crossing the game's physical bag limit.
+        var value = await ReadGatheringAsync("weight", _data.WeightAsync, ct);
+        var weight = GatheringWeightPolicy.Read(value.Current, value.Maximum);
+        long remaining = Math.Max(0L, (long)plan.TargetQuantity - gained);
+
+        if (weight.ShouldWarn && !_bagWeightWarningSent)
+        {
+            _bagWeightWarningSent = true;
+            Log?.Invoke($"[자동 채집][가방 무게] 주의 · {weight.Current}/{weight.Maximum} " +
+                        $"({weight.FillPercent}%) · 90%까지 여유 {weight.RemainingToSafetyLimit} · " +
+                        $"{plan.DisplayName} 남은 수량 {remaining}개");
+        }
+
+        if (weight.MustStop)
+        {
+            Log?.Invoke($"[자동 채집][가방 무게] 안전 정지 · " +
+                        $"{plan.DisplayName} +{gained}/{plan.TargetQuantity} · " +
+                        $"현재 {weight.Current}/{weight.Maximum} ({weight.FillPercent}%) · " +
+                        $"남은 수량 {remaining}개 · 자동 폐기/추가 채집 금지");
+            throw new GatheringBagCapacityException(plan.DisplayName, remaining, weight);
+        }
     }
 }
