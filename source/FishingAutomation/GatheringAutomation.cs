@@ -82,6 +82,7 @@ internal sealed class GatheringAutomation
         initial = await WaitForCombatEndAsync(initial, "시작 전", ct);
         if (initial.IsGathering || initial.IsFishing || initial.IsAutoTraveling)
             throw new InvalidOperationException("진행 중인 행동을 종료하고 필드에서 자동 채집을 시작하세요. 상태: " + DescribeActivity(initial));
+        bool staleStopVisuallyAbsent = false;
         if (initial.MainButtonState == "Stop")
         {
             // A previous material may have ended while CLI MainButton=Stop
@@ -96,10 +97,30 @@ internal sealed class GatheringAutomation
                  await probe.IsStopButtonVisibleAsync(ct)))
                 throw new InvalidOperationException("채집 시작 전 정지 상태가 재확인되지 않았습니다. 상태: " + DescribeActivity(checkedAgain));
 
+            staleStopVisuallyAbsent = true;
             Log?.Invoke("[자동 채집] CLI MainButton=Stop 잔상 확인 · 화면 Stop 버튼 2회 부재로 다음 재료 시작 허용");
         }
         await CheckWeightAsync(plan, 0, ct);
         long baseline = await ReadGatheringCountAsync(plan.DisplayName, ct);
+
+        // Read only: activity can change during the catalog/weight/inventory steps.
+        // Require two new consistent CLI observations immediately before issuing
+        // StartAsync's screen input. A disagreement is UNKNOWN, not permission to
+        // click again. Actual list-row identity still requires screen verification.
+        var beforeStart = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
+        await _delay(TimeSpan.FromMilliseconds(200), ct);
+        var finalStart = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
+        if (!GatheringStartCliGuard.IsStableSafeToStart(
+                beforeStart, finalStart, staleStopVisuallyAbsent))
+            throw new InvalidOperationException(
+                "채집 시작 직전 CLI 상태가 불안정하거나 안전하지 않아 입력 없이 중단합니다. " +
+                "첫 상태: " + DescribeActivity(beforeStart) +
+                " · 재확인: " + DescribeActivity(finalStart));
+        if (staleStopVisuallyAbsent &&
+            (_screen is not IGatheringStopVisualProbe finalStopProbe ||
+             await finalStopProbe.IsStopButtonVisibleAsync(ct)))
+            throw new InvalidOperationException(
+                "채집 시작 직전 Stop 화면이 재등장하여 새 채집 입력을 차단합니다.");
         bool started = false;
         LifeSkillWorkTicket? workTicket = null;
         Exception? failure = null;
