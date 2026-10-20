@@ -12,8 +12,9 @@ public sealed partial class MainForm
         _cancelStart = false;
         try
         {
-            var plan = SelectedCraftingPlan();
-            plan.Validate();
+            var selectedPlans = SelectedCraftingPlans();
+            foreach (var selectedPlan in selectedPlans) selectedPlan.Validate();
+            var plan = selectedPlans[0];
 
             string[] requiredCommands =
             {
@@ -34,9 +35,16 @@ public sealed partial class MainForm
 
             var craftingData = new CraftingCliData(_cli);
             var gatheringData = new GatheringCliData(_cli);
-            var exact = await craftingData.ExactAsync(plan.DisplayName, CancellationToken.None);
-            plan = plan with { ProducedPerCraft = exact.ProducedPerCraft };
-            plan.Validate();
+            var queue = new List<CraftingPlan>();
+            foreach (var selectedPlan in selectedPlans)
+            {
+                var exact = await craftingData.ExactAsync(
+                    selectedPlan.DisplayName, CancellationToken.None);
+                var validated = selectedPlan with { ProducedPerCraft = exact.ProducedPerCraft };
+                validated.Validate();
+                queue.Add(validated);
+            }
+            plan = queue[0];
 
             var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
             if (_cancelStart || IsDisposed) return;
@@ -101,9 +109,10 @@ public sealed partial class MainForm
             var token = _dungeonCts.Token;
             _activeMode = "제작";
             _mode.Enabled = false;
-            _craftingDisplay =
-                $"{(plan.Category == CraftingCategory.Food ? "음식" : "아이템")} · " +
-                $"{plan.DisplayName} {plan.TargetQuantity}개";
+            _craftingDisplay = queue.Count > 1
+                ? $"순차 제작 {queue.Count}종 · 첫 품목 {plan.DisplayName} {plan.TargetQuantity}개"
+                : $"{(plan.Category == CraftingCategory.Food ? "음식" : "아이템")} · " +
+                  $"{plan.DisplayName} {plan.TargetQuantity}개";
             _dungeonStartedAt = DateTime.Now;
             _dungeonStoppedAt = null;
             _dungeonCycles = 0;
@@ -120,14 +129,21 @@ public sealed partial class MainForm
                 UpdateStats();
                 RefreshProductionDashboard();
             });
-            automation.Progress += progress => Ui(() =>
+            CraftingPlan activePlan = plan;
+            int completedCraftsBefore = 0;
+            automation.Progress += progress =>
             {
-                _productionCurrentQuantity = progress.ConfirmedQuantity;
-                _productionProgressSummary = progress.Summary(plan.DisplayName);
-                _dungeonCycles = progress.CompletedCrafts;
-                UpdateStats();
-                RefreshProductionDashboard();
-            });
+                string progressName = activePlan.DisplayName;
+                int completedTotal = completedCraftsBefore + progress.CompletedCrafts;
+                Ui(() =>
+                {
+                    _productionCurrentQuantity = progress.ConfirmedQuantity;
+                    _productionProgressSummary = progress.Summary(progressName);
+                    _dungeonCycles = completedTotal;
+                    UpdateStats();
+                    RefreshProductionDashboard();
+                });
+            };
 
             _log.Write("[제작] 시작(F9) · " + _craftingDisplay +
                 " · 최대 10회 퀘스트 / 직접 재료 퀘스트 채집 / 중간재 자동 가공 / 정령의 날개 0개");
@@ -140,14 +156,49 @@ public sealed partial class MainForm
                 {
                     try
                     {
-                        await automation.RunAsync(plan, token);
+                        await CraftingQueueCoordinator.RunAsync(queue,
+                            async (current, index, runToken) =>
+                        {
+                            activePlan = current;
+                            long itemBaseline = await craftingData.ItemCountAsync(
+                                current.DisplayName, token);
+                            int step = index + 1;
+                            Ui(() =>
+                            {
+                                _productionBaseline = itemBaseline;
+                                _productionDisplayName = current.DisplayName;
+                                _productionTargetQuantity = current.TargetQuantity;
+                                _productionCurrentQuantity = 0;
+                                _productionFacilityName = current.Category == CraftingCategory.Food
+                                    ? "음식 제작" : "아이템 제작";
+                                _productionProgressSummary = $"순차 {step}/{queue.Count} · 제작 준비";
+                                _log.Write($"[제작][순차] {step}/{queue.Count} 시작 · " +
+                                    $"{current.DisplayName} {current.TargetQuantity}개");
+                                RefreshProductionDashboard();
+                            });
+
+                            // Each plan must reach its verified target before
+                            // the next plan is allowed to touch the game.
+                            await automation.RunAsync(current, token);
+                            completedCraftsBefore += automation.CompletedCrafts;
+                            int confirmedCrafts = completedCraftsBefore;
+                            long confirmedGain = automation.Gained;
+                            Ui(() =>
+                            {
+                                _dungeonCompleted = confirmedCrafts;
+                                _productionCurrentQuantity = confirmedGain;
+                                _productionProgressSummary =
+                                    $"{current.DisplayName} 목표 완료 · +{confirmedGain:N0}개";
+                                _craftingPage.MarkCraftingCompleted(current);
+                                _log.Write($"[제작][순차] {step}/{queue.Count} 완료 확인 · " +
+                                    $"{current.DisplayName} +{confirmedGain}개");
+                                RefreshProductionDashboard();
+                            });
+                        }, token);
                         Ui(() =>
                         {
-                            _dungeonCompleted = automation.CompletedCrafts;
-                            _productionCurrentQuantity = automation.Gained;
-                            _productionProgressSummary =
-                                $"{plan.DisplayName} 목표 완료 · +{automation.Gained:N0}개";
-                            _log.Write("[제작] 목표 작업 완료");
+                            _craftingPage.ClearCompletedQueue();
+                            _log.Write("[제작] 전체 순차 제작 목표 작업 완료");
                             RefreshProductionDashboard();
                         });
                     }

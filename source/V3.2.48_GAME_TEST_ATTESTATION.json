@@ -1,0 +1,14 @@
+{
+  "version": "V3.2.48",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "f9FoodHoldResume": "pending",
+  "f9ReceiptNoDuplicate": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "craftingGatherAfterTravel": "pending",
+  "craftingSequentialQueue": "pending",
+  "notes": "2026-10-20 live crafting failure reproduced in logs/screenshots; this code change and per-item sequential queue have not been verified by an actual in-game test; offline CI is not game verification."
+}

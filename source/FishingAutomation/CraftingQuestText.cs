@@ -5,6 +5,15 @@ namespace FishingAutomation;
 internal static class CraftingQuestText
 {
     internal static string Compact(string text) => Regex.Replace(text ?? "", @"[\s•◆◇·]", "");
+    // Live 800x1000 material-shortage popup remains visible while auto gathering.
+    // The header is around y=680, outside the older quest-title ROI.
+    internal static bool IsShortageDialogCaption(string text)
+    {
+        string caption = Compact(text);
+        return caption.Contains("퀘스트를위해필요한아이템", StringComparison.Ordinal) &&
+               caption.Contains("구하는방법", StringComparison.Ordinal);
+    }
+
     internal static bool IsTitle(string text, string displayName)
     {
         string compact = Compact(text);

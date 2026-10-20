@@ -17,6 +17,10 @@ try
     Check(CraftingQuestText.IsTitleNameOnly("야채볶음", "야채볶음") &&
           !CraftingQuestText.IsTitleNameOnly("숙련 야채볶음", "야채볶음"),
         "quest title fallback accepts the exact recipe name when 제작 OCR is split");
+    Check(CraftingQuestText.IsShortageDialogCaption(
+              "퀘스트를 위해 필요한 아이템이 없습니다. 구하는 방법을 보시겠습니까?") &&
+          !CraftingQuestText.IsShortageDialogCaption("퀘스트 수락 구하는 방법"),
+        "existing shortage modal is recognized even when material-ratio OCR is missing");
     Check(CraftingQuestText.IsQuestProgress("감자 준비 7/80") &&
           CraftingQuestText.IsQuestProgress("음식 제작대에서 제작 0/10") &&
           !CraftingQuestText.IsQuestProgress("모험가 길드 퀘스트"),
@@ -30,6 +34,66 @@ try
     Check(CraftingQuestText.IsStationStage("• 약품 제작대에서 제작") &&
           !CraftingQuestText.IsStationStage("바로 제작 진행"),
         "observed bandage quest omits ratio and stays separate from instant crafting");
+
+
+    Check(!CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 32, 100, 5) &&
+          !CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 1) &&
+          CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 2),
+        "auto gather cannot return at idle 32/100; requires two fresh sufficient CLI reads");
+    Check(!CraftingGatherCompletionPolicy.HasVerifiedTarget("", 100, 100, 2) &&
+          CraftingGatherCompletionPolicy.MustStopUnnamed("", 5, true) &&
+          !CraftingGatherCompletionPolicy.MustStopUnnamed("허브", 100, true),
+        "unnamed material cannot be treated as completed from idle alone");
+
+    var serialFirst = new CraftingPlan(CraftingCategory.Food, "가든 샐러드", 60, 1);
+    var serialSecond = new CraftingPlan(CraftingCategory.Food, "생선구이", 50, 1);
+    var order = new List<string>();
+    await CraftingQueueCoordinator.RunAsync(new[] { serialFirst, serialSecond },
+        async (recipe, index, ct) =>
+        {
+            order.Add("start:" + recipe.DisplayName);
+            await Task.Yield();
+            order.Add("verified:" + recipe.DisplayName);
+        }, CancellationToken.None);
+    Check(order.SequenceEqual(new[]
+    {
+        "start:가든 샐러드", "verified:가든 샐러드",
+        "start:생선구이", "verified:생선구이"
+    }), "queued recipes are executed strictly one at a time");
+
+    order.Clear();
+    try
+    {
+        await CraftingQueueCoordinator.RunAsync(new[] { serialFirst, serialSecond },
+            (recipe, index, ct) =>
+            {
+                order.Add(recipe.DisplayName);
+                throw new InvalidOperationException("craft not confirmed");
+            }, CancellationToken.None);
+        throw new Exception("failed recipe did not abort remaining queue");
+    }
+    catch (InvalidOperationException ex) when (ex.Message == "craft not confirmed")
+    {
+        Check(order.SequenceEqual(new[] { "가든 샐러드" }),
+            "failed first recipe must never start the second recipe");
+    }
+
+    using (var cancelled = new CancellationTokenSource())
+    {
+        cancelled.Cancel();
+        order.Clear();
+        try
+        {
+            await CraftingQueueCoordinator.RunAsync(new[] { serialFirst, serialSecond },
+                (recipe, index, ct) => { order.Add(recipe.DisplayName); return Task.CompletedTask; },
+                cancelled.Token);
+            throw new Exception("cancelled queue ran");
+        }
+        catch (OperationCanceledException)
+        {
+            Check(order.Count == 0, "cancellation blocks all subsequent recipes");
+        }
+    }
 
     var stage = new ProductionStageMachine("test");
     stage.Move(ProductionStage.OpenHub, "hub");

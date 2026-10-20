@@ -1,18 +1,8 @@
 name: V3.2.47 Isolated Windows Candidate
 
-# A PR-only candidate, NOT a GitHub Release and NOT visible to the updater.
+# Historical V3.2.47 candidate; kept for manual reruns only, superseded by V3.2.48.
 # Public promotion is separately gated in release-v3247-auto-update.yml.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'source/**'
-      - 'tests/altering/**'
-      - 'tests/gathering/**'
-      - 'tests/release/**'
-      - 'tests/n02-resume/**'
-      - '.github/workflows/release-v3247-auto-update.yml'
-      - '.github/workflows/v3247-candidate.yml'
   workflow_dispatch:
   push:
     branches: [release/v3247-staged-auto-update, fix/v3247-ai-watch-startup-diagnostics]

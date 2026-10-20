@@ -449,7 +449,7 @@ internal static class Program
                     page.Name + " omits embedded log because detailed log already exists");
             }
 
-            Menu("제작"); PumpUntil(() => All(crafting).OfType<ListBox>().Single().Items.Count > 0);
+            Menu("제작"); PumpUntil(() => All(crafting).OfType<ListBox>().Single(x => x.AccessibleName == "제작 품목").Items.Count > 0);
             Check(crafting.Visible && !altering.Visible && !gathering.Visible,
                 "crafting opens as an independent production page");
             Check(!All(crafting).OfType<ComboBox>().Any(), "crafting has no visible execution/status combo boxes");
@@ -457,7 +457,8 @@ internal static class Program
                 "crafting removes current-owned quantity card");
             Check(!All(crafting).OfType<TextBox>().Any(x => x.AccessibleName == "제작 로그"),
                 "crafting omits embedded log because detailed log already exists");
-            var craftItems = All(crafting).OfType<ListBox>().Single();
+            var craftItems = All(crafting).OfType<ListBox>().Single(x => x.AccessibleName == "제작 품목");
+            var craftQueue = All(crafting).OfType<ListBox>().Single(x => x.AccessibleName == "순차 제작 대기 목록");
             var craftSearch = All(crafting).OfType<TextBox>().Single(x => x.PlaceholderText.Contains("품목", StringComparison.Ordinal));
             Check(craftItems.DrawMode == DrawMode.OwnerDrawFixed &&
                   craftItems.BorderStyle == BorderStyle.None &&
@@ -486,6 +487,30 @@ internal static class Program
             var craftPlan = Invoke<CraftingPlan>(form, "SelectedCraftingPlan");
             Check(craftPlan.Category == CraftingCategory.Item && craftPlan.TargetQuantity == 23 && craftPlan.ProducedPerCraft == 5,
                 "crafting selection preserves category, quantity and per-craft yield");
+            var addCraft = All(crafting).OfType<Button>().Single(x => x.Text == "추가");
+            var moveCraftUp = All(crafting).OfType<Button>().Single(x => x.Text == "↑");
+            var removeCraft = All(crafting).OfType<Button>().Single(x => x.Text == "삭제");
+            var clearCraft = All(crafting).OfType<Button>().Single(x => x.Text == "전체삭제");
+            addCraft.PerformClick(); Pump();
+            Check(craftQueue.Items.Count == 1 && craftQueue.Items[0]!.ToString()!.Contains("상급 회복 물약"),
+                "crafting queue captures selected item and independent target");
+            craftSearch.Text = "야채볶음"; Pump();
+            SetQuantity(craftingQuantity, 10);
+            addCraft.PerformClick(); Pump();
+            Check(craftQueue.Items.Count == 2 && craftQueue.Items[1]!.ToString()!.Contains("야채볶음"),
+                "multiple recipe queue entries are registered without starting game input");
+            moveCraftUp.PerformClick(); Pump();
+            var orderedCrafts = Invoke<CraftingPlan[]>(form, "SelectedCraftingPlans");
+            Check(orderedCrafts.Length == 2 && orderedCrafts[0].DisplayName == "야채볶음" &&
+                  orderedCrafts[1].DisplayName == "상급 회복 물약",
+                "reordering the crafting queue changes the strictly sequential F9 plan");
+            removeCraft.PerformClick(); Pump();
+            Check(craftQueue.Items.Count == 1, "queued crafting item can be removed individually");
+            clearCraft.PerformClick(); Pump();
+            Check(craftQueue.Items.Count == 0 && fake.Actions.Count == 0,
+                "clearing crafting queue restores single-selection mode without game commands");
+            craftSearch.Text = "회복"; Pump();
+            SetQuantity(craftingQuantity, 23);
             if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], "crafting.png")); }
             Check(fake.Actions.Count == 0, "crafting catalog and search remain read-only");
             fake.DuplicateCrafting = true;
