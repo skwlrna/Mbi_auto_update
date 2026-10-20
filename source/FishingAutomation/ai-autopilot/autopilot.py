@@ -1336,20 +1336,90 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             return
         time.sleep(max(10, int(c["poll_seconds"])))
 
+class WatcherLockFailure(RuntimeError):
+    """Only a fixed, non-sensitive reason code; never stringify the OS error."""
+    CODES = frozenset({
+        "lock_parent_access_denied", "lock_parent_unavailable",
+        "lock_parent_symlink", "lock_file_symlink", "lock_file_is_directory",
+        "lock_file_open_access_denied", "lock_file_open_sharing_violation",
+        "lock_file_open_unavailable", "lock_file_initialize_failed",
+        "lock_byte_held", "lock_byte_access_denied", "lock_operation_failed",
+        "lock_release_failed",
+    })
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code in self.CODES else "lock_operation_failed"
+        super().__init__(self.code)
+
+
+def lock_open_failure(exc: OSError) -> str:
+    """Do not confuse a sharing violation with ACL denial or a byte lock."""
+    winerror = getattr(exc, "winerror", None)
+    if winerror in (32, 33):
+        return "lock_file_open_sharing_violation"
+    if isinstance(exc, PermissionError) or winerror == 5:
+        return "lock_file_open_access_denied"
+    return "lock_file_open_unavailable"
+
+
+def report_lock_failure(exc: WatcherLockFailure) -> None:
+    """A lock failure must not reveal paths or remove any existing evidence."""
+    reason = exc.code if exc.code in WatcherLockFailure.CODES else "lock_operation_failed"
+    report = {
+        "schema": 1, "kind": "ai_watcher_lock_blocked", "status": "blocked",
+        "stage": "watch_lock", "reason": reason, "utc": now(),
+        "game_input": False, "codex_started": False, "automatic_deployment": False,
+    }
+    try:
+        root = WATCH_DIAGNOSTIC_ROOT or DEFAULT_HOME / "autopilot-results"
+        destination = root / "watch-startup-diagnostic.json"
+        if not root.is_symlink() and not destination.is_symlink():
+            write_json(destination, report)
+    except (OSError, ValueError, TypeError):
+        pass
+    print("WATCHER LOCK BLOCKED|" + reason, flush=True)
+
+
 class SingletonLock:
-    """OS-backed nonblocking advisory lock; released automatically if the process exits."""
+    """Single OS byte lock at the SAME historical path; no unsafe fallback.
+
+    An inaccessible lock file may belong to a live watcher or another user.
+    Never delete/rename it, change ACLs, or switch to a second lock path.
+    """
     def __init__(self, path: Path):
         self.path = path
         self.handle = None
 
     def __enter__(self) -> "SingletonLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.handle = self.path.open("a+b")
-        self.handle.seek(0)
-        if self.handle.read(1) == b"":
-            self.handle.write(b"0")
-            self.handle.flush()
-        self.handle.seek(0)
+        if self.path.parent.is_symlink():
+            raise WatcherLockFailure("lock_parent_symlink")
+        if self.path.is_symlink():
+            raise WatcherLockFailure("lock_file_symlink")
+        if self.path.is_dir():
+            raise WatcherLockFailure("lock_file_is_directory")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            raise WatcherLockFailure("lock_parent_access_denied") from exc
+        except OSError as exc:
+            raise WatcherLockFailure("lock_parent_unavailable") from exc
+        # Exclusive lock requires a writable descriptor, but access errors must
+        # be distinguished from a legitimate byte-lock collision. In particular,
+        # Windows can return WinError 32 before msvcrt.locking is reached.
+        try:
+            self.handle = self.path.open("a+b")
+        except OSError as exc:
+            raise WatcherLockFailure(lock_open_failure(exc)) from exc
+        try:
+            self.handle.seek(0)
+            if self.handle.read(1) == b"":
+                self.handle.write(b"0")
+                self.handle.flush()
+            self.handle.seek(0)
+        except OSError as exc:
+            self.handle.close()
+            self.handle = None
+            raise WatcherLockFailure("lock_file_initialize_failed") from exc
         try:
             if os.name == "nt":
                 import msvcrt
@@ -1357,23 +1427,36 @@ class SingletonLock:
             else:
                 import fcntl
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as e:
+        except OSError as exc:
             self.handle.close()
             self.handle = None
-            raise RuntimeError("autopilot_already_running") from e
+            # A byte lock is held elsewhere only if OS indicates contention.
+            if getattr(exc, "winerror", None) in (32, 33) or exc.errno in (11, 13):
+                code = "lock_byte_held"
+            elif isinstance(exc, PermissionError):
+                code = "lock_byte_access_denied"
+            else:
+                code = "lock_operation_failed"
+            raise WatcherLockFailure(code) from exc
         return self
 
     def __exit__(self, *_: Any) -> None:
-        if self.handle is not None:
-            self.handle.seek(0)
+        if self.handle is None:
+            return
+        handle = self.handle
+        self.handle = None
+        try:
+            handle.seek(0)
             if os.name == "nt":
                 import msvcrt
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
-            self.handle.close()
-
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            raise WatcherLockFailure("lock_release_failed") from exc
+        finally:
+            handle.close()
 
 def watch_readiness(c: dict[str, Any]) -> bool:
     """Block watch startup if the previous Abyss repair fails its dedicated gate.
@@ -1465,6 +1548,9 @@ def main() -> int:
         with SingletonLock(expand(str(c["results_dir"])) / "autopilot.lock"):
             WATCH_STAGE = "watch_loop"
             poll(c, single=a.once, latest=a.latest, retry_cli_error=a.retry_cli_error)
+    except WatcherLockFailure as exc:
+        report_lock_failure(exc)
+        return 2
     except RuntimeError as exc:
         print("실행 차단:", str(exc))
         return 2
