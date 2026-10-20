@@ -91,7 +91,7 @@ jobs:
             )){
               if(-not (Test-Path $needed)){throw "Required update/rollback asset missing: $needed"}
             }
-            Write-Warning 'SOLO OPERATOR RISK ACCEPTANCE: real-game gathering bag-weight stop and rollback remain NOT TESTED; publishing at owner's explicit request for personal use.'
+            Write-Warning 'SOLO OPERATOR RISK ACCEPTANCE: real-game gathering bag-weight stop and rollback remain NOT TESTED; publishing at the explicit request of the sole operator for personal use.'
           }
 
       - name: Require CI-approved current main and exact V3.2.47 version

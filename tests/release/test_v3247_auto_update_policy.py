@@ -87,6 +87,15 @@ class StableReleaseSafetyContract(unittest.TestCase):
         self.assertLess(source.index("Require game signoff OR explicitly accepted"),
                         source.index("Publish public auto-update Release"))
 
+    def test_powershell_warning_quote_is_balanced(self):
+        warnings = [line.split("Write-Warning ", 1)[1].strip()
+                    for line in self.workflow.splitlines()
+                    if "Write-Warning " in line]
+        self.assertEqual(len(warnings), 1)
+        warning = warnings[0]
+        self.assertTrue(warning.startswith("'") and warning.endswith("'"))
+        self.assertNotIn("'", warning[1:-1].replace("''", ""))
+
     def test_updater_compatible_release_and_backups(self):
         source = self.workflow
         self.assertEqual(source.count("gh release create V3.2.47 "), 1)
