@@ -31,6 +31,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Offline auto-update release-gate policy checks
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3246_auto_update_policy.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Auto-update policy contract failed'}
       - name: Validate V3.2.46 version and source safety
         shell: pwsh
         run: |
@@ -51,8 +60,14 @@ jobs:
           # here, but the stable release workflow rejects pending.
 
           $g=Get-Content .github/workflows/release-v3246-auto-update.yml -Raw
-          if($g -notmatch 'workflow_dispatch' -or $g -match 'github.event.workflow_run'){
-            throw 'Public release must remain manually gated'
+          if(-not $g.Contains('workflows: ["Check V3 Production Engine"]') -or
+             -not $g.Contains("workflow_run.conclusion == 'success'") -or
+             -not $g.Contains("workflow_run.event == 'push'") -or
+             -not $g.Contains("workflow_run.head_branch == 'main'") -or
+             -not $g.Contains("CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}") -or
+             -not $g.Contains("V3.2.46_GAME_TEST_ATTESTATION.json") -or
+             -not $g.Contains("$att.status -ne 'passed'")){
+            throw 'Public release must require verified main CI plus passed real-game attestation'
           }
       - name: Run durable recovery and altering regressions
         shell: pwsh
