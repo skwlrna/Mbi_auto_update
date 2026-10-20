@@ -61,6 +61,42 @@ class PinnedSourceTests(TestCase):
             with self.assertRaises(release_source.SourceBlocked):
                 release_source.prepare_source(c, marker)
 
+    @mock.patch.object(release_source, "TRUSTED_ORIGINS", new_callable=lambda: set())
+    def test_exact_unreleased_candidate_sha_is_fetched_not_main_tip(self, trusted):
+        # Regression for a real V3.2.46 RC: BUILD_COMMIT points at a PR
+        # branch commit, while trusted GitHub main still runs V3.2.40.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "BUILD_COMMIT.txt"
+            upstream, _, main_sha, git = self.init_repo(root, marker)
+            git(["checkout", "-b", "release/v3246-staged-auto-update"], upstream)
+            file = upstream / "source/FishingAutomation/FishingAutomation.csproj"
+            file.write_text("<Project><PropertyGroup><Version>3.2.46</Version></PropertyGroup></Project>")
+            git(["add", "."], upstream)
+            git(["commit", "-m", "rc candidate"], upstream)
+            candidate = git(["rev-parse", "HEAD"], upstream).stdout.strip()
+            git(["checkout", "main"], upstream)
+            marker.write_text(candidate + "\\n", encoding="ascii")
+
+            trusted.add(str(upstream))
+            release_source.SOURCE_URL = str(upstream)
+            self.addCleanup(setattr, release_source, "SOURCE_URL",
+                            "https://github.com/skwlrna/Mbi_auto_update.git")
+            original = root / "old-repo"
+            git(["clone", str(upstream), str(original)], root)
+            snapshots = root / "snapshots"
+            chosen = release_source.prepare_source({
+                "repo": str(original),
+                "source_snapshots_dir": str(snapshots)
+            }, marker)
+            self.assertEqual(chosen["expected"], candidate)
+            self.assertTrue(release_source.check_checkout(Path(chosen["repo"]), candidate)[0])
+            self.assertEqual(git(["rev-parse", "HEAD"], original).stdout.strip(), main_sha)
+            self.assertEqual(git(["rev-parse", "HEAD"], upstream).stdout.strip(), main_sha)
+            self.assertEqual(release_source.prepare_source({
+                "repo": str(original), "source_snapshots_dir": str(snapshots)
+            }, marker)["action"], "existing_pinned_snapshot_selected")
+
     def test_missing_or_invalid_release_marker_blocks_all_source_selection(self):
         with tempfile.TemporaryDirectory() as temp:
             marker = Path(temp) / "BUILD_COMMIT.txt"
