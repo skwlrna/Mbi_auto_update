@@ -116,7 +116,31 @@ internal sealed class AiAutopilotHost : IDisposable
     {
         // Do not surface raw MCP error evidence into the app; only the
         // watcher's own activity/status lines may be shown.
-        if (message.StartsWith("WATCHER STARTUP FAILED|", StringComparison.Ordinal))
+        if (message.StartsWith("WATCHER LOCK BLOCKED|", StringComparison.Ordinal))
+        {
+            // Only allowlisted Python diagnostic categories. Never show OS
+            // exception text, absolute paths, MCP logs or sensitive data.
+            string reason = message["WATCHER LOCK BLOCKED|".Length..];
+            string detail = reason switch
+            {
+                "lock_byte_held" => "다른 AI 감시 프로세스가 잠금을 사용 중일 수 있습니다",
+                "lock_file_open_sharing_violation" => "다른 프로세스가 잠금 파일을 사용 중이거나 공유를 차단했습니다",
+                "lock_file_open_access_denied" => "Windows에서 잠금 파일 열기 권한을 거부했습니다",
+                "lock_parent_access_denied" => "AI 결과 폴더에 접근 권한이 없습니다",
+                "lock_parent_unavailable" => "AI 결과 폴더를 사용할 수 없습니다",
+                "lock_file_is_directory" => "잠금 파일 위치에 폴더가 있습니다",
+                "lock_file_symlink" or "lock_parent_symlink" => "잠금 경로가 링크여서 안전상 차단했습니다",
+                "lock_file_initialize_failed" => "잠금 파일 초기화가 차단됐습니다",
+                "lock_byte_access_denied" => "Windows에서 잠금 수행을 거부했습니다",
+                "lock_release_failed" => "잠금 해제 상태 확인이 필요합니다",
+                "lock_file_open_unavailable" or "lock_operation_failed"
+                    => "잠금 파일 상태를 확인해야 합니다",
+                _ => "허용되지 않은 잠금 오류 보고"
+            };
+            Publish("AI 시작 불가 · " + detail +
+                    " · 기존 기록 보존 · 임의 삭제/강제 종료 금지");
+        }
+        else if (message.StartsWith("WATCHER STARTUP FAILED|", StringComparison.Ordinal))
         {
             // Python emits ONLY fixed stage/type enums. No exception strings,
             // local paths, Codex output, tokens or MCP content reach the UI.
