@@ -108,7 +108,7 @@ internal sealed class GatheringAutomation
         // StartAsync's screen input. A disagreement is UNKNOWN, not permission to
         // click again. Actual list-row identity still requires screen verification.
         var beforeStart = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
-        await _delay(TimeSpan.FromMilliseconds(200), ct);
+        await Task.Delay(200, ct).ConfigureAwait(false);
         var finalStart = await ReadGatheringAsync("activity", _data.ActivityAsync, ct);
         if (!GatheringStartCliGuard.IsStableSafeToStart(
                 beforeStart, finalStart, staleStopVisuallyAbsent))
