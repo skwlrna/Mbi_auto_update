@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
@@ -34,6 +35,54 @@ from worktree_retention import (report as retention_report, archive_clean_one, I
 from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
+# Only fixed categories and in-repository frame numbers are reported. No raw
+# exception arguments, user folders, MCP evidence, tokens or Codex output.
+WATCH_STAGE = "initialization"
+WATCH_DIAGNOSTIC_ROOT: Path | None = None
+WATCH_STAGE_CODES = frozenset({
+    "initialization", "source_alignment", "environment", "watch_readiness",
+    "watch_lock", "watch_loop",
+})
+WATCH_ERROR_CODES = frozenset({
+    "JSONDecodeError", "PermissionError", "FileNotFoundError", "KeyError",
+    "ValueError", "TypeError", "AttributeError", "OSError", "RuntimeError",
+    "UnicodeError", "IsADirectoryError", "NotADirectoryError", "Exception",
+})
+
+
+def watcher_startup_failure(exc: Exception) -> dict[str, Any]:
+    """Non-destructive, bounded triage on an unhandled watcher exception."""
+    stage = WATCH_STAGE if WATCH_STAGE in WATCH_STAGE_CODES else "initialization"
+    code = type(exc).__name__
+    code = code if code in WATCH_ERROR_CODES else "Exception"
+    frames: list[dict[str, Any]] = []
+    try:
+        for fr in traceback.extract_tb(exc.__traceback__)[-8:]:
+            filename = Path(fr.filename)
+            if filename.parent.resolve() == HERE.resolve() and re.fullmatch(
+                    r"[A-Za-z0-9_]{1,80}\\.py", filename.name):
+                frames.append({"module": filename.name, "line": int(fr.lineno)})
+    except (OSError, ValueError, RuntimeError):
+        frames = []
+    record = {
+        "schema": 1, "kind": "ai_watcher_startup_failure",
+        "status": "blocked", "stage": stage, "reason": code,
+        "utc": now(), "frames": frames,
+        "game_input": False, "codex_started": False,
+        "automatic_deployment": False,
+    }
+    try:
+        destination = (WATCH_DIAGNOSTIC_ROOT or
+                       DEFAULT_HOME / "autopilot-results") / "watch-startup-diagnostic.json"
+        if destination.is_symlink():
+            raise OSError("diagnostic_destination_symlink")
+        write_json(destination, record)
+    except (OSError, ValueError, TypeError):
+        pass
+    print(f"WATCHER STARTUP FAILED|{stage}|{code}", flush=True)
+    return record
+
+
 BLOCK_WORDS = ("app_server_initialization_failed", "failed to initialize in-process",
                "access is denied", "access denied", "os error 5",
                "code mode is unavailable", "429 too many requests", "503 service unavailable")
@@ -1352,6 +1401,8 @@ def watch_readiness(c: dict[str, Any]) -> bool:
 
 
 def main() -> int:
+    global WATCH_STAGE, WATCH_DIAGNOSTIC_ROOT
+    WATCH_STAGE = "initialization"
     parser = argparse.ArgumentParser(description="MabiAuto safe AI repair companion")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="read-only environment preflight")
@@ -1367,6 +1418,8 @@ def main() -> int:
     if a.retry_cli_error and not (a.once and a.latest):
         parser.error("--retry-cli-error requires --once --latest")
     c = config()
+    if a.watch or a.once:
+        WATCH_DIAGNOSTIC_ROOT = expand(str(c["results_dir"]))
     if a.check:
         return 0 if status_check(c) else 2
     if a.pipeline_check:
@@ -1385,6 +1438,7 @@ def main() -> int:
             print(v.get("started"), v.get("event"), v.get("status"), v.get("reason", ""))
         return 0
     # Only watch/once modes may prepare new source; read-only modes never clone.
+    WATCH_STAGE = "source_alignment"
     try:
         selected = prepare_source(c)
         c["original_repo"] = c["repo"]
@@ -1399,13 +1453,17 @@ def main() -> int:
         print("WATCHER BLOCKED: release_source_alignment:" +
               type(exc).__name__ + ":" + str(exc), flush=True)
         return 2
+    WATCH_STAGE = "environment"
     if not status_check(c):
         print("사전 검사 실패. config.json 경로 또는 Git 상태를 확인하세요.")
         return 2
     if a.watch:
+        WATCH_STAGE = "watch_readiness"
         watch_readiness(c)  # Advisory for history; candidate Abyss patches still fail closed.
+    WATCH_STAGE = "watch_lock"
     try:
         with SingletonLock(expand(str(c["results_dir"])) / "autopilot.lock"):
+            WATCH_STAGE = "watch_loop"
             poll(c, single=a.once, latest=a.latest, retry_cli_error=a.retry_cli_error)
     except RuntimeError as exc:
         print("실행 차단:", str(exc))
@@ -1419,3 +1477,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("종료했습니다. 운영 중인 MabiAuto는 변경되지 않았습니다.")
         sys.exit(130)
+    except Exception as exc:
+        watcher_startup_failure(exc)
+        sys.exit(2)
