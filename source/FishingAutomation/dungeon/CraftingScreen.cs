@@ -913,7 +913,8 @@ internal sealed class CraftingScreen : ICraftingScreen
                     if (current >= deficit.Required)
                     {
                         stableInventory++;
-                        if (stableInventory >= 2)
+                        if (CraftingGatherCompletionPolicy.HasVerifiedTarget(
+                            deficit.DisplayName, current, deficit.Required, stableInventory))
                         {
                             Log?.Invoke(
                                 $"[제작] {deficit.DisplayName} 준비 완료 · {current}/{deficit.Required} · " +
@@ -956,8 +957,8 @@ internal sealed class CraftingScreen : ICraftingScreen
 
             // Unnamed OCR rows cannot be verified by item identity. Do not
             // guess completion and do not click through an uncertain popup.
-            if (string.IsNullOrWhiteSpace(deficit.DisplayName) &&
-                stableIdle >= requiredIdlePolls)
+            if (CraftingGatherCompletionPolicy.MustStopUnnamed(
+                deficit.DisplayName, stableIdle, sawActivity))
                 throw new InvalidOperationException(
                     "재료명 미확인 상태에서 자동채집 완료를 검증할 수 없습니다. " +
                     "퀘스트창을 임의로 다시 열지 않고 안전 정지합니다.");
