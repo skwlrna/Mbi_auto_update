@@ -9,6 +9,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     private readonly MabinogiMobileCli _cli;
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("제작");
+    private string? _activeCraftingRecipe;
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
     private CraftingQuestDeficit? _lastSingleQuestDeficit;
@@ -41,6 +42,13 @@ internal sealed class CraftingScreen : ICraftingScreen
         if (!CraftingHubLayout.IsSafeCraftDetailGeometry())
             throw new InvalidOperationException("제작 상세 고정좌표가 800x1000 안전 영역을 벗어났습니다.");
 
+        if (!string.Equals(_activeCraftingRecipe, plan.DisplayName, StringComparison.Ordinal))
+        {
+            _activeCraftingRecipe = plan.DisplayName;
+            _questRecipeMaterialNames = Array.Empty<string>();
+            _questMaterialNameCatalog = null;
+            _lastSingleQuestDeficit = null;
+        }
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
 
@@ -748,6 +756,17 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private async Task OpenQuestPopupAsync(CraftingPlan plan, CancellationToken ct)
     {
+        // The quest shortage popup can persist during auto-gathering.
+        // Clicking the quest list behind it only changes pixels and causes
+        // false OCR failures. Reuse the verified existing popup instead.
+        using (var existing = Capture(ct))
+        {
+            if (await IsQuestMaterialPopupAsync(existing, ct))
+            {
+                Log?.Invoke("[제작] 이미 표시된 퀘스트 재료 팝업 재사용 · 추가 퀘스트 클릭 없음");
+                return;
+            }
+        }
         await CloseOverlayAsync(ct);
         await Task.Delay(CraftingHubLayout.ProductionQuestListSettleDelayMs, ct);
 
@@ -832,7 +851,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             $"{CraftingHubLayout.AcquisitionMethodRecommendedPoint.Y}) · " +
             $"퀘스트 필요수량 {deficit.Required}");
 
-        DateTime deadline = DateTime.UtcNow.AddMinutes(5);
+        DateTime deadline = DateTime.UtcNow.AddMinutes(12);
         int stableInventory = 0;
         int stableIdle = 0;
         int activityLoadingRejects = 0;
@@ -923,22 +942,25 @@ internal sealed class CraftingScreen : ICraftingScreen
                 }
             }
 
-            // When the name is unknown, or get_items cannot verify it, activity
-            // ending is enough to hand control back to the quest. The quest is
-            // reopened immediately and remains the authority on whether this row
-            // is still short. Re-entering early is safe: a still-visible row is
-            // simply gathered again.
+            // Auto-travel can briefly report idle before the game's automatic
+            // gathering has finished (live 2026-10-20: parsnip 32/100).
+            // Never open a quest or declare collection complete from idle alone.
+            // A named material is complete ONLY after two fresh CLI inventory
+            // observations reach the requested quantity (checked above).
             int requiredIdlePolls = sawActivity ? 5 : 8;
-            if (stableIdle >= requiredIdlePolls)
-            {
+            if (stableIdle == requiredIdlePolls ||
+                (stableIdle > requiredIdlePolls && stableIdle % 15 == 0))
                 Log?.Invoke(
-                    $"[제작] {label} 활동 종료 안정 확인 · idle={stableIdle} · " +
-                    "재료 충족 여부는 새 퀘스트의 부족 행으로 재확인");
-                _stage.Move(
-                    ProductionStage.VerifyInventory,
-                    $"{label} 퀘스트 재확인");
-                return;
-            }
+                    $"[제작] {label} 일시 idle={stableIdle} · 목표 재고 미확인 · " +
+                    "게임 자동채집 대기 · 퀘스트창 재진입 금지");
+
+            // Unnamed OCR rows cannot be verified by item identity. Do not
+            // guess completion and do not click through an uncertain popup.
+            if (string.IsNullOrWhiteSpace(deficit.DisplayName) &&
+                stableIdle >= requiredIdlePolls)
+                throw new InvalidOperationException(
+                    "재료명 미확인 상태에서 자동채집 완료를 검증할 수 없습니다. " +
+                    "퀘스트창을 임의로 다시 열지 않고 안전 정지합니다.");
 
             await Task.Delay(1000, ct);
         }
@@ -1222,7 +1244,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             "구하는 방법",
             ct);
         var cancel = await FindUniqueAsync(frame, new Rectangle(100, 350, 600, 280), "취소", ct);
-        if (modalHeader is null && cancel is null)
+        bool questPopup = await IsQuestMaterialPopupAsync(frame, ct);
+        if (modalHeader is null && cancel is null && !questPopup)
             return;
         _ui.TapFresh(0x01, ct);
         await Task.Delay(300, ct);
