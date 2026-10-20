@@ -2,9 +2,14 @@ name: Publish V3.2.46 Auto Update After Main CI
 
 # Installed clients ignore prereleases. Publish only the CI-approved main.
 # Committed game-test attestation must be passed before release.
-# Explicit approval gate: verify the candidate with a real-game test
-# before manual promotion to the public stable auto-update channel.
+# Publishes AUTOMATICALLY after a verified real-game attestation is merged
+# to main and the exact main push passes the full production CI workflow.
+# A manual dispatch retains the same non-bypassable test and SHA gates.
 on:
+  workflow_run:
+    workflows: ["Check V3 Production Engine"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -17,12 +22,12 @@ concurrency:
 
 jobs:
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'workflow_dispatch') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.repository.full_name == github.repository) }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
@@ -58,7 +63,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          CI_HEAD_SHA: ${{ github.sha }}
+          CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           $ErrorActionPreference='Stop'
           $sha=(git rev-parse HEAD).Trim()
@@ -66,7 +71,7 @@ jobs:
           $remote=(git ls-remote origin refs/heads/main | Select-Object -First 1)
           if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($remote)){throw 'main unavailable'}
           if((($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main moved since CI; abort'}
-          # The manual promotion must still be an already CI-approved main commit.
+          # Automatic and manual promotion both require an already CI-approved main commit.
           $ci=gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$sha&per_page=20" | ConvertFrom-Json
           if($LASTEXITCODE-ne0 -or -not $ci){throw 'Cannot verify main CI'}
           $passed=@($ci.workflow_runs | Where-Object {
@@ -213,7 +218,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          CI_HEAD_SHA: ${{ github.sha }}
+          CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           $ErrorActionPreference='Stop'
           $sha=(git rev-parse HEAD).Trim()
