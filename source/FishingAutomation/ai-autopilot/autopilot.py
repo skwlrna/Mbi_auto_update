@@ -743,7 +743,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     memory_context: str | None = None
     if retry_retention:
         output["retry_of"] = original_eid
-        output["retry_reason"] = "explicit_ui_after_retention_cleanup"
+        output["retry_reason"] = "verified_worktree_space_available"
     if retry_quota:
         output["retry_of"] = original_eid
         output["retry_reason"] = "explicit_ui_after_quota_recovery"
@@ -999,6 +999,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
     last_reported: tuple[str, int] | None = None
     last_retention_warning: int | None = None
     last_retention_scan = 0.0
+    last_automatic_retention = 0.0
 
     def category_for(folder: Path) -> str:
         try:
@@ -1159,6 +1160,57 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 try: cleanup_request.unlink(missing_ok=True)
                 except OSError: pass
 
+        # A user may request a bounded batch of ONLY clean, terminal worktrees.
+        # The existing archive_clean_one revalidates ownership, Git cleanliness,
+        # checksums and archive collision for every candidate before removing it.
+        batch_request = results_dir / "retention-batch-request.json"
+        if (not single and not state.get("quota_pause")
+                and batch_request.is_file() and not batch_request.is_symlink()):
+            try:
+                request = (read_json(batch_request)
+                           if batch_request.stat().st_size <= 4096 else {})
+                ids = request.get("event_ids", []) if isinstance(request, dict) else []
+                if (isinstance(request, dict) and
+                        request.get("action") == "archive_clean_verified_batch_once"
+                        and isinstance(ids, list) and len(ids) <= 20):
+                    visited = set()
+                    for identifier in ids:
+                        if (not isinstance(identifier, str)
+                                or not RETENTION_ID.fullmatch(identifier)
+                                or identifier in visited):
+                            continue
+                        visited.add(identifier)
+                        outcome = archive_clean_one(c, identifier)
+                        print("AI 작업공간 사용자 정리:", outcome.get("status"),
+                              outcome.get("reason"), flush=True)
+                    cleaned_or_attempted = bool(visited) or cleaned_or_attempted
+            except (OSError, ValueError, TypeError):
+                print("AI 작업공간 일괄 정리 요청 무효 · 원본 보존", flush=True)
+            finally:
+                try: batch_request.unlink(missing_ok=True)
+                except OSError: pass
+
+        # Opt-in product behavior: recover near-full retention only for verified,
+        # already-terminal clean worktrees. Never touch an in-progress/dirty
+        # candidate, never bypass archive/checksum validation, and never prune Git.
+        if (not single and not state.get("quota_pause")
+                and time.monotonic() - last_automatic_retention >= 60):
+            last_automatic_retention = time.monotonic()
+            try:
+                inventory = retention_report(c)
+                if (not inventory.get("error") and
+                        inventory.get("count", 0) >= max(0, inventory.get("limit", 30) - 2)):
+                    for identifier in inventory.get("archive_ready_candidates", [])[:3]:
+                        if not isinstance(identifier, str) or not RETENTION_ID.fullmatch(identifier):
+                            continue
+                        outcome = archive_clean_one(c, identifier)
+                        if outcome.get("status") == "archived":
+                            cleaned_or_attempted = True
+                        print("AI 작업공간 자동 안전 정리:",
+                              outcome.get("status"), outcome.get("reason"), flush=True)
+            except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                print("AI 작업공간 자동 정리 보류 · 증거 보존", flush=True)
+
         # Deep Git status inspection is relatively expensive on Windows:
         # refresh once per minute and immediately after an approved cleanup.
         if not single and (cleaned_or_attempted or time.monotonic() - last_retention_scan >= 60):
@@ -1173,6 +1225,35 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                     last_retention_warning = None
             except (OSError, ValueError, TypeError):
                 pass
+        # Re-attempt only a previous capacity-blocked error once after verified
+        # space recovery. Its old result/worktree remains immutable; process()
+        # writes the standard separate -retry-retention-v1 result.
+        if (not single and retry_folder is None and quota_retry_folder is None
+                and retention_retry_folder is None and not state.get("quota_pause")):
+            try:
+                space = retention_report(c)
+                if (not space.get("error")
+                        and space.get("count", 30) < space.get("limit", 30)):
+                    for candidate in all_evidence_folders(c):
+                        original_id = event_id(candidate)
+                        previous_path = results_dir / original_id / "result.json"
+                        retry_path = results_dir / retention_retry_id(original_id) / "result.json"
+                        if (not stable(candidate, int(c["settle_seconds"]))
+                                or previous_path.is_symlink() or not previous_path.is_file()
+                                or previous_path.stat().st_size > 131072 or retry_path.exists()):
+                            continue
+                        previous = read_json(previous_path)
+                        if (isinstance(previous, dict)
+                                and previous.get("event_id") == original_id
+                                and previous.get("event") == candidate.name
+                                and previous.get("status") == "blocked"
+                                and previous.get("reason") == "worktree_retention_limit_reached"):
+                            retention_retry_folder = candidate
+                            print("AI 작업공간 확보 · 차단 오류 1건 격리 재분석", flush=True)
+                            break
+            except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+                pass
+
         if retry_folder is not None:
             pending = [retry_folder] + [p for p in pending if p != retry_folder]
         elif quota_retry_folder is not None:
