@@ -427,7 +427,7 @@ internal sealed partial class AiAutopilotDashboard : Form
         if (reason.Contains("regression_test_missing", StringComparison.OrdinalIgnoreCase))
             return "오류를 확인할 테스트 코드가 부족함";
         if (reason.Contains("agent_no_patch", StringComparison.OrdinalIgnoreCase))
-            return "AI가 수정할 코드를 찾지 못함";
+            return "AI가 코드 변경 없이 분석 종료 · Codex 결과 확인 필요";
         if (reason.Contains("worktree_retention_limit", StringComparison.OrdinalIgnoreCase))
             return "AI 작업 공간이 가득 참 · 기존 자료 보존, 공간 정리 필요";
         if (status == "tests_failed") return "코드를 수정했지만 자동 테스트에 실패함";
