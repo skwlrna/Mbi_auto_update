@@ -22,5 +22,7 @@
     "This produces a publicly visible, non-prerelease GitHub Release because the existing auto-updater consumes those releases.",
     "Uncertain crafting actions must stop rather than automatically retrying or starting the next queued item."
   ],
-  "allowFabricatedGameTestAttestation": false
+  "allowFabricatedGameTestAttestation": false,
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
 }
