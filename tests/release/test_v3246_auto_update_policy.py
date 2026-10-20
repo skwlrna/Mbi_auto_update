@@ -1,6 +1,6 @@
-"""V3.2.46: the public GitHub updater can only run from a verified main CI.
-This is a source-only contract test. It never logs in, creates releases, or
-changes installed macro state.
+"""V3.2.46: public rollout requires exact main CI and explicit acceptance.
+A sole-operator opt-in is not a simulated real-game attestation.
+This is a source-only test: no login, releases or local macro updates.
 """
 from pathlib import Path
 import re
@@ -46,20 +46,39 @@ class StableReleaseSafetyContract(unittest.TestCase):
         self.assertIn('public const string CurrentVersion = "V3.2.46"', self.updater)
         self.assertIn("<Version>3.2.46</Version>", self.project)
 
-    def test_real_game_and_rollback_remain_non_bypassable(self):
+    def test_unverified_solo_operator_release_has_explicit_acceptance_not_fake_signoff(self):
+        import json
         source = self.workflow
+        att = json.loads(ATTESTATION.read_text(encoding="utf-8"))
+        self.assertEqual(att["status"], "pending")
+        self.assertEqual(att["rollbackVerified"], "pending")
+        solo = json.loads((ROOT / "source/V3.2.46_SOLO_OWNER_RELEASE_ACCEPTANCE.json")
+                          .read_text(encoding="utf-8"))
+        self.assertEqual(solo["rolloutMode"],
+                         "sole_operator_explicitly_accepted_unverified_live_game")
+        self.assertEqual(solo["gameF9FoodHoldResume"], "not_tested")
+        self.assertEqual(solo["gameF9ReceiptNoDuplicate"], "not_tested")
+        self.assertEqual(solo["rollbackExecution"], "not_tested")
+        self.assertIs(solo["allowFabricatedGameTestAttestation"], False)
         for required in ("V3.2.46_GAME_TEST_ATTESTATION.json",
-                         "$att.status -ne 'passed'",
-                         "$att.f9FoodHoldResume -ne 'passed'",
-                         "$att.f9ReceiptNoDuplicate -ne 'passed'",
-                         "$att.oneClickOfflineSmoke -ne 'passed'",
-                         "$att.rollbackVerified -ne 'passed'",
+                         "V3.2.46_SOLO_OWNER_RELEASE_ACCEPTANCE.json",
+                         "$att.status -eq 'passed'",
+                         "$att.f9FoodHoldResume -eq 'passed'",
+                         "$att.f9ReceiptNoDuplicate -eq 'passed'",
+                         "$att.rollbackVerified -eq 'passed'",
                          "Tested commit not ancestor of release",
-                         "Production source changed after tested candidate"):
+                         "Production source changed after tested candidate",
+                         "$att.status -ne 'pending'",
+                         "$solo.allowFabricatedGameTestAttestation -ne $false",
+                         "$solo.gameF9FoodHoldResume -ne 'not_tested'",
+                         "$solo.gameF9ReceiptNoDuplicate -ne 'not_tested'",
+                         "$solo.rollbackExecution -ne 'not_tested'",
+                         "Real-game testing or rollback not verified; auto-update blocked",
+                         "Required update/rollback asset missing"):
             self.assertIn(required, source)
-        self.assertLess(source.index("Require verified real-game recovery"),
+        self.assertLess(source.index("Require game signoff OR explicitly accepted"),
                         source.index("Publish verified Windows binaries"))
-        self.assertLess(source.index("Require verified real-game recovery"),
+        self.assertLess(source.index("Require game signoff OR explicitly accepted"),
                         source.index("Publish public auto-update Release"))
 
     def test_updater_compatible_release_and_backups(self):
