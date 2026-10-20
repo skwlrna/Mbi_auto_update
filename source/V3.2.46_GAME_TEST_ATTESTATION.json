@@ -1,0 +1,12 @@
+{
+  "version": "V3.2.46",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "f9FoodHoldResume": "pending",
+  "f9ReceiptNoDuplicate": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "Release BLOCKED until a real Windows/game validation run and rollback test are documented. CI passing is not enough."
+}
