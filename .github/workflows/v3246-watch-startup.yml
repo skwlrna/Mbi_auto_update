@@ -1,0 +1,52 @@
+name: V3.2.46 AI Watcher Startup Diagnostics
+
+# Diagnostics only. No Codex, no game interaction, no auto-release.
+on:
+  push:
+    branches: [fix/v3246-ai-watch-startup-diagnostics]
+  pull_request:
+    branches: [release/v3246-staged-auto-update]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watcher-startup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Reproduce corrupted watcher state and verify sanitized triage
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_watch_startup_failure.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Watcher fail-closed triage regression failed'}
+      - name: Existing Python AutoFix regressions
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/ai-autopilot -p 'test_*.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Existing AutoFix regression failed'}
+      - name: Windows program build
+        shell: pwsh
+        run: |
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'App restore failed'}
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if($LASTEXITCODE -ne 0){throw 'App build failed'}
+      - name: F9 and durable resume regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'F9 fail-closed regression failed'}
+          dotnet run --project tests/n02-resume/Regression.csproj -c Release -r win-x64
+          if($LASTEXITCODE -ne 0){throw 'N02 resume regression failed'}
