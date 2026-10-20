@@ -80,16 +80,22 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.47"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.48"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.47</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3247-auto-update.yml -Raw
+          if ($p -notmatch '<Version>3\.2\.48</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3248-auto-update.yml -Raw
           if (-not $release.Contains('CurrentVersion = "V3\.2\.47"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
-      - name: V3.2.47 auto-update source policy
+      - name: V3.2.48 auto-update source policy
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/release -p 'test_v3248_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.48 release policy failed' }
+
+      - name: V3.2.47 historical source policy
         shell: pwsh
         run: |
           python -m unittest discover -s tests/release -p 'test_v3247_auto_update_policy.py' -v
