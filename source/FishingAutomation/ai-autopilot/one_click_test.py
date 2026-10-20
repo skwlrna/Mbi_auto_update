@@ -105,7 +105,7 @@ def has_dotnet_8_sdk() -> bool:
             ["dotnet", "--list-sdks"], capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=15, shell=False)
         return checked.returncode == 0 and any(
-            re.match(r"^8\\.0\\.\\d+\\s+\\[", line.strip())
+            re.match(r"^8\.0\.\d+\s+\[", line.strip())
             for line in checked.stdout.splitlines())
     except (OSError, subprocess.TimeoutExpired):
         return False
