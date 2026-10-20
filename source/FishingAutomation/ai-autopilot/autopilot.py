@@ -1410,17 +1410,12 @@ class SingletonLock:
             self.handle = self.path.open("a+b")
         except OSError as exc:
             raise WatcherLockFailure(lock_open_failure(exc)) from exc
+        # CRITICAL: Windows denies even reading a byte that another process
+        # has locked. Always acquire the byte lock BEFORE touching that byte.
+        # LockFile/LockFileEx permits locking a range beyond EOF; initialising
+        # an empty lock file is safe only AFTER the lock is held.
         try:
             self.handle.seek(0)
-            if self.handle.read(1) == b"":
-                self.handle.write(b"0")
-                self.handle.flush()
-            self.handle.seek(0)
-        except OSError as exc:
-            self.handle.close()
-            self.handle = None
-            raise WatcherLockFailure("lock_file_initialize_failed") from exc
-        try:
             if os.name == "nt":
                 import msvcrt
                 msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
@@ -1430,7 +1425,6 @@ class SingletonLock:
         except OSError as exc:
             self.handle.close()
             self.handle = None
-            # A byte lock is held elsewhere only if OS indicates contention.
             if getattr(exc, "winerror", None) in (32, 33) or exc.errno in (11, 13):
                 code = "lock_byte_held"
             elif isinstance(exc, PermissionError):
@@ -1438,6 +1432,28 @@ class SingletonLock:
             else:
                 code = "lock_operation_failed"
             raise WatcherLockFailure(code) from exc
+        try:
+            # SEEK_END does not access the locked region; preserve every
+            # existing lock file byte. Never truncate or rewrite a live lock.
+            self.handle.seek(0, os.SEEK_END)
+            if self.handle.tell() == 0:
+                self.handle.write(b"0")
+                self.handle.flush()
+            self.handle.seek(0)
+        except OSError as exc:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            finally:
+                self.handle.close()
+                self.handle = None
+            raise WatcherLockFailure("lock_file_initialize_failed") from exc
         return self
 
     def __exit__(self, *_: Any) -> None:
