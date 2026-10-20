@@ -90,14 +90,16 @@ class OneClickPcTests(unittest.TestCase):
             marker.write_text("b" * 40, encoding="ascii")
             with patch.object(check, "check_step", side_effect=AssertionError(
                     "must not execute any test")), patch.object(
-                    check, "release_snapshot", return_value=(None, "missing")):
+                    check, "release_snapshot", return_value=(None, "missing")), patch.object(
+                    check, "prepare_source", side_effect=check.SourceBlocked("mismatch")):
                 missing_sdk = check.run_once(root, root / "report1",
                     marker=marker, locate=lambda exe: None)
                 missing_source = check.run_once(root, root / "report2",
                     marker=marker, locate=lambda exe: "/bin/exe")
             self.assertEqual(missing_sdk["result"], "blocked_environment")
             self.assertEqual(missing_source["result"], "blocked_environment")
-            self.assertEqual(missing_source["reason"], "missing")
+            self.assertEqual(missing_source["reason"],
+                "trusted_release_source_download_or_verification_failed")
             self.assertFalse(missing_source["gameTested"])
 
     def test_first_failure_does_not_run_later_steps_or_call_codex(self):
