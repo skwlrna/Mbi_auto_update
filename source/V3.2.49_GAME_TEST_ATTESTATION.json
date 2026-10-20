@@ -1,0 +1,18 @@
+{
+  "version": "V3.2.49",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "f9FoodHoldResume": "pending",
+  "f9ReceiptNoDuplicate": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "craftingGatherAfterTravel": "pending",
+  "craftingSequentialQueue": "pending",
+  "notes": "2026-10-20 AI error manager simplification, manual history deletion and guarded worktree cleanup/retry were verified in GitHub Windows CI only; real Windows desktop interaction, Codex run, automatic update application and rollback are NOT yet tested. No live-game verification is claimed.",
+  "aiErrorManagerUI": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "localHistoryDeletion": "pending",
+  "autoUpdateInstall": "pending"
+}
