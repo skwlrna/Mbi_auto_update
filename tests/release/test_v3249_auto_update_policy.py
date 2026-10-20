@@ -42,7 +42,7 @@ class StableReleaseSafetyContract(unittest.TestCase):
         self.assertIn("No successful production CI for current main SHA", source)
         self.assertIn("main changed since CI; abort release", source)
         self.assertIn("V3.2.49 tag already exists", source)
-        self.assertIn(r'CurrentVersion = "V3\.2\.48"', source)
+        self.assertIn(r'CurrentVersion = "V3\.2\.49"', source)
         self.assertIn('public const string CurrentVersion = "V3.2.49"', self.updater)
         self.assertIn("<Version>3.2.49</Version>", self.project)
 
