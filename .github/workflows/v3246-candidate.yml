@@ -64,7 +64,8 @@ jobs:
              -not $g.Contains("workflow_run.conclusion == 'success'") -or
              -not $g.Contains("workflow_run.event == 'push'") -or
              -not $g.Contains("workflow_run.head_branch == 'main'") -or
-             -not $g.Contains('CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}') -or
+             -not $g.Contains('CI_HEAD_SHA:') -or
+             -not $g.Contains('github.event.workflow_run.head_sha') -or
              -not $g.Contains("V3.2.46_GAME_TEST_ATTESTATION.json") -or
              -not $g.Contains('Real-game testing or rollback not verified')){
             throw 'Public release must require verified main CI plus passed real-game attestation'
