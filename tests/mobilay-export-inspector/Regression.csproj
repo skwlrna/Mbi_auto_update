@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../tools/MobilayExportInspector/ExportShapeInspector.cs" Link="ExportShapeInspector.cs" />
+    <Compile Include="../../tools/MobilayExportInspector/IntegrationCoveragePolicy.cs" Link="IntegrationCoveragePolicy.cs" />
+  </ItemGroup>
+</Project>

@@ -200,6 +200,20 @@ internal sealed class GatheringScreen : IGatheringScreen
             if(state.MainButtonState!="Stop" || !GatheringVision.HasStopButton(frame))
                 Fail(frame,"채집/이동 정지 버튼을 확인하지 못했습니다. 게임에서 직접 정지하세요.");
             if(pass==0){await Task.Delay(150,ct);continue;}
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+            // Existing stop control passed two visual + activity checks.
+            // Log its presence only; do not infer gathering completion.
+            if (state.IsGathering)
+            {
+                try
+                {
+                    FishingAutomation.Telemetry.AiPassiveCliEvidence.ObserveVerifiedScreen(
+                        FishingAutomation.Telemetry.VerifiedScreenIncidentSignal.GatheringStopControlDoubleChecked,
+                        DateTimeOffset.UtcNow);
+                }
+                catch (Exception) { /* never alter production stop behavior */ }
+            }
+#endif
             _ui.TapFresh(0x39, ct); // Space, as shown on the supplied stop control.
         }
     }

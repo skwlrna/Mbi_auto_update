@@ -99,6 +99,24 @@ internal sealed partial class ScenarioEngine
 
         if (previous != next)
             Log?.Invoke($"[어비스 상태] {previous} -> {next} · {reason}");
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+        // Observe ONLY transitions already accepted by the production visual
+        // workflow. This diagnostic cannot change the transition or click.
+        if (previous != next &&
+            (next == AbyssFlowState.ClearConfirmed ||
+             next == AbyssFlowState.ResultConfirmed))
+        {
+            try
+            {
+                FishingAutomation.Telemetry.AiPassiveCliEvidence.ObserveVerifiedScreen(
+                    next == AbyssFlowState.ClearConfirmed
+                        ? FishingAutomation.Telemetry.VerifiedScreenIncidentSignal.AbyssClearPairedFrames
+                        : FishingAutomation.Telemetry.VerifiedScreenIncidentSignal.AbyssResultConfirmed,
+                    DateTimeOffset.UtcNow);
+            }
+            catch (Exception) { /* diagnostics must never block safety path */ }
+        }
+#endif
     }
 
     private void AbyssRequireState(AbyssFlowState expected, string operation)

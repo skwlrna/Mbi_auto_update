@@ -582,6 +582,17 @@ public sealed class FishingBot : IDisposable
                 compassFrames = 0;
                 if (hookFrames >= 2)
                 {
+#if MABIAUTO_AI_PASSIVE_CONTEXT
+                    // Two stable ready-icon images mean UI ready to cast;
+                    // not a caught fish, reward, result or successful round.
+                    try
+                    {
+                        Telemetry.AiPassiveCliEvidence.ObserveVerifiedScreen(
+                            Telemetry.VerifiedScreenIncidentSignal.FishingHookReadyTwoFrames,
+                            DateTimeOffset.UtcNow);
+                    }
+                    catch (Exception) { /* diagnostic does not affect fishing */ }
+#endif
                     _log.Write($"낚싯대 아이콘 복귀 {hook.Score:F3}, 2프레임 -> 다음 판");
                     return;
                 }

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../tools/PacketReceiveProbe/CaptureProbeOptions.cs" Link="CaptureProbeOptions.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/InteractiveProbeConsent.cs" Link="InteractiveProbeConsent.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/ReceiveActivityWindows.cs" Link="ReceiveActivityWindows.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/TcpSocketOwnerProbe.cs" Link="TcpSocketOwnerProbe.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/GuidedDiagnosticPolicy.cs" Link="GuidedDiagnosticPolicy.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/ReadOnlyCliComparison.cs" Link="ReadOnlyCliComparison.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/TcpFlowCorrelation.cs" Link="TcpFlowCorrelation.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/TcpOsFlowSnapshot.cs" Link="TcpOsFlowSnapshot.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/TransportEvidenceAssessment.cs" Link="TransportEvidenceAssessment.cs" />
+    <Compile Include="../../tools/PacketReceiveProbe/SanitizedSummaryReport.cs" Link="SanitizedSummaryReport.cs" />
+  </ItemGroup>
+</Project>
