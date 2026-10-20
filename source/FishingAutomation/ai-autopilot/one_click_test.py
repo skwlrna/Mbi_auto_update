@@ -17,7 +17,8 @@ import tarfile
 import tempfile
 import time
 
-from release_source import release_commit, check_checkout, SourceBlocked
+from release_source import (release_commit, check_checkout, prepare_source,
+                            RELEASE_MARKER, SourceBlocked)
 
 STEPS = (
     ("ai_autofix", [sys.executable, "-B", "-m", "unittest", "discover",
@@ -114,10 +115,26 @@ def run_once(home: Path, output_root: Path, *,
             report["reason"] = "installed_build_commit_unverified"
             return report
         source, proof = release_snapshot(home, expected)
-        report["source"] = proof
         if source is None:
-            report["reason"] = proof
-            return report
+            # No PowerShell/manual clone needed. Existing trusted release-source
+            # preparation may download a clean pinned main snapshot, but can
+            # never update the installed macro or select a mismatched branch.
+            try:
+                selected = prepare_source({
+                    "repo": str(home / "MabiAutoAI" / "repo"),
+                    "source_snapshots_dir": str(home / "MabiAutoAI" / "source-snapshots")
+                }, marker=marker if marker is not None else RELEASE_MARKER)
+                source = Path(selected["repo"])
+                valid, _ = check_checkout(source, expected)
+                if not valid:
+                    report["reason"] = "prepared_source_revision_mismatch"
+                    return report
+                proof = "newly_prepared_pinned_snapshot"
+            except (SourceBlocked, OSError, subprocess.TimeoutExpired, ValueError):
+                report["source"] = "pinned_source_unavailable"
+                report["reason"] = "trusted_release_source_download_or_verification_failed"
+                return report
+        report["source"] = proof
         # Do not let a concurrent source checkout edit race the archive.
         with tempfile.TemporaryDirectory(prefix="mabiauto-oneclick-") as temp:
             root = Path(temp)
