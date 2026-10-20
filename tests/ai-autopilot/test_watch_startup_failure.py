@@ -156,7 +156,9 @@ class WatchStartupFailureTests(unittest.TestCase):
 
     def test_host_does_not_log_raw_stderr_or_run_auto_update(self):
         host = (AI.parent / "AiAutopilotHost.cs").read_text(encoding="utf-8")
-        self.assertIn("WATCHER STARTUP FAILED|", host)\n        self.assertIn("WATCHER LOCK BLOCKED|", host)\n        self.assertIn("lock_file_open_access_denied", host)
+        self.assertIn("WATCHER STARTUP FAILED|", host)
+        self.assertIn("WATCHER LOCK BLOCKED|", host)
+        self.assertIn("lock_file_open_access_denied", host)
         self.assertIn("JSONDecodeError", host)
         self.assertIn("watch-startup-diagnostic.json", host)
         self.assertIn("AI 감시 종료 (코드 ", host)
