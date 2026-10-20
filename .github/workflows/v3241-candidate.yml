@@ -18,6 +18,8 @@ permissions:
 
 jobs:
   candidate:
+    # A V3.2.46 promotion PR must not execute the old 3.2.41 candidate.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.head_ref == 'feat/v3241-durable-food-hold-recovery' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
