@@ -24,6 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Test EXACT feature-branch commit, not GitHub's temporary PR merge SHA.
+          # BUILD_COMMIT.txt must refer to the code actually tested.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
