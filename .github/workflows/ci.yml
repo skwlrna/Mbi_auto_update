@@ -85,7 +85,7 @@ jobs:
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
           if ($p -notmatch '<Version>3\.2\.48</Version>') { throw 'project version mismatch' }
           $release = Get-Content .github/workflows/release-v3248-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.47"')) {
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.48"')) {
             throw 'release workflow eligibility version mismatch'
           }
 
