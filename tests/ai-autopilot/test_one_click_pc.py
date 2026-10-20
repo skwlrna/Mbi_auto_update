@@ -69,8 +69,9 @@ class OneClickPcTests(unittest.TestCase):
                 commands.append(tuple(argv))
                 return "passed", "exit_0"
 
-            with patch.object(check, "release_snapshot",
-                              return_value=(source, "verified_local_pinned_source")), patch.object(
+            with patch.object(check, "has_dotnet_8_sdk", return_value=True), patch.object(
+                    check, "release_snapshot",
+                    return_value=(source, "verified_local_pinned_source")), patch.object(
                      check, "check_checkout", return_value=(True, "ok")), patch.object(
                      check.subprocess, "run", side_effect=fake_archive), patch.object(
                      check, "check_step", side_effect=fake_step):
@@ -91,7 +92,8 @@ class OneClickPcTests(unittest.TestCase):
             root = Path(directory)
             marker = root / "BUILD_COMMIT.txt"
             marker.write_text("b" * 40, encoding="ascii")
-            with patch.object(check, "check_step", side_effect=AssertionError(
+            with patch.object(check, "has_dotnet_8_sdk", return_value=True), patch.object(
+                    check, "check_step", side_effect=AssertionError(
                     "must not execute any test")), patch.object(
                     check, "release_snapshot", return_value=(None, "missing")), patch.object(
                     check, "prepare_source", side_effect=check.SourceBlocked("mismatch")):
@@ -129,8 +131,9 @@ class OneClickPcTests(unittest.TestCase):
                 calls.append(argv)
                 return "failed", "test_nonzero_exit"
 
-            with patch.object(check, "release_snapshot",
-                              return_value=(source, "verified")), patch.object(
+            with patch.object(check, "has_dotnet_8_sdk", return_value=True), patch.object(
+                    check, "release_snapshot",
+                    return_value=(source, "verified")), patch.object(
                      check, "check_checkout", return_value=(True, "ok")), patch.object(
                      check.subprocess, "run", side_effect=fake_archive), patch.object(
                      check, "check_step", side_effect=fail_step):
@@ -139,6 +142,31 @@ class OneClickPcTests(unittest.TestCase):
             self.assertEqual(output["result"], "tests_failed")
             self.assertEqual(len(calls), 1)
             self.assertFalse(output["prCreated"])
+
+    def test_dotnet_8_sdk_is_required_not_only_runtime_executable(self):
+        from types import SimpleNamespace
+        def output(text):
+            return SimpleNamespace(returncode=0, stdout=text)
+        with patch.object(check.subprocess, "run", return_value=output(
+                "8.0.407 [C:/dotnet/sdk]")):
+            self.assertTrue(check.has_dotnet_8_sdk())
+        with patch.object(check.subprocess, "run", return_value=output(
+                "9.0.300 [C:/dotnet/sdk]")):
+            self.assertFalse(check.has_dotnet_8_sdk())
+        with patch.object(check.subprocess, "run", return_value=output("")):
+            self.assertFalse(check.has_dotnet_8_sdk())
+
+    def test_broken_sdk_or_missing_git_results_distinguished(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with patch.object(check, "has_dotnet_8_sdk", return_value=False):
+                out = check.run_once(root, root / "sdk-missing",
+                    locate=lambda exe: "installed")
+                self.assertEqual(out["reason"], "dotnet_sdk_8_missing")
+                out = check.run_once(root, root / "git-missing",
+                    locate=lambda exe: None if exe == "git" else "installed")
+                self.assertEqual(out["reason"], "git_missing")
+                self.assertEqual(out["tests"], [])
 
     def test_ui_wiring_uses_idle_guard_and_report_only(self):
         ui = (LIB.parent / "MainForm.AiAutopilot.cs").read_text(encoding="utf-8")
