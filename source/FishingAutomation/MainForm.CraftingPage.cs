@@ -26,6 +26,18 @@ public sealed partial class MainForm
             choice.Item.ProducedPerCraft);
     }
 
+    private CraftingPlan[] SelectedCraftingPlans()
+    {
+        if (_craftingPage.HasQueueEntries)
+        {
+            var queued = _craftingPage.PendingCraftingPlans.ToArray();
+            if (queued.Length == 0)
+                throw new InvalidOperationException("대기 중인 제작 품목이 없습니다.");
+            return queued;
+        }
+        return new[] { SelectedCraftingPlan() };
+    }
+
     private async Task RefreshCraftingStateAsync()
     {
         if (_craftingPolling || _craftingPage is null || _craftingPage.IsDisposed ||
@@ -66,6 +78,39 @@ public sealed partial class MainForm
         private readonly Button _start;
         private readonly Button _stop;
         private readonly Button _reload;
+        private readonly ListBox _craftingQueue = new();
+        private Button _addQueue = null!;
+        private Button _removeQueue = null!;
+        private Button _upQueue = null!;
+        private Button _downQueue = null!;
+        private Button _clearQueue = null!;
+        private sealed class QueuedCraftingChoice
+        {
+            internal CraftingPlan Plan { get; }
+            internal bool Completed { get; set; }
+            internal QueuedCraftingChoice(CraftingPlan plan) => Plan = plan;
+            public override string ToString() =>
+                (Completed ? "✓ " : "□ ") + Plan.DisplayName + " · " + Plan.TargetQuantity.ToString("N0") + "개";
+        }
+        internal bool HasQueueEntries => _craftingQueue.Items.Count > 0;
+        internal IReadOnlyList<CraftingPlan> PendingCraftingPlans =>
+            _craftingQueue.Items.Cast<QueuedCraftingChoice>()
+                .Where(x => !x.Completed).Select(x => x.Plan).ToArray();
+        internal void MarkCraftingCompleted(CraftingPlan plan)
+        {
+            var item = _craftingQueue.Items.Cast<QueuedCraftingChoice>()
+                .FirstOrDefault(x => !x.Completed && x.Plan == plan);
+            if (item is null) return;
+            item.Completed = true;
+            _craftingQueue.Refresh();
+            UpdateExecution();
+        }
+        internal void ClearCompletedQueue()
+        {
+            if (_craftingQueue.Items.Cast<QueuedCraftingChoice>().All(x => x.Completed))
+                _craftingQueue.Items.Clear();
+            UpdateExecution();
+        }
         private readonly Label _selected = new();
         private readonly Label _detail = new();
         private readonly Label _progress = new();
@@ -115,6 +160,7 @@ public sealed partial class MainForm
             root.Controls.Add(header, 0, 0);
 
             Items.AccessibleName = "제작 품목"; StyleListBox(Items);
+            _craftingQueue.AccessibleName = "순차 제작 대기 목록"; StyleListBox(_craftingQueue);
             _search.PlaceholderText = "품목을 검색하세요"; StyleField(_search);
             Quantity.Minimum = 1; Quantity.Maximum = 1_000_000; Quantity.Value = 100; StyleField(Quantity);
             Quantity.AccessibleName = "제작 목표 수량";
@@ -127,9 +173,10 @@ public sealed partial class MainForm
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
 
             var leftCard = Card(); leftCard.Padding = new Padding(16, 10, 16, 10); leftCard.Margin = new Padding(0, 0, 9, 0); leftCard.AccessibleName = "제작 품목 영역";
-            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty, BackColor = Color.Transparent };
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = Padding.Empty, BackColor = Color.Transparent };
             left.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
+            left.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
 
             var settingsHeading = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = Padding.Empty };
             settingsHeading.Controls.Add(new Label { Text = "제작 설정", Dock = DockStyle.Fill, ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft });
@@ -139,6 +186,7 @@ public sealed partial class MainForm
             left.Controls.Add(settingsHeading, 0, 0);
             left.Controls.Add(BuildLabeledField("품목 검색", _search, "crafting-field"), 0, 1);
             left.Controls.Add(BuildListArea("제작 품목"), 0, 2);
+            left.Controls.Add(BuildQueueArea(), 0, 3);
             leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
 
             var right = new TableLayoutPanel
@@ -217,6 +265,7 @@ public sealed partial class MainForm
                 }
                 foreach (var x in rows) x.Style.Height = x.Size * scale; foreach (var x in columns) x.Style.Width = x.Size * scale;
                 _reload.Width = Math.Max(70, (int)(110 * scale)); Items.ItemHeight = Math.Max(26, Items.Font.Height + Math.Max(7, (int)(8 * scale)));
+                _craftingQueue.ItemHeight = Math.Max(26, _craftingQueue.Font.Height + Math.Max(7, (int)(8 * scale)));
                 foreach (var field in Descendants(root).Where(control => control.Tag is string tag && tag == "crafting-field")) LayoutField(field);
                 root.ResumeLayout(true); fitting = false;
             }
@@ -445,6 +494,94 @@ public sealed partial class MainForm
             surface.Controls.Add(Items); layout.Controls.Add(surface, 0, 1); return layout;
         }
 
+        private Control BuildQueueArea()
+        {
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
+                Margin = Padding.Empty, BackColor = Color.Transparent
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            layout.Controls.Add(new Label
+            {
+                Text = "순차 제작 대기 목록 · 위에서 아래로 한 품목씩",
+                Dock = DockStyle.Fill, ForeColor = TitleText,
+                TextAlign = ContentAlignment.MiddleLeft
+            }, 0, 0);
+            var surface = new CraftingCard
+            {
+                Dock = DockStyle.Fill, BackColor = CardBg2,
+                Margin = new Padding(0, 2, 0, 2), Padding = new Padding(4)
+            };
+            surface.Controls.Add(_craftingQueue);
+            layout.Controls.Add(surface, 0, 1);
+
+            var controls = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1,
+                BackColor = Color.Transparent, Margin = Padding.Empty
+            };
+            for (int i = 0; i < 5; i++)
+                controls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            _addQueue = Button("추가", AddToQueue);
+            _removeQueue = Button("삭제", RemoveFromQueue);
+            _upQueue = Button("↑", () => MoveQueue(-1));
+            _downQueue = Button("↓", () => MoveQueue(1));
+            _clearQueue = Button("전체삭제", () =>
+            {
+                if (_owner.AnyRunning || _owner._starting) return;
+                _craftingQueue.Items.Clear();
+                UpdateExecution();
+            });
+            Button[] buttons = { _addQueue, _removeQueue, _upQueue, _downQueue, _clearQueue };
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                buttons[i].Margin = new Padding(2);
+                buttons[i].Font = new Font("맑은 고딕", 13f, FontStyle.Regular, GraphicsUnit.Pixel);
+                controls.Controls.Add(buttons[i], i, 0);
+            }
+            layout.Controls.Add(controls, 0, 2);
+            return layout;
+        }
+
+        private void AddToQueue()
+        {
+            if (_owner.AnyRunning || _owner._starting || _loading) return;
+            try
+            {
+                var plan = _owner.SelectedCraftingPlan();
+                plan.Validate();
+                _craftingQueue.Items.Add(new QueuedCraftingChoice(plan));
+                _craftingQueue.SelectedIndex = _craftingQueue.Items.Count - 1;
+            }
+            catch (Exception ex)
+            {
+                _owner._log.Write("[제작][순차] 대기 등록 거부 · " + ex.Message);
+            }
+            UpdateExecution();
+        }
+
+        private void RemoveFromQueue()
+        {
+            if (_owner.AnyRunning || _owner._starting || _craftingQueue.SelectedIndex < 0) return;
+            _craftingQueue.Items.RemoveAt(_craftingQueue.SelectedIndex);
+            UpdateExecution();
+        }
+
+        private void MoveQueue(int direction)
+        {
+            if (_owner.AnyRunning || _owner._starting) return;
+            int from = _craftingQueue.SelectedIndex;
+            int to = from + direction;
+            if (from < 0 || to < 0 || to >= _craftingQueue.Items.Count) return;
+            object choice = _craftingQueue.Items[from]!;
+            _craftingQueue.Items.RemoveAt(from);
+            _craftingQueue.Items.Insert(to, choice);
+            _craftingQueue.SelectedIndex = to;
+        }
+
         private static void StyleCombo(ComboBox combo)
         {
             combo.FlatStyle = FlatStyle.Flat;
@@ -626,9 +763,12 @@ public sealed partial class MainForm
             bool ownRun = _owner._activeMode == "제작";
             bool busy = _owner.AnyRunning || _owner._starting;
             bool selected = Items.SelectedItem is CraftingChoice;
-            foreach (Control control in new Control[] { Items, Quantity, _search, _reload })
+            foreach (Control control in new Control[] { Items, Quantity, _search, _reload,
+                _craftingQueue, _addQueue, _removeQueue, _upQueue, _downQueue, _clearQueue })
                 control.Enabled = !busy && !_loading;
-            _start.Enabled = !busy && !_loading && selected && !SelectedAmbiguous;
+            _addQueue.Enabled = !busy && !_loading && selected && !SelectedAmbiguous;
+            _start.Enabled = !busy && !_loading &&
+                (HasQueueEntries ? PendingCraftingPlans.Count > 0 : selected && !SelectedAmbiguous);
             _stop.Enabled = ownRun && _owner.AnyRunning;
 
             long current = ownRun ||
