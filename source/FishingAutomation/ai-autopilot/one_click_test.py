@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -94,6 +95,22 @@ def check_step(argv: list[str], cwd: Path, limit: int) -> tuple[str, str]:
         return "failed", "test_launch_unavailable"
 
 
+def has_dotnet_8_sdk() -> bool:
+    """Only an actual .NET 8 SDK can compile these C# regression projects.
+
+    'dotnet.exe' alone often means the runtime is present, not the SDK.
+    """
+    try:
+        checked = subprocess.run(
+            ["dotnet", "--list-sdks"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15, shell=False)
+        return checked.returncode == 0 and any(
+            re.match(r"^8\\.0\\.\\d+\\s+\\[", line.strip())
+            for line in checked.stdout.splitlines())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def run_once(home: Path, output_root: Path, *,
              locate=shutil.which, marker=None) -> dict:
     report = {
@@ -105,9 +122,13 @@ def run_once(home: Path, output_root: Path, *,
         "tests": [], "source": "not_verified"
     }
     try:
-        # The UI always invokes this with Python. Missing executables fail closed.
-        if not locate("git") or not locate("dotnet"):
-            report["reason"] = "git_or_dotnet_sdk_missing"
+        # Distinguish tools from mismatched source so the user never has to
+        # guess from a generic "Git/.NET/SHA" failure dialog.
+        if not locate("git"):
+            report["reason"] = "git_missing"
+            return report
+        if not locate("dotnet") or not has_dotnet_8_sdk():
+            report["reason"] = "dotnet_sdk_8_missing"
             return report
         try:
             expected = release_commit(marker) if marker is not None else release_commit()
