@@ -137,19 +137,18 @@ class AutomaticWorkspaceCleanupTest(unittest.TestCase):
             self.assertTrue(kwargs["retry_retention"])
             self.assertTrue(folder.samefile(event), 'same runtime event despite Windows short paths')
             calls.append(folder)
-            new = self.results / autopilot.retention_retry_id(eid) / "result.json"
-            new.parent.mkdir(parents=True)
-            new.write_text(json.dumps({
-                "event": folder.name, "event_id": new.parent.name, "status": "blocked",
-                "reason": "offline_fixture"
-            }))
-            return {"status": "blocked", "reason": "offline_fixture"}
+            # Model a result creation failure: the user must never be charged
+            # for a second unapproved Codex attempt on the next watch cycle.
+            return {"status": "blocked", "reason": "offline_fixture_no_result_file"}
         with mock.patch.object(autopilot, "process", side_effect=fake_process):
             self.run_one_cycle()
             self.run_one_cycle()
         self.assertEqual(len(calls), 1)
         self.assertEqual(blocked.read_bytes(), old_bytes)
         self.assertFalse(self.worktree.exists())
+        state = json.loads((self.results / "watch-state.json").read_text())
+        self.assertIn(eid, state["auto_retention_retry_attempted"])
+        self.assertFalse((self.results / autopilot.retention_retry_id(eid) / "result.json").exists())
 
 
 class DashboardContractsTest(unittest.TestCase):
