@@ -274,6 +274,24 @@ try
 }
 catch (ArgumentOutOfRangeException) { Check(true, "invalid progress timestamps are rejected"); }
 
+// Capacity policy is based on fresh get_inventory values, never guessed unit weight.
+var bagUnder = GatheringWeightPolicy.Read(79.9m, 100m);
+var bagWarn = GatheringWeightPolicy.Read(80m, 100m);
+var bagBelowLimit = GatheringWeightPolicy.Read(89.99m, 100m);
+var bagAtLimit = GatheringWeightPolicy.Read(90m, 100m);
+Check(!bagUnder.ShouldWarn && !bagUnder.MustStop &&
+      bagWarn.ShouldWarn && !bagWarn.MustStop &&
+      !bagBelowLimit.MustStop && bagAtLimit.MustStop &&
+      bagAtLimit.RemainingToSafetyLimit == 0m &&
+      bagBelowLimit.RemainingToSafetyLimit == 0.01m,
+    "capacity rule warns at 80%, stops at 90%, never rounds up before comparing");
+try { GatheringWeightPolicy.Read(-1m, 100m); throw new Exception("negative bag weight accepted"); }
+catch(InvalidDataException) { Check(true, "negative bag weight is rejected"); }
+try { GatheringWeightPolicy.Read(1m, 0m); throw new Exception("unknown bag maximum accepted"); }
+catch(InvalidDataException) { Check(true, "missing capacity is rejected"); }
+Check(GatheringWeightPolicy.Read(101m, 100m).MustStop,
+    "overfilled bag is stopped rather than treated as free space");
+
 var plan=new GatheringPlan("철 광석",5);
 try { (plan with {SourceRecipe=new AlteringPlan("금속 가공 시설","철괴(철 광석)",1,3,true)}).Validate(); throw new Exception("paid source accepted"); }
 catch(InvalidDataException){Check(true,"source recipe cannot enable paid altering button");}
@@ -354,6 +372,53 @@ foreach(var world in new[]{new FakeWorld {Tool=false},new FakeWorld{Full=true},n
     try{await new GatheringAutomation(world,world).RunAsync(plan,default);throw new Exception("unsafe start accepted");}
     catch(InvalidOperationException){Check(world.Starts==0,"unavailable tool/full bag/unsafe state cannot start");}
 }
+// When the weight limit is already reached, do not issue any screen input.
+var nearFull = new FakeWorld { BagWeight = 90m };
+try
+{
+    await new GatheringAutomation(nearFull, nearFull).RunAsync(plan, default);
+    throw new Exception("90% bag incorrectly accepted before start");
+}
+catch (GatheringBagCapacityException e)
+{
+    Check(nearFull.Starts == 0 && nearFull.Stops == 0 &&
+          e.RemainingQuantity == plan.TargetQuantity,
+          "90% bag capacity blocks new gather input with remaining target");
+}
+// While gathering, the same 90% limit takes the existing guarded Stop route.
+var duringGather = new FakeWorld { BagWeight = 88m, PerGainWeight = 1m };
+var bagMessages = new List<string>();
+var weightLimited = new GatheringAutomation(duringGather, duringGather,
+    (_, _) => Task.CompletedTask);
+weightLimited.Log += bagMessages.Add;
+try
+{
+    await weightLimited.RunAsync(plan, default);
+    throw new Exception("bag limit not enforced during gathering");
+}
+catch (GatheringBagCapacityException e)
+{
+    Check(duringGather.Starts == 1 && duringGather.Stops == 1 &&
+          duringGather.Owned == 102 && e.RemainingQuantity == 3 &&
+          bagMessages.Any(x => x.Contains("자동 폐기/추가 채집 금지", StringComparison.Ordinal)),
+          "90% reached mid-gather stops safely and reports remaining material");
+}
+// Hitting target before the weight check must still complete normally.
+var targetJustReached = new FakeWorld { BagWeight = 88m, PerGainWeight = 1m };
+await new GatheringAutomation(targetJustReached, targetJustReached,
+    (_, _) => Task.CompletedTask).RunAsync(new GatheringPlan("철 광석", 2), default);
+Check(targetJustReached.Starts == 1 && targetJustReached.Stops == 1 &&
+      targetJustReached.Owned == 102,
+      "target reached is not falsely marked as a bag-capacity failure");
+var warnOnce = new FakeWorld { BagWeight = 81m, Gain = 1 };
+var warnMessages = new List<string>();
+var warnRun = new GatheringAutomation(warnOnce, warnOnce,
+    (_, _) => Task.CompletedTask);
+warnRun.Log += warnMessages.Add;
+await warnRun.RunAsync(plan, default);
+Check(warnMessages.Count(x => x.Contains("[가방 무게] 주의", StringComparison.Ordinal)) == 1,
+    "80% bag weight warning is emitted once per gathering run");
+
 var stalled=new FakeWorld{Gain=0};
 try{await new GatheringAutomation(stalled,stalled,(_,_)=>Task.CompletedTask,3).RunAsync(plan,default);throw new Exception("stalled run accepted");}
 catch(InvalidOperationException){Check(stalled.Starts==1 && stalled.Stops==1,"no progress stops without another start");}
@@ -393,6 +458,7 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen, IGatheringSt
     internal int PreStartCombatPolls,PostStartCombatPolls;
     internal long Owned=100;
     internal bool Tool=true,Full,IgnoreStop,TravelOnStart,SilentCompleteOnStart,StopVisible;
+    internal decimal BagWeight=1m, BagMaximum=100m, PerGainWeight=0m;
     public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult<IReadOnlyList<GatherableItem>>(new[]{new GatherableItem("철 광석",Tool)});}
     public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
     {
@@ -409,7 +475,11 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen, IGatheringSt
         }
         return Task.FromResult(State);
     }
-    public Task<(decimal Current,decimal Maximum)> WeightAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(((decimal)(Full?100:1),100m));}
+    public Task<(decimal Current,decimal Maximum)> WeightAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult((Full ? BagMaximum : BagWeight + (Owned - 100) * PerGainWeight, BagMaximum));
+    }
     public Task<long> ItemCountAsync(string name,CancellationToken ct){ct.ThrowIfCancellationRequested();if(State.IsGathering)Owned+=Gain;return Task.FromResult(Owned);}
     public Task StartAsync(GatheringPlan plan,CancellationToken ct)
     {

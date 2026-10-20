@@ -14,6 +14,7 @@
     <Compile Include="../../source/FishingAutomation/FacilityBottleneckEvidence.cs" Link="FacilityBottleneckEvidence.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringIncidentSnapshot.cs" Link="MultiAlteringIncidentSnapshot.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/GatheringWeightPolicy.cs" Link="GatheringWeightPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringQueries.cs" Link="GatheringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringSafetyPolicy.cs" Link="GatheringSafetyPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringNavigationPolicy.cs" Link="GatheringNavigationPolicy.cs" />

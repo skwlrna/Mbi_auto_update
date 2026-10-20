@@ -19,6 +19,7 @@
     <Compile Include="../../source/FishingAutomation/AlteringStatus.cs" Link="AlteringStatus.cs" />
     <Compile Include="../../source/FishingAutomation/CliAutomationGuards.cs" Link="CliAutomationGuards.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringAutomation.cs" Link="GatheringAutomation.cs" />
+    <Compile Include="../../source/FishingAutomation/GatheringWeightPolicy.cs" Link="GatheringWeightPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/LivingSkillGatheringCatalog.cs" Link="LivingSkillGatheringCatalog.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringQueries.cs" Link="GatheringQueries.cs" />
     <Compile Include="../../source/FishingAutomation/GatheringSafetyPolicy.cs" Link="GatheringSafetyPolicy.cs" />
