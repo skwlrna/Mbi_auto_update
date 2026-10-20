@@ -1,8 +1,9 @@
-"""Opt-in, fail-closed retention maintenance for isolated AI worktrees.
+"""Fail-closed retention maintenance for isolated AI worktrees.
 
-Never remove a worktree automatically. A human-approved cleanup archives a
-terminal, unchanged worktree, verifies its backup, and only then removes it.
-Results, evidence, Git branches and original source snapshots are untouched.
+The opted-in watcher may archive only verified clean, terminal worktrees when
+near its configured limit. Explicit UI approval may also request bounded batch
+cleanup. Each backup is verified before removal. Active worktrees, dirty edits,
+results, evidence, Git branches and original source snapshots are untouched.
 """
 from __future__ import annotations
 
@@ -157,7 +158,10 @@ def report(c: dict) -> dict:
 
 
 def archive_clean_one(c: dict, event_id: str) -> dict:
-    """Called only after explicit UI approval, while watcher lock is held."""
+    """Called by the authorized watcher for approved or policy-bounded cleanup.
+
+    The watcher singleton lock guards cleanup; report() revalidates every candidate.
+    """
     if not IDENTIFIER.fullmatch(event_id):
         return {"status": "blocked", "reason": "invalid_event_id"}
     snapshot = report(c)
