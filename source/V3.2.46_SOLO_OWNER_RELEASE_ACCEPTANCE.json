@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "version": "V3.2.46",
+  "rolloutMode": "sole_operator_explicitly_accepted_unverified_live_game",
+  "acceptedOnLocalDate": "2026-10-20",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "gameF9FoodHoldResume": "not_tested",
+  "gameF9ReceiptNoDuplicate": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "5_of_5_user_reported",
+  "aiWatcher": "running_state_observed_no_end_to_end_codex",
+  "disclosures": [
+    "This is a public non-prerelease GitHub Release visible to existing clients.",
+    "No real-game F9 registration/receipt/duplicate-prevention attestation is being claimed.",
+    "The user explicitly accepted the unverified risk for their own use.",
+    "The update retains checksums, binary smoke, backups and rollback scripts; restore was not independently game tested.",
+    "AI changes continue to need offline checks and Draft PR review; no automatic AI patch deployment."
+  ],
+  "allowFabricatedGameTestAttestation": false
+}
