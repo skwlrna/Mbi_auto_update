@@ -922,7 +922,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     // Limit remains 2 seconds; no unverified extra K is sent.
                     bool firstEntry = !_managedKInputIssued;
                     var previousHud = firstEntry
-                        ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false)
+                        ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false, HomeFound: false, EndFound: false)
                         : DetectManagedWorldHudTemplates(frame);
                     bool previousField = !firstEntry && HasManagedKEntryFieldHudVisual(frame);
                     var started = Stopwatch.StartNew();
@@ -935,7 +935,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         await Task.Delay(180, ct);
                         using var freshField = Capture(ct);
                         var currentHud = firstEntry
-                            ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false)
+                            ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false, HomeFound: false, EndFound: false)
                             : DetectManagedWorldHudTemplates(freshField);
                         bool currentField = !firstEntry && HasManagedKEntryFieldHudVisual(freshField);
                         samples++;
