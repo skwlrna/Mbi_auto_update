@@ -60,7 +60,7 @@ def watcher_startup_failure(exc: Exception) -> dict[str, Any]:
         for fr in traceback.extract_tb(exc.__traceback__)[-8:]:
             filename = Path(fr.filename)
             if filename.parent.resolve() == HERE.resolve() and re.fullmatch(
-                    r"[A-Za-z0-9_]{1,80}\\.py", filename.name):
+                    r"[A-Za-z0-9_]{1,80}\.py", filename.name):
                 frames.append({"module": filename.name, "line": int(fr.lineno)})
     except (OSError, ValueError, RuntimeError):
         frames = []
