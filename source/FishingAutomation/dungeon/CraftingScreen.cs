@@ -1215,6 +1215,15 @@ internal sealed class CraftingScreen : ICraftingScreen
         Bitmap frame,
         CancellationToken ct)
     {
+        var captionLines = await _ui.Ocr.ReadLinesAsync(
+            frame, new Rectangle(175, 645, 455, 125), 3, ct);
+        var caption = string.Join("", captionLines.Select(x => x.ReadText ?? ""));
+        if (CraftingQuestText.IsShortageDialogCaption(caption))
+        {
+            Log?.Invoke("[제작] 기존 재료 부족 팝업 구조 확인 · 퀘스트/구하는 방법 문구 · 중복 열기 생략");
+            return true;
+        }
+
         var lines = await _ui.Ocr.ReadLinesAsync(
             frame,
             CraftingHubLayout.ProductionQuestMaterialArea,
