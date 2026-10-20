@@ -7,7 +7,7 @@ namespace FishingAutomation;
 /// Read-only local snapshot of the existing Autopilot result directory.
 /// No process control, script invocation, upload or automatic PR operations.
 /// </summary>
-internal sealed class AiAutopilotDashboard : Form
+internal sealed partial class AiAutopilotDashboard : Form
 {
     private static readonly Color UiBackground = Color.FromArgb(23, 23, 24);
     private static readonly Color UiPanel = Color.FromArgb(30, 30, 32);
@@ -29,7 +29,7 @@ internal sealed class AiAutopilotDashboard : Form
     private readonly Label _details;
     private readonly ComboBox _range;
     private sealed record ResultItem(string Url, string FilePath, string EventId,
-        string Title, string Detail, string Status, string Next);
+        string Title, string Detail, string Status, string Next, string EventName);
     private sealed record Analysis(string EventName, string EventId, string FilePath,
         DateTimeOffset Time, string Status, string Reason, string Url, string PrText,
         string Feedback, string Provenance);
@@ -44,30 +44,30 @@ internal sealed class AiAutopilotDashboard : Form
     {
         _isWatcherRunning = isWatcherRunning;
         _watcherStatus = watcherStatus;
-        Text = "MabiAuto · AI 오류 시간별 내역";
+        Text = "MabiAuto · AI 오류 관리";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(1080, 550);
-        ClientSize = new Size(1140, 720);
+        MinimumSize = new Size(850, 480);
+        ClientSize = new Size(1020, 640);
         BackColor = UiBackground;
         ForeColor = UiText;
         Font = new Font("맑은 고딕", 9f);
 
         var heading = new Label
         {
-            Text = "AI 오류 내역 · 발생 시간순", Dock = DockStyle.Top, Height = 49,
+            Text = "AI 오류 관리", Dock = DockStyle.Top, Height = 44,
             Font = new Font("맑은 고딕", 14f, FontStyle.Bold),
             ForeColor = UiText,
             Padding = new Padding(17, 10, 0, 0)
         };
         _overview = new Label
         {
-            Dock = DockStyle.Top, Height = 76, AutoEllipsis = true,
+            Dock = DockStyle.Top, Height = 55, AutoEllipsis = true,
             ForeColor = UiMuted,
             Padding = new Padding(18, 6, 12, 0)
         };
         _pipeline = new Label
         {
-            Dock = DockStyle.Top, Height = 72, AutoEllipsis = true,
+            Dock = DockStyle.Top, Height = 72, AutoEllipsis = true, Visible = false,
             ForeColor = UiText, BackColor = UiPanel,
             Font = new Font("맑은 고딕", 9f),
             Padding = new Padding(18, 8, 10, 4),
@@ -75,7 +75,7 @@ internal sealed class AiAutopilotDashboard : Form
         };
         _counts = new Label
         {
-            Dock = DockStyle.Top, Height = 54,
+            Dock = DockStyle.Top, Height = 31,
             ForeColor = UiText,
             Font = new Font("맑은 고딕", 9.5f, FontStyle.Bold),
             Padding = new Padding(18, 5, 12, 0)
@@ -83,11 +83,11 @@ internal sealed class AiAutopilotDashboard : Form
         _memory = new Label
         {
             Text = "초기 후보 로컬 테스트 ≠ 최종 PR CI ≠ 실게임 해결. 세 단계는 별개입니다.",
-            Dock = DockStyle.Top, Height = 34,
+            Dock = DockStyle.Top, Height = 34, Visible = false,
             ForeColor = UiMuted,
             Padding = new Padding(18, 5, 12, 0)
         };
-        var foot = new Panel { Dock = DockStyle.Bottom, Height = 51, BackColor = UiBackground };
+        var foot = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = UiBackground };
         _updated = new Label
         {
             Text = "최근 기록을 표시합니다 · 게임에 자동 적용하지 않습니다.",
@@ -164,7 +164,7 @@ internal sealed class AiAutopilotDashboard : Form
             Dock = DockStyle.Fill, BorderStyle = BorderStyle.None,
             ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false, RowHeadersVisible = false,
-            MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = true, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
             BackgroundColor = UiBackground, GridColor = UiBorder
         };
@@ -199,6 +199,8 @@ internal sealed class AiAutopilotDashboard : Form
         _recent.Columns.Add("status", "AI가 한 일");
         _recent.Columns.Add("action", "다음 단계");
         _recent.Columns.Add("pr", "수정안");
+        _recent.Columns["detail"]!.Visible = false;
+        _recent.Columns["pr"]!.Visible = false;
         _recent.Columns[0].FillWeight = 111;
         _recent.Columns[1].FillWeight = 130;
         _recent.Columns[2].FillWeight = 265;
@@ -224,8 +226,8 @@ internal sealed class AiAutopilotDashboard : Form
 
         _details = new Label
         {
-            Text = "오류를 선택하면 원인과 다음에 할 일을 아래에서 볼 수 있습니다.",
-            Dock = DockStyle.Bottom, Height = 90,
+            Text = "오류를 선택하면 상세 내용과 다음 단계를 볼 수 있습니다.",
+            Dock = DockStyle.Bottom, Height = 104,
             ForeColor = UiText,
             BackColor = UiPanel, BorderStyle = BorderStyle.FixedSingle,
             Padding = new Padding(15, 7, 10, 6), AutoEllipsis = true
@@ -238,7 +240,7 @@ internal sealed class AiAutopilotDashboard : Form
         };
         var intro = new Label
         {
-            Text = "최신 오류가 위에 나옵니다. 한 줄을 누르면 자세히 볼 수 있고, 수정안이 있으면 두 번 눌러 GitHub에서 엽니다.",
+            Text = "오류를 선택하면 아래에 상세 내용이 표시됩니다. Ctrl/Shift로 여러 기록을 선택할 수 있습니다.",
             Dock = DockStyle.Top, Height = 30, Padding = new Padding(18, 0, 0, 0),
             ForeColor = UiMuted
         };
@@ -254,7 +256,7 @@ internal sealed class AiAutopilotDashboard : Form
         _range.SelectedIndexChanged += (_, _) => Reload();
         var explanation = new Label
         {
-            Text = "발생 시간 기준 · PC에 기록된 오류와 Codex 분석 결과",
+            Text = "", Visible = false,
             Location = new Point(175, 8), AutoSize = true,
             ForeColor = UiMuted
         };
@@ -266,10 +268,10 @@ internal sealed class AiAutopilotDashboard : Form
         checkPipeline.Click += async (_, _) => await RequestPipelineCheckAsync();
         var retentionCleanup = new Button
         {
-            Text = "작업공간 안전 정리", Dock = DockStyle.Right, Width = 155,
+            Text = "작업공간 정리", Dock = DockStyle.Right, Width = 130,
             BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
-        retentionCleanup.Click += (_, _) => RequestRetentionCleanup();
+        retentionCleanup.Click += (_, _) => RequestRetentionCleanupBatch();
         var retentionRetry = new Button
         {
             Text = "공간 한도 재분석", Dock = DockStyle.Right, Width = 145,
@@ -281,13 +283,53 @@ internal sealed class AiAutopilotDashboard : Form
             button.FlatAppearance.BorderColor = UiBorder;
             button.FlatAppearance.MouseOverBackColor = UiAccentSoft;
         }
-        rangeBar.Controls.Add(checkPipeline);
         rangeBar.Controls.Add(retentionCleanup);
-        rangeBar.Controls.Add(retentionRetry);
         rangeBar.Controls.Add(_range);
-        rangeBar.Controls.Add(explanation);
+        // Keep advanced actions available without crowding the primary view.
+        var advanced = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, Height = 78, Visible = false,
+            FlowDirection = FlowDirection.LeftToRight, WrapContents = true,
+            AutoScroll = true, BackColor = UiPanel, Padding = new Padding(8, 5, 8, 5)
+        };
+        foreach (var button in new[] { confirmed, recurred, reset, handoff,
+            resumeCodex, retryInterrupted, retryQuota, checkPipeline, retentionRetry })
+        {
+            button.Dock = DockStyle.None;
+            button.Height = 29;
+            advanced.Controls.Add(button);
+        }
+        foot.Controls.Clear();
+        var removeSelected = new Button
+        {
+            Text = "선택 삭제", Dock = DockStyle.Right, Width = 94,
+            BackColor = UiButton, ForeColor = UiText, FlatStyle = FlatStyle.Flat
+        };
+        removeSelected.Click += (_, _) => DeleteLocalHistory(false);
+        var removeAll = new Button
+        {
+            Text = "기록 전체 삭제", Dock = DockStyle.Right, Width = 115,
+            BackColor = UiButton, ForeColor = UiText, FlatStyle = FlatStyle.Flat
+        };
+        removeAll.Click += (_, _) => DeleteLocalHistory(true);
+        var advancedToggle = new Button
+        {
+            Text = "고급 ▾", Dock = DockStyle.Right, Width = 80,
+            BackColor = UiButton, ForeColor = UiText, FlatStyle = FlatStyle.Flat
+        };
+        advancedToggle.Click += (_, _) =>
+        {
+            advanced.Visible = !advanced.Visible;
+            advancedToggle.Text = advanced.Visible ? "고급 ▴" : "고급 ▾";
+        };
+        foot.Controls.Add(_updated);
+        foot.Controls.Add(advancedToggle);
+        foot.Controls.Add(refresh);
+        foot.Controls.Add(removeSelected);
+        foot.Controls.Add(removeAll);
         Controls.Add(_recent);
         Controls.Add(_details);
+        Controls.Add(advanced);
         Controls.Add(intro);
         Controls.Add(foot);
         Controls.Add(_memory);
@@ -298,7 +340,7 @@ internal sealed class AiAutopilotDashboard : Form
         Controls.Add(heading);
 
         _timer = new System.Windows.Forms.Timer { Interval = 5000 };
-        _timer.Tick += (_, _) => Reload();
+        _timer.Tick += (_, _) => { if (!_recent.ContainsFocus) Reload(); };
         Shown += (_, _) => { Reload(); _timer.Start(); };
         FormClosed += (_, _) => { _timer.Stop(); _timer.Dispose(); };
     }
@@ -1070,7 +1112,7 @@ internal sealed class AiAutopilotDashboard : Form
             }
 
             var items = new List<(DateTimeOffset Time, string Title, string Detail,
-                string Status, string Next, string Url, string Pr, string File, string Id)>();
+                string Status, string Next, string Url, string Pr, string File, string Id, string EventName)>();
             var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             string localRoot = AiRuntimeErrorJournal.Root;
             if (Directory.Exists(localRoot))
@@ -1100,7 +1142,7 @@ internal sealed class AiAutopilotDashboard : Form
                     items.Add((occurred, FriendlyError(title.Length > 0 ? title : "오류", detail),
                         explanation, status, NextStep(aiStatus, ai?.Reason ?? "", running),
                         ai?.Url ?? "", ai?.PrText ?? "없음",
-                        ai?.FilePath ?? "", ai?.EventId ?? ""));
+                        ai?.FilePath ?? "", ai?.EventId ?? "", name));
                     shown.Add(name);
                 }
             }
@@ -1115,7 +1157,7 @@ internal sealed class AiAutopilotDashboard : Form
                     ai.Status == "in_progress" && (!running || active != ai.EventName)
                         ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(ai.Status),
                     NextStep(ai.Status, ai.Reason, running),
-                    ai.Url, ai.PrText, ai.FilePath, ai.EventId));
+                    ai.Url, ai.PrText, ai.FilePath, ai.EventId, ai.EventName));
             }
             DateTimeOffset now = DateTimeOffset.Now;
             int rangeIndex = _range.SelectedIndex;
@@ -1136,7 +1178,7 @@ internal sealed class AiAutopilotDashboard : Form
                     item.Time.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
                     item.Title, item.Detail, item.Status, item.Next, item.Pr);
                 _recent.Rows[row].Tag = new ResultItem(item.Url, item.File,
-                    item.Id, item.Title, item.Detail, item.Status, item.Next);
+                    item.Id, item.Title, item.Detail, item.Status, item.Next, item.EventName);
                 _recent.Rows[row].Cells[2].ToolTipText = item.Detail;
                 if (item.Status.Contains("중단") || item.Status.Contains("실패"))
                     _recent.Rows[row].DefaultCellStyle.ForeColor = UiError;
