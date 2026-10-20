@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "version": "V3.2.47",
+  "rolloutMode": "sole_operator_explicitly_accepted_unverified_live_game",
+  "acceptedOnLocalDate": "2026-10-20",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "gameF9FoodHoldResume": "not_tested",
+  "gameF9ReceiptNoDuplicate": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3247",
+  "aiWatcher": "not_tested_for_v3247",
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested",
+  "disclosures": [
+    "This is a public non-prerelease GitHub Release visible to existing clients.",
+    "User explicitly requested this release after the V3.2.47 feature code was integrated.",
+    "No real-game packet or CLI weight result, item-unit weight, 80/90% stopping, 100-action cycle safety or rollback has been attested.",
+    "Windows CI and offline regression tests do not establish live-game success.",
+    "The updater requires ZIP SHA256, binary smoke, bundled backups and rollback tools; restoring the prior version was not independently game tested.",
+    "The 90% weight rule may be exceeded between CLI polls; no automatic item disposal or storage is performed.",
+    "AI/auto-fix PR workflow is not permission for automatic unreviewed code deployment."
+  ],
+  "allowFabricatedGameTestAttestation": false
+}

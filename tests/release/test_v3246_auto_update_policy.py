@@ -43,8 +43,8 @@ class StableReleaseSafetyContract(unittest.TestCase):
         self.assertIn("main changed since CI; abort release", source)
         self.assertIn("V3.2.46 tag already exists", source)
         self.assertIn(r'CurrentVersion = "V3\.2\.46"', source)
-        self.assertIn('public const string CurrentVersion = "V3.2.46"', self.updater)
-        self.assertIn("<Version>3.2.46</Version>", self.project)
+        self.assertRegex(self.updater, r'public const string CurrentVersion = "V3\.2\.\d+";')
+        self.assertRegex(self.project, r"<Version>3\.2\.\d+</Version>")
 
     def test_unverified_solo_operator_release_has_explicit_acceptance_not_fake_signoff(self):
         import json

@@ -1,0 +1,14 @@
+{
+  "version": "V3.2.47",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "f9FoodHoldResume": "pending",
+  "f9ReceiptNoDuplicate": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "bagWeightLiveCli": "pending",
+  "bagWeightGatherStop": "pending",
+  "notes": "V3.2.47 real-game CLI weight reads, 80/90% stop, 100-action crossing behavior and rollback are not attested; owner explicitly requested unverified personal-use release."
+}

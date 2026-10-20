@@ -1,16 +1,9 @@
 name: V3.2.46 Isolated Windows Candidate
 
-# A PR-only candidate, NOT a GitHub Release and NOT visible to the updater.
-# Public promotion is separately gated in release-v3246-auto-update.yml.
+# Historical V3.2.46 candidate: its release was published.
+# Keep manual and original staging-branch checks, not PR gating for later versions.
+# Public promotion remains separately gated in release-v3246-auto-update.yml.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'source/**'
-      - 'tests/altering/**'
-      - 'tests/n02-resume/**'
-      - '.github/workflows/release-v3246-auto-update.yml'
-      - '.github/workflows/v3246-candidate.yml'
   workflow_dispatch:
   push:
     branches: [release/v3246-staged-auto-update, fix/v3246-ai-watch-startup-diagnostics]
