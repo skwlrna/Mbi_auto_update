@@ -135,7 +135,7 @@ class AutomaticWorkspaceCleanupTest(unittest.TestCase):
         calls = []
         def fake_process(folder, cfg, **kwargs):
             self.assertTrue(kwargs["retry_retention"])
-            self.assertEqual(folder, event)
+            self.assertTrue(folder.samefile(event), 'same runtime event despite Windows short paths')
             calls.append(folder)
             new = self.results / autopilot.retention_retry_id(eid) / "result.json"
             new.parent.mkdir(parents=True)
