@@ -107,11 +107,32 @@ internal static class AiOneClickTestHost
                 x.GetProperty("status").GetString() == "passed");
             if ((status == "passed_offline") != (exitCode == 0 && total == 5 && passed == 5))
                 return new("blocked_environment", "프로세스/테스트 결과 불일치 · 검증 불가", 0, 0);
+            // Only fixed, host-authored error codes may appear in the UI.
+            // Unknown or tampered JSON content must not become a log message.
+            string reason = root.TryGetProperty("reason", out var node)
+                && node.ValueKind == JsonValueKind.String
+                ? node.GetString() ?? "" : "";
             string detail = status switch
             {
                 "passed_offline" => "로컬 격리 테스트 5종 통과 · 실제 게임/코드 수정 시험은 별도",
                 "tests_failed" => "일부 로컬 테스트 실패 · 보고서의 단계별 결과 확인",
-                _ => "Git·.NET 8 SDK·배포 SHA 또는 일치하는 소스 확인 필요"
+                _ => reason switch
+                {
+                    "git_missing" => "Git이 설치되어 있지 않거나 실행 경로에 없습니다",
+                    "dotnet_sdk_8_missing" => ".NET 8 SDK가 없습니다 · .NET Runtime만으로는 테스트할 수 없습니다",
+                    "installed_build_commit_unverified" => "배포 ZIP의 BUILD_COMMIT.txt가 없거나 내용이 잘못됐습니다",
+                    "trusted_release_source_download_or_verification_failed"
+                        => "설치한 시험판과 동일한 GitHub 소스 SHA 확인 실패 · 네트워크/저장소 접근 점검 필요",
+                    "pinned_source_unavailable" => "설치 버전과 정확히 일치하는 공식 GitHub 소스를 찾지 못했습니다",
+                    "prepared_source_revision_mismatch" => "다운로드한 작업용 소스가 설치된 실행 파일의 버전과 다릅니다",
+                    "source_changed_before_archive" or "source_changed_during_archive"
+                        => "테스트 도중 소스가 변경되어 안전하게 중단했습니다",
+                    "source_archive_unsafe_or_unavailable" or "source_archive_failed"
+                        => "격리 소스 압축 검증 실패 · 원본 프로그램은 변경되지 않았습니다",
+                    "one_click_unexpected_environment_error"
+                        => "PC 실행 환경 또는 접근 권한 확인 필요",
+                    _ => "실행 사전 검증 차단 · 로컬 latest-result.json의 reason 항목 확인 필요"
+                }
             };
             return new(status, detail, passed, total);
         }
