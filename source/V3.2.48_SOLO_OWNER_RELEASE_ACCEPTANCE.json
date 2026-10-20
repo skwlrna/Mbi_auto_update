@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "version": "V3.2.48",
+  "rolloutMode": "user_requested_unverified_release",
+  "acceptedOnLocalDate": "2026-10-20",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "gameF9FoodHoldResume": "not_tested",
+  "gameF9ReceiptNoDuplicate": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3248",
+  "aiWatcher": "not_tested_for_v3248",
+  "craftingGatherAfterTravel": "not_tested",
+  "craftingSequentialQueue": "not_tested",
+  "disclosures": [
+    "User explicitly requested to modify and deploy the crafting auto-gather bugfix and sequential crafting queue on 2026-10-20.",
+    "Real-game crafting completion, partial gathers, mixed recipe queues and rollback have NOT been verified.",
+    "Windows CI and offline simulator tests cannot establish safe live game behavior.",
+    "Do not label any live-game or rollback outcome passed until independently observed.",
+    "Updater ZIP SHA256, Windows binary smoke, backup and rollback assets are required.",
+    "This produces a publicly visible, non-prerelease GitHub Release because the existing auto-updater consumes those releases.",
+    "Uncertain crafting actions must stop rather than automatically retrying or starting the next queued item."
+  ],
+  "allowFabricatedGameTestAttestation": false
+}
