@@ -156,10 +156,9 @@ public sealed partial class MainForm
                 {
                     try
                     {
-                        for (int index = 0; index < queue.Count; index++)
+                        await CraftingQueueCoordinator.RunAsync(queue,
+                            async (current, index, runToken) =>
                         {
-                            token.ThrowIfCancellationRequested();
-                            var current = queue[index];
                             activePlan = current;
                             long itemBaseline = await craftingData.ItemCountAsync(
                                 current.DisplayName, token);
@@ -195,7 +194,7 @@ public sealed partial class MainForm
                                     $"{current.DisplayName} +{confirmedGain}개");
                                 RefreshProductionDashboard();
                             });
-                        }
+                        }, token);
                         Ui(() =>
                         {
                             _craftingPage.ClearCompletedQueue();
