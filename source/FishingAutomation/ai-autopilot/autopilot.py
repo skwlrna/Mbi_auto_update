@@ -1231,6 +1231,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
         if (not single and retry_folder is None and quota_retry_folder is None
                 and retention_retry_folder is None and not state.get("quota_pause")):
             try:
+                already_retried = set(state.get("auto_retention_retry_attempted", []))
                 space = retention_report(c)
                 if (not space.get("error")
                         and space.get("count", 30) < space.get("limit", 30)):
@@ -1238,7 +1239,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                         original_id = event_id(candidate)
                         previous_path = results_dir / original_id / "result.json"
                         retry_path = results_dir / retention_retry_id(original_id) / "result.json"
-                        if (not stable(candidate, int(c["settle_seconds"]))
+                        if (original_id in already_retried
+                                or not stable(candidate, int(c["settle_seconds"]))
                                 or previous_path.is_symlink() or not previous_path.is_file()
                                 or previous_path.stat().st_size > 131072 or retry_path.exists()):
                             continue
@@ -1248,6 +1250,12 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                                 and previous.get("event") == candidate.name
                                 and previous.get("status") == "blocked"
                                 and previous.get("reason") == "worktree_retention_limit_reached"):
+                            # Persist the one-shot receipt BEFORE invoking Codex.
+                            # Even a process crash without result.json cannot
+                            # silently loop and burn the user's Codex quota.
+                            state["auto_retention_retry_attempted"] = (
+                                list(already_retried) + [original_id])[-1000:]
+                            write_json(statefile, state)
                             retention_retry_folder = candidate
                             print("AI 작업공간 확보 · 차단 오류 1건 격리 재분석", flush=True)
                             break
