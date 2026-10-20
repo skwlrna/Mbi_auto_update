@@ -31,6 +31,66 @@ try
           !CraftingQuestText.IsStationStage("바로 제작 진행"),
         "observed bandage quest omits ratio and stays separate from instant crafting");
 
+
+    Check(!CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 32, 100, 5) &&
+          !CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 1) &&
+          CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 2),
+        "auto gather cannot return at idle 32/100; requires two fresh sufficient CLI reads");
+    Check(!CraftingGatherCompletionPolicy.HasVerifiedTarget("", 100, 100, 2) &&
+          CraftingGatherCompletionPolicy.MustStopUnnamed("", 5, true) &&
+          !CraftingGatherCompletionPolicy.MustStopUnnamed("허브", 100, true),
+        "unnamed material cannot be treated as completed from idle alone");
+
+    var serialFirst = new CraftingPlan(CraftingCategory.Food, "가든 샐러드", 60, 1);
+    var serialSecond = new CraftingPlan(CraftingCategory.Food, "생선구이", 50, 1);
+    var order = new List<string>();
+    await CraftingQueueCoordinator.RunAsync(new[] { serialFirst, serialSecond },
+        async (recipe, index, ct) =>
+        {
+            order.Add("start:" + recipe.DisplayName);
+            await Task.Yield();
+            order.Add("verified:" + recipe.DisplayName);
+        }, CancellationToken.None);
+    Check(order.SequenceEqual(new[]
+    {
+        "start:가든 샐러드", "verified:가든 샐러드",
+        "start:생선구이", "verified:생선구이"
+    }), "queued recipes are executed strictly one at a time");
+
+    order.Clear();
+    try
+    {
+        await CraftingQueueCoordinator.RunAsync(new[] { serialFirst, serialSecond },
+            (recipe, index, ct) =>
+            {
+                order.Add(recipe.DisplayName);
+                throw new InvalidOperationException("craft not confirmed");
+            }, CancellationToken.None);
+        throw new Exception("failed recipe did not abort remaining queue");
+    }
+    catch (InvalidOperationException ex) when (ex.Message == "craft not confirmed")
+    {
+        Check(order.SequenceEqual(new[] { "가든 샐러드" }),
+            "failed first recipe must never start the second recipe");
+    }
+
+    using (var cancelled = new CancellationTokenSource())
+    {
+        cancelled.Cancel();
+        order.Clear();
+        try
+        {
+            await CraftingQueueCoordinator.RunAsync(new[] { serialFirst, serialSecond },
+                (recipe, index, ct) => { order.Add(recipe.DisplayName); return Task.CompletedTask; },
+                cancelled.Token);
+            throw new Exception("cancelled queue ran");
+        }
+        catch (OperationCanceledException)
+        {
+            Check(order.Count == 0, "cancellation blocks all subsequent recipes");
+        }
+    }
+
     var stage = new ProductionStageMachine("test");
     stage.Move(ProductionStage.OpenHub, "hub");
     stage.Move(ProductionStage.SelectCategory, "category");
