@@ -94,7 +94,7 @@ jobs:
             )){
               if(-not (Test-Path $needed)){throw "Required update/rollback asset missing: $needed"}
             }
-            Write-Warning 'USER-REQUESTED UNVERIFIED ROLLOUT: AI manager UI, guarded workspace retention, live-game behavior and rollback remain NOT TESTED on the user's PC; publishing a user-requested personal-use update after exact CI and offline smoke.'
+            Write-Warning 'USER-REQUESTED UNVERIFIED ROLLOUT: AI manager UI, guarded workspace retention, live-game behavior and rollback remain NOT TESTED on the owner PC; publishing a user-requested personal-use update after exact CI and offline smoke.'
           }
 
       - name: Require CI-approved current main and exact V3.2.49 version
