@@ -17,6 +17,10 @@ try
     Check(CraftingQuestText.IsTitleNameOnly("야채볶음", "야채볶음") &&
           !CraftingQuestText.IsTitleNameOnly("숙련 야채볶음", "야채볶음"),
         "quest title fallback accepts the exact recipe name when 제작 OCR is split");
+    Check(CraftingQuestText.IsShortageDialogCaption(
+              "퀘스트를 위해 필요한 아이템이 없습니다. 구하는 방법을 보시겠습니까?") &&
+          !CraftingQuestText.IsShortageDialogCaption("퀘스트 수락 구하는 방법"),
+        "existing shortage modal is recognized even when material-ratio OCR is missing");
     Check(CraftingQuestText.IsQuestProgress("감자 준비 7/80") &&
           CraftingQuestText.IsQuestProgress("음식 제작대에서 제작 0/10") &&
           !CraftingQuestText.IsQuestProgress("모험가 길드 퀘스트"),
