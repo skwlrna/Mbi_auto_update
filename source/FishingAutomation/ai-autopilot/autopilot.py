@@ -817,6 +817,7 @@ def mark_interrupted_result(path: Path) -> bool:
         "reason": "macro_or_watcher_exited_during_isolated_fix",
         "ended": now(),
         "automatic_resume": False,
+        "failure_kind": "interrupted",
     })
     write_json(path, report)
     return True
@@ -905,7 +906,11 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         output["retry_reason"] = "unsupported_codex_exec_approval_flag"
 
     def finish(status: str, reason: str) -> dict[str, Any]:
-        output.update({"status": status, "reason": redacted(reason), "ended": now()})
+        output.update({"status": status, "reason": redacted(reason), "ended": now(),
+                       "failure_kind": failure_kind(status, reason, output),
+                       "offline_verified": (status == "tests_passed_review_required"
+                           and output.get("host_offline_tests", {}).get("status") == "passed"),
+                       "game_verified": False})
         # Hash only approved candidate source/test bytes. Never persist raw patch.
         if output.get("changed_files") and output.get("worktree"):
             try:
@@ -921,12 +926,14 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             except (OSError, ValueError, TypeError):
                 # Memory is diagnostic-only: no impact on safe stop or verification.
                 pass
-        if status == "needs_review" and output.get("missing_patch") is True:
-            # A no-patch attempt is unresolved: preserve its result and notes,
-            # but release its unedited worktree immediately when a verified
-            # checksum-backed archive can be made. Never delete source edits.
+        # Offline test success and worktree retention are separate gates.
+        # Source edits and logs are ZIP backed up locally before any Git remove.
+        if output.get("worktree") and status in FINISHED:
             try:
-                cleaned = archive_clean_one(c, eid)
+                if status == "needs_review" and output.get("missing_patch") is True:
+                    cleaned = archive_clean_one(c, eid)
+                else:
+                    cleaned = archive_finished_one(c, eid)
                 output["worktree_cleanup"] = {
                     "status": cleaned.get("status", "blocked"),
                     "reason": cleaned.get("reason", "unknown")}
