@@ -84,6 +84,44 @@ def _registrations(c: dict) -> dict[Path, Path]:
                     owners[Path(line[9:]).resolve()] = resolved
         except (OSError, subprocess.TimeoutExpired, ValueError):
             continue
+    # Older installed releases can have distinct SHA-pinned source snapshots.
+    # Enumerate only trusted MabiAutoAI snapshots already owning an actual
+    # worktree. Never prune, re-register, or rewrite an unknown repository.
+    root = Path(c["worktrees_dir"]).expanduser()
+    home = (Path.home() / "MabiAutoAI").resolve()
+    if root.is_dir() and not root.is_symlink():
+        for folder in root.iterdir():
+            try:
+                if (not folder.is_dir() or folder.is_symlink() or
+                        not IDENTIFIER.fullmatch(folder.name) or
+                        folder.resolve() in owners):
+                    continue
+                common = _git(folder, "rev-parse", "--git-common-dir")
+                if common.returncode:
+                    continue
+                git_dir = Path(common.stdout.strip())
+                if not git_dir.is_absolute():
+                    git_dir = folder / git_dir
+                git_dir = git_dir.resolve()
+                candidate = git_dir.parent
+                if (git_dir.name != ".git" or candidate.is_symlink() or
+                        not candidate.resolve().is_relative_to(home) or
+                        not (candidate == home / "repo" or
+                             candidate.is_relative_to(home / "source-snapshots"))):
+                    continue
+                remote = _git(candidate, "remote", "get-url", "origin")
+                top = _git(candidate, "rev-parse", "--show-toplevel")
+                listed = _git(candidate, "worktree", "list", "--porcelain")
+                if (remote.returncode or remote.stdout.strip() not in TRUSTED_ORIGINS
+                        or top.returncode or Path(top.stdout.strip()).resolve() != candidate
+                        or listed.returncode):
+                    continue
+                if any(line.startswith("worktree ") and
+                       Path(line[9:]).resolve() == folder.resolve()
+                       for line in listed.stdout.splitlines()):
+                    owners[folder.resolve()] = candidate
+            except (OSError, subprocess.TimeoutExpired, ValueError):
+                continue
     return owners
 
 
