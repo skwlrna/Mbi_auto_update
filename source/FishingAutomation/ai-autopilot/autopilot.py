@@ -33,6 +33,7 @@ from draft_dedup import existing_draft_for_evidence
 from pipeline_readiness import readiness
 from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
 from worktree_recovery import (preview as recovery_preview, recover_one as recovery_reclaim_one,
+                               verify_saved_archive as recovery_verify_saved_archive,
                                TERMINAL as RECOVERY_TERMINAL)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
@@ -1817,6 +1818,8 @@ def main() -> int:
                       help="write a read-only local prerequisite report; does not launch Codex")
     mode.add_argument("--reclaim-worktrees", action="store_true",
                       help="preview old AI worktrees without deleting any originals")
+    mode.add_argument("--verify-recovery-archives", action="store_true",
+                      help="read-only SHA-256 verification of saved recovery ZIPs")
     parser.add_argument("--latest", action="store_true", help="with --once, target latest prior error")
     parser.add_argument("--retry-cli-error", action="store_true",
                         help="with --once --latest, retry known Codex -a error once without deleting history")
@@ -1832,6 +1835,20 @@ def main() -> int:
     c = config()
     if a.watch or a.once:
         WATCH_DIAGNOSTIC_ROOT = expand(str(c["results_dir"]))
+    if a.verify_recovery_archives:
+        archive_root = Path(c.get("worktree_archives_dir",
+            str(Path.home() / "MabiAutoAI" / "worktree-archives"))).expanduser()
+        if archive_root.is_symlink():
+            print("RECOVERY ARCHIVE BLOCKED: archive_root_symlink")
+            return 2
+        if not archive_root.is_dir():
+            print("RECOVERY ARCHIVES: none")
+            return 0
+        archives = sorted(archive_root.glob("recovery-*.zip"))
+        results = [recovery_verify_saved_archive(path) for path in archives]
+        print(json.dumps({"kind": "read_only_archive_verification",
+            "count": len(archives), "results": results}, ensure_ascii=False, indent=2))
+        return 2 if any(result.get("status") != "verified" for result in results) else 0
     if a.reclaim_worktrees:
         # No source checkout, Codex or game input in recovery mode.
         if not a.execute_reclaim:
