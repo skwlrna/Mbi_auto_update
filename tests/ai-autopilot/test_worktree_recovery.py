@@ -139,6 +139,26 @@ class GitRecoveryFixture(unittest.TestCase):
         self.assertEqual(verify_saved_archive(source)["status"], "verified")
         self.assertFalse(self.workspace.exists())
 
+    def test_ignored_only_build_output_reclaimed_after_verified_backup(self):
+        self.result("blocked")
+        excludes = self.home / "ignored-patterns.txt"
+        excludes.write_text("obj/\\n", encoding="utf-8")
+        self.git(self.workspace, "config", "core.excludesfile", str(excludes))
+        generated = self.workspace / "obj" / "cache.bin"
+        generated.parent.mkdir(parents=True)
+        generated.write_bytes(b"ignored binary test output")
+        self.assertEqual(
+            self.git(self.workspace, "status", "--porcelain=v1", "--untracked-files=all"),
+            "", "fixture must be clean to Git porcelain, despite ignored bytes")
+        recovered = recover_one(self.config, self.event_id)
+        self.assertEqual(recovered["status"], "archived", recovered)
+        self.assertFalse(self.workspace.exists())
+        with zipfile.ZipFile(recovered["archive"]) as archive:
+            self.assertEqual(archive.read("worktree/obj/cache.bin"),
+                             b"ignored binary test output")
+        self.assertEqual(verify_saved_archive(Path(recovered["archive"]))["status"],
+                         "verified")
+
     def test_still_running_is_protected_even_in_legacy_mode(self):
         self.result("in_progress")
         self.assertEqual(eligibility(self.config, self.event_id, legacy=True)[0],
