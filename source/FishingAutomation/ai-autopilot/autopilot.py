@@ -1819,6 +1819,10 @@ def main() -> int:
     mode.add_argument("--watch", action="store_true", help="watch new MCP error folders")
     mode.add_argument("--once", action="store_true", help="process one pending event")
     mode.add_argument("--status", action="store_true", help="show recent results")
+    mode.add_argument("--retention-preview", action="store_true",
+                      help="audit existing worktrees with watcher stopped")
+    mode.add_argument("--retention-reset", action="store_true",
+                      help="backup and safely retire legacy worktrees with watcher stopped")
     mode.add_argument("--pipeline-check", action="store_true",
                       help="write a read-only local prerequisite report; does not launch Codex")
     parser.add_argument("--latest", action="store_true", help="with --once, target latest prior error")
@@ -1830,6 +1834,24 @@ def main() -> int:
     c = config()
     if a.watch or a.once:
         WATCH_DIAGNOSTIC_ROOT = expand(str(c["results_dir"]))
+    if a.retention_preview or a.retention_reset:
+        # No network/source clone, Codex invocation, game input or deployment.
+        # Require the SAME OS lock as --watch; live watcher means NO cleanup.
+        try:
+            with SingletonLock(expand(str(c["results_dir"])) / "autopilot.lock"):
+                if a.retention_preview:
+                    inventory = reset_preview(c)
+                    print(json.dumps(inventory, ensure_ascii=False, indent=2))
+                    return 0
+                outcome = reset_legacy_batch(c)
+                write_json(expand(str(c["results_dir"])) /
+                           "retention-reset-last.json", outcome)
+                print(json.dumps(outcome, ensure_ascii=False, indent=2))
+                return 0 if not outcome["blocked"] else 2
+        except WatcherLockFailure as exc:
+            report_lock_failure(exc)
+            print("WATCHER ACTIVE OR LOCK UNAVAILABLE: cleanup refused")
+            return 2
     if a.check:
         return 0 if status_check(c) else 2
     if a.pipeline_check:
