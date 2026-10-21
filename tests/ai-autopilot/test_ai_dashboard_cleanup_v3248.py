@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from unittest import mock
 
 HERE = Path(__file__).resolve().parents[2]
@@ -78,12 +79,18 @@ class AutomaticWorkspaceCleanupTest(unittest.TestCase):
         self.assertEqual(self.report.read_bytes(), saved)
         self.assertIn("ai/offline-fixture", git(self.repo, "branch", "--list"))
 
-    def test_changed_code_is_never_auto_deleted(self):
+    def test_changed_code_is_never_lost_on_auto_cleanup(self):
         (self.worktree / "README").write_text("valuable proposed patch", encoding="utf8")
         original = (self.worktree / "README").read_bytes()
+        original_result = self.report.read_bytes()
         self.run_one_cycle()
-        self.assertEqual((self.worktree / "README").read_bytes(), original)
-        self.assertFalse((self.root / "archives" / (self.id + ".zip")).exists())
+        backup = self.root / "archives" / (self.id + ".recovery.zip")
+        self.assertTrue(backup.is_file())
+        with zipfile.ZipFile(backup) as saved:
+            self.assertEqual(saved.read("worktree/README"), original)
+            self.assertEqual(saved.read("results/result.json"), original_result)
+        self.assertFalse(self.worktree.exists())
+        self.assertEqual(self.report.read_bytes(), original_result)
 
     def test_batch_user_request_with_revalidation(self):
         self.config["max_worktrees"] = 30
@@ -96,7 +103,7 @@ class AutomaticWorkspaceCleanupTest(unittest.TestCase):
         self.assertFalse(self.worktree.exists())
         self.assertTrue((self.root / "archives" / (self.id + ".zip")).is_file())
 
-    def test_batch_never_removes_dirty_worktree(self):
+    def test_clean_only_batch_never_discards_unbacked_dirty_code(self):
         self.config["max_worktrees"] = 30
         (self.worktree / "README").write_text("pending code edit")
         request = self.results / "retention-batch-request.json"
@@ -105,7 +112,15 @@ class AutomaticWorkspaceCleanupTest(unittest.TestCase):
         }), encoding="utf8")
         self.run_one_cycle()
         self.assertFalse(request.exists())
-        self.assertTrue(self.worktree.exists())
+        # The legacy clean-only request rejects dirty worktrees. The later
+        # independent automatic retention pass may recover-archive them.
+        backup = self.root / "archives" / (self.id + ".recovery.zip")
+        if self.worktree.exists():
+            self.assertEqual((self.worktree / "README").read_text(), "pending code edit")
+        else:
+            self.assertTrue(backup.is_file())
+            with zipfile.ZipFile(backup) as saved:
+                self.assertEqual(saved.read("worktree/README"), b"pending code edit")
         self.assertFalse((self.root / "archives" / (self.id + ".zip")).exists())
 
     def test_capacity_blocked_event_gets_one_isolated_retry(self):

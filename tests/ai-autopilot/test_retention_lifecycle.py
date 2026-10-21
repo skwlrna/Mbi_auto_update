@@ -1,0 +1,348 @@
+"""Regression coverage for local recovery and the trusted test registry."""
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+import zipfile
+
+HERE = Path(__file__).resolve().parents[2]
+AI = HERE / "source" / "FishingAutomation" / "ai-autopilot"
+sys.path.insert(0, str(AI))
+import retention_lifecycle as lifecycle
+import regression_policy as policy
+
+
+class GitSandbox(unittest.TestCase):
+    def git(self, root, *args):
+        result = subprocess.run(["git", "-C", str(root), *args],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result.stdout.strip()
+
+    def setup_repo(self, root, state="tests_failed"):
+        repo = root / "repo"
+        repo.mkdir()
+        self.git(repo, "init", "-q")
+        (repo / "src.txt").write_text("before", encoding="utf-8")
+        self.git(repo, "add", "src.txt")
+        self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                 "user.name=Test", "commit", "-qm", "seed")
+        eid = "a" * 16
+        folder = root / "worktrees" / eid
+        folder.parent.mkdir()
+        self.git(repo, "worktree", "add", "-q", "--detach", str(folder), "HEAD")
+        (folder / "src.txt").write_text("modified by Codex", encoding="utf-8")
+        (folder / "untracked.bin").write_bytes(b"untracked-but-backed-up")
+        results = root / "results" / eid
+        results.mkdir(parents=True)
+        event = "runtime_20261021_132452_590"
+        (results / "codex-last-1.md").write_text("diagnostics remain", encoding="utf-8")
+        (results / "result.json").write_text(json.dumps({
+            "event_id": eid, "event": event, "worktree": str(folder),
+            "status": state, "reason": "build_or_regression_test_failed_after_retries",
+            "changed_files": ["src.txt"]
+        }), encoding="utf-8")
+        report = root / "reports" / event
+        report.mkdir(parents=True)
+        (report / "error.txt").write_text("original evidence remains",
+                                          encoding="utf-8")
+        config = {"repo": str(repo), "original_repo": str(repo),
+                  "worktrees_dir": str(folder.parent),
+                  "worktree_archives_dir": str(root / "archives"),
+                  "results_dir": str(root / "results"),
+                  "reports_dir": str(root / "reports")}
+        return config, repo, folder, results, report
+
+
+class RecoveryLifecycleTests(GitSandbox):
+    def test_changed_patch_and_logs_archived_verified_before_removal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, results, report = self.setup_repo(Path(temporary))
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}):
+                action = lifecycle.archive_finished_one(config, folder.name)
+            self.assertEqual(action["status"], "archived", action)
+            self.assertFalse(folder.exists())
+            self.assertEqual((report / "error.txt").read_text(), "original evidence remains")
+            self.assertTrue((results / "result.json").exists())
+            archive = Path(action["archive"])
+            with zipfile.ZipFile(archive) as zipped:
+                self.assertEqual(zipped.read("worktree/src.txt"), b"modified by Codex")
+                self.assertEqual(zipped.read("worktree/untracked.bin"),
+                                 b"untracked-but-backed-up")
+                self.assertEqual(zipped.read("results/codex-last-1.md"),
+                                 b"diagnostics remain")
+                self.assertIn("evidence/error.txt", zipped.namelist())
+
+    def test_29_legacy_worktrees_can_be_reclaimed_with_verified_archives(self):
+        # Mirrors an exhausted 29/30 installation without touching a user PC.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, repo, original, results, _ = self.setup_repo(root)
+            folders = [original]
+            for i in range(1, 29):
+                event_id = f"{i:016x}"
+                folder = root / "worktrees" / event_id
+                self.git(repo, "worktree", "add", "--detach", "-q",
+                         str(folder), "HEAD")
+                (folder / "src.txt").write_text(f"patch-{i}", encoding="utf-8")
+                target = root / "results" / event_id
+                target.mkdir(parents=True)
+                (target / "result.json").write_text(json.dumps({
+                    "event_id": event_id,
+                    "event": f"runtime_legacy_{i}",
+                    "worktree": str(folder),
+                    "status": "interrupted_review_required",
+                    "reason": "macro_or_watcher_exited_during_isolated_fix",
+                    "changed_files": ["src.txt"]
+                }), encoding="utf-8")
+                folders.append(folder)
+            owners = {folder.resolve(): repo.resolve() for folder in folders}
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value=owners):
+                preview = lifecycle.reset_preview(config)
+                summary = lifecycle.reset_legacy_batch(config)
+            self.assertEqual(preview["count"], 29)
+            self.assertEqual(summary["initial_count"], 29)
+            self.assertEqual(summary["archive_and_reclaimed"], 29, summary)
+            self.assertEqual(summary["blocked"], [], summary)
+            self.assertFalse(any(folder.exists() for folder in folders))
+            for folder in folders:
+                self.assertTrue((root / "results" / folder.name / "result.json").exists())
+                self.assertTrue((root / "archives" /
+                                 (folder.name + ".recovery.zip")).is_file())
+
+    def test_in_progress_never_automatically_retired(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, _, _ = self.setup_repo(Path(temporary), "in_progress")
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}):
+                blocked = lifecycle.archive_finished_one(config, folder.name)
+                preview = lifecycle.reset_preview(config)
+            self.assertEqual(blocked["reason"], "not_terminal")
+            self.assertEqual(preview["recoverable"][0]["state"], "in_progress")
+            self.assertTrue(folder.exists())
+
+    def test_in_app_runtime_evidence_is_copied_and_original_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, results, _ = self.setup_repo(Path(temporary))
+            name = json.loads((results / "result.json").read_text())["event"]
+            runtime = Path(temporary) / "runtime" / name
+            runtime.mkdir(parents=True)
+            (runtime / "error.txt").write_bytes(b"runtime crash evidence")
+            config["runtime_reports_dir"] = str(Path(temporary) / "runtime")
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}):
+                action = lifecycle.archive_finished_one(config, folder.name)
+            self.assertEqual(action["status"], "archived", action)
+            self.assertEqual((runtime / "error.txt").read_bytes(),
+                             b"runtime crash evidence")
+            with zipfile.ZipFile(action["archive"]) as backup:
+                self.assertEqual(backup.read("runtime-evidence/error.txt"),
+                                 b"runtime crash evidence")
+
+    def test_reparse_backed_diagnostics_block_removal_without_touching_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, results, _ = self.setup_repo(Path(temporary))
+            result_root = Path(config["results_dir"])
+            old_linked = lifecycle._linked
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}), \
+                 mock.patch.object(lifecycle, "_linked",
+                                   side_effect=lambda p: p == result_root or old_linked(p)):
+                action = lifecycle.archive_finished_one(config, folder.name)
+            self.assertEqual(action["reason"], "backup_ValueError")
+            self.assertTrue(folder.exists())
+            self.assertTrue((results / "result.json").exists())
+
+    def test_unknown_owner_is_vetoed_even_for_explicit_reset(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, _, folder, _, _ = self.setup_repo(Path(temporary))
+            with mock.patch.object(lifecycle, "_registrations", return_value={}):
+                preview = lifecycle.reset_preview(config)
+                action = lifecycle.archive_finished_one(config, folder.name,
+                                                       allow_interrupted=True)
+            self.assertEqual(preview["blocked"][0]["reason"],
+                             "untrusted_or_unregistered")
+            self.assertEqual(action["reason"], "untrusted_or_unregistered_owner")
+            self.assertTrue(folder.exists())
+
+    def test_existing_corrupted_backup_never_authorizes_removal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, _, _ = self.setup_repo(Path(temporary))
+            archive_dir = Path(config["worktree_archives_dir"])
+            archive_dir.mkdir()
+            (archive_dir / (folder.name + ".recovery.zip")).write_bytes(b"bad")
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}):
+                action = lifecycle.archive_finished_one(config, folder.name)
+            self.assertEqual(action["reason"], "existing_archive_conflicts")
+            self.assertTrue(folder.exists())
+
+    def test_user_requested_batch_retires_stopped_interrupted_job(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, results, _ = self.setup_repo(
+                Path(temporary), "in_progress")
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}):
+                report = lifecycle.reset_legacy_batch(config)
+            self.assertEqual(report["archive_and_reclaimed"], 1, report)
+            self.assertEqual(report["blocked"], [])
+            self.assertFalse(folder.exists())
+            self.assertTrue((results / "result.json").exists())
+            self.assertFalse(report["evidence_deleted"])
+
+
+class LegacyReleaseSourceRegistrationTests(GitSandbox):
+    def test_old_pinned_snapshot_worktree_is_found_without_current_main_repo(self):
+        import worktree_retention as retention
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "user-home"
+            repo = home / "MabiAutoAI" / "source-snapshots" / ("1" * 40)
+            repo.mkdir(parents=True)
+            self.git(repo, "init", "-q")
+            self.git(repo, "remote", "add", "origin",
+                     "https://github.com/skwlrna/Mbi_auto_update.git")
+            (repo / "src.txt").write_text("installed release", encoding="utf-8")
+            self.git(repo, "add", ".")
+            self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                     "user.name=Test", "commit", "-qm", "release")
+            folder = home / "MabiAutoAI" / "autopilot-worktrees" / ("e" * 16)
+            folder.parent.mkdir()
+            self.git(repo, "worktree", "add", "--detach", "-q", str(folder), "HEAD")
+            c = {"repo": str(home / "MabiAutoAI" / "repo-not-present"),
+                 "worktrees_dir": str(folder.parent),
+                 "results_dir": str(home / "MabiAutoAI" / "autopilot-results")}
+            with mock.patch.object(retention.Path, "home", return_value=home):
+                owners = retention._registrations(c)
+            self.assertIn(folder.resolve(), owners)
+            self.assertEqual(owners[folder.resolve()], repo.resolve())
+
+
+class RegisteredRegressionTests(GitSandbox):
+    def test_preexisting_committed_suite_recovers_registry_gap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            suite = repo / "tests" / "trusted-existing"
+            suite.mkdir(parents=True)
+            (suite / "Program.cs").write_text("test", encoding="utf-8")
+            (suite / "Regression.csproj").write_text("<Project />", encoding="utf-8")
+            self.git(repo, "add", ".")
+            self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                     "user.name=Test", "commit", "-qm", "baseline")
+            commands, reason = policy.commands_for([
+                "source/FishingAutomation/Ordinary.cs",
+                "tests/trusted-existing/Program.cs"], repo)
+            self.assertIsNone(reason)
+            self.assertIn("tests/trusted-existing/Regression.csproj", commands[0])
+
+    def test_agent_created_test_suite_remains_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                     "user.name=Test", "commit", "--allow-empty", "-qm", "baseline")
+            suite = repo / "tests" / "brand-new"
+            suite.mkdir(parents=True)
+            (suite / "Program.cs").write_text("test", encoding="utf-8")
+            (suite / "Regression.csproj").write_text("<Project />", encoding="utf-8")
+            _, reason = policy.commands_for([
+                "source/FishingAutomation/Ordinary.cs",
+                "tests/brand-new/Program.cs"], repo)
+            self.assertEqual(reason, "regression_test_suite_not_registered")
+
+
+class OfflinePipelineOrchestrationTests(GitSandbox):
+    def test_simulated_codex_patch_passes_gates_and_worktree_is_archived(self):
+        # Only Codex and the test executor are stubs. The real orchestration,
+        # Git worktree, change validation, result writing and ZIP are exercised.
+        # This is NOT a real Codex, .NET build, or live game acceptance test.
+        import autopilot
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            source_path = "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs"
+            test_path = "tests/gathering/Program.cs"
+            for name, data in (
+                    ("source/FishingAutomation/FishingAutomation.csproj", "<Project />"),
+                    (source_path, "original production"),
+                    (test_path, "original regression"),
+                    ("tests/gathering/Regression.csproj", "<Project />")):
+                target = repo / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(data, encoding="utf-8")
+            self.git(repo, "add", ".")
+            self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                     "user.name=Test", "commit", "-qm", "base")
+            base = self.git(repo, "rev-parse", "HEAD")
+            error = root / "reports" / "runtime_test_codex"
+            error.mkdir(parents=True)
+            (error / "error.txt").write_text("채집 둥지 OCR 오류", encoding="utf-8")
+            config = autopilot.config()
+            config.update({
+                "repo": str(repo), "original_repo": str(repo),
+                "release_source_sha": base,
+                "results_dir": str(root / "results"),
+                "worktrees_dir": str(root / "worktrees"),
+                "worktree_archives_dir": str(root / "archives"),
+                "reports_dir": str(root / "reports"),
+                "runtime_reports_dir": str(root / "runtime"),
+                "require_clean_repo": True,
+            })
+            identity = autopilot.event_id(error)
+            worktree = root / "worktrees" / identity
+
+            def simulated_codex(folder, _prompt, outdir, _config, progress=None):
+                (folder / source_path).write_text("changed production", encoding="utf-8")
+                (folder / test_path).write_text("changed regression", encoding="utf-8")
+                (outdir / "codex-last-1.md").write_text("SIMULATION ONLY", encoding="utf-8")
+                return True, "simulated_codex_edit"
+
+            simulated_tests = [{"test": 1, "ok": True, "reason": "pass",
+                                "argv": ["offline-simulated-test-gate"]}]
+            with mock.patch.object(autopilot, "require_pinned_source"), \
+                 mock.patch.object(autopilot, "prepare_dotnet_environment",
+                                   return_value=(True, "simulated_restore")), \
+                 mock.patch.object(autopilot, "exec_codex",
+                                   side_effect=simulated_codex), \
+                 mock.patch.object(autopilot, "test_patch",
+                                   return_value=(True, simulated_tests)), \
+                 mock.patch.object(autopilot, "record_attempt"), \
+                 mock.patch.object(autopilot, "publish_verified_draft_pr",
+                                   return_value={"status": "blocked",
+                                                 "reason": "offline_simulation"}), \
+                 mock.patch.object(lifecycle, "_registrations",
+                                   return_value={worktree.resolve(): repo.resolve()}):
+                outcome = autopilot.process(error, config)
+            self.assertEqual(outcome["status"], "tests_passed_review_required", outcome)
+            self.assertEqual(outcome["failure_kind"], "offline_verified_pending_review")
+            self.assertTrue(outcome["offline_verified"])
+            self.assertFalse(outcome["game_verified"])
+            self.assertEqual(outcome["worktree_cleanup"]["status"], "archived", outcome)
+            self.assertFalse(worktree.exists())
+            archive = root / "archives" / (identity + ".recovery.zip")
+            self.assertTrue(archive.is_file())
+            with zipfile.ZipFile(archive) as backup:
+                self.assertEqual(backup.read("worktree/" + source_path),
+                                 b"changed production")
+                self.assertEqual(backup.read("worktree/" + test_path),
+                                 b"changed regression")
+                self.assertIn("results/result.json", backup.namelist())
+            saved = json.loads((root / "results" / identity / "result.json").read_text())
+            self.assertEqual(saved["worktree_cleanup"]["status"], "archived")
+            self.assertTrue((error / "error.txt").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

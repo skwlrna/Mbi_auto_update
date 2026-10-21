@@ -422,12 +422,24 @@ internal sealed partial class AiAutopilotDashboard : Form
             return "Codex 프로그램을 찾지 못함";
         if (reason.Contains("repo_dirty_or_git_error", StringComparison.OrdinalIgnoreCase))
             return "작업용 소스에 저장되지 않은 변경 사항이 있음";
+        if (reason.Contains("release_source_guard", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("pinned_release_source", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("pinned_release_commit", StringComparison.OrdinalIgnoreCase))
+            return "설치 버전과 일치하는 로컬 소스 확보·검증 실패 (GitHub 소스 부재 아님)";
         if (reason.Contains("legacy_autofix", StringComparison.OrdinalIgnoreCase))
             return "구버전 자동수정 검사로 차단된 과거 기록";
+        if (reason.Contains("regression_test_suite_not_registered", StringComparison.OrdinalIgnoreCase))
+            return "자동수정기 회귀 테스트 등록 규칙 오류 또는 신규 테스트 검증 필요";
+        if (reason.Contains("regression_test_project_missing", StringComparison.OrdinalIgnoreCase))
+            return "회귀 테스트 프로젝트 구성 누락 · 빌드 환경 검사 필요";
+        if (reason.Contains("dotnet_restore_preflight_failed", StringComparison.OrdinalIgnoreCase))
+            return ".NET 테스트 실행 환경 준비 실패 · 실제 코드 테스트 실패 아님";
         if (reason.Contains("regression_test_missing", StringComparison.OrdinalIgnoreCase))
             return "오류를 확인할 테스트 코드가 부족함";
+        if (reason.Contains("source_access_rechecked_no_patch", StringComparison.OrdinalIgnoreCase))
+            return "소스 파일 존재 확인 뒤 AI 1회 재분석했으나 수정안 없음 · 미해결";
         if (reason.Contains("agent_no_patch", StringComparison.OrdinalIgnoreCase))
-            return "AI가 코드 변경 없이 분석 종료 · Codex 결과 확인 필요";
+            return "AI가 코드 변경 없이 분석 종료 · 미해결 (Codex 결과 확인 필요)";
         if (reason.Contains("worktree_retention_limit", StringComparison.OrdinalIgnoreCase))
             return "AI 작업 공간이 가득 참 · 기존 자료 보존, 공간 정리 필요";
         if (status == "tests_failed") return "코드를 수정했지만 자동 테스트에 실패함";

@@ -4,6 +4,8 @@ A successful build without a modified, registered regression test is REVIEW,
 not a verified fix. Existing test projects only; no arbitrary test commands.
 """
 from pathlib import Path, PurePosixPath
+import re
+import subprocess
 
 REGISTERED_TESTS = frozenset({
     "tests/altering/Program.cs",
@@ -17,6 +19,7 @@ REGISTERED_TESTS = frozenset({
     "tests/loot-retry/Program.cs",
     "tests/retry-flow/Program.cs",
     "tests/gathering-diagnostic/Program.cs",
+    "tests/gathering/Program.cs",
     "tests/inventory-loot/Program.cs",
     "tests/n03-input/Program.cs",
     "tests/cli-readonly/Program.cs",
@@ -39,6 +42,8 @@ SCREEN_TESTS = {
     "source/FishingAutomation/AlteringRecipeLayout.cs": "tests/altering/Program.cs",
     "source/FishingAutomation/AlteringFacilityLayout.cs": "tests/altering/Program.cs",
     "source/FishingAutomation/dungeon/ProductionUiRuntime.cs": "tests/production-ui/Program.cs",
+    "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs": "tests/gathering/Program.cs",
+    "source/FishingAutomation/LifeSkillListLayout.cs": "tests/gathering/Program.cs",
 }
 
 # A general passing test is insufficient when Codex edits persistence,
@@ -81,13 +86,35 @@ def changes_scheduler_source(path: str) -> bool:
             path.startswith("source/FishingAutomation/MainForm.Scheduler"))
 
 
+def _trusted_existing_suite(file: str, worktree: Path) -> bool:
+    """Reconcile a missing registry entry only from committed HEAD files."""
+    if not re.fullmatch(r"tests/[a-z0-9-]{1,80}/Program[.]cs", file):
+        return False
+    project = str(PurePosixPath(file).parent / "Regression.csproj")
+    for name in (file, project):
+        target = worktree / name
+        if target.is_symlink() or not target.is_file():
+            return False
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(worktree), "cat-file", "-e", "HEAD:" + name],
+                capture_output=True, timeout=10, shell=False, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if result.returncode != 0:
+            return False
+    return True
+
+
 def commands_for(changed: list[str], worktree: Path
                  ) -> tuple[list[list[str]], str | None]:
     modified_tests = [name for name in changed if name.startswith("tests/")
                       or name.startswith("changes/tests/")]
     if not modified_tests:
         return [], "regression_test_missing"
-    if any(name not in REGISTERED_TESTS for name in modified_tests):
+    # Reject newly introduced suites; trust pre-existing pinned-HEAD tests.
+    if any(name not in REGISTERED_TESTS and
+           not _trusted_existing_suite(name, worktree) for name in modified_tests):
         return [], "regression_test_suite_not_registered"
     projects = set()
     for name in modified_tests:
