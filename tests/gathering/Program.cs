@@ -220,6 +220,16 @@ Check(LifeSkillListLayout.SafeDragStart == new System.Drawing.Point(580, 760) &&
       LifeSkillListLayout.SafeDragStart.X < 640 &&
       LifeSkillListLayout.SafeDragEnd.X < 640,
     "scrolling categories keep drag points safely inside the life-skill modal");
+// Replays the 2026-10-21 nest-not-visible failure without issuing any game input.
+Check(LifeSkillListLayout.NeedsNestTopReset("일상 채집", "둥지") &&
+      LifeSkillListLayout.MaxNestTopResetSwipes > 0 &&
+      LifeSkillListLayout.MaxNestTopResetSwipes <= 4 &&
+      LifeSkillListLayout.SafeDragEnd.Y < LifeSkillListLayout.SafeDragStart.Y,
+    "nest first-row recovery permits only a bounded upward-list reset");
+Check(!LifeSkillListLayout.NeedsNestTopReset("일상 채집", "물") &&
+      !LifeSkillListLayout.NeedsNestTopReset("나무 베기", "둥지") &&
+      !LifeSkillListLayout.NeedsNestTopReset("추수", "밀"),
+    "other materials and fixed one-page categories cannot invoke nest reset");
 long bulkOwned = 0;
 int bulkStarts = 0;
 int bulkWaits = 0;
