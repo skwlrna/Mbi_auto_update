@@ -101,6 +101,71 @@ def _archive_matches(archive: Path, entries: dict, event_id: str) -> bool:
         return False
 
 
+def verify_saved_archive(archive: Path) -> dict:
+    """Verify an existing recovery ZIP without accessing deleted worktrees.
+
+    This is read-only: no extraction, Git changes, Codex or game access.
+    """
+    if archive.is_symlink() or not archive.is_file():
+        return {"status": "blocked", "reason": "archive_missing_or_link"}
+    try:
+        if archive.stat().st_size > MAX_BYTES * 2:
+            return {"status": "blocked", "reason": "archive_too_large"}
+        with zipfile.ZipFile(archive) as z:
+            records = z.infolist()
+            names = [record.filename for record in records]
+            if len(names) != len(set(names)) or "RECOVERY-MANIFEST.json" not in names:
+                return {"status": "blocked", "reason": "duplicate_or_missing_entries"}
+            raw_manifest = z.read("RECOVERY-MANIFEST.json")
+            if len(raw_manifest) > 10 * 1024 * 1024:
+                return {"status": "blocked", "reason": "manifest_too_large"}
+            manifest = json.loads(raw_manifest)
+            event_id = manifest.get("event_id", "")
+            files = manifest.get("files", {})
+            if (manifest.get("schema") != 1 or not isinstance(event_id, str)
+                    or not IDENTIFIER.fullmatch(event_id)
+                    or not isinstance(files, dict)
+                    or len(files) > MAX_FILES
+                    or set(files) | {"RECOVERY-MANIFEST.json"} != set(names)):
+                return {"status": "blocked", "reason": "manifest_invalid"}
+            total = 0
+            for name, item in files.items():
+                # Ensure a saved ZIP can later be restored manually without
+                # unsafe path traversal. No archive is extracted here.
+                if not isinstance(name, str):
+                    return {"status": "blocked", "reason": "manifest_path_or_digest_invalid"}
+                pieces = name.split("/")
+                if ("\\" in name
+                        or len(pieces) < 2
+                        or pieces[0] not in ("worktree", "result",
+                                           "evidence_reports_dir",
+                                           "evidence_runtime_reports_dir")
+                        or any(part in ("", ".", "..") for part in pieces)
+                        or not isinstance(item, dict)
+                        or not isinstance(item.get("size"), int)
+                        or not 0 <= item["size"] <= MAX_BYTES
+                        or not isinstance(item.get("sha256"), str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+                    return {"status": "blocked", "reason": "manifest_path_or_digest_invalid"}
+                total += item["size"]
+                if total > MAX_BYTES:
+                    return {"status": "blocked", "reason": "uncompressed_size_limit"}
+                digest = hashlib.sha256()
+                observed = 0
+                with z.open(name) as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        observed += len(chunk)
+                        if observed > item["size"]:
+                            return {"status": "blocked", "reason": "entry_size_exceeded"}
+                        digest.update(chunk)
+                if observed != item["size"] or digest.hexdigest() != item["sha256"]:
+                    return {"status": "blocked", "reason": "checksum_mismatch"}
+        return {"status": "verified", "event_id": event_id,
+                "file_count": len(files), "archive": str(archive)}
+    except (OSError, ValueError, TypeError, KeyError, zipfile.BadZipFile, RuntimeError):
+        return {"status": "blocked", "reason": "archive_read_or_integrity_error"}
+
+
 def eligibility(c: dict, event_id: str, *, legacy: bool = False) -> tuple[str, str]:
     """Read-only explanation; no unknown/in-progress workspace is auto-reclaimed."""
     if not IDENTIFIER.fullmatch(event_id):
