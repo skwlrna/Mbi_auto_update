@@ -26,6 +26,28 @@ internal static class AlteringQueueStartGuard
             ct.ThrowIfCancellationRequested();
             var recipes = await readRecipes(ct);
             var works = await readWorks(ct);
+            // Diagnostic only: a 200-item target must not be interpreted as
+            // requiring 200 items of raw stock before its FIRST work ticket.
+            // Expose the current single-work CLI gate even when preflight stops
+            // before the durable batch/onsite screen actions can begin.
+            foreach (var plan in plans)
+            {
+                var recipe = recipes.Where(x =>
+                    string.Equals(x.DisplayName, plan.DisplayName, StringComparison.Ordinal))
+                    .ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                string singleWorkStatus = recipe is null ? "제법 확인 실패" :
+                    recipe.Alterable ? "1회 제작 가능" :
+                    recipe.MissingIngredients.Count > 0
+                        ? "1회 제작 재료 부족 · " + string.Join(", ",
+                            recipe.MissingIngredients.Take(8).Select(x =>
+                                $"{x.DisplayName} {x.Owned}/{x.Required}"))
+                        : "1회 제작 불가 · CLI Reason=" + (recipe.Reason ?? "unknown");
+                log?.Invoke(
+                    $"[CLI][가공 시작 품목별 진단] {plan.FacilityName} · {plan.DisplayName} · " +
+                    $"목표 {plan.TargetQuantity}개 / 총 {plan.RequiredWorks}회 · " +
+                    $"현재 시설 {works.Count(x => x.FacilityName == plan.FacilityName)}/7칸 · " +
+                    singleWorkStatus + " · 신규 게임 입력 없음");
+            }
             try
             {
                 EnsureStartable(plans, recipes, works);
