@@ -11,7 +11,6 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 AI = ROOT / "source" / "FishingAutomation" / "ai-autopilot"
@@ -110,26 +109,57 @@ class SafeWorktreeCleanupTests(unittest.TestCase):
         }
         return config, repo, folder, result
 
-    def test_no_patch_generated_build_files_are_backed_up_and_reclaimed(self):
+    def test_no_patch_generated_build_files_are_reclaimed_without_zip(self):
+        # An unrelated older archive must not waste the new no-patch slot.
+        for ignored in (False, True):
+            with self.subTest(ignored=ignored), tempfile.TemporaryDirectory() as td:
+                config, repo, folder, result = self.local_checkout(Path(td))
+                generated = folder / "source" / "FishingAutomation" / "obj" / "Debug" / "assets.json"
+                generated.parent.mkdir(parents=True)
+                generated.write_text('{"generated":true}', encoding="utf-8")
+                if ignored:
+                    (repo / ".gitignore").write_text("**/obj/\\n", encoding="utf-8")
+                    # The live worktree has its own ignored build artifacts.
+                    (folder / ".git" ).exists()
+                    self.run_git(repo, "add", ".gitignore")
+                    self.run_git(repo, "-c", "user.name=Test", "-c",
+                                 "user.email=test@example.invalid", "commit", "-qm", "ignore")
+                    # Refresh the checkout's index and tracked files without
+                    # altering its separate generated artifact.
+                    self.run_git(folder, "reset", "--hard", "HEAD")
+                    (folder / ".gitignore").write_text("**/obj/\\n", encoding="utf-8")
+                    # New untracked ignore rules are NOT disposable.
+                    # Instead ignore via the local worktree's Git info/exclude.
+                    (folder / ".gitignore").unlink()
+                    info_exclude = repo / ".git" / "info" / "exclude"
+                    info_exclude.write_text("**/obj/\\n", encoding="utf-8")
+                archive_dir = Path(config["worktree_archives_dir"])
+                archive_dir.mkdir()
+                prior_zip = archive_dir / (folder.name + ".zip")
+                prior_zip.write_bytes(b"legacy archive kept")
+                with mock.patch.object(retention, "_registrations",
+                                       return_value={folder.resolve(): repo.resolve()}):
+                    before = retention.report(config)
+                    self.assertIn(folder.name, before["archive_ready_candidates"])
+                    action = retention.archive_clean_one(config, folder.name)
+                self.assertEqual(action["status"], "cleaned", action)
+                self.assertFalse(folder.exists())
+                self.assertTrue(result.exists())
+                self.assertEqual(prior_zip.read_bytes(), b"legacy archive kept")
+                self.assertEqual(list(archive_dir.glob("*.partial")), [])
+
+    def test_unexpected_ignored_file_is_never_removed(self):
         with tempfile.TemporaryDirectory() as td:
             config, repo, folder, result = self.local_checkout(Path(td))
-            generated = folder / "source" / "FishingAutomation" / "obj" / "Debug" / "assets.json"
-            generated.parent.mkdir(parents=True)
-            generated.write_text('{"generated":true}', encoding="utf-8")
+            foreign = folder / "private.log"
+            foreign.write_text("retain", encoding="utf-8")
+            (repo / ".git" / "info" / "exclude").write_text("private.log\\n", encoding="utf-8")
             with mock.patch.object(retention, "_registrations",
                                    return_value={folder.resolve(): repo.resolve()}):
-                before = retention.report(config)
-                self.assertIn(folder.name, before["archive_ready_candidates"])
                 action = retention.archive_clean_one(config, folder.name)
-            self.assertEqual(action["status"], "archived", action)
-            self.assertFalse(folder.exists())
-            self.assertTrue(result.exists())
-            archive = Path(config["worktree_archives_dir"]) / (folder.name + ".zip")
-            self.assertTrue(archive.is_file())
-            with zipfile.ZipFile(archive) as z:
-                self.assertEqual(z.read("source/FishingAutomation/obj/Debug/assets.json"),
-                                 b'{"generated":true}')
-                self.assertEqual(z.read("seeded.txt"), b"not modified")
+            self.assertEqual(action["status"], "blocked", action)
+            self.assertTrue(foreign.is_file())
+            self.assertTrue(result.is_file())
 
     def test_source_change_or_foreign_untracked_file_is_never_removed(self):
         for change in ("tracked_change", "untrusted_file", "active_work"):
@@ -216,7 +246,7 @@ class OfflinePipelineReplayTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "needs_review", outcome)
             self.assertTrue(outcome["missing_patch"])
             self.assertFalse(outcome["repair_verified"])
-            self.assertEqual(outcome["worktree_cleanup"]["status"], "archived", outcome)
+            self.assertEqual(outcome["worktree_cleanup"]["status"], "cleaned", outcome)
             self.assertFalse(worktree.exists())
             self.assertTrue((Path(c["results_dir"]) / event_id / "result.json").is_file())
             self.assertTrue((error / "error.txt").exists())
