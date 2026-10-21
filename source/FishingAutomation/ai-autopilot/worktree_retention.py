@@ -98,6 +98,33 @@ def _existing_report(c: dict, event_id: str) -> dict:
         return {}
 
 
+def _generated_only(folder: Path) -> bool:
+    """Only untracked bin/obj build output may be forcibly removed *after*
+    a checksum-verified full-worktree archive of an agent_no_patch result.
+
+    A tracked edit, rename, unknown untracked file, symlink or unreadable
+    status must keep the worktree protected. Never use git clean.
+    """
+    status = _git(folder, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if status.returncode or not status.stdout:
+        return False
+    for entry in status.stdout.split("\0"):
+        if not entry:
+            continue
+        if not entry.startswith("?? "):
+            return False
+        relative = entry[3:]
+        parts = relative.split("/")
+        if (len(parts) < 2 or any(not p or p in (".", "..") for p in parts)
+                or not any(p in ("bin", "obj") for p in parts[:-1])):
+            return False
+        candidate = folder.joinpath(*parts)
+        if (candidate.is_symlink() or not candidate.is_file()
+                or not candidate.resolve().is_relative_to(folder.resolve())):
+            return False
+    return True
+
+
 def _eligible(folder: Path, c: dict, registered: dict[Path, Path]) -> bool:
     # A missing/foreign worktree, an active job, or a worktree with edits cannot
     # be cleaned automatically or by the opt-in clean-only action.
@@ -112,7 +139,15 @@ def _eligible(folder: Path, c: dict, registered: dict[Path, Path]) -> bool:
         return False
     try:
         status = _git(folder, "status", "--porcelain", "--untracked-files=all")
-        return status.returncode == 0 and not status.stdout.strip()
+        if status.returncode:
+            return False
+        if not status.stdout.strip():
+            return True
+        # A no-patch Codex attempt can leave NuGet/bin/obj output behind.
+        # Back it up, but NEVER treat source edits as disposable artifacts.
+        return (result.get("status") == "needs_review"
+                and str(result.get("reason", "")).startswith("agent_no_patch")
+                and _generated_only(folder))
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -201,15 +236,34 @@ def archive_clean_one(c: dict, event_id: str) -> dict:
             for name, digest in checksums.items():
                 if hashlib.sha256(check.read(name)).hexdigest() != digest:
                     raise ValueError("archive_checksum_mismatch")
-        # Recheck immediately before destructive Git action; never force
-        # through tracked/untracked edits or an unavailable registration.
+        # Recheck every current byte (including ignored files) against the
+        # archive before removing anything, not merely git's tracked status.
+        current: dict[str, str] = {}
+        for entry in folder.rglob("*"):
+            if entry.is_symlink():
+                raise ValueError("linked_file_blocked")
+            if entry.is_file():
+                current[entry.relative_to(folder).as_posix()] = hashlib.sha256(
+                    entry.read_bytes()).hexdigest()
+        if current != checksums:
+            raise ValueError("worktree_changed_during_backup")
         if event_id not in report(c).get("clean_candidates", []):
             raise ValueError("worktree_changed_during_backup")
+        status = _git(folder, "status", "--porcelain", "--untracked-files=all")
+        if status.returncode:
+            raise ValueError("git_status_unavailable_before_remove")
+        generated = bool(status.stdout.strip())
+        if generated and not _generated_only(folder):
+            raise ValueError("untrusted_worktree_change_before_remove")
         staging.rename(final)
         owner = _registrations(c).get(folder.resolve())
         if owner is None:
             return {"status": "blocked", "reason": "registered_owner_disappeared"}
-        removed = _git(owner, "worktree", "remove", str(folder))
+        # Force is *only* allowed for known untracked build artifacts after
+        # verified archival. Normal clean worktrees use the non-force route.
+        args = ("worktree", "remove", "--force", str(folder)) if generated else (
+            "worktree", "remove", str(folder))
+        removed = _git(owner, *args)
         if removed.returncode:
             return {"status": "blocked", "reason": "git_worktree_remove_failed_backup_kept"}
         return {"status": "archived", "reason": "verified_backup_then_clean_worktree_removed",
