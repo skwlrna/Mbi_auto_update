@@ -1415,15 +1415,17 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 inventory = retention_report(c)
                 if not inventory.get("error"):
                     pending_cleanup = list(inventory.get("no_patch_candidates", []))
-                    if (inventory.get("count", 0) >=
-                            max(0, inventory.get("limit", 30) - 2)):
-                        pending_cleanup.extend(item for item in
-                            inventory.get("archive_ready_candidates", [])
-                            if item not in pending_cleanup)
-                    for identifier in pending_cleanup[:3]:
+                    legacy = reset_preview(c)
+                    pending_cleanup.extend(item["id"] for item in legacy["recoverable"]
+                                           if item["state"] in FINISHED
+                                           and item["id"] not in pending_cleanup)
+                    for identifier in pending_cleanup[:6]:
                         if not isinstance(identifier, str) or not RETENTION_ID.fullmatch(identifier):
                             continue
-                        outcome = archive_clean_one(c, identifier)
+                        if identifier in inventory.get("no_patch_candidates", []):
+                            outcome = archive_clean_one(c, identifier)
+                        else:
+                            outcome = archive_finished_one(c, identifier)
                         if outcome.get("status") in ("archived", "cleaned"):
                             cleaned_or_attempted = True
                         print("AI 작업공간 자동 안전 정리:",
