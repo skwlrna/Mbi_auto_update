@@ -235,5 +235,88 @@ class RegisteredRegressionTests(GitSandbox):
             self.assertEqual(reason, "regression_test_suite_not_registered")
 
 
+class OfflinePipelineOrchestrationTests(GitSandbox):
+    def test_simulated_codex_patch_passes_gates_and_worktree_is_archived(self):
+        # Only Codex and the test executor are stubs. The real orchestration,
+        # Git worktree, change validation, result writing and ZIP are exercised.
+        # This is NOT a real Codex, .NET build, or live game acceptance test.
+        import autopilot
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self.git(repo, "init", "-q")
+            source_path = "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs"
+            test_path = "tests/gathering/Program.cs"
+            for name, data in (
+                    ("source/FishingAutomation/FishingAutomation.csproj", "<Project />"),
+                    (source_path, "original production"),
+                    (test_path, "original regression"),
+                    ("tests/gathering/Regression.csproj", "<Project />")):
+                target = repo / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(data, encoding="utf-8")
+            self.git(repo, "add", ".")
+            self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                     "user.name=Test", "commit", "-qm", "base")
+            base = self.git(repo, "rev-parse", "HEAD")
+            error = root / "reports" / "runtime_test_codex"
+            error.mkdir(parents=True)
+            (error / "error.txt").write_text("채집 둥지 OCR 오류", encoding="utf-8")
+            config = autopilot.config()
+            config.update({
+                "repo": str(repo), "original_repo": str(repo),
+                "release_source_sha": base,
+                "results_dir": str(root / "results"),
+                "worktrees_dir": str(root / "worktrees"),
+                "worktree_archives_dir": str(root / "archives"),
+                "reports_dir": str(root / "reports"),
+                "runtime_reports_dir": str(root / "runtime"),
+                "require_clean_repo": True,
+            })
+            identity = autopilot.event_id(error)
+            worktree = root / "worktrees" / identity
+
+            def simulated_codex(folder, _prompt, outdir, _config, progress=None):
+                (folder / source_path).write_text("changed production", encoding="utf-8")
+                (folder / test_path).write_text("changed regression", encoding="utf-8")
+                (outdir / "codex-last-1.md").write_text("SIMULATION ONLY", encoding="utf-8")
+                return True, "simulated_codex_edit"
+
+            simulated_tests = [{"test": 1, "ok": True, "reason": "pass",
+                                "argv": ["offline-simulated-test-gate"]}]
+            with mock.patch.object(autopilot, "require_pinned_source"), \
+                 mock.patch.object(autopilot, "prepare_dotnet_environment",
+                                   return_value=(True, "simulated_restore")), \
+                 mock.patch.object(autopilot, "exec_codex",
+                                   side_effect=simulated_codex), \
+                 mock.patch.object(autopilot, "test_patch",
+                                   return_value=(True, simulated_tests)), \
+                 mock.patch.object(autopilot, "record_attempt"), \
+                 mock.patch.object(autopilot, "publish_verified_draft_pr",
+                                   return_value={"status": "blocked",
+                                                 "reason": "offline_simulation"}), \
+                 mock.patch.object(lifecycle, "_registrations",
+                                   return_value={worktree.resolve(): repo.resolve()}):
+                outcome = autopilot.process(error, config)
+            self.assertEqual(outcome["status"], "tests_passed_review_required", outcome)
+            self.assertEqual(outcome["failure_kind"], "offline_verified_pending_review")
+            self.assertTrue(outcome["offline_verified"])
+            self.assertFalse(outcome["game_verified"])
+            self.assertEqual(outcome["worktree_cleanup"]["status"], "archived", outcome)
+            self.assertFalse(worktree.exists())
+            archive = root / "archives" / (identity + ".recovery.zip")
+            self.assertTrue(archive.is_file())
+            with zipfile.ZipFile(archive) as backup:
+                self.assertEqual(backup.read("worktree/" + source_path),
+                                 b"changed production")
+                self.assertEqual(backup.read("worktree/" + test_path),
+                                 b"changed regression")
+                self.assertIn("results/result.json", backup.namelist())
+            saved = json.loads((root / "results" / identity / "result.json").read_text())
+            self.assertEqual(saved["worktree_cleanup"]["status"], "archived")
+            self.assertTrue((error / "error.txt").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
