@@ -3,18 +3,8 @@ name: V3.2.51 Isolated Windows Candidate
 # A PR-only candidate, NOT a GitHub Release and NOT visible to the updater.
 # Public promotion is separately gated in release-v3251-auto-update.yml.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'source/**'
-      - 'tests/altering/**'
-      - 'tests/altering-screen-integration/**'
-      - 'tests/ai-autopilot/**'
-      - 'tests/gathering/**'
-      - 'tests/release/**'
-      - 'tests/n02-resume/**'
-      - '.github/workflows/release-v3251-auto-update.yml'
-      - '.github/workflows/v3251-candidate.yml'
+  # Historical V3.2.51 candidate is superseded by v3252-candidate.yml.
+  # Retain manual execution for provenance, not new PR gating.
   workflow_dispatch:
   push:
     branches: [fix/v3251-managed-k-reentry-autofix-diagnostics]

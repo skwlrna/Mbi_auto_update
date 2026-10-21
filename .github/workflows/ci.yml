@@ -80,14 +80,20 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.51"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.52"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.51</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3251-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.51"')) {
+          if ($p -notmatch '<Version>3\.2\.52</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3252-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.52"')) {
             throw 'release workflow eligibility version mismatch'
           }
+
+      - name: V3.2.52 F9 leather release safety policy
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/release -p 'test_v3252_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.52 release safety policy failed' }
 
       - name: V3.2.51 nest release safety policy
         shell: pwsh
