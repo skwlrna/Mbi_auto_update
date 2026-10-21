@@ -97,6 +97,65 @@ class PinnedSourceTests(TestCase):
                 "repo": str(original), "source_snapshots_dir": str(snapshots)
             }, marker)["action"], "existing_pinned_snapshot_selected")
 
+    @mock.patch.object(release_source, "TRUSTED_ORIGINS", new_callable=lambda: set())
+    def test_exact_release_is_selected_even_when_current_main_lacks_source(self, trusted):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "BUILD_COMMIT.txt"
+            upstream, _, expected, git = self.init_repo(root, marker)
+            trusted.add(str(upstream))
+            with mock.patch.object(release_source, "SOURCE_URL", str(upstream)):
+                project = upstream / "source/FishingAutomation/FishingAutomation.csproj"
+                project.unlink()
+                git(["add", "-u"], upstream)
+                git(["commit", "-m", "main removed project"], upstream)
+                chosen = release_source.prepare_source({
+                    "repo": str(root / "no-local-repo"),
+                    "source_snapshots_dir": str(root / "snapshots"),
+                }, marker)
+                self.assertEqual(chosen["expected"], expected)
+                self.assertTrue(release_source.check_checkout(
+                    Path(chosen["repo"]), expected)[0])
+                self.assertTrue((Path(chosen["repo"]) /
+                                 "source/FishingAutomation/FishingAutomation.csproj").exists())
+
+    @mock.patch.object(release_source, "TRUSTED_ORIGINS", new_callable=lambda: set())
+    def test_exact_pr_head_fallback_uses_matching_sha_not_hardcoded_pr(self, trusted):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "BUILD_COMMIT.txt"
+            upstream, _, main_sha, git = self.init_repo(root, marker)
+            git(["checkout", "-b", "release/candidate"], upstream)
+            project = upstream / "source/FishingAutomation/FishingAutomation.csproj"
+            project.write_text("<Project><PropertyGroup><Version>3.2.50</Version></PropertyGroup></Project>")
+            git(["add", "."], upstream)
+            git(["commit", "-m", "isolated RC"], upstream)
+            expected = git(["rev-parse", "HEAD"], upstream).stdout.strip()
+            git(["update-ref", "refs/pull/432/head", expected], upstream)
+            git(["update-ref", "refs/pull/255/head", main_sha], upstream)
+            git(["checkout", "main"], upstream)
+            marker.write_text(expected + "\n", encoding="ascii")
+            trusted.add(str(upstream))
+            original = release_source.run_git
+            commands = []
+            def fail_direct_sha_fetch(args, cwd=None, timeout=30):
+                commands.append(list(args))
+                if (args[:4] == ["fetch", "--no-tags", "--depth", "1"]
+                        and args[-1] == expected):
+                    return subprocess.CompletedProcess(args, 1, "", "SHA fetch denied")
+                return original(args, cwd, timeout)
+            with mock.patch.object(release_source, "SOURCE_URL", str(upstream)), \
+                 mock.patch.object(release_source, "run_git",
+                                   side_effect=fail_direct_sha_fetch):
+                chosen = release_source.prepare_source({
+                    "repo": str(root / "missing"),
+                    "source_snapshots_dir": str(root / "snapshots"),
+                }, marker)
+            self.assertEqual(chosen["expected"], expected)
+            self.assertTrue(release_source.check_checkout(Path(chosen["repo"]), expected)[0])
+            self.assertTrue(any(cmd[-1] == "refs/pull/432/head" for cmd in commands))
+            self.assertFalse(any(cmd[-1] == "refs/pull/255/head" for cmd in commands))
+
     def test_missing_or_invalid_release_marker_blocks_all_source_selection(self):
         with tempfile.TemporaryDirectory() as temp:
             marker = Path(temp) / "BUILD_COMMIT.txt"
