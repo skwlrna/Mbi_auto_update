@@ -824,6 +824,19 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             except (OSError, ValueError, TypeError):
                 # Memory is diagnostic-only: no impact on safe stop or verification.
                 pass
+        if status == "needs_review" and output.get("missing_patch") is True:
+            # A no-patch attempt is unresolved: preserve its result and notes,
+            # but release its unedited worktree immediately when a verified
+            # checksum-backed archive can be made. Never delete source edits.
+            try:
+                cleaned = archive_clean_one(c, eid)
+                output["worktree_cleanup"] = {
+                    "status": cleaned.get("status", "blocked"),
+                    "reason": cleaned.get("reason", "unknown")}
+            except (OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
+                output["worktree_cleanup"] = {
+                    "status": "blocked", "reason": type(exc).__name__}
+            write_json(result_path, output)
         return output
 
     if result_path.exists():
