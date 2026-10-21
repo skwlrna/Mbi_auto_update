@@ -89,6 +89,38 @@ class RecoveryLifecycleTests(GitSandbox):
             self.assertEqual(preview["recoverable"][0]["state"], "in_progress")
             self.assertTrue(folder.exists())
 
+    def test_in_app_runtime_evidence_is_copied_and_original_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, results, _ = self.setup_repo(Path(temporary))
+            name = json.loads((results / "result.json").read_text())["event"]
+            runtime = Path(temporary) / "runtime" / name
+            runtime.mkdir(parents=True)
+            (runtime / "error.txt").write_bytes(b"runtime crash evidence")
+            config["runtime_reports_dir"] = str(Path(temporary) / "runtime")
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}):
+                action = lifecycle.archive_finished_one(config, folder.name)
+            self.assertEqual(action["status"], "archived", action)
+            self.assertEqual((runtime / "error.txt").read_bytes(),
+                             b"runtime crash evidence")
+            with zipfile.ZipFile(action["archive"]) as backup:
+                self.assertEqual(backup.read("runtime-evidence/error.txt"),
+                                 b"runtime crash evidence")
+
+    def test_reparse_backed_diagnostics_block_removal_without_touching_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, repo, folder, results, _ = self.setup_repo(Path(temporary))
+            result_root = Path(config["results_dir"])
+            old_linked = lifecycle._linked
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value={folder.resolve(): repo.resolve()}), \
+                 mock.patch.object(lifecycle, "_linked",
+                                   side_effect=lambda p: p == result_root or old_linked(p)):
+                action = lifecycle.archive_finished_one(config, folder.name)
+            self.assertEqual(action["reason"], "backup_ValueError")
+            self.assertTrue(folder.exists())
+            self.assertTrue((results / "result.json").exists())
+
     def test_unknown_owner_is_vetoed_even_for_explicit_reset(self):
         with tempfile.TemporaryDirectory() as temporary:
             config, _, folder, _, _ = self.setup_repo(Path(temporary))
