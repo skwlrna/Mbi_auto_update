@@ -53,6 +53,11 @@ class GitRecoveryFixture(unittest.TestCase):
             "test\n", encoding="utf-8")
         (self.repo / "tests" / "new-suite" / "Regression.csproj").write_text(
             "<Project />\n", encoding="utf-8")
+        (self.repo / "changes" / "tests" / "stability").mkdir(parents=True)
+        (self.repo / "changes" / "tests" / "stability" / "Program.cs").write_text(
+            "stable test\n", encoding="utf-8")
+        (self.repo / "changes" / "tests" / "stability" / "Regression.csproj").write_text(
+            "<Project />\n", encoding="utf-8")
         (self.repo / "tests" / "ai-autopilot").mkdir(parents=True)
         (self.repo / "tests" / "ai-autopilot" / "test_autofix.py").write_text(
             "import unittest\n", encoding="utf-8")
@@ -140,6 +145,14 @@ class GitRecoveryFixture(unittest.TestCase):
         commands, error = commands_for(changed, self.workspace)
         self.assertIsNone(error)
         self.assertTrue(commands and commands[0][0] == "dotnet")
+        # The production's stability project exists but was missing from
+        # the former fixed list. It must be recognized on the pinned baseline.
+        commands, error = commands_for([
+            "source/FishingAutomation/MainForm.Crafting.cs",
+            "changes/tests/stability/Program.cs"], self.workspace)
+        self.assertIsNone(error)
+        self.assertTrue(any("changes/tests/stability/Regression.csproj" in argv
+                            for command in commands for argv in command))
         (self.workspace / "tests" / "invented").mkdir()
         (self.workspace / "tests" / "invented" / "Program.cs").write_text("test")
         (self.workspace / "tests" / "invented" / "Regression.csproj").write_text(
