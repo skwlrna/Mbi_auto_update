@@ -131,7 +131,7 @@ class GitRecoveryFixture(unittest.TestCase):
         tampered = self.home / "tampered.zip"
         with zipfile.ZipFile(tampered, "w", compression=zipfile.ZIP_DEFLATED) as out:
             for name, raw in items.items():
-                out.writestr(name, b"altered source" if name == "worktree/src.txt" else raw)
+                out.writestr(name, (b"X" + raw[1:]) if name == "worktree/src.txt" else raw)
         self.assertEqual(verify_saved_archive(tampered)["reason"],
                          "checksum_mismatch")
         self.assertEqual(verify_saved_archive(source)["status"], "verified")
