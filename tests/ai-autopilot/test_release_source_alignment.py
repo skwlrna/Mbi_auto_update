@@ -156,6 +156,73 @@ class PinnedSourceTests(TestCase):
             self.assertTrue(any(cmd[-1] == "refs/pull/432/head" for cmd in commands))
             self.assertFalse(any(cmd[-1] == "refs/pull/255/head" for cmd in commands))
 
+    @mock.patch.object(release_source, "TRUSTED_ORIGINS", new_callable=lambda: set())
+    def test_direct_sha_denied_uses_bounded_history_for_older_main_release(self, trusted):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "BUILD_COMMIT.txt"
+            upstream, _, expected, git = self.init_repo(root, marker)
+            file = upstream / "source/FishingAutomation/FishingAutomation.csproj"
+            file.write_text("<Project><PropertyGroup>new main</PropertyGroup></Project>")
+            git(["add", "."], upstream)
+            git(["commit", "-m", "later main"], upstream)
+            trusted.add(str(upstream))
+            commands = []
+            run_git_original = release_source.run_git
+            def deny_direct(args, cwd=None, timeout=30):
+                commands.append(list(args))
+                if args[:2] == ["fetch", "--no-tags"] and args[-1] == expected:
+                    return subprocess.CompletedProcess(args, 1, "", "not allowed")
+                return run_git_original(args, cwd, timeout)
+            with mock.patch.object(release_source, "SOURCE_URL", str(upstream)), \
+                 mock.patch.object(release_source, "run_git", side_effect=deny_direct):
+                result = release_source.prepare_source({
+                    "repo": str(root / "missing"),
+                    "source_snapshots_dir": str(root / "snapshots")
+                }, marker)
+            self.assertEqual(result["expected"], expected)
+            self.assertTrue(release_source.check_checkout(Path(result["repo"]), expected)[0])
+            self.assertTrue(any(cmd[-2:] == ["origin", "refs/heads/main"] and
+                                "256" in cmd for cmd in commands))
+
+    @mock.patch.object(release_source, "TRUSTED_ORIGINS", new_callable=lambda: set())
+    def test_previous_rc_sha_inside_legacy_pr_history_still_resolves(self, trusted):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "BUILD_COMMIT.txt"
+            upstream, _, _, git = self.init_repo(root, marker)
+            git(["checkout", "-b", "old-rc"], upstream)
+            file = upstream / "source/FishingAutomation/FishingAutomation.csproj"
+            file.write_text("<Project><PropertyGroup>candidate</PropertyGroup></Project>")
+            git(["add", "."], upstream)
+            git(["commit", "-m", "pinned candidate"], upstream)
+            expected = git(["rev-parse", "HEAD"], upstream).stdout.strip()
+            file.write_text("<Project><PropertyGroup>new rc head</PropertyGroup></Project>")
+            git(["add", "."], upstream)
+            git(["commit", "-m", "later rc head"], upstream)
+            head = git(["rev-parse", "HEAD"], upstream).stdout.strip()
+            git(["update-ref", "refs/pull/255/head", head], upstream)
+            git(["checkout", "main"], upstream)
+            marker.write_text(expected + "\n", encoding="ascii")
+            trusted.add(str(upstream))
+            called = []
+            run_git_original = release_source.run_git
+            def deny_direct(args, cwd=None, timeout=30):
+                called.append(list(args))
+                if args[:2] == ["fetch", "--no-tags"] and args[-1] == expected:
+                    return subprocess.CompletedProcess(args, 1, "", "not allowed")
+                return run_git_original(args, cwd, timeout)
+            with mock.patch.object(release_source, "SOURCE_URL", str(upstream)), \
+                 mock.patch.object(release_source, "run_git", side_effect=deny_direct):
+                result = release_source.prepare_source({
+                    "repo": str(root / "missing"),
+                    "source_snapshots_dir": str(root / "snapshots")
+                }, marker)
+            self.assertEqual(result["expected"], expected)
+            self.assertTrue(release_source.check_checkout(Path(result["repo"]), expected)[0])
+            self.assertTrue(any(cmd[-1] == "refs/pull/255/head" for cmd in called))
+
+
     def test_ui_explains_local_source_validation_without_false_github_absence(self):
         app = AI.parent
         host = (app / "AiAutopilotHost.cs").read_text(encoding="utf-8")
