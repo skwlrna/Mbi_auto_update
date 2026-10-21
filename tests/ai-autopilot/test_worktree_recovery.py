@@ -102,9 +102,12 @@ class GitRecoveryFixture(unittest.TestCase):
         self.assertTrue((self.results / self.event_id / "test-1.log").exists())
         self.assertTrue((self.reports / "incident-one" / "error.txt").exists())
         with zipfile.ZipFile(outcome["archive"]) as z:
-            self.assertEqual(z.read("worktree/src.txt"), b"Codex patch\n")
-            self.assertEqual(z.read("result/test-1.log"), b"failed assertion\n")
-            self.assertEqual(z.read("evidence_reports_dir/error.txt"), b"original evidence\n")
+            self.assertEqual(z.read("worktree/src.txt").replace(b"\r\n", b"\n"),
+                             b"Codex patch\n")
+            self.assertEqual(z.read("result/test-1.log").replace(b"\r\n", b"\n"),
+                             b"failed assertion\n")
+            self.assertEqual(z.read("evidence_reports_dir/error.txt").replace(b"\r\n", b"\n"),
+                             b"original evidence\n")
             manifest = json.loads(z.read("RECOVERY-MANIFEST.json"))
             self.assertEqual(manifest["event_id"], self.event_id)
             self.assertTrue(manifest["original_logs_preserved"])
