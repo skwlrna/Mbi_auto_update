@@ -2673,6 +2673,33 @@ await resolvedAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.ReservedWings == 0,
     "missing materials are resolved inside the same zero-wing altering session");
 
+// A partial raw stock of 100 is NOT permission to reject a 200-output
+// target before its first valid work ticket. Later tickets are gated by the
+// same live recipe availability check as the very first ticket.
+var partialLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 3, false);
+var partialLeatherWorld = new FakeWorld(partialLeather) { RawLeatherStock = 100, LeatherCost = 2 };
+var firstLeatherStartLogs = new List<string>();
+var partialStart = await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+    new[] { partialLeather }, partialLeatherWorld.RecipesAsync,
+    partialLeatherWorld.WorksAsync,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    CancellationToken.None, firstLeatherStartLogs.Add);
+Check(firstLeatherStartLogs.Any(x =>
+        x.Contains("가죽+", StringComparison.Ordinal) &&
+        x.Contains("1회 제작 가능", StringComparison.Ordinal) &&
+        x.Contains("목표 200개", StringComparison.Ordinal)),
+    "F9 logs first-work availability for leather+ 200 target with only 100 raw stock");
+var partialLeatherAuto = new AlteringAutomation(
+    partialLeatherWorld, partialLeatherWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; }, 4);
+var partialFirstBatch = await partialLeatherAuto.RunBatchAsync(partialLeather, 1, default);
+Check(partialStart.Recipes.Single().Alterable &&
+      partialFirstBatch == AlteringRunResult.BatchQueued &&
+      partialLeatherWorld.QueueCalls == 1 &&
+      partialLeatherWorld.RawLeatherStock == 98 &&
+      partialLeatherAuto.ReservedWings == 0,
+    "leather+ 200 target registers first free work with 100 raw stock; no full-target material gate");
+
 // Leather at the leather facility is a RAW input. A shortage is a normal
 // partial terminal: never invoke recursive supply or fabricate goal completion.
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
@@ -4476,12 +4503,19 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal bool QueuedWhileExisting;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
+    internal long? RawLeatherStock;
+    internal long LeatherCost = 2;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        bool available = Available || (UnlockAfterExisting && ExistingRemaining == 0);
-        var missing = available ? Array.Empty<AlteringIngredient>() : new[] { new AlteringIngredient("철 광석", 3, 0) };
+        bool available = RawLeatherStock.HasValue
+            ? RawLeatherStock.Value >= LeatherCost
+            : Available || (UnlockAfterExisting && ExistingRemaining == 0);
+        var missing = available ? Array.Empty<AlteringIngredient>() :
+            RawLeatherStock.HasValue
+                ? new[] { new AlteringIngredient("가죽", LeatherCost, RawLeatherStock.Value) }
+                : new[] { new AlteringIngredient("철 광석", 3, 0) };
         var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : MissingReason, missing, _plan.FacilityName);
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
@@ -4507,7 +4541,16 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         ct.ThrowIfCancellationRequested();
         if (ExistingRemaining > 0) QueuedWhileExisting = true;
         QueueCalls++;
-        if (Register) _works.Add(new(plan.OutputName, plan.FacilityName, "InProgress", false, 5));
+        if (Register)
+        {
+            if (RawLeatherStock.HasValue)
+            {
+                if (RawLeatherStock.Value < LeatherCost)
+                    throw new InvalidOperationException("Test: cannot queue without one work of raw leather");
+                RawLeatherStock -= LeatherCost;
+            }
+            _works.Add(new(plan.OutputName, plan.FacilityName, "InProgress", false, 5));
+        }
         MaxQueue = Math.Max(MaxQueue, _works.Count);
         return Task.CompletedTask;
     }
