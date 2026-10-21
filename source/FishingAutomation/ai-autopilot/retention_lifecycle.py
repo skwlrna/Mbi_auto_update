@@ -24,21 +24,33 @@ MAX_FILES = 35000
 MAX_BYTES = 512 * 1024 * 1024
 
 
+def _linked(path: Path) -> bool:
+    """Reject Windows junctions/reparse-backed directories as well as symlinks."""
+    return path.is_symlink() or bool(getattr(path, "is_junction", lambda: False)())
+
+
+def _sha256(stream) -> str:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _source_dirs(config: dict, event_id: str, result: dict) -> list[tuple[str, Path]]:
     """Only owned worktree, matching result folder and bounded evidence folder."""
     root = Path(config["worktrees_dir"]).expanduser()
     sources = [("worktree", root / event_id)]
     result_root = Path(config["results_dir"]).expanduser()
     result_dir = result_root / event_id
-    if not result_dir.is_symlink() and result_dir.is_dir():
+    if not _linked(result_dir) and result_dir.is_dir():
         sources.append(("results", result_dir))
     event = result.get("event", "")
     if (isinstance(event, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", event)
             and event not in (".", "..") and "reports_dir" in config):
         reports_root = Path(config["reports_dir"]).expanduser()
-        if not reports_root.is_symlink():
+        if not _linked(reports_root):
             evidence = reports_root / event
-            if evidence.is_dir() and not evidence.is_symlink():
+            if evidence.is_dir() and not _linked(evidence):
                 sources.append(("evidence", evidence))
     return sources
 
@@ -47,10 +59,10 @@ def _files(sources: list[tuple[str, Path]]) -> list[tuple[str, Path, int]]:
     entries = []
     size = 0
     for prefix, root in sources:
-        if root.is_symlink() or not root.is_dir():
+        if _linked(root) or not root.is_dir():
             raise ValueError("recovery_root_unavailable")
         for file in root.rglob("*"):
-            if file.is_symlink():
+            if _linked(file):
                 raise ValueError("recovery_symlink_detected")
             if not file.is_file():
                 continue
@@ -69,15 +81,16 @@ def _files(sources: list[tuple[str, Path]]) -> list[tuple[str, Path, int]]:
 def _snapshot(entries: list[tuple[str, Path, int]]) -> dict[str, str]:
     values = {}
     for name, path, length in entries:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size != length:
+        if _linked(path) or not path.is_file() or path.stat().st_size != length:
             raise ValueError("recovery_input_changed")
-        values[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        with path.open("rb") as source:
+            values[name] = _sha256(source)
     return values
 
 
 def _verify_archive(path: Path, event_id: str, expected: dict[str, str]) -> bool:
     try:
-        if path.is_symlink() or not path.is_file():
+        if _linked(path) or not path.is_file():
             return False
         with zipfile.ZipFile(path) as archive:
             manifest = json.loads(archive.read("_recovery/manifest.json"))
@@ -86,8 +99,15 @@ def _verify_archive(path: Path, event_id: str, expected: dict[str, str]) -> bool
                     manifest.get("files") != expected or
                     set(archive.namelist()) != set(expected) | {"_recovery/manifest.json"}):
                 return False
-            return all(hashlib.sha256(archive.read(name)).hexdigest() == digest
-                       for name, digest in expected.items())
+            entries = archive.infolist()
+            if (len(entries) > MAX_FILES + 1 or
+                    sum(info.file_size for info in entries) > MAX_BYTES + 1024 * 1024):
+                return False
+            for name, digest in expected.items():
+                with archive.open(name) as source:
+                    if _sha256(source) != digest:
+                        return False
+            return True
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError):
         return False
 
@@ -102,10 +122,10 @@ def archive_finished_one(config: dict, event_id: str, *,
     if not IDENTIFIER.fullmatch(event_id):
         return {"status": "blocked", "reason": "invalid_event_id"}
     root = Path(config["worktrees_dir"]).expanduser()
-    if root.is_symlink():
+    if _linked(root):
         return {"status": "blocked", "reason": "worktree_root_symlink"}
     folder = root / event_id
-    if folder.is_symlink() or not folder.is_dir():
+    if _linked(folder) or not folder.is_dir():
         return {"status": "blocked", "reason": "worktree_not_a_directory"}
     registered = _registrations(config)
     owner = registered.get(folder.resolve())
@@ -122,7 +142,7 @@ def archive_finished_one(config: dict, event_id: str, *,
     archive_root = Path(config.get(
         "worktree_archives_dir",
         str(Path.home() / "MabiAutoAI" / "worktree-archives"))).expanduser()
-    if archive_root.is_symlink():
+    if _linked(archive_root):
         return {"status": "blocked", "reason": "archive_root_symlink"}
     destination = archive_root / (event_id + ".recovery.zip")
     temporary = archive_root / (event_id + ".recovery.zip.partial")
@@ -174,7 +194,7 @@ def reset_preview(config: dict) -> dict:
     """Read-only classification even when legacy results are missing."""
     root = Path(config["worktrees_dir"]).expanduser()
     report = {"count": 0, "recoverable": [], "blocked": [], "states": {}}
-    if root.is_symlink():
+    if _linked(root):
         report["error"] = "worktree_root_symlink"
         return report
     if not root.is_dir():
@@ -188,7 +208,7 @@ def reset_preview(config: dict) -> dict:
         state = result.get("status", "missing_result")
         report["states"][state] = report["states"].get(state, 0) + 1
         entry = {"id": folder.name, "state": state}
-        if (not IDENTIFIER.fullmatch(folder.name) or folder.is_symlink()
+        if (not IDENTIFIER.fullmatch(folder.name) or _linked(folder)
                 or folder.resolve() not in registered):
             entry["reason"] = "untrusted_or_unregistered"
             report["blocked"].append(entry)
