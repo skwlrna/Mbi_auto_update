@@ -196,6 +196,7 @@ def report(c: dict) -> dict:
     data = {"kind": "retention_read_only", "limit": limit,
             "count": 0, "clean_candidates": [], "archive_ready_candidates": [],
             "no_patch_candidates": [], "archive_conflicts": [],
+            "recovery_ready_candidates": [], "protection_reasons": {},
             "protected_count": 0, "warning": False}
     if root.is_symlink():
         data["error"] = "worktree_root_symlink"
@@ -212,6 +213,22 @@ def report(c: dict) -> dict:
         folders = sorted(p for p in root.iterdir() if p.is_dir())
         data["count"] = len(folders)
         for folder in folders:
+            existing = _existing_report(c, folder.name)
+            registered_owner = registered.get(folder.resolve()) if not folder.is_symlink() else None
+            if (registered_owner and IDENTIFIER.fullmatch(folder.name)
+                    and existing.get("status") in
+                        ("blocked", "needs_review", "tests_failed",
+                         "tests_passed_review_required", "interrupted_review_required")
+                    and existing.get("event_id") == folder.name):
+                data["recovery_ready_candidates"].append(folder.name)
+            elif not registered_owner:
+                data["protection_reasons"][folder.name] = "unregistered_git_owner"
+            elif not existing:
+                data["protection_reasons"][folder.name] = "result_missing_or_unreadable"
+            elif existing.get("status") == "in_progress":
+                data["protection_reasons"][folder.name] = "possibly_interrupted_process"
+            else:
+                data["protection_reasons"][folder.name] = "metadata_or_state_requires_review"
             if _eligible(folder, c, registered):
                 data["clean_candidates"].append(folder.name)
                 # A pre-existing ZIP or an abandoned partial backup must not
