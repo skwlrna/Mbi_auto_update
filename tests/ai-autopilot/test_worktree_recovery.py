@@ -13,7 +13,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 AI = ROOT / "source" / "FishingAutomation" / "ai-autopilot"
 sys.path.insert(0, str(AI))
-from worktree_recovery import eligibility, preview, recover_one
+from worktree_recovery import eligibility, preview, recover_one, verify_saved_archive
 from regression_policy import commands_for
 
 spec = importlib.util.spec_from_file_location("reclaim_test_agent", AI / "autopilot.py")
@@ -104,6 +104,8 @@ class GitRecoveryFixture(unittest.TestCase):
         outcome = recover_one(self.config, self.event_id)
         self.assertEqual(outcome["status"], "archived", outcome)
         self.assertFalse(self.workspace.exists())
+        self.assertEqual(verify_saved_archive(Path(outcome["archive"]))["status"],
+                         "verified")
         self.assertTrue((self.results / self.event_id / "test-1.log").exists())
         self.assertTrue((self.reports / "incident-one" / "error.txt").exists())
         with zipfile.ZipFile(outcome["archive"]) as z:
@@ -116,6 +118,24 @@ class GitRecoveryFixture(unittest.TestCase):
             manifest = json.loads(z.read("RECOVERY-MANIFEST.json"))
             self.assertEqual(manifest["event_id"], self.event_id)
             self.assertTrue(manifest["original_logs_preserved"])
+
+    def test_backup_verification_detects_tampering_without_relying_on_worktree(self):
+        self.result("blocked")
+        (self.workspace / "src.txt").write_text("must survive")
+        result = recover_one(self.config, self.event_id)
+        self.assertEqual(result["status"], "archived", result)
+        source = Path(result["archive"])
+        with zipfile.ZipFile(source) as original:
+            items = {name: original.read(name)
+                     for name in original.namelist()}
+        tampered = self.home / "tampered.zip"
+        with zipfile.ZipFile(tampered, "w", compression=zipfile.ZIP_DEFLATED) as out:
+            for name, raw in items.items():
+                out.writestr(name, b"altered source" if name == "worktree/src.txt" else raw)
+        self.assertEqual(verify_saved_archive(tampered)["reason"],
+                         "checksum_mismatch")
+        self.assertEqual(verify_saved_archive(source)["status"], "verified")
+        self.assertFalse(self.workspace.exists())
 
     def test_still_running_is_protected_even_in_legacy_mode(self):
         self.result("in_progress")
