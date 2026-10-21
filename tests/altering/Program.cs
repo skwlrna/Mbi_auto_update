@@ -3351,10 +3351,40 @@ Check(riceRequests.Count == 1 &&
       riceRequests[0].Recipe.MissingIngredients.Single().DisplayName == "물이 든 병" &&
       riceRequests[0].RemainingWorks == 34,
     "F9 retains verified rice-water shortage when global queue_full masks recipe evidence");
+// Leather+ shortage must never enter the global free-gather pass.
+// The actual altering engine terminates this recipe when raw leather is absent.
+var leatherPreflightPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
+var leatherPreflightRecipe = new AlteringRecipe(
+    "가죽+", false, 3, "not_enough_ingredient",
+    new[] { new AlteringIngredient("가죽", 1, 0) }, "가죽 가공 시설");
+var leatherPreflightEvidence = new[]
+{
+    new MultiAlteringSupplyPreflight(
+        leatherPreflightPlan, leatherPreflightRecipe, leatherPreflightPlan.RequiredWorks)
+};
+var mixedPreflight = MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+    new[] { leatherPreflightPlan, ricePlan },
+    new[] { leatherPreflightRecipe, riceSelected },
+    Array.Empty<MultiAlteringSupplyPreflight>());
+Check(mixedPreflight.Count == 1 && mixedPreflight[0].Plan == ricePlan,
+    "F9 skips leather+ raw shortage but preserves other facilities' free pre-gather");
+Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+        new[] { leatherPreflightPlan },
+        new[] { leatherPreflightRecipe with {
+            Reason = "queue_full", MissingIngredients = Array.Empty<AlteringIngredient>() } },
+        leatherPreflightEvidence).Count == 0,
+    "F9 never resurrects masked leather+ shortage from queued UI evidence");
 var riceResolver = new RecursiveAlteringSupplyResolver(
     riceWorld, riceWorld, riceWorld, riceWorld,
     delay: (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
     verificationAttempts: 4);
+// Defensive entry-point check: even a direct resolver call cannot gather leather.
+int preLeatherGatherCount = riceWorld.Gathered.Count;
+int preLeatherFieldExits = riceWorld.FieldExitCalls;
+await riceResolver.PreGatherKnownShortagesAsync(leatherPreflightEvidence, default);
+Check(riceWorld.Gathered.Count == preLeatherGatherCount &&
+      riceWorld.FieldExitCalls == preLeatherFieldExits,
+    "direct F9 pre-gather call leaves raw leather inputs and game screens untouched");
 await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
 Check(riceWorld.Count("물이 든 병") >= 68 &&
       riceWorld.Gathered.SequenceEqual(new[] { "물이 든 병" }) &&
