@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 AI = ROOT / "source" / "FishingAutomation" / "ai-autopilot"
 sys.path.insert(0, str(AI))
 from worktree_recovery import eligibility, preview, recover_one, verify_saved_archive
+import worktree_retention as retention
+from unittest import mock
 from regression_policy import commands_for
 
 spec = importlib.util.spec_from_file_location("reclaim_test_agent", AI / "autopilot.py")
@@ -164,6 +166,28 @@ class GitRecoveryFixture(unittest.TestCase):
         self.assertEqual(recovered["status"], "archived", recovered)
         with zipfile.ZipFile(recovered["archive"]) as z:
             self.assertEqual(z.read("worktree/src.txt"), b"important failed patch")
+
+    def test_damaged_legacy_checkout_does_not_hide_next_valid_owner(self):
+        self.result("blocked")
+        self.config["repo"] = str(self.home / "missing-new-snapshot")
+        self.config["original_repo"] = str(self.home / "missing-old-snapshot")
+        broken = self.worktrees / "0000000000000000"
+        broken.mkdir()
+        (broken / ".git").write_text("gitdir: absent", encoding="utf-8")
+        real_git = retention._git
+
+        def isolated_git(repo, *args):
+            if Path(repo) == broken:
+                raise OSError("simulated legacy Git metadata I/O failure")
+            return real_git(repo, *args)
+
+        # Ensure damaged entry is encountered BEFORE the real checkout.
+        with mock.patch.object(retention, "_git", side_effect=isolated_git):
+            with mock.patch.object(Path, "iterdir", return_value=iter(
+                    [broken, self.workspace])):
+                owners = retention._registrations(self.config)
+        self.assertEqual(owners.get(self.workspace.resolve()),
+                         self.repo.resolve())
 
     def test_untrusted_snapshot_origin_never_authorizes_legacy_recovery(self):
         self.result("blocked")
