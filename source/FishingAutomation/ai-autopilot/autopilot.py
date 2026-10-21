@@ -1009,7 +1009,10 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             # unresolved and reclaim the verified no-patch workspace.
             output["repair_verified"] = False
             output["missing_patch"] = True
-            return finish("needs_review", "agent_no_patch; see codex-last-1.md")
+            suffix = ("source_access_rechecked_no_patch"
+                      if output.get("no_patch_followup") else "analysis_no_patch")
+            return finish("needs_review", "agent_no_patch; " + suffix +
+                          "; see codex-last-1.md")
     if len(changed) > int(c["max_changed_files"]):
         return finish("blocked", "change_count_limit_exceeded")
     for file in changed:
