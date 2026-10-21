@@ -15,7 +15,8 @@ import re
 import subprocess
 import zipfile
 
-from worktree_retention import _registrations, _existing_report, _git, IDENTIFIER
+from worktree_retention import (_registrations, _existing_report, _git, IDENTIFIER,
+                                recorded_worktree_matches)
 
 TERMINAL = frozenset({
     "blocked", "needs_review", "tests_failed", "tests_passed_review_required",
@@ -117,7 +118,7 @@ def eligibility(c: dict, event_id: str, *, legacy: bool = False) -> tuple[str, s
         if status == "in_progress":
             return "protected", "in_progress_must_be_reviewed"
         if not legacy and (result.get("event_id") != event_id
-                           or result.get("worktree") != str(folder)
+                           or not recorded_worktree_matches(result.get("worktree"), folder)
                            or status not in TERMINAL):
             return "protected", "result_not_terminal_or_unverifiable"
         if legacy and status not in TERMINAL and status not in (None, "", "interrupted"):
