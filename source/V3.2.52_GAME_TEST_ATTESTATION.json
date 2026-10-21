@@ -1,0 +1,12 @@
+{
+  "version": "V3.2.52",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "leatherFirstTicketObserved": "pending",
+  "leatherShortageStopVerified": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "2026-10-22: F9 leather+ pre-gather correction and first-ticket diagnostics. Actual live game F9 issue and updater rollback not verified."
+}
