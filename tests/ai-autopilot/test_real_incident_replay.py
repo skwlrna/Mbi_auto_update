@@ -50,7 +50,7 @@ class ActualIncidentEvidenceTests(unittest.TestCase):
             self.assertNotIn("PRIVATE-IMAGE-CONTENTS", context)
             hints = agent.trusted_source_hints(context)
             self.assertTrue(any("LivingSkillGatheringCatalog.cs" in h for h in hints))
-            self.assertTrue(any("tests/gathering-diagnostic/Program.cs" in h for h in hints))
+            self.assertTrue(any("tests/gathering/Program.cs" in h for h in hints))
 
     def test_crafting_timeline_allowed_but_foreign_diagnostics_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as td:
