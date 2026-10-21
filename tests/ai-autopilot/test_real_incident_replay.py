@@ -118,21 +118,10 @@ class SafeWorktreeCleanupTests(unittest.TestCase):
                 generated.parent.mkdir(parents=True)
                 generated.write_text('{"generated":true}', encoding="utf-8")
                 if ignored:
-                    (repo / ".gitignore").write_text("**/obj/\\n", encoding="utf-8")
-                    # The live worktree has its own ignored build artifacts.
-                    (folder / ".git" ).exists()
-                    self.run_git(repo, "add", ".gitignore")
-                    self.run_git(repo, "-c", "user.name=Test", "-c",
-                                 "user.email=test@example.invalid", "commit", "-qm", "ignore")
-                    # Refresh the checkout's index and tracked files without
-                    # altering its separate generated artifact.
-                    self.run_git(folder, "reset", "--hard", "HEAD")
-                    (folder / ".gitignore").write_text("**/obj/\\n", encoding="utf-8")
-                    # New untracked ignore rules are NOT disposable.
-                    # Instead ignore via the local worktree's Git info/exclude.
-                    (folder / ".gitignore").unlink()
-                    info_exclude = repo / ".git" / "info" / "exclude"
-                    info_exclude.write_text("**/obj/\\n", encoding="utf-8")
+                    # Use Git's ignored-artifact policy without changing any
+                    # tracked source, so this exercises an ordinary .NET build.
+                    (repo / ".git" / "info" / "exclude").write_text(
+                        "**/obj/\n", encoding="utf-8")
                 archive_dir = Path(config["worktree_archives_dir"])
                 archive_dir.mkdir()
                 prior_zip = archive_dir / (folder.name + ".zip")
@@ -153,7 +142,7 @@ class SafeWorktreeCleanupTests(unittest.TestCase):
             config, repo, folder, result = self.local_checkout(Path(td))
             foreign = folder / "private.log"
             foreign.write_text("retain", encoding="utf-8")
-            (repo / ".git" / "info" / "exclude").write_text("private.log\\n", encoding="utf-8")
+            (repo / ".git" / "info" / "exclude").write_text("private.log\n", encoding="utf-8")
             with mock.patch.object(retention, "_registrations",
                                    return_value={folder.resolve(): repo.resolve()}):
                 action = retention.archive_clean_one(config, folder.name)
