@@ -32,6 +32,8 @@ from github_pr import publish_verified_draft_pr, user_opted_in
 from draft_dedup import existing_draft_for_evidence
 from pipeline_readiness import readiness
 from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
+from worktree_recovery import (preview as recovery_preview, recover_one as recovery_reclaim_one,
+                               TERMINAL as RECOVERY_TERMINAL)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
@@ -786,6 +788,37 @@ def retention_retry_id(original: str) -> str:
     return original + "-retry-retention-v1"
 
 
+def repair_outcome_category(status: str, reason: str,
+                            test_rounds: list[dict[str, Any]] | None = None) -> str:
+    """Distinguish execution, policy, no-patch, and real-test failure."""
+    raw = reason.lower()
+    if status == "tests_passed_review_required":
+        return "offline_tests_passed_not_released"
+    if "agent_no_patch" in raw or "production_source_patch_missing" in raw:
+        return "code_unchanged"
+    if any(x in raw for x in ("regression_test_suite_not_registered",
+                             "regression_test_project_missing",
+                             "regression_test_missing",
+                             "scheduler_regression_test_missing",
+                             "production_screen_regression_test_missing",
+                             "critical_source_regression_missing")):
+        return "regression_policy_block"
+    if "interrupted" in raw or "stop_requested" in raw or "cancelled" in raw:
+        return "interrupted"
+    if status == "tests_failed":
+        failures = [t.get("reason", "") for round_ in (test_rounds or [])
+                    for t in round_.get("tests", []) if not t.get("ok")]
+        if any(x in ("timeout", "FileNotFoundError", "PermissionError")
+               for x in failures):
+            return "test_environment_error"
+        return "actual_test_failure"
+    if any(x in raw for x in ("dotnet_restore", "release_source_guard",
+                             "repo_dirty_or_git_error", "codex_unverified",
+                             "git_worktree_add_failed", "timeout", "environment")):
+        return "environment_or_codex_execution_error"
+    return "validation_incomplete" if status == "needs_review" else "guard_or_validation_block"
+
+
 def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             progress=None, retry_interrupted: bool = False,
             retry_quota: bool = False, retry_retention: bool = False,
@@ -865,7 +898,10 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         output["retry_reason"] = "unsupported_codex_exec_approval_flag"
 
     def finish(status: str, reason: str) -> dict[str, Any]:
-        output.update({"status": status, "reason": redacted(reason), "ended": now()})
+        output.update({"status": status, "reason": redacted(reason), "ended": now(),
+                       "repair_verified": status == "tests_passed_review_required",
+                       "failure_category": repair_outcome_category(
+                           status, reason, output.get("test_rounds"))})
         # Hash only approved candidate source/test bytes. Never persist raw patch.
         if output.get("changed_files") and output.get("worktree"):
             try:
@@ -881,15 +917,20 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             except (OSError, ValueError, TypeError):
                 # Memory is diagnostic-only: no impact on safe stop or verification.
                 pass
-        if status == "needs_review" and output.get("missing_patch") is True:
-            # A no-patch attempt is unresolved: preserve its result and notes,
-            # but release its unedited worktree immediately when a verified
-            # checksum-backed archive can be made. Never delete source edits.
+        if output.get("worktree") and status in RECOVERY_TERMINAL:
+            # Repair success is independent from worktree retention.
+            # Modified source/test bytes must be checksum-backed before removal.
             try:
-                cleaned = archive_clean_one(c, eid)
+                if status == "needs_review" and output.get("missing_patch") is True:
+                    cleaned = archive_clean_one(c, eid)
+                    if cleaned.get("status") == "blocked":
+                        cleaned = recovery_reclaim_one(c, eid)
+                else:
+                    cleaned = recovery_reclaim_one(c, eid)
                 output["worktree_cleanup"] = {
                     "status": cleaned.get("status", "blocked"),
-                    "reason": cleaned.get("reason", "unknown")}
+                    "reason": cleaned.get("reason", "unknown"),
+                    "archive": cleaned.get("archive", "")}
             except (OSError, ValueError, TypeError, subprocess.TimeoutExpired) as exc:
                 output["worktree_cleanup"] = {
                     "status": "blocked", "reason": type(exc).__name__}
@@ -1772,15 +1813,45 @@ def main() -> int:
     mode.add_argument("--status", action="store_true", help="show recent results")
     mode.add_argument("--pipeline-check", action="store_true",
                       help="write a read-only local prerequisite report; does not launch Codex")
+    mode.add_argument("--reclaim-worktrees", action="store_true",
+                      help="preview old AI worktrees without deleting any originals")
     parser.add_argument("--latest", action="store_true", help="with --once, target latest prior error")
     parser.add_argument("--retry-cli-error", action="store_true",
                         help="with --once --latest, retry known Codex -a error once without deleting history")
+    parser.add_argument("--execute-reclaim", action="store_true",
+                        help="with --reclaim-worktrees: verified backup and worktree removal")
+    parser.add_argument("--include-legacy", action="store_true",
+                        help="with --reclaim-worktrees: include old missing result records")
     a = parser.parse_args()
     if a.retry_cli_error and not (a.once and a.latest):
         parser.error("--retry-cli-error requires --once --latest")
+    if (a.execute_reclaim or a.include_legacy) and not a.reclaim_worktrees:
+        parser.error("--execute-reclaim and --include-legacy require --reclaim-worktrees")
     c = config()
     if a.watch or a.once:
         WATCH_DIAGNOSTIC_ROOT = expand(str(c["results_dir"]))
+    if a.reclaim_worktrees:
+        # No source checkout, Codex or game input in recovery mode.
+        if not a.execute_reclaim:
+            print(json.dumps(recovery_preview(c, legacy=a.include_legacy),
+                             ensure_ascii=False, indent=2))
+            return 0
+        try:
+            with SingletonLock(expand(str(c["results_dir"])) / "autopilot.lock"):
+                before = recovery_preview(c, legacy=a.include_legacy)
+                outcomes = [recovery_reclaim_one(c, item["event_id"],
+                            legacy=a.include_legacy)
+                            for item in before["recoverable"][:30]]
+                summary = {"mode": "explicit_recovery", "started": now(),
+                           "before": before, "outcomes": outcomes,
+                           "after": recovery_preview(c, legacy=a.include_legacy)}
+                write_json(expand(str(c["results_dir"])) /
+                           "worktree-recovery-latest.json", summary)
+                print(json.dumps(summary, ensure_ascii=False, indent=2))
+                return 2 if any(x.get("status") == "blocked" for x in outcomes) else 0
+        except WatcherLockFailure as exc:
+            report_lock_failure(exc)
+            return 2
     if a.check:
         return 0 if status_check(c) else 2
     if a.pipeline_check:
