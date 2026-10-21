@@ -428,6 +428,12 @@ internal sealed partial class AiAutopilotDashboard : Form
             return "설치 버전과 일치하는 로컬 소스 확보·검증 실패 (GitHub 소스 부재 아님)";
         if (reason.Contains("legacy_autofix", StringComparison.OrdinalIgnoreCase))
             return "구버전 자동수정 검사로 차단된 과거 기록";
+        if (reason.Contains("regression_test_suite_not_registered", StringComparison.OrdinalIgnoreCase))
+            return "자동수정기 회귀 테스트 등록 규칙 오류 또는 신규 테스트 검증 필요";
+        if (reason.Contains("regression_test_project_missing", StringComparison.OrdinalIgnoreCase))
+            return "회귀 테스트 프로젝트 구성 누락 · 빌드 환경 검사 필요";
+        if (reason.Contains("dotnet_restore_preflight_failed", StringComparison.OrdinalIgnoreCase))
+            return ".NET 테스트 실행 환경 준비 실패 · 실제 코드 테스트 실패 아님";
         if (reason.Contains("regression_test_missing", StringComparison.OrdinalIgnoreCase))
             return "오류를 확인할 테스트 코드가 부족함";
         if (reason.Contains("source_access_rechecked_no_patch", StringComparison.OrdinalIgnoreCase))
