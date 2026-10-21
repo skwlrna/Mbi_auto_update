@@ -173,6 +173,13 @@ internal static class MultiAlteringMaterialPreflightPolicy
                 throw new InvalidOperationException(
                     $"F9 선행채집 제법 확인 실패: {plan.DisplayName}. 새로고침 후 재확인하세요.");
 
+            // Leather raw-material shortage is terminal for this recipe; the
+            // existing F9 engine handles it without auto-gathering. Exclude it
+            // even when prior evidence is masked by a global queue_full.
+            if (string.Equals(plan.FacilityName, "가죽 가공 시설",
+                StringComparison.Ordinal))
+                continue;
+
             // A new read-only CLI shortage is preferred over any UI evidence.
             if (fresh.MissingIngredients.Count > 0)
             {
@@ -339,8 +346,13 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
     {
         ArgumentNullException.ThrowIfNull(requests);
 
+        // Guard the resolver entry point too: callers outside the F9 UI
+        // must never pre-gather leather raw inputs before the shortage policy.
         var eligible = requests
-            .Where(x => x.RemainingWorks > 0 && x.Recipe.MissingIngredients.Count > 0)
+            .Where(x => x.RemainingWorks > 0 &&
+                x.Recipe.MissingIngredients.Count > 0 &&
+                !string.Equals(x.Plan.FacilityName, "가죽 가공 시설",
+                    StringComparison.Ordinal))
             .ToArray();
         if (eligible.Length == 0)
             return;

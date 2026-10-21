@@ -1086,7 +1086,8 @@ Check(changedYieldError.Contains("등록 당시와 달라져", StringComparison.
      CancellationToken.None, refreshEvidence.Add);
  Check(refreshReads == 2 && refreshWorkReads == 2 && refreshDelays == 1 &&
        refreshed.Recipes.Single().Alterable &&
-       refreshEvidence.Single().Contains("입력 없음", StringComparison.Ordinal),
+       refreshEvidence.Count(x => x.Contains("queue_full/시설별 슬롯 불일치", StringComparison.Ordinal)) == 1 &&
+       refreshEvidence.Count(x => x.Contains("[CLI][가공 시작 품목별 진단]", StringComparison.Ordinal)) == 2,
      "F9 retries unverified queue_full read-only and accepts a fresh ready snapshot");
 
  int persistReads = 0, persistDelays = 0;
@@ -2673,6 +2674,33 @@ await resolvedAuto.RunAsync(plan with { TargetQuantity = 3 }, default);
 Check(resolver.Calls == 1 && resolvedWorld.QueueCalls == 1 && resolvedAuto.ReservedWings == 0,
     "missing materials are resolved inside the same zero-wing altering session");
 
+// A partial raw stock of 100 is NOT permission to reject a 200-output
+// target before its first valid work ticket. Later tickets are gated by the
+// same live recipe availability check as the very first ticket.
+var partialLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 3, false);
+var partialLeatherWorld = new FakeWorld(partialLeather) { RawLeatherStock = 100, LeatherCost = 2 };
+var firstLeatherStartLogs = new List<string>();
+var partialStart = await AlteringQueueStartGuard.EnsureStartableWithRefreshAsync(
+    new[] { partialLeather }, partialLeatherWorld.RecipesAsync,
+    partialLeatherWorld.WorksAsync,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    CancellationToken.None, firstLeatherStartLogs.Add);
+Check(firstLeatherStartLogs.Any(x =>
+        x.Contains("가죽+", StringComparison.Ordinal) &&
+        x.Contains("1회 제작 가능", StringComparison.Ordinal) &&
+        x.Contains("목표 200개", StringComparison.Ordinal)),
+    "F9 logs first-work availability for leather+ 200 target with only 100 raw stock");
+var partialLeatherAuto = new AlteringAutomation(
+    partialLeatherWorld, partialLeatherWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; }, 4);
+var partialFirstBatch = await partialLeatherAuto.RunBatchAsync(partialLeather, 1, default);
+Check(partialStart.Recipes.Single().Alterable &&
+      partialFirstBatch == AlteringRunResult.BatchQueued &&
+      partialLeatherWorld.QueueCalls == 1 &&
+      partialLeatherWorld.RawLeatherStock == 98 &&
+      partialLeatherAuto.ReservedWings == 0,
+    "leather+ 200 target registers first free work with 100 raw stock; no full-target material gate");
+
 // Leather at the leather facility is a RAW input. A shortage is a normal
 // partial terminal: never invoke recursive supply or fabricate goal completion.
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
@@ -3351,10 +3379,40 @@ Check(riceRequests.Count == 1 &&
       riceRequests[0].Recipe.MissingIngredients.Single().DisplayName == "물이 든 병" &&
       riceRequests[0].RemainingWorks == 34,
     "F9 retains verified rice-water shortage when global queue_full masks recipe evidence");
+// Leather+ shortage must never enter the global free-gather pass.
+// The actual altering engine terminates this recipe when raw leather is absent.
+var leatherPreflightPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
+var leatherPreflightRecipe = new AlteringRecipe(
+    "가죽+", false, 3, "not_enough_ingredient",
+    new[] { new AlteringIngredient("가죽", 1, 0) }, "가죽 가공 시설");
+var leatherPreflightEvidence = new[]
+{
+    new MultiAlteringSupplyPreflight(
+        leatherPreflightPlan, leatherPreflightRecipe, leatherPreflightPlan.RequiredWorks)
+};
+var mixedPreflight = MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+    new[] { leatherPreflightPlan, ricePlan },
+    new[] { leatherPreflightRecipe, riceSelected },
+    Array.Empty<MultiAlteringSupplyPreflight>());
+Check(mixedPreflight.Count == 1 && mixedPreflight[0].Plan == ricePlan,
+    "F9 skips leather+ raw shortage but preserves other facilities' free pre-gather");
+Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
+        new[] { leatherPreflightPlan },
+        new[] { leatherPreflightRecipe with {
+            Reason = "queue_full", MissingIngredients = Array.Empty<AlteringIngredient>() } },
+        leatherPreflightEvidence).Count == 0,
+    "F9 never resurrects masked leather+ shortage from queued UI evidence");
 var riceResolver = new RecursiveAlteringSupplyResolver(
     riceWorld, riceWorld, riceWorld, riceWorld,
     delay: (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
     verificationAttempts: 4);
+// Defensive entry-point check: even a direct resolver call cannot gather leather.
+int preLeatherGatherCount = riceWorld.Gathered.Count;
+int preLeatherFieldExits = riceWorld.FieldExitCalls;
+await riceResolver.PreGatherKnownShortagesAsync(leatherPreflightEvidence, default);
+Check(riceWorld.Gathered.Count == preLeatherGatherCount &&
+      riceWorld.FieldExitCalls == preLeatherFieldExits,
+    "direct F9 pre-gather call leaves raw leather inputs and game screens untouched");
 await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
 Check(riceWorld.Count("물이 든 병") >= 68 &&
       riceWorld.Gathered.SequenceEqual(new[] { "물이 든 병" }) &&
@@ -4446,12 +4504,19 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal bool QueuedWhileExisting;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
+    internal long? RawLeatherStock;
+    internal long LeatherCost = 2;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        bool available = Available || (UnlockAfterExisting && ExistingRemaining == 0);
-        var missing = available ? Array.Empty<AlteringIngredient>() : new[] { new AlteringIngredient("철 광석", 3, 0) };
+        bool available = RawLeatherStock.HasValue
+            ? RawLeatherStock.Value >= LeatherCost
+            : Available || (UnlockAfterExisting && ExistingRemaining == 0);
+        var missing = available ? Array.Empty<AlteringIngredient>() :
+            RawLeatherStock.HasValue
+                ? new[] { new AlteringIngredient("가죽", LeatherCost, RawLeatherStock.Value) }
+                : new[] { new AlteringIngredient("철 광석", 3, 0) };
         var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : MissingReason, missing, _plan.FacilityName);
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
@@ -4477,7 +4542,16 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         ct.ThrowIfCancellationRequested();
         if (ExistingRemaining > 0) QueuedWhileExisting = true;
         QueueCalls++;
-        if (Register) _works.Add(new(plan.OutputName, plan.FacilityName, "InProgress", false, 5));
+        if (Register)
+        {
+            if (RawLeatherStock.HasValue)
+            {
+                if (RawLeatherStock.Value < LeatherCost)
+                    throw new InvalidOperationException("Test: cannot queue without one work of raw leather");
+                RawLeatherStock -= LeatherCost;
+            }
+            _works.Add(new(plan.OutputName, plan.FacilityName, "InProgress", false, 5));
+        }
         MaxQueue = Math.Max(MaxQueue, _works.Count);
         return Task.CompletedTask;
     }
