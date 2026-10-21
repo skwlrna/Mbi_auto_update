@@ -120,7 +120,7 @@ jobs:
           })
           if($passed.Count -lt 1){throw 'No successful production CI for current main SHA'}
           $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if($u -notmatch 'CurrentVersion = "V3\.2\.50"'){
+          if($u -notmatch 'CurrentVersion = "V3\.2\.51"'){
             "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
             Write-Host 'Not V3.2.51 any more; skip'
             exit 0
