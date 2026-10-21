@@ -153,5 +153,76 @@ class SafeWorktreeCleanupTests(unittest.TestCase):
                 self.assertTrue(folder.exists())
 
 
+class OfflinePipelineReplayTests(unittest.TestCase):
+    def test_actual_failure_drives_review_and_reclaims_unmodified_worktree(self):
+        # Run the real process() orchestration with a stubbed Codex boundary,
+        # not a fake live-game input or a claim of a successful source patch.
+        with tempfile.TemporaryDirectory(dir=Path.home()) as td:
+            root = Path(td)
+            repo = root / "repo"
+            repo.mkdir()
+            def git(*args):
+                out = subprocess.run(["git", "-C", str(repo), *args],
+                                     capture_output=True, text=True, check=False)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                return out.stdout.strip()
+            git("init", "-q")
+            (repo / "seeded.txt").write_text("unchanged", encoding="utf-8")
+            git("add", "seeded.txt")
+            git("-c", "user.name=Test", "-c",
+                "user.email=test@example.invalid", "commit", "-qm", "seed")
+            base = git("rev-parse", "HEAD")
+            error = root / "reports" / "runtime_20261021_132452_590"
+            error.mkdir(parents=True)
+            timeline = (root / "debug" / "gathering" / "visual-evidence"
+                        / "bulk-gathering-20261021-042451-975" / "timeline.txt")
+            timeline.parent.mkdir(parents=True)
+            timeline.write_text(
+                "[대량 채집] 생활 스킬 분류 고정좌표 클릭 · 일상 채집\n"
+                "[대량 채집] 둥지 행을 OCR+아이콘 구조로 확인하지 못했습니다.",
+                encoding="utf-8")
+            (error / "error.txt").write_text(
+                "다중가공 오류: 일상 채집 고정좌표 클릭 후 둥지 행을 OCR+아이콘 구조로 확인하지 못했습니다.\n"
+                "시각 증거: " + str(timeline), encoding="utf-8")
+            c = agent.config()
+            c.update({
+                "repo": str(repo), "original_repo": str(repo),
+                "release_source_sha": base,
+                "worktrees_dir": str(root / "worktrees"),
+                "worktree_archives_dir": str(root / "archives"),
+                "results_dir": str(root / "results"),
+                "require_clean_repo": True,
+            })
+            event_id = agent.event_id(error)
+            worktree = root / "worktrees" / event_id
+            prompts = []
+            def fake_codex(_worktree, prompt, outdir, _c, progress=None):
+                prompts.append(prompt)
+                (outdir / "codex-last-1.md").write_text(
+                    "No reliable patch was produced by this test stub.",
+                    encoding="utf-8")
+                return True, "mocked_codex_completion"
+            with mock.patch.object(agent, "require_pinned_source"), \\
+                 mock.patch.object(agent, "prepare_dotnet_environment",
+                                   return_value=(True, "offline_mock")), \\
+                 mock.patch.object(agent, "exec_codex", side_effect=fake_codex), \\
+                 mock.patch.object(agent, "record_attempt"), \\
+                 mock.patch.object(retention, "_registrations",
+                                   return_value={worktree.resolve(): repo.resolve()}):
+                outcome = agent.process(error, c)
+            self.assertEqual(len(prompts), 1)
+            self.assertIn("생활 스킬 분류 고정좌표 클릭", prompts[0])
+            self.assertIn("LivingSkillGatheringCatalog.cs", prompts[0])
+            self.assertEqual(outcome["status"], "needs_review", outcome)
+            self.assertTrue(outcome["missing_patch"])
+            self.assertFalse(outcome["repair_verified"])
+            self.assertEqual(outcome["worktree_cleanup"]["status"], "archived", outcome)
+            self.assertFalse(worktree.exists())
+            self.assertTrue((c["worktrees_dir"] and
+                             Path(c["results_dir"]) / event_id / "result.json").is_file())
+            self.assertTrue((error / "error.txt").exists())
+            self.assertEqual((repo / "seeded.txt").read_text(encoding="utf-8"), "unchanged")
+
+
 if __name__ == "__main__":
     unittest.main()
