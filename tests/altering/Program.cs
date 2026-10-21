@@ -1086,7 +1086,8 @@ Check(changedYieldError.Contains("등록 당시와 달라져", StringComparison.
      CancellationToken.None, refreshEvidence.Add);
  Check(refreshReads == 2 && refreshWorkReads == 2 && refreshDelays == 1 &&
        refreshed.Recipes.Single().Alterable &&
-       refreshEvidence.Single().Contains("입력 없음", StringComparison.Ordinal),
+       refreshEvidence.Count(x => x.Contains("queue_full/시설별 슬롯 불일치", StringComparison.Ordinal)) == 1 &&
+       refreshEvidence.Count(x => x.Contains("[CLI][가공 시작 품목별 진단]", StringComparison.Ordinal)) == 2,
      "F9 retries unverified queue_full read-only and accepts a fresh ready snapshot");
 
  int persistReads = 0, persistDelays = 0;
