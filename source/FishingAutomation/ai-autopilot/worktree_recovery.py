@@ -117,10 +117,15 @@ def eligibility(c: dict, event_id: str, *, legacy: bool = False) -> tuple[str, s
         status = result.get("status")
         if status == "in_progress":
             return "protected", "in_progress_must_be_reviewed"
-        if not legacy and (result.get("event_id") != event_id
-                           or not recorded_worktree_matches(result.get("worktree"), folder)
-                           or status not in TERMINAL):
-            return "protected", "result_not_terminal_or_unverifiable"
+        if not legacy:
+            if not result:
+                return "protected", "result_record_missing_or_invalid"
+            if result.get("event_id") != event_id:
+                return "protected", "result_event_identity_mismatch"
+            if not recorded_worktree_matches(result.get("worktree"), folder):
+                return "protected", "result_worktree_path_mismatch"
+            if status not in TERMINAL:
+                return "protected", "result_status_requires_review"
         if legacy:
             # Legacy mode relaxes only MISSING metadata. It never accepts
             # conflicting ownership or a different recorded event identity.
