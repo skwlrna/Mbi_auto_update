@@ -116,9 +116,11 @@ def verify_saved_archive(archive: Path) -> dict:
             names = [record.filename for record in records]
             if len(names) != len(set(names)) or "RECOVERY-MANIFEST.json" not in names:
                 return {"status": "blocked", "reason": "duplicate_or_missing_entries"}
-            raw_manifest = z.read("RECOVERY-MANIFEST.json")
-            if len(raw_manifest) > 10 * 1024 * 1024:
+            manifest_info = z.getinfo("RECOVERY-MANIFEST.json")
+            if (manifest_info.file_size > 10 * 1024 * 1024
+                    or len(records) > MAX_FILES + 1):
                 return {"status": "blocked", "reason": "manifest_too_large"}
+            raw_manifest = z.read("RECOVERY-MANIFEST.json")
             manifest = json.loads(raw_manifest)
             event_id = manifest.get("event_id", "")
             files = manifest.get("files", {})
