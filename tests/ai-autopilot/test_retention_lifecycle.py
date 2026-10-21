@@ -78,6 +78,44 @@ class RecoveryLifecycleTests(GitSandbox):
                                  b"diagnostics remain")
                 self.assertIn("evidence/error.txt", zipped.namelist())
 
+    def test_29_legacy_worktrees_can_be_reclaimed_with_verified_archives(self):
+        # Mirrors an exhausted 29/30 installation without touching a user PC.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, repo, original, results, _ = self.setup_repo(root)
+            folders = [original]
+            for i in range(1, 29):
+                event_id = f"{i:016x}"
+                folder = root / "worktrees" / event_id
+                self.git(repo, "worktree", "add", "--detach", "-q",
+                         str(folder), "HEAD")
+                (folder / "src.txt").write_text(f"patch-{i}", encoding="utf-8")
+                target = root / "results" / event_id
+                target.mkdir(parents=True)
+                (target / "result.json").write_text(json.dumps({
+                    "event_id": event_id,
+                    "event": f"runtime_legacy_{i}",
+                    "worktree": str(folder),
+                    "status": "interrupted_review_required",
+                    "reason": "macro_or_watcher_exited_during_isolated_fix",
+                    "changed_files": ["src.txt"]
+                }), encoding="utf-8")
+                folders.append(folder)
+            owners = {folder.resolve(): repo.resolve() for folder in folders}
+            with mock.patch.object(lifecycle, "_registrations",
+                                   return_value=owners):
+                preview = lifecycle.reset_preview(config)
+                summary = lifecycle.reset_legacy_batch(config)
+            self.assertEqual(preview["count"], 29)
+            self.assertEqual(summary["initial_count"], 29)
+            self.assertEqual(summary["archive_and_reclaimed"], 29, summary)
+            self.assertEqual(summary["blocked"], [], summary)
+            self.assertFalse(any(folder.exists() for folder in folders))
+            for folder in folders:
+                self.assertTrue((root / "results" / folder.name / "result.json").exists())
+                self.assertTrue((root / "archives" /
+                                 (folder.name + ".recovery.zip")).is_file())
+
     def test_in_progress_never_automatically_retired(self):
         with tempfile.TemporaryDirectory() as temporary:
             config, repo, folder, _, _ = self.setup_repo(Path(temporary), "in_progress")
