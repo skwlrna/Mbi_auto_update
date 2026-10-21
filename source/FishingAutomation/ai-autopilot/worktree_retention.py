@@ -95,7 +95,11 @@ def _registrations(c: dict) -> dict[Path, Path]:
         return owners
     try:
         zone = root.parent.resolve()
-        for folder in root.iterdir():
+        folders = list(root.iterdir())
+    except (OSError, ValueError):
+        return owners
+    for folder in folders:
+        try:
             if (not folder.is_dir() or folder.is_symlink()
                     or not IDENTIFIER.fullmatch(folder.name)
                     or folder.resolve() in owners):
@@ -130,8 +134,6 @@ def _registrations(c: dict) -> dict[Path, Path]:
             listed = _git(owner, "worktree", "list", "--porcelain")
             if listed.returncode:
                 continue
-            # A worktree's self-report is not sufficient authorization.
-            # Its candidate owner must independently list this exact folder.
             listed_paths = {
                 Path(line[9:]).resolve()
                 for line in listed.stdout.splitlines()
@@ -139,10 +141,11 @@ def _registrations(c: dict) -> dict[Path, Path]:
             }
             if folder.resolve() in listed_paths:
                 owners[folder.resolve()] = owner
-        return owners
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        # Diagnostic-only owner discovery must not grant cleanup on failure.
-        return owners
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            # One corrupt or inaccessible legacy checkout must not prevent
+            # safe registration discovery for the other independent checkouts.
+            continue
+    return owners
 
 
 def _existing_report(c: dict, event_id: str) -> dict:
