@@ -179,7 +179,13 @@ def report(c: dict) -> dict:
                 # monopolize the one-at-a-time cleanup button. Never overwrite it.
                 archive_files = (archive_root / (folder.name + ".zip"),
                                  archive_root / (folder.name + ".zip.partial"))
-                if any(p.exists() or p.is_symlink() for p in archive_files):
+                existing = _existing_report(c, folder.name)
+                disposable_no_patch = (existing.get("status") == "needs_review"
+                    and str(existing.get("reason", "")).startswith("agent_no_patch"))
+                # A prior ZIP cannot block a no-patch checkout: the source
+                # checkout will not be archived or modify that existing ZIP.
+                if (not disposable_no_patch
+                        and any(p.exists() or p.is_symlink() for p in archive_files)):
                     data["archive_conflicts"].append(folder.name)
                 else:
                     data["archive_ready_candidates"].append(folder.name)
