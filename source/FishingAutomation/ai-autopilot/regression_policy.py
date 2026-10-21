@@ -17,6 +17,7 @@ REGISTERED_TESTS = frozenset({
     "tests/loot-retry/Program.cs",
     "tests/retry-flow/Program.cs",
     "tests/gathering-diagnostic/Program.cs",
+    "tests/gathering/Program.cs",
     "tests/inventory-loot/Program.cs",
     "tests/n03-input/Program.cs",
     "tests/cli-readonly/Program.cs",
@@ -39,6 +40,8 @@ SCREEN_TESTS = {
     "source/FishingAutomation/AlteringRecipeLayout.cs": "tests/altering/Program.cs",
     "source/FishingAutomation/AlteringFacilityLayout.cs": "tests/altering/Program.cs",
     "source/FishingAutomation/dungeon/ProductionUiRuntime.cs": "tests/production-ui/Program.cs",
+    "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs": "tests/gathering/Program.cs",
+    "source/FishingAutomation/LifeSkillListLayout.cs": "tests/gathering/Program.cs",
 }
 
 # A general passing test is insufficient when Codex edits persistence,

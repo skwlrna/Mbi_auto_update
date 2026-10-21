@@ -129,6 +129,33 @@ class PipelineReviewTests(unittest.TestCase):
                     agent.poll(c)
             process.assert_not_called()
 
+    def test_real_gathering_suite_is_registered_for_production_screen_fixes(self):
+        source_paths = (
+            "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs",
+            "source/FishingAutomation/LifeSkillListLayout.cs",
+        )
+        required = "tests/gathering/Program.cs"
+        self.assertIn(required, regression_policy.REGISTERED_TESTS)
+        for source in source_paths:
+            self.assertEqual(regression_policy.SCREEN_TESTS[source], required)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for suite in ("tests/gathering", "tests/gathering-diagnostic"):
+                project = root / suite / "Regression.csproj"
+                project.parent.mkdir(parents=True, exist_ok=True)
+                project.write_text("<Project />", encoding="utf-8")
+            veto, why = regression_policy.commands_for([
+                source_paths[0], "tests/gathering-diagnostic/Program.cs"], root)
+            self.assertEqual(veto, [])
+            self.assertEqual(
+                why, "production_screen_regression_test_missing:" + required)
+            accepted, why = regression_policy.commands_for([
+                source_paths[0], required], root)
+            self.assertIsNone(why)
+            self.assertEqual(accepted, [[
+                "dotnet", "run", "--project",
+                "tests/gathering/Regression.csproj", "-c", "Release"]])
+
     def test_production_screen_requires_actual_screen_regression(self):
         for source, required in regression_policy.SCREEN_TESTS.items():
             with self.subTest(source=source):
