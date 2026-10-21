@@ -3,16 +3,6 @@ name: V3.2.49 Isolated Windows Candidate
 # A PR-only candidate, NOT a GitHub Release and NOT visible to the updater.
 # Public promotion is separately gated in release-v3249-auto-update.yml.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'source/**'
-      - 'tests/altering/**'
-      - 'tests/gathering/**'
-      - 'tests/release/**'
-      - 'tests/n02-resume/**'
-      - '.github/workflows/release-v3249-auto-update.yml'
-      - '.github/workflows/v3249-candidate.yml'
   workflow_dispatch:
   push:
     branches: [release/v3249-ai-error-manager-updater]
