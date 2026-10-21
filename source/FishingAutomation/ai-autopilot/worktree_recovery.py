@@ -121,8 +121,16 @@ def eligibility(c: dict, event_id: str, *, legacy: bool = False) -> tuple[str, s
                            or not recorded_worktree_matches(result.get("worktree"), folder)
                            or status not in TERMINAL):
             return "protected", "result_not_terminal_or_unverifiable"
-        if legacy and status not in TERMINAL and status not in (None, "", "interrupted"):
-            return "protected", "active_or_unknown_status"
+        if legacy:
+            # Legacy mode relaxes only MISSING metadata. It never accepts
+            # conflicting ownership or a different recorded event identity.
+            if result.get("event_id") not in (None, event_id):
+                return "protected", "legacy_event_identity_conflict"
+            if (result.get("worktree") and not recorded_worktree_matches(
+                    result.get("worktree"), folder)):
+                return "protected", "legacy_worktree_identity_conflict"
+            if status not in TERMINAL and status not in (None, "", "interrupted"):
+                return "protected", "active_or_unknown_status"
         head = _git(folder, "rev-parse", "HEAD")
         state = _git(folder, "status", "--porcelain=v1", "--untracked-files=all")
         if head.returncode or state.returncode or not re.fullmatch(
