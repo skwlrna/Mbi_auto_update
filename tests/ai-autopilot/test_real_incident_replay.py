@@ -202,11 +202,11 @@ class OfflinePipelineReplayTests(unittest.TestCase):
                     "No reliable patch was produced by this test stub.",
                     encoding="utf-8")
                 return True, "mocked_codex_completion"
-            with mock.patch.object(agent, "require_pinned_source"), \\
+            with mock.patch.object(agent, "require_pinned_source"), \
                  mock.patch.object(agent, "prepare_dotnet_environment",
-                                   return_value=(True, "offline_mock")), \\
-                 mock.patch.object(agent, "exec_codex", side_effect=fake_codex), \\
-                 mock.patch.object(agent, "record_attempt"), \\
+                                   return_value=(True, "offline_mock")), \
+                 mock.patch.object(agent, "exec_codex", side_effect=fake_codex), \
+                 mock.patch.object(agent, "record_attempt"), \
                  mock.patch.object(retention, "_registrations",
                                    return_value={worktree.resolve(): repo.resolve()}):
                 outcome = agent.process(error, c)
@@ -218,8 +218,7 @@ class OfflinePipelineReplayTests(unittest.TestCase):
             self.assertFalse(outcome["repair_verified"])
             self.assertEqual(outcome["worktree_cleanup"]["status"], "archived", outcome)
             self.assertFalse(worktree.exists())
-            self.assertTrue((c["worktrees_dir"] and
-                             Path(c["results_dir"]) / event_id / "result.json").is_file())
+            self.assertTrue((Path(c["results_dir"]) / event_id / "result.json").is_file())
             self.assertTrue((error / "error.txt").exists())
             self.assertEqual((repo / "seeded.txt").read_text(encoding="utf-8"), "unchanged")
 
