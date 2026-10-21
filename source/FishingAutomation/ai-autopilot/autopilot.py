@@ -562,12 +562,16 @@ def trusted_source_hints(context: str) -> list[str]:
     if (("둥지" in lower and ("채집" in lower or "달걀" in lower))
             or ("일상 채집" in lower and ("ocr" in lower or "행" in lower))):
         return [
+            "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs "
+            "(StartLifeSkillHundredAsync and two-frame row OCR/icon verification)",
+            "source/FishingAutomation/LifeSkillListLayout.cs "
+            "(nest-specific safe scroll-to-top policy and bounded swipe coordinates)",
             "source/FishingAutomation/MainForm.Gathering.cs "
             "(entry point; trace the living-skill bulk collection call site)",
             "source/FishingAutomation/LivingSkillGatheringCatalog.cs "
             "(map the ingredient to the expected category and target)",
-            "tests/gathering-diagnostic/Program.cs "
-            "(registered deterministic gathering regressions; also locate screen logic)",
+            "tests/gathering/Program.cs "
+            "(registered deterministic gathering positive/veto regressions)",
         ]
     return []
 
