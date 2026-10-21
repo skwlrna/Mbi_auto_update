@@ -24,6 +24,7 @@ permissions:
 
 jobs:
   candidate:
+    if: ${{ github.event_name != 'pull_request' || github.head_ref == 'fix/v3250-managed-k-reentry-autofix-diagnostics' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

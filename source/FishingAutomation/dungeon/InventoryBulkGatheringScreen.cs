@@ -195,6 +195,28 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         _ui.ClickFresh(categoryPoint, ct);
         await Task.Delay(500, ct);
 
+        if (LifeSkillListLayout.NeedsNestTopReset(source.Category, source.TargetName))
+        {
+            // The nest is the first row of 일상 채집. The UI may retain a
+            // previous scroll offset (2026-10-21 incident showed 물 first).
+            // Restore towards the beginning using only bounded list drags.
+            // NO row click is permitted until the existing two-fresh-frame
+            // exact OCR + icon + geometry checks succeed below.
+            Log?.Invoke("[대량 채집] 둥지 맨 위 복귀 · 목록 위 방향 제한 드래그");
+            for (int reset = 0; reset < LifeSkillListLayout.MaxNestTopResetSwipes; reset++)
+            {
+                ct.ThrowIfCancellationRequested();
+                using (var frame = Capture(ct))
+                {
+                    _ui.DragFresh(
+                        LifeSkillListLayout.SafeDragEnd,
+                        LifeSkillListLayout.SafeDragStart,
+                        450, ct);
+                }
+                await Task.Delay(420, ct);
+            }
+        }
+
         _stage.Move(ProductionStage.Search, source.TargetName);
         if (LifeSkillListLayout.TryFixedRowPoint(
                 source.Category,
