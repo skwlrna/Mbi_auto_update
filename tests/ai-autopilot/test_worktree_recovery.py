@@ -142,7 +142,7 @@ class GitRecoveryFixture(unittest.TestCase):
     def test_ignored_only_build_output_reclaimed_after_verified_backup(self):
         self.result("blocked")
         excludes = self.home / "ignored-patterns.txt"
-        excludes.write_text("obj/\\n", encoding="utf-8")
+        excludes.write_text("obj/" + chr(10), encoding="utf-8")
         self.git(self.workspace, "config", "core.excludesfile", str(excludes))
         generated = self.workspace / "obj" / "cache.bin"
         generated.parent.mkdir(parents=True)
