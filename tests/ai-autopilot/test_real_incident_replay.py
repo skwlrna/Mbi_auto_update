@@ -129,6 +129,10 @@ class SafeWorktreeCleanupTests(unittest.TestCase):
                 with mock.patch.object(retention, "_registrations",
                                        return_value={folder.resolve(): repo.resolve()}):
                     before = retention.report(config)
+                    self.assertEqual(before["count"], 1)
+                    self.assertEqual(before["limit"], 30)
+                    self.assertFalse(before["warning"])  # Not near the limit.
+                    self.assertIn(folder.name, before["no_patch_candidates"])
                     self.assertIn(folder.name, before["archive_ready_candidates"])
                     action = retention.archive_clean_one(config, folder.name)
                 self.assertEqual(action["status"], "cleaned", action)
