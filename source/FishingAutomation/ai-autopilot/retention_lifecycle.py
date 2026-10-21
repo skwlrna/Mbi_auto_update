@@ -14,7 +14,7 @@ import subprocess
 import zipfile
 
 from worktree_retention import (_existing_report, _git, _registrations,
-                                IDENTIFIER)
+                                _same_worktree_path, IDENTIFIER)
 
 FINISHED = frozenset({
     "blocked", "needs_review", "tests_failed", "tests_passed_review_required",
@@ -116,7 +116,8 @@ def archive_finished_one(config: dict, event_id: str, *,
     if not allow_interrupted and state not in FINISHED:
         return {"status": "blocked", "reason": "not_terminal"}
     if result and (result.get("event_id") != event_id or
-                   (result.get("worktree") not in (None, str(folder)))):
+                   (result.get("worktree") is not None and
+                    not _same_worktree_path(result.get("worktree"), folder)))):
         return {"status": "blocked", "reason": "result_identity_mismatch"}
     archive_root = Path(config.get(
         "worktree_archives_dir",
