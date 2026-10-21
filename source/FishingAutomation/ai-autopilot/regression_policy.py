@@ -94,7 +94,7 @@ def _present_in_base(worktree: Path, name: str) -> bool:
     existing test suite was often missing from the hand-maintained allowlist;
     those are safe to discover and rerun in a fixed command shape.
     """
-    if not name.startswith("tests/") or ":" in name or "\\" in name:
+    if not (name.startswith("tests/") or name.startswith("changes/tests/")) or ":" in name or "\\" in name:
         return False
     try:
         check = subprocess.run(
@@ -108,7 +108,7 @@ def _present_in_base(worktree: Path, name: str) -> bool:
 def _registered_csharp_test(name: str, worktree: Path) -> bool:
     if name in REGISTERED_TESTS:
         return True
-    if not re.fullmatch(r"tests/[A-Za-z0-9_-]+/Program\.cs", name):
+    if not re.fullmatch(r"(?:tests|changes/tests)/[A-Za-z0-9_-]+/Program\.cs", name):
         return False
     project = str(PurePosixPath(name).parent / "Regression.csproj")
     return (_present_in_base(worktree, name)
