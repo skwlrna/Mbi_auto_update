@@ -899,7 +899,9 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
 
     def finish(status: str, reason: str) -> dict[str, Any]:
         output.update({"status": status, "reason": redacted(reason), "ended": now(),
-                       "repair_verified": status == "tests_passed_review_required",
+                       "repair_verified": False,
+                       "offline_tests_passed": status == "tests_passed_review_required",
+                       "game_verified": False,
                        "failure_category": repair_outcome_category(
                            status, reason, output.get("test_rounds"))})
         # Hash only approved candidate source/test bytes. Never persist raw patch.
