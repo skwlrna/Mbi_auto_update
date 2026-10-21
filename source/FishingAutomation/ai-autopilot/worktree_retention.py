@@ -84,7 +84,65 @@ def _registrations(c: dict) -> dict[Path, Path]:
                     owners[Path(line[9:]).resolve()] = resolved
         except (OSError, subprocess.TimeoutExpired, ValueError):
             continue
-    return owners
+    # Older releases can register worktrees against a release-pinned source
+    # snapshot that is no longer the CURRENT selected repository. Discover a
+    # possible owner from each worktree's own Git common-dir, but only accept
+    # the owner after proving its trusted origin AND reciprocal registration.
+    # Never scan arbitrary drives, prune metadata, or infer ownership from a
+    # guessed path.
+    root = Path(c["worktrees_dir"]).expanduser()
+    if root.is_symlink() or not root.is_dir():
+        return owners
+    try:
+        zone = root.parent.resolve()
+        for folder in root.iterdir():
+            if (not folder.is_dir() or folder.is_symlink()
+                    or not IDENTIFIER.fullmatch(folder.name)
+                    or folder.resolve() in owners):
+                continue
+            git_file = folder / ".git"
+            if (git_file.is_symlink() or not git_file.is_file()
+                    or git_file.stat().st_size > 4096):
+                continue
+            common = _git(folder, "rev-parse", "--git-common-dir")
+            if common.returncode:
+                continue
+            common_name = common.stdout.strip()
+            if not common_name:
+                continue
+            common_path = Path(common_name)
+            if not common_path.is_absolute():
+                common_path = folder / common_path
+            common_path = common_path.resolve()
+            if common_path.name != ".git":
+                continue
+            owner = common_path.parent
+            if (owner == folder.resolve() or owner in visited
+                    or not owner.is_relative_to(zone) or owner.is_symlink()
+                    or not owner.is_dir() or common_path.is_symlink()):
+                continue
+            git_top = _git(owner, "rev-parse", "--show-toplevel")
+            remote = _git(owner, "remote", "get-url", "origin")
+            if (git_top.returncode or remote.returncode
+                    or Path(git_top.stdout.strip()).resolve() != owner
+                    or remote.stdout.strip() not in TRUSTED_ORIGINS):
+                continue
+            listed = _git(owner, "worktree", "list", "--porcelain")
+            if listed.returncode:
+                continue
+            # A worktree's self-report is not sufficient authorization.
+            # Its candidate owner must independently list this exact folder.
+            listed_paths = {
+                Path(line[9:]).resolve()
+                for line in listed.stdout.splitlines()
+                if line.startswith("worktree ")
+            }
+            if folder.resolve() in listed_paths:
+                owners[folder.resolve()] = owner
+        return owners
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        # Diagnostic-only owner discovery must not grant cleanup on failure.
+        return owners
 
 
 def _existing_report(c: dict, event_id: str) -> dict:
