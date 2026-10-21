@@ -137,7 +137,7 @@ def archive_finished_one(config: dict, event_id: str, *,
         return {"status": "blocked", "reason": "not_terminal"}
     if result and (result.get("event_id") != event_id or
                    (result.get("worktree") is not None and
-                    not _same_worktree_path(result.get("worktree"), folder)))):
+                    not _same_worktree_path(result.get("worktree"), folder))):
         return {"status": "blocked", "reason": "result_identity_mismatch"}
     archive_root = Path(config.get(
         "worktree_archives_dir",
@@ -163,7 +163,7 @@ def archive_finished_one(config: dict, event_id: str, *,
             with zipfile.ZipFile(temporary, "x", compression=zipfile.ZIP_DEFLATED,
                                  allowZip64=True) as archive:
                 for name, file, _ in entries:
-                    if file.is_symlink():
+                    if _linked(file):
                         raise ValueError("recovery_symlink_detected")
                     archive.write(file, name)
                 archive.writestr("_recovery/manifest.json",
