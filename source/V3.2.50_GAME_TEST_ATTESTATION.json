@@ -1,0 +1,20 @@
+{
+  "version": "V3.2.50",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "f9FoodHoldResume": "pending",
+  "f9ReceiptNoDuplicate": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "craftingGatherAfterTravel": "pending",
+  "craftingSequentialQueue": "pending",
+  "notes": "2026-10-21 V3.2.50 candidate: Managed F9 K re-entry and Codex AI diagnosis improvements. GitHub CI only; no real-game test, owner PC Codex test, updater application or rollback test.",
+  "aiErrorManagerUI": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "localHistoryDeletion": "pending",
+  "autoUpdateInstall": "pending",
+  "managedKReentry": "pending",
+  "codexAutoFixNoPatch": "pending"
+}

@@ -340,6 +340,29 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
             true, true, true, true, true, true, false, true),
         "V3.2.0 K/I + independent gold/teal field requires BOTH consecutive frames; modal/menu veto");
+    // 2026-10-20 23:45 V3.2.48 live screenshot/log: Home=0.942,
+    // End=0.941, K=0.406, I=0.606. Two stable world frames had
+    // independent gold minimap + teal life-skill HUD proof. Preserve the
+    // strict K/I route AND allow this distinct, equally corroborated pair.
+    Check(CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            false, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, false, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, false, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, true, false, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, true, true, false, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, true, true, true, false, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, true, true, true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
+            true, true, true, true, true, true, false, true),
+        "V3.2.50 Home+End world fallback needs both icons and independent field on 2 frames; popup/menu veto");
     var enter = ScreenCalls("EnterFacilityAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
@@ -348,6 +371,7 @@ try
           Has(enter, "StartNew") &&
           Has(enter, "HasManagedKEntryFieldHudVisual") &&
           Has(enter, "CanAuthorizeManagedKFieldFallback") &&
+          Has(enter, "CanAuthorizeManagedKHomeEndFieldFallback") &&
           Has(enter, "RequireManagedIdleAsync") &&
           Has(enter, "Capture"),
         "V3.2.0 K re-entry uses template path or guarded 2-frame K/I + minimap+skill visual; idle still required");

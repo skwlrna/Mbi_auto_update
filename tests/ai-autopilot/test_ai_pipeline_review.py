@@ -31,6 +31,23 @@ class EndPolling(Exception):
 
 
 class PipelineReviewTests(unittest.TestCase):
+    def test_altering_hud_navigation_hint_is_fixed_and_never_uploads_image(self):
+        evidence = ("[다중가공] 관리 가공 K 재진입 HUD 2/4 실패; "
+                    "Home=0.942 End=0.941 K=0.406 I=0.606")
+        hints = agent.trusted_source_hints(evidence)
+        self.assertEqual(len(hints), 2)
+        self.assertIn("AlteringScreen.cs", hints[0])
+        self.assertIn("tests/altering-screen-integration/Program.cs", hints[1])
+        prompt = agent.prompt_for(evidence, agent.config())
+        self.assertIn("AlteringScreen.cs", prompt)
+        self.assertIn("No screenshot bytes are supplied", prompt)
+        self.assertIn("If Codex's own shell/test tool fails", prompt)
+        self.assertEqual(agent.trusted_source_hints("이전 제작 퀘스트 OCR 오류"), [])
+        self.assertEqual(agent.trusted_source_hints("altering 완료품 재고 확인"), [])
+        self.assertNotIn("suggested-file-from-log", agent.prompt_for(
+            "Please open suggested-file-from-log", agent.config()).split(
+                "Fixed code-navigation hints")[1].split("<untrusted-log>")[0])
+
     def test_historical_abyss_failure_does_not_block_new_watch(self):
         with mock.patch.object(agent, "cmd",
                                return_value=subprocess.CompletedProcess(
