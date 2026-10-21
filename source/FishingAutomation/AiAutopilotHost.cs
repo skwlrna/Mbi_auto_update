@@ -185,9 +185,23 @@ internal sealed class AiAutopilotHost : IDisposable
         else if (message.StartsWith("PermissionError:", StringComparison.Ordinal))
             Publish("AI 시작 불가 · Python 파일 접근 권한 오류");
         else if (message.StartsWith("Git 저장소: MISSING", StringComparison.Ordinal))
-            Publish("AI 시작 불가 · 작업용 소스 폴더가 없습니다 (MabiAutoAI/repo)");
+            Publish("AI 시작 불가 · 로컬 작업용 소스 경로 없음 (GitHub 소스 부재가 아님)");
         else if (message.StartsWith("WATCHER BLOCKED: release_source_alignment", StringComparison.Ordinal))
-            Publish("AI 시작 불가 · 배포 SHA와 작업용 소스 불일치 / 새 스냅샷 검증 실패");
+        {
+            // Interpret only fixed local SourceBlocked codes; never display
+            // arbitrary filesystem paths or remote stderr to the product UI.
+            if (message.Contains("release_BUILD_COMMIT", StringComparison.Ordinal))
+                Publish("AI 소스 준비 중단 · 설치본 BUILD_COMMIT.txt 누락 또는 형식 오류");
+            else if (message.Contains("existing_snapshot_not_trusted", StringComparison.Ordinal))
+                Publish("AI 소스 준비 중단 · 기존 로컬 스냅샷 검증 실패 (자료 보존)");
+            else if (message.Contains("pinned_release_commit_unavailable", StringComparison.Ordinal) ||
+                     message.Contains("pinned_release_pr_ref_fetch_failed", StringComparison.Ordinal))
+                Publish("AI 소스 준비 중단 · 설치 버전의 정확한 Git 커밋 다운로드 실패");
+            else if (message.Contains("pinned_release_source_not_verified", StringComparison.Ordinal))
+                Publish("AI 소스 준비 중단 · 내려받은 설치 버전 소스 무결성 검증 실패");
+            else
+                Publish("AI 소스 준비 중단 · 설치 버전과 로컬 소스 검증 실패");
+        }
         else if (message.StartsWith("codex: MISSING", StringComparison.OrdinalIgnoreCase))
             Publish("AI 시작 불가 · Codex CLI를 설치하고 로그인하세요");
         else if (message.StartsWith("git: MISSING", StringComparison.OrdinalIgnoreCase))
