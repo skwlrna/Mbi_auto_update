@@ -100,35 +100,58 @@ def prepare_source(config: dict, marker: Path = RELEASE_MARKER) -> dict:
                 "previous_source_issue": reason}
     staging = Path(tempfile.mkdtemp(prefix=".building-release-", dir=root))
     try:
-        # The remote is a constant, never taken from stale repo git config.
-        cloned = run_git(["clone", "--depth", "1", "--single-branch",
-                          "--branch", "main", SOURCE_URL, str(staging)],
-                         timeout=300)
-        if cloned.returncode:
-            raise SourceBlocked("snapshot_clone_failed")
-        valid, why = check_checkout(staging, expected)
-        if not valid:
-            # The installed release may have been built from an approved RC
-            # commit, or main may have advanced since its publication.
-            # Fetch ONLY the exact 40-hex SHA recorded by BUILD_COMMIT.txt.
-            # We NEVER trust a configured branch, search result or local head.
-            if why != "source_head_not_release":
-                raise SourceBlocked("fetched_main_source_untrusted:" + why)
+        # Always resolve the exact installed source SHA first. A release
+        # candidate may not be present at the current main branch tip.
+        # Never fetch from a user-configured or log-provided remote.
+        if run_git(["init", "-q", str(staging)], timeout=40).returncode:
+            raise SourceBlocked("pinned_snapshot_git_init_failed")
+        if run_git(["remote", "add", "origin", SOURCE_URL], staging).returncode:
+            raise SourceBlocked("pinned_snapshot_remote_setup_failed")
+
+        failures: list[str] = []
+        for ref in (expected, "refs/heads/main"):
             fetched = run_git(["fetch", "--no-tags", "--depth", "1",
-                               "origin", expected], staging, timeout=180)
+                               "origin", ref], staging, timeout=180)
             if fetched.returncode:
-                # GitHub servers can deny direct want-by-SHA for RC commits.
-                # The known release candidate is exposed by its official
-                # GitHub pull ref. Fetching that ref is NOT authorization:
-                # checkout still must equal the installed immutable SHA.
-                pulled = run_git(["fetch", "--no-tags", "--depth", "100",
-                                  "origin", "refs/pull/255/head"],
-                                 staging, timeout=180)
-                if pulled.returncode:
-                    raise SourceBlocked("pinned_release_commit_unavailable")
+                failures.append("exact_sha_fetch_failed" if ref == expected
+                                else "main_fallback_fetch_failed")
+                continue
+            # Main is only a way to obtain objects; never accept its HEAD
+            # unless it matches the immutable installed commit exactly.
             detached = run_git(["-c", "advice.detachedHead=false",
-                                "checkout", "--detach", expected],
-                               staging, timeout=90)
+                                "checkout", "--detach", expected], staging,
+                               timeout=90)
+            if detached.returncode:
+                failures.append("pinned_commit_not_yet_reachable")
+                continue
+            valid, why = check_checkout(staging, expected)
+            if not valid:
+                raise SourceBlocked("pinned_release_source_not_verified:" + why)
+            break
+        else:
+            # Direct SHA fetch can be denied by the server. Only use pull
+            # request refs whose HEAD is the exact trusted BUILD_COMMIT SHA.
+            # A hard-coded PR number would fail for newer release candidates.
+            candidates: list[str] = []
+            listed = run_git(["ls-remote", "origin", "refs/pull/*/head"],
+                             staging, timeout=90)
+            if listed.returncode == 0:
+                for line in listed.stdout.splitlines():
+                    pair = line.split()
+                    if (len(pair) == 2 and pair[0].lower() == expected and
+                            re.fullmatch(r"refs/pull/[1-9][0-9]*/head", pair[1])):
+                        candidates.append(pair[1])
+            if not candidates:
+                raise SourceBlocked("pinned_release_commit_unavailable:" +
+                                    ",".join(failures))
+            fetched = run_git(["fetch", "--no-tags", "--depth", "1",
+                               "origin", sorted(candidates)[0]], staging,
+                              timeout=180)
+            if fetched.returncode:
+                raise SourceBlocked("pinned_release_pr_ref_fetch_failed")
+            detached = run_git(["-c", "advice.detachedHead=false",
+                                "checkout", "--detach", expected], staging,
+                               timeout=90)
             if detached.returncode:
                 raise SourceBlocked("pinned_release_commit_not_reachable")
             valid, why = check_checkout(staging, expected)
