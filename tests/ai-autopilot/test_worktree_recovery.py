@@ -15,6 +15,7 @@ AI = ROOT / "source" / "FishingAutomation" / "ai-autopilot"
 sys.path.insert(0, str(AI))
 from worktree_recovery import eligibility, preview, recover_one, verify_saved_archive
 import worktree_retention as retention
+from worktree_recovery import _linked_or_junction
 from unittest import mock
 from regression_policy import commands_for
 
@@ -138,6 +139,15 @@ class GitRecoveryFixture(unittest.TestCase):
                          "checksum_mismatch")
         self.assertEqual(verify_saved_archive(source)["status"], "verified")
         self.assertFalse(self.workspace.exists())
+
+    def test_windows_junction_path_is_rejected_before_inventory(self):
+        class JunctionPath:
+            def is_symlink(self):
+                return False
+            def is_junction(self):
+                return True
+        self.assertTrue(_linked_or_junction(JunctionPath()))
+        self.assertFalse(_linked_or_junction(self.repo / "src.txt"))
 
     def test_ignored_only_build_output_reclaimed_after_verified_backup(self):
         self.result("blocked")
