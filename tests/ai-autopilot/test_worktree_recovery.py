@@ -131,6 +131,34 @@ class GitRecoveryFixture(unittest.TestCase):
         result = recover_one(self.config, self.event_id, legacy=True)
         self.assertEqual(result["status"], "archived", result)
 
+    def test_legacy_snapshot_owner_discovered_from_reciprocal_git_registration(self):
+        # The configured source may be replaced when a newer pinned release
+        # is installed. Its prior legitimate worktrees must not be orphaned.
+        self.result("tests_failed")
+        self.config["repo"] = str(self.home / "new-release-repo-absent")
+        self.config["original_repo"] = str(self.home / "old-configured-repo-absent")
+        before = preview(self.config)
+        self.assertEqual(len(before["recoverable"]), 1, before)
+        (self.workspace / "src.txt").write_text("important failed patch")
+        recovered = recover_one(self.config, self.event_id)
+        self.assertEqual(recovered["status"], "archived", recovered)
+        with zipfile.ZipFile(recovered["archive"]) as z:
+            self.assertEqual(z.read("worktree/src.txt"), b"important failed patch")
+
+    def test_untrusted_snapshot_origin_never_authorizes_legacy_recovery(self):
+        self.result("blocked")
+        self.config["repo"] = str(self.home / "missing")
+        self.config["original_repo"] = str(self.home / "missing-original")
+        self.git(self.repo, "remote", "set-url", "origin",
+                 "https://attacker.invalid/untrusted.git")
+        inspected = preview(self.config)
+        self.assertEqual(inspected["recoverable"], [])
+        self.assertEqual(inspected["protected"][0]["reason"],
+                         "worktree_not_registered_with_trusted_repo")
+        refused = recover_one(self.config, self.event_id)
+        self.assertEqual(refused["status"], "blocked")
+        self.assertTrue(self.workspace.exists())
+
     def test_unknown_untracked_content_is_archived_not_silently_removed(self):
         self.result("blocked")
         (self.workspace / "unknown_user_file.txt").write_text("keep me")
