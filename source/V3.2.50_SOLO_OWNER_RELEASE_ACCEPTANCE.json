@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "version": "V3.2.50",
+  "rolloutMode": "user_requested_unverified_release",
+  "acceptedOnLocalDate": "2026-10-21",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "gameF9FoodHoldResume": "not_tested",
+  "gameF9ReceiptNoDuplicate": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3250",
+  "aiWatcher": "not_tested_for_v3250",
+  "craftingGatherAfterTravel": "not_tested",
+  "craftingSequentialQueue": "not_tested",
+  "disclosures": [
+    "User explicitly requested on 2026-10-21 to proceed with next-version deployment after V3.2.49 of multi-processing K re-entry and AI diagnostics PR #265.",
+    "Two consecutive Home/End icons plus independent minimap and skill world evidence, fresh final screenshot, popup/menu veto, 2-second deadline and CLI idle remain required.",
+    "Live-game inputs and multi-processing receipt, Codex AI modifications on owner Windows PC, automatic updater installation and rollback remain NOT TESTED.",
+    "GitHub Windows CI, registered regression tests, source SHA, binary smoke, checksum and rollback assets remain required; never fabricate live-game signoff.",
+    "This direct-user personal-use release is public non-prerelease and may be visible to other clients."
+  ],
+  "allowFabricatedGameTestAttestation": false,
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested",
+  "aiErrorManagerUI": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "managedKReentry": "not_tested",
+  "codexAutoFixNoPatch": "not_tested"
+}
