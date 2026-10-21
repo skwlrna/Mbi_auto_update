@@ -21,5 +21,7 @@
     "Live reproduction of the original first-registration failure is missing, so this release does not claim to fix that root cause.",
     "This release includes PR #270 leather F9 pre-gather exclusion and diagnostics; separate AI PR #269/#271 are excluded.",
     "Public non-prerelease will be seen by other updater users; exact main CI, Windows smoke, checksum and rollback assets must pass."
-  ]
+  ],
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
 }
