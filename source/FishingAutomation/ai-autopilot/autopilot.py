@@ -1422,7 +1422,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                     for identifier in pending_cleanup[:6]:
                         if not isinstance(identifier, str) or not RETENTION_ID.fullmatch(identifier):
                             continue
-                        if identifier in inventory.get("no_patch_candidates", []):
+                        if identifier in inventory.get("archive_ready_candidates", []):
                             outcome = archive_clean_one(c, identifier)
                         else:
                             outcome = archive_finished_one(c, identifier)
