@@ -1265,17 +1265,24 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 try: batch_request.unlink(missing_ok=True)
                 except OSError: pass
 
-        # Opt-in product behavior: recover near-full retention only for verified,
-        # already-terminal clean worktrees. Never touch an in-progress/dirty
-        # candidate, never bypass archive/checksum validation, and never prune Git.
+        # Release verified no-patch worktrees at any occupancy, not just
+        # near the configured limit. Preserve result.json / original evidence;
+        # source edits, unexpected files and active worktrees always veto.
+        # Other terminal clean worktrees still use the archive-backed
+        # near-limit policy. Never prune Git or bypass ownership checks.
         if (not single and not state.get("quota_pause")
                 and time.monotonic() - last_automatic_retention >= 60):
             last_automatic_retention = time.monotonic()
             try:
                 inventory = retention_report(c)
-                if (not inventory.get("error") and
-                        inventory.get("count", 0) >= max(0, inventory.get("limit", 30) - 2)):
-                    for identifier in inventory.get("archive_ready_candidates", [])[:3]:
+                if not inventory.get("error"):
+                    pending_cleanup = list(inventory.get("no_patch_candidates", []))
+                    if (inventory.get("count", 0) >=
+                            max(0, inventory.get("limit", 30) - 2)):
+                        pending_cleanup.extend(item for item in
+                            inventory.get("archive_ready_candidates", [])
+                            if item not in pending_cleanup)
+                    for identifier in pending_cleanup[:3]:
                         if not isinstance(identifier, str) or not RETENTION_ID.fullmatch(identifier):
                             continue
                         outcome = archive_clean_one(c, identifier)
