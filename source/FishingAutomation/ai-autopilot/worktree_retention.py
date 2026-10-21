@@ -157,7 +157,8 @@ def report(c: dict) -> dict:
     limit = int(c.get("max_worktrees", 30))
     data = {"kind": "retention_read_only", "limit": limit,
             "count": 0, "clean_candidates": [], "archive_ready_candidates": [],
-            "archive_conflicts": [], "protected_count": 0, "warning": False}
+            "no_patch_candidates": [], "archive_conflicts": [],
+            "protected_count": 0, "warning": False}
     if root.is_symlink():
         data["error"] = "worktree_root_symlink"
         return data
@@ -182,6 +183,8 @@ def report(c: dict) -> dict:
                 existing = _existing_report(c, folder.name)
                 disposable_no_patch = (existing.get("status") == "needs_review"
                     and str(existing.get("reason", "")).startswith("agent_no_patch"))
+                if disposable_no_patch:
+                    data["no_patch_candidates"].append(folder.name)
                 # A prior ZIP cannot block a no-patch checkout: the source
                 # checkout will not be archived or modify that existing ZIP.
                 if (not disposable_no_patch
