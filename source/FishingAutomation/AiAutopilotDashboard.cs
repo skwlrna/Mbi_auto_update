@@ -428,6 +428,13 @@ internal sealed partial class AiAutopilotDashboard : Form
             return "설치 버전과 일치하는 로컬 소스 확보·검증 실패 (GitHub 소스 부재 아님)";
         if (reason.Contains("legacy_autofix", StringComparison.OrdinalIgnoreCase))
             return "구버전 자동수정 검사로 차단된 과거 기록";
+        if (reason.Contains("regression_test_suite_not_registered", StringComparison.OrdinalIgnoreCase))
+            return "회귀 테스트 등록 규칙 불일치 · 자동수정기 자체 검사 확인 필요";
+        if (reason.Contains("regression_test_project_missing", StringComparison.OrdinalIgnoreCase))
+            return "회귀 테스트 프로젝트 파일 누락 · 검사 환경 확인 필요";
+        if (reason.Contains("python_regression_test_missing", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("production_regression_test_missing", StringComparison.OrdinalIgnoreCase))
+            return "소스 종류에 맞는 회귀 테스트 변경이 없어 검증 보류";
         if (reason.Contains("regression_test_missing", StringComparison.OrdinalIgnoreCase))
             return "오류를 확인할 테스트 코드가 부족함";
         if (reason.Contains("source_access_rechecked_no_patch", StringComparison.OrdinalIgnoreCase))
@@ -447,6 +454,8 @@ internal sealed partial class AiAutopilotDashboard : Form
         "tests_passed_review_required" => "PR 최종 CI 및 실게임 별도 확인",
         "in_progress" => running ? "현재 분석인지 위의 감시 상태 확인" : "AI 재시작 시 중단 상태 판정",
         "interrupted_review_required" => running ? "해당 오류 선택 → 중단 작업 재분석" : "AI 감시 시작 → 중단 작업 재분석",
+        "needs_review" when reason.Contains("regression_test_suite_not_registered", StringComparison.OrdinalIgnoreCase) =>
+            "기존 테스트 프로젝트 등록 상태 점검 후 재검증",
         "needs_review" => "수정안·오류 증거 검토",
         "tests_failed" => "실패한 테스트 기록 확인",
         "blocked" when reason.Contains("worktree_retention_limit_reached", StringComparison.OrdinalIgnoreCase) =>
