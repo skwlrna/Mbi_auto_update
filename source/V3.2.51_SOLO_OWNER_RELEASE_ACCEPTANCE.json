@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "version": "V3.2.51",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "nest_click_only",
+  "acceptedOnLocalDate": "2026-10-21",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "gameNestRowReset": "not_tested",
+  "gameNestRowClick": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3251",
+  "aiWatcher": "not_tested_for_v3251",
+  "aiErrorManagerUI": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "disclosures": [
+    "Direct user request to release nest-click fix only. PR #267 AI fixes excluded.",
+    "PR #267 candidate offline smoke 5/5 passed, but exact V3.2.51 and live game not tested.",
+    "Public non-prerelease will appear to other client auto-updaters.",
+    "Exact main CI, binary smoke, updater checksum, rollback assets and SHA gates are mandatory."
+  ],
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
+}
