@@ -43,20 +43,27 @@ def _sources(c: dict, event_id: str, folder: Path) -> dict[str, Path]:
     return roots
 
 
+def _linked_or_junction(path: Path) -> bool:
+    # On Windows NTFS directory junctions are reparse points but need not
+    # report as ordinary symlinks. Never back up or remove through them.
+    junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or (junction is not None and junction())
+
+
 def _inventory(roots: dict[str, Path]) -> dict[str, tuple[Path, str, int]]:
     entries: dict[str, tuple[Path, str, int]] = {}
     total = 0
     for prefix, root in roots.items():
-        if root.is_symlink() or not root.is_dir():
+        if _linked_or_junction(root) or not root.is_dir():
             raise ValueError("recovery_root_not_regular")
         for directory, dirs, files in os.walk(root, followlinks=False):
             parent = Path(directory)
             for name in dirs:
-                if (parent / name).is_symlink():
-                    raise ValueError("recovery_directory_symlink")
+                if _linked_or_junction(parent / name):
+                    raise ValueError("recovery_directory_reparse_point")
             for name in files:
                 path = parent / name
-                if path.is_symlink() or not path.is_file():
+                if _linked_or_junction(path) or not path.is_file():
                     raise ValueError("recovery_file_not_regular")
                 relative = path.relative_to(root).as_posix()
                 if any(part in ("", ".", "..") for part in relative.split("/")):
@@ -174,7 +181,7 @@ def eligibility(c: dict, event_id: str, *, legacy: bool = False) -> tuple[str, s
         return "protected", "invalid_worktree_identifier"
     root = Path(c["worktrees_dir"]).expanduser()
     folder = root / event_id
-    if root.is_symlink() or folder.is_symlink() or not folder.is_dir():
+    if _linked_or_junction(root) or _linked_or_junction(folder) or not folder.is_dir():
         return "protected", "worktree_missing_or_link"
     try:
         owners = _registrations(c)
@@ -217,13 +224,13 @@ def preview(c: dict, *, legacy: bool = False) -> dict:
     root = Path(c["worktrees_dir"]).expanduser()
     data = {"mode": "read_only", "recoverable": [], "protected": [],
             "count": 0, "warning": "No originals have been deleted."}
-    if root.is_symlink():
-        data["error"] = "worktree_root_symlink"
+    if _linked_or_junction(root):
+        data["error"] = "worktree_root_symlink_or_junction"
         return data
     if not root.is_dir():
         return data
     for folder in sorted(root.iterdir()):
-        if folder.is_symlink() or not folder.is_dir():
+        if _linked_or_junction(folder) or not folder.is_dir():
             continue
         data["count"] += 1
         status, reason = eligibility(c, folder.name, legacy=legacy)
