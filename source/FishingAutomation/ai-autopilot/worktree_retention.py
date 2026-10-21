@@ -1,9 +1,9 @@
 """Fail-closed retention maintenance for isolated AI worktrees.
 
-The opted-in watcher may archive only verified clean, terminal worktrees when
-near its configured limit. Explicit UI approval may also request bounded batch
-cleanup. Each backup is verified before removal. Active worktrees, dirty edits,
-results, evidence, Git branches and original source snapshots are untouched.
+An agent_no_patch worktree can be discarded immediately only after confirming
+it has no tracked edits or unknown on-disk files. It needs no full-source ZIP;
+diagnostics live outside the worktree. Other terminal clean worktrees still use
+verified archives. Active worktrees and actual patches remain protected.
 """
 from __future__ import annotations
 
@@ -192,6 +192,60 @@ def report(c: dict) -> dict:
     return data
 
 
+def _discard_no_patch_one(c: dict, event_id: str, folder: Path,
+                          registered: dict[Path, Path]) -> dict:
+    """Drop only a proven no-source-change Codex checkout without a full ZIP.
+
+    The original incident, redacted Codex logs and result.json live outside
+    this disposable checkout. Retain any unexpected file or source change.
+    """
+    original = _existing_report(c, event_id)
+    if (original.get("event_id") != event_id
+            or original.get("status") != "needs_review"
+            or not str(original.get("reason", "")).startswith("agent_no_patch")
+            or original.get("changed_files") or original.get("pr")
+            or original.get("worktree") != str(folder)
+            or folder.is_symlink() or folder.resolve() not in registered):
+        return {"status": "blocked", "reason": "no_patch_discard_not_authorized"}
+    # Check BOTH index and working tree. An unchanged git index alone is not
+    # sufficient if an untracked or ignored non-build file was created.
+    difference = _git(folder, "diff", "--quiet", "HEAD", "--")
+    if difference.returncode:
+        return {"status": "blocked", "reason": "tracked_source_changed"}
+    tracked = _git(folder, "ls-files", "-z", "--cached")
+    if tracked.returncode:
+        return {"status": "blocked", "reason": "tracked_files_unavailable"}
+    known = set(filter(None, tracked.stdout.split("\0")))
+    try:
+        for entry in folder.rglob("*"):
+            if entry.is_symlink():
+                return {"status": "blocked", "reason": "worktree_symlink_detected"}
+            if not entry.is_file():
+                continue
+            relative = entry.relative_to(folder).as_posix()
+            if relative == ".git" or relative in known:
+                continue
+            parts = relative.split("/")
+            if not any(part in ("bin", "obj") for part in parts[:-1]):
+                return {"status": "blocked", "reason": "unexpected_untracked_file"}
+    except (OSError, ValueError):
+        return {"status": "blocked", "reason": "worktree_inventory_unavailable"}
+    # Repeat the authorization and source-diff checks as late as possible.
+    if (not _eligible(folder, c, registered)
+            or _git(folder, "diff", "--quiet", "HEAD", "--").returncode):
+        return {"status": "blocked", "reason": "worktree_changed_before_discard"}
+    owner = registered.get(folder.resolve())
+    if owner is None:
+        return {"status": "blocked", "reason": "registered_owner_disappeared"}
+    # --force is safe only after the complete checkout file inventory above;
+    # Git rejects non-forced removal when ignored bin/obj output remains.
+    removed = _git(owner, "worktree", "remove", "--force", str(folder))
+    if removed.returncode:
+        return {"status": "blocked", "reason": "git_worktree_remove_failed"}
+    return {"status": "cleaned", "reason": "verified_no_patch_no_zip_needed",
+            "event_id": event_id}
+
+
 def archive_clean_one(c: dict, event_id: str) -> dict:
     """Called by the authorized watcher for approved or policy-bounded cleanup.
 
@@ -204,6 +258,12 @@ def archive_clean_one(c: dict, event_id: str) -> dict:
         return {"status": "blocked", "reason": "not_verified_clean_terminal_or_archive_conflict"}
     root = Path(c["worktrees_dir"]).expanduser()
     folder = root / event_id
+    # No-patch analysis must NOT consume an archival ZIP or a worktree slot.
+    # Return with a clear blocking reason if the checkout is not disposable.
+    existing = _existing_report(c, event_id)
+    if (existing.get("status") == "needs_review"
+            and str(existing.get("reason", "")).startswith("agent_no_patch")):
+        return _discard_no_patch_one(c, event_id, folder, _registrations(c))
     archive_root = Path(c.get("worktree_archives_dir",
                               str(Path.home() / "MabiAutoAI" / "worktree-archives"))).expanduser()
     if archive_root.is_symlink():
