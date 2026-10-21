@@ -1279,7 +1279,7 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                         if not isinstance(identifier, str) or not RETENTION_ID.fullmatch(identifier):
                             continue
                         outcome = archive_clean_one(c, identifier)
-                        if outcome.get("status") == "archived":
+                        if outcome.get("status") in ("archived", "cleaned"):
                             cleaned_or_attempted = True
                         print("AI 작업공간 자동 안전 정리:",
                               outcome.get("status"), outcome.get("reason"), flush=True)
