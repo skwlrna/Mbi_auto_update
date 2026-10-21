@@ -21,5 +21,7 @@
     "PR #267 candidate offline smoke 5/5 passed, but exact V3.2.51 and live game not tested.",
     "Public non-prerelease will appear to other client auto-updaters.",
     "Exact main CI, binary smoke, updater checksum, rollback assets and SHA gates are mandatory."
-  ]
+  ],
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
 }
