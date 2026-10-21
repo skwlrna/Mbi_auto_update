@@ -42,16 +42,26 @@ def _source_dirs(config: dict, event_id: str, result: dict) -> list[tuple[str, P
     sources = [("worktree", root / event_id)]
     result_root = Path(config["results_dir"]).expanduser()
     result_dir = result_root / event_id
-    if not _linked(result_dir) and result_dir.is_dir():
+    if _linked(result_root) or _linked(result_dir):
+        raise ValueError("result_reparse_path_blocked")
+    if result_dir.is_dir():
         sources.append(("results", result_dir))
+    # In-app runtime errors are stored separately from external MCP reports.
+    # Copy both known, bounded evidence sources without deleting either one.
     event = result.get("event", "")
-    if (isinstance(event, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", event)
-            and event not in (".", "..") and "reports_dir" in config):
-        reports_root = Path(config["reports_dir"]).expanduser()
-        if not _linked(reports_root):
+    if isinstance(event, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", event):
+        for config_key, label in (("reports_dir", "evidence"),
+                                  ("runtime_reports_dir", "runtime-evidence")):
+            if config_key not in config:
+                continue
+            reports_root = Path(config[config_key]).expanduser()
+            if _linked(reports_root):
+                raise ValueError("evidence_reparse_path_blocked")
             evidence = reports_root / event
-            if evidence.is_dir() and not _linked(evidence):
-                sources.append(("evidence", evidence))
+            if _linked(evidence):
+                raise ValueError("evidence_reparse_path_blocked")
+            if evidence.is_dir():
+                sources.append((label, evidence))
     return sources
 
 
@@ -150,10 +160,16 @@ def archive_finished_one(config: dict, event_id: str, *,
         archive_root.mkdir(parents=True, exist_ok=True)
         sources = _source_dirs(config, event_id, result)
         entries = _files(sources)
+        # Never silently omit a present result or diagnostic folder. A
+        # missing/malformed record remains identifiable in the archive notes.
+        if (Path(config["results_dir"]).expanduser() / event_id).is_dir() and (
+                "results/result.json" not in {item[0] for item in entries}
+                and result):
+            return {"status": "blocked", "reason": "result_record_missing_from_backup"}
         if not any(x[0].startswith("worktree/") for x in entries):
             return {"status": "blocked", "reason": "empty_worktree"}
         before = _snapshot(entries)
-        if temporary.exists() or temporary.is_symlink():
+        if temporary.exists() or _linked(temporary):
             return {"status": "blocked", "reason": "partial_backup_requires_review"}
         if not destination.exists():
             manifest = {"schema": 1, "event_id": event_id,
