@@ -33,6 +33,7 @@ from draft_dedup import existing_draft_for_evidence
 from pipeline_readiness import readiness
 from worktree_retention import (report as retention_report, archive_clean_one, IDENTIFIER as RETENTION_ID)
 from release_source import prepare_source, require_pinned_source, SourceBlocked
+from retention_lifecycle import archive_finished_one, reset_preview, reset_legacy_batch, FINISHED
 from error_memory import (record_attempt, related_attempts, context_hint,
                           failed_fingerprint, patch_fingerprint, classify)
 # Only fixed categories and in-repository frame numbers are reported. No raw
@@ -116,6 +117,45 @@ def read_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, An
     if not path.is_file():
         return {} if default is None else default
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def failure_kind(status: str, reason: str,
+                 output: dict[str, Any] | None = None) -> str:
+    """Differentiate source, Codex, test, policy, and environment outcomes."""
+    output = output or {}
+    if status == "interrupted_review_required" or "interrupted" in reason:
+        return "interrupted"
+    if reason.startswith("agent_no_patch"):
+        return "code_unchanged"
+    if ("regression_test_suite_not_registered" in reason or
+            "regression_test_project_missing" in reason):
+        return "registration_policy_error"
+    if ("regression_test_missing" in reason or
+            "production_screen_regression_test_missing" in reason or
+            "critical_source_regression_missing" in reason or
+            "scheduler_regression_test_missing" in reason):
+        return "regression_coverage_missing"
+    if status == "tests_failed":
+        tests = [item for round_info in output.get("test_rounds", [])
+                 for item in round_info.get("tests", [])]
+        if any(item.get("reason") in ("timeout", "PermissionError",
+                "FileNotFoundError", "invalid_command_config")
+               for item in tests):
+            return "test_environment_error"
+        return "actual_test_failure"
+    if status == "tests_passed_review_required":
+        return "offline_verified_pending_review"
+    if (reason.startswith("dotnet_restore_preflight_failed") or
+            reason.startswith("release_source_guard") or
+            "git_error" in reason or "environment" in reason):
+        return "environment_error"
+    if "codex_" in reason or "agent_changed_git_head" in reason:
+        return "codex_failure"
+    if status == "needs_review":
+        return "review_required"
+    if status == "blocked":
+        return "blocked_other"
+    return "not_classified"
 
 
 def expand(raw: str) -> Path:
