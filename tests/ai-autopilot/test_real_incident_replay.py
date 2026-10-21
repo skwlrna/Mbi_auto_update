@@ -176,6 +176,19 @@ class SafeWorktreeCleanupTests(unittest.TestCase):
                 self.assertTrue(folder.exists())
 
 
+class SourceAccessFollowupPolicyTests(unittest.TestCase):
+    def test_untrusted_claim_without_host_verified_sources_does_not_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            context = "일상 채집 둥지 OCR 인식 실패"
+            self.assertEqual(agent.verified_source_hints(root, context), [])
+            note = root / "codex-last-1.md"
+            note.write_text("No source code available.", encoding="utf-8")
+            self.assertTrue(agent.codex_claims_source_unavailable(note))
+            note.write_text("Cannot patch safely without a screenshot.", encoding="utf-8")
+            self.assertFalse(agent.codex_claims_source_unavailable(note))
+
+
 class OfflinePipelineReplayTests(unittest.TestCase):
     def test_actual_failure_drives_review_and_reclaims_unmodified_worktree(self):
         # Run the real process() orchestration with a stubbed Codex boundary,
@@ -191,7 +204,16 @@ class OfflinePipelineReplayTests(unittest.TestCase):
                 return out.stdout.strip()
             git("init", "-q")
             (repo / "seeded.txt").write_text("unchanged", encoding="utf-8")
-            git("add", "seeded.txt")
+            for name in (
+                "source/FishingAutomation/FishingAutomation.csproj",
+                "source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs",
+                "source/FishingAutomation/LivingSkillGatheringCatalog.cs",
+                "tests/gathering/Program.cs",
+            ):
+                target = repo / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("verified fixture", encoding="utf-8")
+            git("add", ".")
             git("-c", "user.name=Test", "-c",
                 "user.email=test@example.invalid", "commit", "-qm", "seed")
             base = git("rev-parse", "HEAD")
@@ -222,7 +244,9 @@ class OfflinePipelineReplayTests(unittest.TestCase):
             def fake_codex(_worktree, prompt, outdir, _c, progress=None):
                 prompts.append(prompt)
                 (outdir / "codex-last-1.md").write_text(
-                    "No reliable patch was produced by this test stub.",
+                    "No source code is available in this checkout."
+                    if len(prompts) == 1 else
+                    "The source exists, but there is insufficient evidence to patch.",
                     encoding="utf-8")
                 return True, "mocked_codex_completion"
             with mock.patch.object(agent, "require_pinned_source"), \
@@ -233,9 +257,14 @@ class OfflinePipelineReplayTests(unittest.TestCase):
                  mock.patch.object(retention, "_registrations",
                                    return_value={worktree.resolve(): repo.resolve()}):
                 outcome = agent.process(error, c)
-            self.assertEqual(len(prompts), 1)
+            self.assertEqual(len(prompts), 2, "source confusion gets one bounded retry")
             self.assertIn("생활 스킬 분류 고정좌표 클릭", prompts[0])
             self.assertIn("LivingSkillGatheringCatalog.cs", prompts[0])
+            self.assertIn("The outer host verified these files", prompts[0])
+            self.assertIn("HOST-VERIFIED SOURCE RETRY", prompts[1])
+            self.assertEqual(
+                outcome["no_patch_followup"]["trigger"],
+                "codex_claimed_missing_source_but_files_verified")
             self.assertEqual(outcome["status"], "needs_review", outcome)
             self.assertTrue(outcome["missing_patch"])
             self.assertFalse(outcome["repair_verified"])
