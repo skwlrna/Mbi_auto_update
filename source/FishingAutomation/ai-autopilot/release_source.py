@@ -109,12 +109,16 @@ def prepare_source(config: dict, marker: Path = RELEASE_MARKER) -> dict:
             raise SourceBlocked("pinned_snapshot_remote_setup_failed")
 
         failures: list[str] = []
-        for ref in (expected, "refs/heads/main"):
-            fetched = run_git(["fetch", "--no-tags", "--depth", "1",
+        # The bounded main-history fallback helps when the installed release
+        # was recently merged but GitHub disallows direct SHA fetch.
+        for ref, depth in ((expected, 1), ("refs/heads/main", 1),
+                           ("refs/heads/main", 256)):
+            fetched = run_git(["fetch", "--no-tags", "--depth", str(depth),
                                "origin", ref], staging, timeout=180)
             if fetched.returncode:
-                failures.append("exact_sha_fetch_failed" if ref == expected
-                                else "main_fallback_fetch_failed")
+                failures.append("exact_sha_fetch_failed" if ref == expected else
+                                ("main_history_fetch_failed" if depth > 1
+                                 else "main_fallback_fetch_failed"))
                 continue
             # Main is only a way to obtain objects; never accept its HEAD
             # unless it matches the immutable installed commit exactly.
@@ -141,14 +145,18 @@ def prepare_source(config: dict, marker: Path = RELEASE_MARKER) -> dict:
                     if (len(pair) == 2 and pair[0].lower() == expected and
                             re.fullmatch(r"refs/pull/[1-9][0-9]*/head", pair[1])):
                         candidates.append(pair[1])
-            if not candidates:
+            if candidates:
+                ref, depth = sorted(candidates)[0], 1
+            else:
+                # Preserve the older RC release path where the pinned commit
+                # is an ancestor (not the HEAD) of the known historic PR.
+                # This is strictly a fetch mechanism, not source authorization.
+                ref, depth = "refs/pull/255/head", 100
+            fetched = run_git(["fetch", "--no-tags", "--depth", str(depth),
+                               "origin", ref], staging, timeout=180)
+            if fetched.returncode:
                 raise SourceBlocked("pinned_release_commit_unavailable:" +
                                     ",".join(failures))
-            fetched = run_git(["fetch", "--no-tags", "--depth", "1",
-                               "origin", sorted(candidates)[0]], staging,
-                              timeout=180)
-            if fetched.returncode:
-                raise SourceBlocked("pinned_release_pr_ref_fetch_failed")
             detached = run_git(["-c", "advice.detachedHead=false",
                                 "checkout", "--detach", expected], staging,
                                timeout=90)
