@@ -136,6 +136,17 @@ def _existing_report(c: dict, event_id: str) -> dict:
         return {}
 
 
+def _same_worktree_path(recorded: object, folder: Path) -> bool:
+    """Accept a Windows 8.3/long-name alias only if it is the SAME folder."""
+    if not isinstance(recorded, str) or not recorded:
+        return False
+    try:
+        path = Path(recorded).expanduser()
+        return path.is_absolute() and not path.is_symlink() and path.samefile(folder)
+    except (OSError, ValueError):
+        return False
+
+
 def _generated_only(folder: Path) -> bool:
     """Only untracked bin/obj build output may be forcibly removed *after*
     a checksum-verified full-worktree archive of an agent_no_patch result.
@@ -173,7 +184,7 @@ def _eligible(folder: Path, c: dict, registered: dict[Path, Path]) -> bool:
     if (result.get("event_id") != folder.name
             or result.get("status") not in TERMINAL
             or result.get("changed_files") or result.get("pr")
-            or result.get("worktree") != str(folder)):
+            or not _same_worktree_path(result.get("worktree"), folder)):
         return False
     try:
         status = _git(folder, "status", "--porcelain", "--untracked-files=all")
@@ -268,7 +279,7 @@ def _discard_no_patch_one(c: dict, event_id: str, folder: Path,
             or original.get("status") != "needs_review"
             or not str(original.get("reason", "")).startswith("agent_no_patch")
             or original.get("changed_files") or original.get("pr")
-            or original.get("worktree") != str(folder)
+            or not _same_worktree_path(original.get("worktree"), folder)
             or folder.is_symlink() or folder.resolve() not in registered):
         return {"status": "blocked", "reason": "no_patch_discard_not_authorized"}
     # Check BOTH index and working tree. An unchanged git index alone is not
