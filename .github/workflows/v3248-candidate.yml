@@ -22,6 +22,8 @@ permissions:
 
 jobs:
   candidate:
+    # The already-published V3.2.48 candidate contract must not block newer releases.
+    if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/v3248') || startsWith(github.head_ref, 'fix/v3248') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

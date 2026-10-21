@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "version": "V3.2.49",
+  "rolloutMode": "user_requested_unverified_release",
+  "acceptedOnLocalDate": "2026-10-20",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "gameF9FoodHoldResume": "not_tested",
+  "gameF9ReceiptNoDuplicate": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3249",
+  "aiWatcher": "not_tested_for_v3249",
+  "craftingGatherAfterTravel": "not_tested",
+  "craftingSequentialQueue": "not_tested",
+  "disclosures": [
+    "User explicitly requested version bump and public auto-update of AI error management cleanup features on 2026-10-20.",
+    "Windows CI verifies source and offline regression contracts, but no user PC GUI, Codex repair, workspace cleanup, automatic upgrade or rollback has been performed for V3.2.49.",
+    "AI watcher writes isolated code candidates; it does not patch, merge, deploy or replace the running macro automatically.",
+    "Manual history deletion is user-confirmed and protects active jobs/worktrees, but deleted local error evidence may be irrecoverable.",
+    "Bounded automatic worktree cleanup archives only unchanged clean terminal worktrees with verified backup; dirty/in-progress work is never silently deleted.",
+    "Real-game crafting/gathering and other prior release features remain unverified where previously disclosed.",
+    "Public non-prerelease release is necessary for the existing GitHub updater to offer this version; this will be visible to all clients.",
+    "Update ZIP SHA256, same-main-SHA CI, Windows binary smoke, backup and rollback assets remain mandatory; no fabricated test signoffs."
+  ],
+  "allowFabricatedGameTestAttestation": false,
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested",
+  "aiErrorManagerUI": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "localHistoryDeletion": "not_tested"
+}
