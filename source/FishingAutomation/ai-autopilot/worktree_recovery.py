@@ -286,10 +286,21 @@ def recover_one(c: dict, event_id: str, *, legacy: bool = False) -> dict:
         if _git(folder, "rev-parse", "HEAD").stdout.strip() != head.stdout.strip():
             return {"status": "blocked", "reason": "head_changed_since_backup"}
         changed = _git(folder, "status", "--porcelain=v1", "--untracked-files=all")
-        if changed.returncode:
-            return {"status": "blocked", "reason": "git_status_unavailable"}
-        # --force is used ONLY after a complete verified backup of modified files.
-        args = ("worktree", "remove", "--force", str(folder)) if changed.stdout.strip() else (
+        tracked = _git(folder, "ls-files", "-z", "--cached")
+        if changed.returncode or tracked.returncode:
+            return {"status": "blocked", "reason": "git_status_or_index_unavailable"}
+        # Git porcelain omits IGNORED bin/obj artifacts. If tracked source is
+        # clean but ignored generated files remain, non-force worktree removal
+        # fails and the slot leaks. Force is safe only after every file was
+        # independently archived, checksummed and re-inventoried above.
+        known = set(filter(None, tracked.stdout.split("\0")))
+        worktree_files = {
+            name[len("worktree/"):]
+            for name in entries if name.startswith("worktree/")
+        }
+        extras = worktree_files - known - {".git"}
+        force_required = bool(changed.stdout.strip() or extras)
+        args = ("worktree", "remove", "--force", str(folder)) if force_required else (
             "worktree", "remove", str(folder))
         removed = _git(owner, *args)
         if removed.returncode:
