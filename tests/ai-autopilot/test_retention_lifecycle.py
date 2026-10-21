@@ -197,6 +197,32 @@ class RecoveryLifecycleTests(GitSandbox):
             self.assertFalse(report["evidence_deleted"])
 
 
+class LegacyReleaseSourceRegistrationTests(GitSandbox):
+    def test_old_pinned_snapshot_worktree_is_found_without_current_main_repo(self):
+        import worktree_retention as retention
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "user-home"
+            repo = home / "MabiAutoAI" / "source-snapshots" / ("1" * 40)
+            repo.mkdir(parents=True)
+            self.git(repo, "init", "-q")
+            self.git(repo, "remote", "add", "origin",
+                     "https://github.com/skwlrna/Mbi_auto_update.git")
+            (repo / "src.txt").write_text("installed release", encoding="utf-8")
+            self.git(repo, "add", ".")
+            self.git(repo, "-c", "user.email=test@example.invalid", "-c",
+                     "user.name=Test", "commit", "-qm", "release")
+            folder = home / "MabiAutoAI" / "autopilot-worktrees" / ("e" * 16)
+            folder.parent.mkdir()
+            self.git(repo, "worktree", "add", "--detach", "-q", str(folder), "HEAD")
+            c = {"repo": str(home / "MabiAutoAI" / "repo-not-present"),
+                 "worktrees_dir": str(folder.parent),
+                 "results_dir": str(home / "MabiAutoAI" / "autopilot-results")}
+            with mock.patch.object(retention.Path, "home", return_value=home):
+                owners = retention._registrations(c)
+            self.assertIn(folder.resolve(), owners)
+            self.assertEqual(owners[folder.resolve()], repo.resolve())
+
+
 class RegisteredRegressionTests(GitSandbox):
     def test_preexisting_committed_suite_recovers_registry_gap(self):
         with tempfile.TemporaryDirectory() as temporary:
