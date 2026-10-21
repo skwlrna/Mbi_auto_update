@@ -156,6 +156,17 @@ class PinnedSourceTests(TestCase):
             self.assertTrue(any(cmd[-1] == "refs/pull/432/head" for cmd in commands))
             self.assertFalse(any(cmd[-1] == "refs/pull/255/head" for cmd in commands))
 
+    def test_ui_explains_local_source_validation_without_false_github_absence(self):
+        app = AI.parent
+        host = (app / "AiAutopilotHost.cs").read_text(encoding="utf-8")
+        dashboard = (app / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
+        self.assertIn("release_BUILD_COMMIT", host)
+        self.assertIn("existing_snapshot_not_trusted", host)
+        self.assertIn("pinned_release_commit_unavailable", host)
+        self.assertIn("GitHub 소스 부재가 아님", host)
+        self.assertIn("release_source_guard", dashboard)
+        self.assertIn("GitHub 소스 부재 아님", dashboard)
+
     def test_missing_or_invalid_release_marker_blocks_all_source_selection(self):
         with tempfile.TemporaryDirectory() as temp:
             marker = Path(temp) / "BUILD_COMMIT.txt"
