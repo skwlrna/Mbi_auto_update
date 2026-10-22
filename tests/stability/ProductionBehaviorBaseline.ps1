@@ -269,7 +269,7 @@ $m1Resolve = [regex]::Match(
     $alterPlan,
     'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, supplyWorks, ct\);').Value
 Require (-not [string]::IsNullOrWhiteSpace($m1Resolve)) 'M1 material resolver call stays in registration flow'
-Match-Required $m1Resolve 'int supplyWorks = plan\.FacilityName == "가죽 가공 시설"[\s\S]*?\? 1 : remainingWorks;' 'M1 leather checks one ticket of materials; other facilities retain remaining-work planning'
+Match-Required $m1Resolve 'int supplyWorks = plan\.FacilityName == "가죽 가공 시설"[\s\S]*?\? Math\.Min\(7, remainingWorks\) : remainingWorks;' 'M1 leather supplies up to seven parent tickets; other facilities retain remaining-work planning'
 Match-Forbidden $m1Resolve '_facilityState\?\.InvalidateOnsite' 'M1 cannot revoke onsite merely because materials are missing'
 Match-Required $m1Resolve '실제 필드/타 시설 이탈 전 현장확정 유지' 'M1 defers location changes to confirmed travel'
 Match-Required $alterTests 'M1: material inspection and same-facility resolution without travel retain manager onsite' 'M1 same-site resolution preserves reuse directive'
