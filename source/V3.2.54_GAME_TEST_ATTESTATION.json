@@ -1,0 +1,15 @@
+{
+  "version": "V3.2.54",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "Mabi Auto V3.2.54 leather recursion live-game validation, update rollback, and owner-PC acceptance are pending. GitHub Windows CI is not real-game evidence.",
+  "leatherChainRealGame": "pending",
+  "leatherRawShortageRealGame": "pending",
+  "leatherTanninShortageRealGame": "pending"
+}
