@@ -363,6 +363,27 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
             true, true, true, true, true, true, false, true),
         "V3.2.50 Home+End world fallback needs both icons and independent field on 2 frames; popup/menu veto");
+    // End/I are the two surviving templates in the reported re-entry failure.
+    // Exercise the compiled production predicate, including each lost anchor
+    // and the same-frame recheck used immediately before input.
+    Check(!CallBoolean(screen, "CanAuthorizeManagedKEntry",
+            false, 2, 2, false, false) &&
+          CallBoolean(screen, "CanAuthorizeManagedKEndIFieldFallback",
+            true, true, true, true, true, true, false, false),
+        "End/I on two field frames supplies corroboration while bare 2/4 stays blocked");
+    for (int missing = 0; missing < 6; missing++)
+    {
+        object?[] evidence = { true, true, true, true, true, true, false, false };
+        evidence[missing] = false;
+        Check(!CallBoolean(screen, "CanAuthorizeManagedKEndIFieldFallback", evidence),
+            $"End/I fallback vetoes missing template or independent field anchor {missing}");
+    }
+    Check(!CallBoolean(screen, "CanAuthorizeManagedKEndIFieldFallback",
+            true, true, true, true, true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKEndIFieldFallback",
+            true, true, true, true, true, true, false, true),
+        "End/I fallback vetoes a popup or processing menu despite all field anchors");
+
     var enter = ScreenCalls("EnterFacilityAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
@@ -375,6 +396,11 @@ try
           Has(enter, "RequireManagedIdleAsync") &&
           Has(enter, "Capture"),
         "V3.2.0 K re-entry uses template path or guarded 2-frame K/I + minimap+skill visual; idle still required");
+    Check(Count(enter, "CanAuthorizeManagedKEndIFieldFallback") == 2 &&
+          Has(enter, "IsManagedKReentryWithinLimit") &&
+          Has(enter, "HasManagedKEntryBlockingModal") &&
+          Has(enter, "RequireManagedIdleAsync"),
+        "compiled End/I route checks consecutive frames and final fresh frame with deadline/modal/CLI guards");
     Check(Has(enter, "RequireManagedIdleAsync"),
         "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
     // Earlier live captures had an unreliable minimap-only pixel gate;
