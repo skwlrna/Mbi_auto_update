@@ -593,11 +593,22 @@ public sealed partial class MainForm
                         LifeSkillStage.Altering, "preflight-works",
                         rawAlteringData.WorksAsync, ct), ct);
                 bool occupied = liveWorks.Any(x => x.FacilityName == plan.FacilityName);
-                // Only raw hides/tannin cause a leather hold. A shortage of
-                // craftable 가죽/가죽+ is delegated to recursive production.
-                // Every supply hold is checked before movement or registration.
+                // Leather raw hides and tannin are terminal for this selected
+                // item (not a 30-second HOLD). Let the established batch engine
+                // persist the terminal state and safely receive existing jobs.
+                // Unknown routes still use the ordinary isolated HOLD.
                 var unavailable = await ReadBeforeInputAsync(
                     "preflight-supply-route", () => InspectSupplyRouteAsync(plan, ct), ct);
+                if (unavailable is not null &&
+                    plan.FacilityName == "가죽 가공 시설" &&
+                    LeatherRawMaterialPolicy.IsExternalRaw(unavailable.Item))
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공] {plan.DisplayName} 외부 원재료 부족 · " +
+                        $"{unavailable.Item} {unavailable.Observed}/{unavailable.Required} · " +
+                        "선행 채집/구매 없이 해당 품목만 종료 · 기존 등록 작업 유지"));
+                    return; // Batch engine owns durable terminal/receipt accounting.
+                }
                 if (unavailable is not null)
                     throw new MaterialSupplyHoldException(unavailable);
                 if (LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
