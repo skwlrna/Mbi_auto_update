@@ -176,6 +176,10 @@ internal static class MaterialSupplyRoutePolicy
             if (current < 0)
                 throw new InvalidDataException("확인되지 않은 음수 재고는 재료 경로 판정에 사용하지 않습니다.");
             if (current >= required) return null;
+            // Raw hides (including higher-tier hides) and tannin must be
+            // supplied by the player. They are not automatic gather/craft inputs.
+            if (LeatherRawMaterialPolicy.IsExternalRaw(item))
+                return new(item, required, current, "external_leather_raw_missing");
             if (depth >= 6 || !path.Add(item))
                 return new(item, required, current, "recursive_route_unverified");
             try
