@@ -2724,8 +2724,27 @@ var leatherRouteReady = await MaterialSupplyRoutePolicy.FindHoldAsync(
     Array.Empty<GatherableItem>(),
     (name, ct) => Task.FromResult(name == "상급 생가죽" ? 10L : 0L),
     CancellationToken.None);
-Check(leatherRouteReady is null,
-    "enough raw hide for next leather ticket permits verified recursive crafting");
+Check(leatherRouteReady is not null &&
+      leatherRouteReady.Item == "상급 생가죽" &&
+      leatherRouteReady.Category == "leather_recipe_inventory_mismatch" &&
+      leatherRouteReady.Observed == 10,
+    "stale recipe Owned=0 vs get_items=10 must HOLD, not mislabel as raw exhaustion");
+var partialHideRecipe = new AlteringRecipe("가죽", false, 3,
+    "not_enough_ingredient", [new("생가죽", 10, 6)], "가죽 가공 시설");
+var partialHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    new AlteringPlan("가죽 가공 시설", "가죽", 3, 3, false),
+    partialHideRecipe, [partialHideRecipe], Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(6L), CancellationToken.None);
+Check(partialHideHold?.Category == "external_leather_raw_missing" &&
+      partialHideHold.Observed == 6 && partialHideHold.Required == 10,
+    "6 raw hides in inventory are insufficient for one 10-hide ticket, not zero hides");
+var conflictingHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    new AlteringPlan("가죽 가공 시설", "가죽", 3, 3, false),
+    partialHideRecipe, [partialHideRecipe], Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(0L), CancellationToken.None);
+Check(conflictingHideHold?.Category == "leather_recipe_inventory_mismatch" &&
+      conflictingHideHold.Observed == 0,
+    "recipe-owned 6 but parsed bag 0 never proves raw hide exhaustion");
 var tanninRouteRecipe = new AlteringRecipe("가죽+", false, 3,
     "not_enough_ingredient", [new("타닌 가루", 2, 0)], "가죽 가공 시설");
 var tanninHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
@@ -2813,6 +2832,83 @@ Check(leatherChainResult == AlteringRunResult.BatchQueued &&
       leatherChainAuto.ReservedWings == 0,
     "recursive leather chain crafts intermediate before parent without raw gathering or wings");
 
+// Customer-reported raw inventory: 500 생가죽 but zero ordinary 가죽.
+// The 200-target must start one verified leather ticket instead of treating
+// the final target quantity or missing intermediate as a raw exhaustion.
+var fiveHundredHides = new RecursiveProductionWorld { IncludeLeather = true };
+fiveHundredHides.SetCount("생가죽", 500);
+fiveHundredHides.SetCount("타닌 가루", 4);
+var fiveHundredResolver = new RecursiveAlteringSupplyResolver(
+    fiveHundredHides, fiveHundredHides, fiveHundredHides, fiveHundredHides,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var fiveHundredPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 3, false);
+var fiveHundredAuto = new AlteringAutomation(
+    fiveHundredHides, fiveHundredHides,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, fiveHundredResolver);
+var first500RawBatch = await fiveHundredAuto.RunBatchAsync(
+    fiveHundredPlan, 1, default);
+Check(first500RawBatch == AlteringRunResult.BatchQueued &&
+      fiveHundredHides.Queued.Count(x => x == "가죽") == 7 &&
+      fiveHundredHides.Queued.Count(x => x == "가죽+") == 1 &&
+      fiveHundredHides.Count("생가죽") == 430 &&
+      fiveHundredHides.GatherStarts == 0 &&
+      fiveHundredAuto.ReservedWings == 0,
+    "500 hides + one ticket of tannin allows seven leather intermediates and the first parent work");
+
+// With adequate confirmed stock, one F9 pass fills seven dependency
+// tickets, receives the completed batch, and fills seven parent tickets.
+// Recipe quantities here are synthetic fixtures, NOT live CLI recipe claims.
+var leatherSevenWorld = new RecursiveProductionWorld { IncludeLeather = true };
+leatherSevenWorld.SetCount("생가죽", 500);
+leatherSevenWorld.SetCount("타닌 가루", 28);
+var leatherSevenResolver = new RecursiveAlteringSupplyResolver(
+    leatherSevenWorld, leatherSevenWorld, leatherSevenWorld, leatherSevenWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var leatherSevenPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 3, false);
+var leatherSevenAuto = new AlteringAutomation(
+    leatherSevenWorld, leatherSevenWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, leatherSevenResolver);
+var leatherSevenResult = await leatherSevenAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(leatherSevenResult == AlteringRunResult.BatchQueued &&
+      leatherSevenWorld.Queued.Count(x => x == "가죽") == 7 &&
+      leatherSevenWorld.Queued.Count(x => x == "가죽+") == 7 &&
+      leatherSevenWorld.Queued.Take(7).All(x => x == "가죽") &&
+      leatherSevenWorld.Queued.Skip(7).Take(7).All(x => x == "가죽+") &&
+      leatherSevenWorld.Count("생가죽") == 430 &&
+      leatherSevenWorld.Count("타닌 가루") == 0 &&
+      leatherSevenWorld.GatherStarts == 0 &&
+      leatherSevenAuto.ReservedWings == 0,
+    "500 hides: leather seven-slot child batch and seven-slot parent batch, no gathering or wings");
+
+// Insufficient raw stock for a full seven-slot batch must not prevent the
+// first three safe tickets. Once hides run low, child receipts can satisfy
+// the next parent ticket without inventing the missing fourth input.
+var leatherPartialWorld = new RecursiveProductionWorld { IncludeLeather = true };
+leatherPartialWorld.SetCount("생가죽", 35);
+leatherPartialWorld.SetCount("타닌 가루", 28);
+var leatherPartialResolver = new RecursiveAlteringSupplyResolver(
+    leatherPartialWorld, leatherPartialWorld, leatherPartialWorld, leatherPartialWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var leatherPartialAuto = new AlteringAutomation(
+    leatherPartialWorld, leatherPartialWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, leatherPartialResolver);
+var leatherPartialResult = await leatherPartialAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(leatherPartialResult == AlteringRunResult.BatchQueued &&
+      leatherPartialWorld.Queued.Count(x => x == "가죽") == 3 &&
+      leatherPartialWorld.Queued.Count(x => x == "가죽+") == 3 &&
+      leatherPartialWorld.Count("생가죽") == 5 &&
+      leatherPartialWorld.GatherStarts == 0 &&
+      leatherPartialAuto.ReservedWings == 0,
+    "35 hides produce three leather and three leather+ tickets safely; remaining raw short does not block partial receipt");
+
 // Synthetic full chain: upper leather -> leather+ -> leather. The
 // fixture's recipe costs are test data, not a statement about live CLI.
 var upperLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
@@ -2867,6 +2963,38 @@ Check(exhaustedResult == AlteringRunResult.RawMaterialExhausted &&
       exhaustedWorld.QueueCalls == 0 && exhaustedResolver.Calls == 0 &&
       exhaustedAuto.ReservedWings == 0,
     "raw leather shortage terminates this recipe without replenishment, registration, or wings");
+var partialRawWorld = new FakeWorld(exhaustedLeather) {
+    Available = false, MissingIngredient = "생가죽",
+    MissingIngredientOwned = 2, MissingIngredientRequired = 3,
+    RawObservedOverride = 2
+};
+var partialRawLogs = new List<string>();
+var partialRawAuto = new AlteringAutomation(
+    partialRawWorld, partialRawWorld, (_, _) => Task.CompletedTask, 4);
+partialRawAuto.Log += partialRawLogs.Add;
+var partialRawResult = await partialRawAuto.RunAsync(exhaustedLeather, default);
+Check(partialRawResult == AlteringRunResult.RawMaterialExhausted &&
+      partialRawLogs.Any(x => x.Contains("생가죽 2/3", StringComparison.Ordinal)) &&
+      partialRawLogs.Any(x => x.Contains("원재료 부족", StringComparison.Ordinal)) &&
+      partialRawWorld.QueueCalls == 0,
+    "positive raw hide stock below one-ticket requirement reports 2/3 shortage, not empty stock");
+var conflictingRawWorld = new FakeWorld(exhaustedLeather) {
+    Available = false, MissingIngredient = "생가죽",
+    MissingIngredientOwned = 2, MissingIngredientRequired = 3,
+    RawObservedOverride = 10
+};
+var conflictingRawAuto = new AlteringAutomation(
+    conflictingRawWorld, conflictingRawWorld, (_, _) => Task.CompletedTask, 4);
+bool heldConflict = false;
+try { await conflictingRawAuto.RunAsync(exhaustedLeather, default); }
+catch (MaterialSupplyHoldException ex) {
+    heldConflict = ex.Evidence.Category == "leather_recipe_inventory_mismatch" &&
+        ex.Evidence.Item == "생가죽" && ex.Evidence.Observed == 10;
+}
+Check(heldConflict && conflictingRawWorld.QueueCalls == 0 &&
+      conflictingRawAuto.ReservedWings == 0,
+    "recipe says 2/3 but inventory says 10: no durable raw-exhausted decision and no input");
+
 Check(!LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
           new AlteringRecipe("가죽+", false, 3, "short", [new("가죽", 1, 0)], "가죽 가공 시설")) &&
       LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
@@ -3244,6 +3372,81 @@ Check(recursiveWorld.Count("강철괴") == 3 &&
     "steel recursively gathers iron ore, produces iron ingot, then resumes steel");
 Check(steelAuto.ReservedWings == 0 && recursiveWorld.ReserveCallbackCalls == 0,
     "recursive steel production never reserves Spirit Wings");
+
+// End-to-end F9 dependency scheduler: one intermediate lease fills seven
+// leather slots, receives the batch, and yields back to seven leather+ jobs.
+var integratedLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
+integratedLeatherWorld.SetCount("생가죽", 500);
+integratedLeatherWorld.SetCount("타닌 가루", 28);
+string integratedLeatherDir = Path.Combine(
+    Path.GetTempPath(), "mabi-seven-leather-" + Guid.NewGuid().ToString("N"));
+var integratedLeatherLane = new FacilityLaneState(
+    await integratedLeatherWorld.WorksAsync(default));
+var integratedLeatherScheduler = new MultiAlteringDependencyScheduler(
+    integratedLeatherWorld, integratedLeatherWorld, testIdentity,
+    integratedLeatherDir,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: integratedLeatherLane);
+var integratedLeatherResolver = new RecursiveAlteringSupplyResolver(
+    integratedLeatherWorld, integratedLeatherWorld,
+    integratedLeatherWorld, integratedLeatherWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, dependencyScheduler: integratedLeatherScheduler);
+var integratedLeatherAuto = new AlteringAutomation(
+    integratedLeatherWorld, integratedLeatherWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, integratedLeatherResolver, facilityState: integratedLeatherLane);
+var integratedLeatherResult = await integratedLeatherAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(integratedLeatherResult == AlteringRunResult.BatchQueued &&
+      integratedLeatherWorld.Queued.Take(7).All(x => x == "가죽") &&
+      integratedLeatherWorld.Queued.Skip(7).Take(7).All(x => x == "가죽+") &&
+      integratedLeatherWorld.Queued.Count == 14 &&
+      integratedLeatherLane.Snapshot("가죽 가공 시설").IntermediateRegisteredWorks == 7 &&
+      !integratedLeatherLane.Snapshot("가죽 가공 시설").IntermediateLease &&
+      integratedLeatherWorld.GatherStarts == 0 &&
+      integratedLeatherAuto.ReservedWings == 0,
+    "real dependency coordinator fills seven leather slots before seven parent registrations and releases lease");
+if (Directory.Exists(integratedLeatherDir))
+    Directory.Delete(integratedLeatherDir, recursive: true);
+
+// Partial stock on the real dependency coordinator must safely drain the
+// three-slot child, release its lease, then use those three outputs. A fake
+// resolver alone would miss a terminal-state / scheduler deadlock.
+var integratedPartialWorld = new RecursiveProductionWorld { IncludeLeather = true };
+integratedPartialWorld.SetCount("생가죽", 35);
+integratedPartialWorld.SetCount("타닌 가루", 28);
+string integratedPartialDir = Path.Combine(
+    Path.GetTempPath(), "mabi-partial-leather-" + Guid.NewGuid().ToString("N"));
+var integratedPartialLane = new FacilityLaneState(
+    await integratedPartialWorld.WorksAsync(default));
+var integratedPartialScheduler = new MultiAlteringDependencyScheduler(
+    integratedPartialWorld, integratedPartialWorld, testIdentity,
+    integratedPartialDir,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: integratedPartialLane);
+var integratedPartialResolver = new RecursiveAlteringSupplyResolver(
+    integratedPartialWorld, integratedPartialWorld,
+    integratedPartialWorld, integratedPartialWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, dependencyScheduler: integratedPartialScheduler);
+var integratedPartialAuto = new AlteringAutomation(
+    integratedPartialWorld, integratedPartialWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, integratedPartialResolver, facilityState: integratedPartialLane);
+var integratedPartialResult = await integratedPartialAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(integratedPartialResult == AlteringRunResult.BatchQueued &&
+      integratedPartialWorld.Queued.Count(x => x == "가죽") == 3 &&
+      integratedPartialWorld.Queued.Count(x => x == "가죽+") == 3 &&
+      integratedPartialWorld.Count("생가죽") == 5 &&
+      integratedPartialLane.Snapshot("가죽 가공 시설").IntermediateRegisteredWorks == 3 &&
+      !integratedPartialLane.Snapshot("가죽 가공 시설").IntermediateLease &&
+      integratedPartialWorld.GatherStarts == 0 &&
+      integratedPartialAuto.ReservedWings == 0,
+    "real dependency coordinator uses 3 confirmed child receipts under 35 hides and returns partial stock to parent");
+if (Directory.Exists(integratedPartialDir))
+    Directory.Delete(integratedPartialDir, recursive: true);
 
 var scheduledWorld = new RecursiveProductionWorld();
 scheduledWorld.AddExternalWork(
@@ -4669,6 +4872,8 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
     internal string MissingIngredient = "철 광석";
+    internal long MissingIngredientOwned, MissingIngredientRequired = 3;
+    internal long? RawObservedOverride;
     internal long? RawLeatherStock;
     internal long LeatherCost = 2;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
@@ -4681,7 +4886,8 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         var missing = available ? Array.Empty<AlteringIngredient>() :
             RawLeatherStock.HasValue
                 ? new[] { new AlteringIngredient("가죽", LeatherCost, RawLeatherStock.Value) }
-                : new[] { new AlteringIngredient(MissingIngredient, 3, 0) };
+                : new[] { new AlteringIngredient(
+                    MissingIngredient, MissingIngredientRequired, MissingIngredientOwned) };
         var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : MissingReason, missing, _plan.FacilityName);
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
@@ -4701,7 +4907,13 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         return Task.FromResult<IReadOnlyList<AlteringWork>>(_works.ToArray());
     }
     public Task<long> ItemCountAsync(string name, CancellationToken ct)
-    { ct.ThrowIfCancellationRequested(); if (name != _plan.OutputName) throw new Exception("wrong output mapping"); return Task.FromResult(Owned); }
+    {
+        ct.ThrowIfCancellationRequested();
+        if (name == _plan.OutputName) return Task.FromResult(Owned);
+        if (name == MissingIngredient)
+            return Task.FromResult(RawObservedOverride ?? MissingIngredientOwned);
+        throw new Exception("wrong output mapping");
+    }
     public Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

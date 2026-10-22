@@ -80,14 +80,20 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.54"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.55"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.54</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3254-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.54"')) {
+          if ($p -notmatch '<Version>3\.2\.55</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3255-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.55"')) {
             throw 'release workflow eligibility version mismatch'
           }
+
+      - name: V3.2.55 leather seven-slot release safety policy
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/release -p 'test_v3255_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.55 release safety policy failed' }
 
       - name: V3.2.54 leather recursive release safety policy
         shell: pwsh
@@ -1524,7 +1530,7 @@ jobs:
               $alteringPlan,
               'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, supplyWorks, ct\);').Value
           if ([string]::IsNullOrWhiteSpace($materialEntry) -or
-              $materialEntry -notmatch 'int supplyWorks = plan\.FacilityName == "가죽 가공 시설"[\s\S]*?\? 1 : remainingWorks;' -or
+              $materialEntry -notmatch 'int supplyWorks = plan\.FacilityName == "가죽 가공 시설"[\s\S]*?\? Math\.Min\(7, remainingWorks\) : remainingWorks;' -or
               $materialEntry -match '_facilityState\?\.InvalidateOnsite' -or
               $materialEntry -notmatch '실제 필드/타 시설 이탈 전 현장확정 유지' -or
               $alterTests -notmatch 'M1: material inspection and same-facility resolution without travel retain manager onsite' -or

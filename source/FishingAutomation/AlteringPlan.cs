@@ -263,9 +263,18 @@ internal static class LeatherRawMaterialPolicy
                string.Equals(normalized, "타닌가루", StringComparison.Ordinal);
     }
 
+    // Two read-only CLI sources are independently fallible. A recipe's Owned
+    // and a fresh get_items Count must agree before a missing raw input can be
+    // called confirmed. A mismatch is an isolated no-input HOLD, never a
+    // durable completed/shortage classification or permission to click.
+    internal static bool HasInventoryConflict(AlteringIngredient ingredient, long inventoryCount)
+        => IsExternalRaw(ingredient.DisplayName) &&
+           inventoryCount != ingredient.Owned;
+
     internal static bool EndsOnShortage(AlteringPlan plan, AlteringRecipe recipe)
         => plan.FacilityName == "가죽 가공 시설" &&
-           recipe.MissingIngredients.Any(x => IsExternalRaw(x.DisplayName));
+           recipe.MissingIngredients.Any(x =>
+               IsExternalRaw(x.DisplayName) && x.Owned < x.Required);
 }
 
 // V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
@@ -614,7 +623,7 @@ internal sealed class AlteringAutomation
                 }
 
                 await ReportProgressAsync(works, plan, baseline, initialExistingCount,
-                    "가죽 원재료 소진 · 목표 미달 종료", ct);
+                    "가죽 원재료 부족 · 목표 미달 종료", ct);
                 if (_session is not null)
                 {
                     SaveSession(_session with
@@ -622,12 +631,12 @@ internal sealed class AlteringAutomation
                         RawMaterialExhausted = true,
                         MultiState = MultiAlteringItemState.RawMaterialExhausted,
                         CompletedAt = DateTimeOffset.UtcNow,
-                        Stage = "가죽 원재료 소진 · 목표 미달 종료"
+                        Stage = "가죽 원재료 부족 · 목표 미달 종료"
                     });
                     if (_session.BatchId is null)
                         _sessionStore?.Delete();
                 }
-                Log?.Invoke($"[자동 가공] 가죽 원재료 소진 · {plan.DisplayName} 신규 등록 중단 · " +
+                Log?.Invoke($"[자동 가공] 가죽 원재료 부족 · {plan.DisplayName} 신규 등록 중단 · " +
                             $"등록 {QueuedWorks}/{plan.RequiredWorks} · 목표 미달 정상 종료 · 다른 품목 계속");
                 return AlteringRunResult.RawMaterialExhausted;
             }
@@ -722,19 +731,43 @@ internal sealed class AlteringAutomation
                         !selected[plan.RecipeOrdinal - 1].Alterable)
                     {
                         var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
+                        // Recipe MissingIngredients is a snapshot, not proof of
+                        // completely empty inventory. Reconcile its Owned with
+                        // fresh get_items BEFORE persisting a terminal shortage.
+                        if (recipe is not null && plan.FacilityName == "가죽 가공 시설")
+                        {
+                            foreach (var raw in recipe.MissingIngredients.Where(x =>
+                                LeatherRawMaterialPolicy.IsExternalRaw(x.DisplayName)))
+                            {
+                                long live = await _data.ItemCountAsync(raw.DisplayName, ct);
+                                if (live < 0)
+                                    throw new InvalidDataException("가죽 원재료 음수 재고는 신뢰하지 않습니다.");
+                                if (LeatherRawMaterialPolicy.HasInventoryConflict(raw, live) ||
+                                    live >= raw.Required)
+                                {
+                                    Log?.Invoke($"[자동 가공][재료 수량 불일치] {plan.DisplayName} · " +
+                                        $"{raw.DisplayName} · 제법 Owned={raw.Owned}/{raw.Required} · " +
+                                        $"get_items={live} · 원재료 소진 확정 금지 · 신규 입력 보류");
+                                    throw new MaterialSupplyHoldException(new(
+                                        raw.DisplayName, raw.Required, live,
+                                        "leather_recipe_inventory_mismatch"));
+                                }
+                            }
+                        }
                         if (recipe is not null && LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
                         {
                             rawMaterialExhausted = true;
-                            string shortages = string.Join(", ", recipe.MissingIngredients.Select(x =>
-                                $"{x.DisplayName} {x.Owned}/{x.Required}"));
+                            string shortages = string.Join(", ", recipe.MissingIngredients.Where(x =>
+                                LeatherRawMaterialPolicy.IsExternalRaw(x.DisplayName)).Select(x =>
+                                $"{x.DisplayName} {x.Owned}/{x.Required} (다음 1회분 부족)"));
                             if (_session is not null)
                                 SaveSession(_session with
                                 {
                                     RawMaterialExhausted = true,
-                                    Stage = "가죽 원재료 소진 · 신규 등록 중단"
+                                    Stage = "가죽 원재료 부족 · 신규 등록 중단"
                                 });
-                            Log?.Invoke($"[자동 가공] 가죽 원재료 소진 · {plan.DisplayName} · {shortages} · " +
-                                        "자동 채집/하위 가공 없이 해당 품목 신규 등록 종료 · 기존 작업은 유지");
+                            Log?.Invoke($"[자동 가공] 가죽 원재료 부족 · {plan.DisplayName} · {shortages} · " +
+                                        "생가죽 계열/타닌 가루 자동 확보 없이 해당 품목만 중단 · 기존 작업은 유지");
                             break; // Exit the inner registration loop, then handle queued work above.
                         }
                         if (recipe is not null &&
@@ -761,11 +794,18 @@ internal sealed class AlteringAutomation
                                 "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
                             try
                             {
-                                // Leather materials are prepared one confirmed ticket
-                                // at a time. Requiring all 67 tickets' raw stock
-                                // before the first one would suppress partial output.
+                                // For leather, opportunistically fill up to seven
+                                // intermediate tickets per facility batch. The
+                                // resolver still preflights one parent ticket,
+                                // and its child scheduler may stop early at a
+                                // verified raw-hide/tannin boundary. Never
+                                // demand the full 67-ticket target up front.
                                 int supplyWorks = plan.FacilityName == "가죽 가공 시설"
-                                    ? 1 : remainingWorks;
+                                    ? Math.Min(7, remainingWorks) : remainingWorks;
+                                if (plan.FacilityName == "가죽 가공 시설")
+                                    Log?.Invoke(
+                                        $"[자동 가공] 가죽 중간재료 묶음 보충 · 최대 {supplyWorks}회분 · " +
+                                        "원재료 1회분 안전 확인 후 최대 7칸 등록·묶음 수령");
                                 await _supplyResolver.ResolveAsync(plan, recipe, supplyWorks, ct);
                             }
                             catch (MaterialSupplyHoldException hold)
@@ -1087,7 +1127,7 @@ internal sealed class AlteringAutomation
             : Math.Max(0, _session.LastObservedOutputQuantity - _session.BaselineQuantity -
                  _session.InitialExistingMinimum);
         Progress?.Invoke(new(Math.Min(received, plan.TargetQuantity), plan.TargetQuantity,
-            QueuedWorks, plan.RequiredWorks, 0, null, "가죽 원재료 소진 · 목표 미달 종료"));
+            QueuedWorks, plan.RequiredWorks, 0, null, "가죽 원재료 부족 · 목표 미달 종료"));
         return AlteringRunResult.RawMaterialExhausted;
     }
 

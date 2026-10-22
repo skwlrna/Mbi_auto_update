@@ -829,11 +829,11 @@ public sealed partial class MainForm
             if (rawExhaustedCount > 0)
             {
                 _productionProgressSummary =
-                    $"다중가공 종료 · 완료 {plans.Count - rawExhaustedCount}종 · 가죽 원재료 소진 {rawExhaustedCount}종 · " +
+                    $"다중가공 종료 · 완료 {plans.Count - rawExhaustedCount}종 · 가죽 원재료 부족 {rawExhaustedCount}종 · " +
                     $"실제 수령 {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0}";
-                NoteMultiAlteringAction("가죽 원재료 소진 품목은 목표 미달 종료 · 다른 품목 처리 완료");
+                NoteMultiAlteringAction("가죽 원재료 부족 품목은 목표 미달 종료 · 다른 품목 처리 완료");
                 _log.Write("[다중가공] 재료 소진 품목은 목표 달성으로 계산하지 않음 · 나머지 작업 완료");
-                SetStatus("다중가공 종료 · 가죽 원재료 소진", Color.DarkOrange);
+                SetStatus("다중가공 종료 · 가죽 원재료 부족", Color.DarkOrange);
             }
             else
             {

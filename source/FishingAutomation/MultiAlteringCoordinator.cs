@@ -158,13 +158,21 @@ internal static class MaterialSupplyRoutePolicy
         ArgumentNullException.ThrowIfNull(readCount);
         var path = new HashSet<string>(StringComparer.Ordinal);
         async Task<MaterialSupplyHold?> InspectAsync(
-            string item, long required, int depth)
+            string item, long required, int depth, long? recipeOwned = null)
         {
             ct.ThrowIfCancellationRequested();
             if (required <= 0) return null;
             long current = await readCount(item, ct);
             if (current < 0)
                 throw new InvalidDataException("확인되지 않은 음수 재고는 재료 경로 판정에 사용하지 않습니다.");
+            // A recipe's Owned and the separate get_items count can disagree
+            // because of a stale snapshot, name/stack parsing, or in-flight
+            // inventory changes. Do not turn that uncertainty into a durable
+            // claim that raw hides or tannin have run out.
+            if (recipeOwned.HasValue &&
+                LeatherRawMaterialPolicy.IsExternalRaw(item) &&
+                current != recipeOwned.Value)
+                return new(item, required, current, "leather_recipe_inventory_mismatch");
             if (current >= required) return null;
             // Raw hides (including higher-tier hides) and tannin must be
             // supplied by the player. They are not automatic gather/craft inputs.
@@ -211,7 +219,7 @@ internal static class MaterialSupplyRoutePolicy
                 foreach (var child in producer.MissingIngredients)
                 {
                     long needed = checked((long)child.Required * works);
-                    var hold = await InspectAsync(child.DisplayName, needed, depth + 1);
+                    var hold = await InspectAsync(child.DisplayName, needed, depth + 1, child.Owned);
                     if (hold is not null) return hold;
                 }
                 return null; // existing producer screen/CLI checks remain necessary
@@ -222,7 +230,7 @@ internal static class MaterialSupplyRoutePolicy
         foreach (var ingredient in selected.MissingIngredients)
         {
             long needed = checked((long)ingredient.Required * plan.RequiredWorks);
-            var hold = await InspectAsync(ingredient.DisplayName, needed, 0);
+            var hold = await InspectAsync(ingredient.DisplayName, needed, 0, ingredient.Owned);
             if (hold is not null) return hold;
         }
         return null;
