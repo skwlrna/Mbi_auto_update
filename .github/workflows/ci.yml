@@ -871,8 +871,8 @@ jobs:
               $screen -notmatch 'ManagedKReentryHudTimeout = TimeSpan.FromSeconds\(2\)' -or
               $managerEntry -notmatch 'HasManagedKEntryFieldHudVisual' -or
               $managerEntry -notmatch 'CanAuthorizeManagedKFieldFallback' -or
-              $managerEntry -notmatch 'fieldFallbackAuthorized' -or
-              $managerEntry -notmatch 'finalFieldVisual' -or
+              $managerEntry -notmatch 'VerifyManagedKFrameAsync' -or
+              $managerEntry -notmatch 'TapVerifiedFreshAsync' -or
               $managerEntry -notmatch 'RequireManagedIdleAsync' -or
               $screen -notmatch 'CanAuthorizeManagedKFieldFallback' -or
               $screen -notmatch 'abyss/templates/outside_home_v75.png' -or

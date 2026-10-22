@@ -2,6 +2,8 @@ using System.Drawing;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.IO.Compression;
 
 try
 {
@@ -380,7 +382,7 @@ try
     // Earlier live captures had an unreliable minimap-only pixel gate;
     // V3.2.0 never uses it by itself: two stable K+I template matches and
     // independent field visual are BOTH mandatory after the first K.
-    // First entry is unchanged; the 3/4 route is unchanged.
+    // First entry now requires the same positive field proof as re-entry.
     // A fresh popup veto and CLI idle remain required before any K input.
     Check(!Has(enter, "HasFixedFacilityHeaderVisual") &&
           Has(enter, "TapFresh") &&
@@ -389,14 +391,14 @@ try
           Has(enter, "HasManagedKEntryFieldHudVisual") &&
           Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "RequireManagedIdleAsync"),
-        "V3.2.0 first entry unchanged; re-entry field path requires pixel+template corroboration and CLI safety");
+        "managed entry preserves independent template/field routes and fresh CLI safety");
     var matchAbyssHud = ScreenCalls("DetectManagedWorldHudTemplates", 1);
     Check(Count(matchAbyssHud, "FindTemplate") == 4 &&
           !Has(matchAbyssHud, "HasManagedKEntryFieldHudVisual") &&
           Has(ScreenCalls("CanAuthorizeManagedKEntry", 5), "get_Item1") == false &&
           Has(ScreenCalls("CanAuthorizeManagedKFieldFallback", 8), "get_Item1") == false,
         "V3.2.0 the four template thresholds remain independent of the field-only supplemental gate");
-    Check(CallBoolean(screen, "CanAuthorizeManagedKEntry",
+    Check(!CallBoolean(screen, "CanAuthorizeManagedKEntry",
             true, 0, 0, false, false) &&
           !CallBoolean(screen, "CanAuthorizeManagedKEntry",
             true, 0, 0, true, false) &&
@@ -414,7 +416,13 @@ try
             false, 4, 4, true, false) &&
           !CallBoolean(screen, "CanAuthorizeManagedKEntry",
             false, 4, 4, false, true),
-        "V3.1.75 F9 K first pass skips gold/teal but re-entry requires 3/4 in both fresh frames and no popup/menu");
+        "first K cannot bypass positive two-frame evidence; popup/menu veto still applies");
+    Check(Has(enter, "FindManagedWorldHudKeysAsync") &&
+          Has(enter, "TrySelectManagedFoodCraftingTabAsync") &&
+          Has(enter, "TapVerifiedFreshAsync") &&
+          Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryBlockingModal") &&
+          Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedFoodCraftingNavigationVisual"),
+        "real managed entry routes food first and validates the same final input capture");
     var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
     Check(Has(enter, "TrySelectManagedProcessingTabAsync") &&
           Has(enter, "WaitForManagedProcessingNavigationReadyAsync") &&
@@ -727,6 +735,79 @@ try
     // driver injection, Space, ClickFresh or paid interaction occurs.
     bool PixelGate(string name, Bitmap image) =>
         (bool)(Method(screen, name, 1).Invoke(null, new object[] { image }) ?? false);
+
+    // Only tiny generic shortcut labels are retained from the incident corpus.
+    // No player, chat, recipe inventory or complete gameplay screenshot is in
+    // this public repository. Baseline/field booleans are offline observations,
+    // not fresh CLI or permission to press a key.
+    string hudFixtures = Path.Combine(Path.GetTempPath(), "MabiAuto-hud-" + Guid.NewGuid().ToString("N"));
+    ZipFile.ExtractToDirectory(Path.Combine("tests", "altering-screen-integration", "hud-fixtures.zip"), hudFixtures);
+    using (var fixtures = JsonDocument.Parse(File.ReadAllText(Path.Combine(hudFixtures, "manifest.json"))))
+    {
+        Type keysType = production.GetType("DungeonVisionBot.ManagedWorldHudKeys", true)!;
+        object DetectKeys(Bitmap image) => Method(screen, "DetectManagedWorldHudKeys", 1)
+            .Invoke(null, new object[] { image })!;
+        bool Found(object keys) => (bool)keysType.GetProperty("Found", all)!.GetValue(keys)!;
+        int corpusCount = 0, otherCount = 0, targetCount = 0, foodCount = 0;
+        foreach (var item in fixtures.RootElement.EnumerateArray())
+        {
+            int id = item.GetProperty("id").GetInt32();
+            using var frame = new Bitmap(800, 1000);
+            using (var g = Graphics.FromImage(frame))
+            using (var strip = new Bitmap(Path.Combine(hudFixtures, item.GetProperty("file").GetString()!)))
+            {
+                g.Clear(Color.Black);
+                g.DrawImageUnscaled(strip, 550, 70);
+            }
+            bool found = Found(DetectKeys(frame));
+            bool world = item.GetProperty("worldHudVisible").GetBoolean();
+            bool target = item.GetProperty("targetField").GetBoolean();
+            bool combined = item.GetProperty("baselineEvidence").GetBoolean() ||
+                found && item.GetProperty("independentField").GetBoolean();
+            if (!world)
+            {
+                Check(!found && !combined, $"incident {id}: menu/modal/result must not acquire world-key evidence");
+                otherCount++;
+            }
+            if (target)
+            {
+                Check(combined, $"incident {id}: known normal field retains an existing or new visual route");
+                targetCount++;
+            }
+            if (id == 212)
+                Check(found, "06:08 Y-button layout is recognized by compiled production glyph matcher");
+            if (item.TryGetProperty("foodFile", out var foodFile))
+            {
+                using var food = new Bitmap(Path.Combine(hudFixtures, foodFile.GetString()!));
+                Check(PixelGate("HasManagedFoodCraftingNavigationVisual", food),
+                    $"incident {id}: food quick-crafting navigation is positively classified");
+                using var dim = new Bitmap(800, 1000);
+                using (var g = Graphics.FromImage(dim))
+                using (var attributes = new System.Drawing.Imaging.ImageAttributes())
+                {
+                    attributes.SetColorMatrix(new System.Drawing.Imaging.ColorMatrix { Matrix00 = .4f, Matrix11 = .4f, Matrix22 = .4f });
+                    g.DrawImage(food, new Rectangle(0, 0, 800, 1000), 0, 0, 800, 1000, GraphicsUnit.Pixel, attributes);
+                }
+                Check(!PixelGate("HasManagedFoodCraftingNavigationVisual", dim),
+                    $"incident {id}: darkened menu is not an actionable food navigation screen");
+                foodCount++;
+            }
+            corpusCount++;
+        }
+        Check(corpusCount == 209 && otherCount == 140 && targetCount == 5 && foodCount == 5,
+            "compiled glyph corpus includes 209 real strips, 140 other screens, 5 target fields and 5 food menus");
+
+        object Keys(string method, Rectangle home) => Activator.CreateInstance(keysType, all, null,
+            new object[] { method, home, new Rectangle(693, 79, 31, 10), new Rectangle(762, 79, 25, 10), "test" }, null)!;
+        var regular = Keys("glyph", new(642, 79, 31, 10));
+        var shifted = Keys("glyph", new(593, 79, 29, 10));
+        bool Consecutive(object a, object b) => (bool)Method(keysType, "IsConsecutiveWith", 1).Invoke(a, new[] { b })!;
+        Check(Found(regular) && Found(shifted) && Consecutive(regular, Keys("glyph", new(643, 79, 31, 10))) &&
+              !Consecutive(regular, shifted) && !Consecutive(regular, Keys("ocr", new(642, 79, 31, 10))) &&
+              !Consecutive(regular, Keys("glyph", Rectangle.Empty)),
+            "two frames must retain the same method and layout; route mixing, vanished keys and shifted layouts are refused");
+    }
+    Directory.Delete(hudFixtures, recursive: true);
     static Bitmap BlackFrame()
     {
         var bitmap = new Bitmap(800, 1000);

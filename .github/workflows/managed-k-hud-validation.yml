@@ -1,0 +1,27 @@
+name: Managed K variable HUD validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'source/FishingAutomation/**'
+      - 'tests/altering-screen-integration/**'
+      - '.github/workflows/managed-k-hud-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compiled-screen-corpus:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run compiled production screen and 209 shortcut-strip regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Compiled screen corpus failed' }

@@ -79,6 +79,30 @@ internal sealed class ProductionUiRuntime : IDisposable
         _evidence.Note("input", $"scan=0x{scanCode:X2}");
     }
 
+    // Validate the SAME last capture that renews the input guard. TapFresh's
+    // unconditional recapture must not replace a previously verified frame.
+    internal async Task TapVerifiedFreshAsync(ushort scanCode,
+        Func<Bitmap, Task<bool>> verify, CancellationToken ct)
+    {
+        using var frame = Capture(ct);
+        if (!await verify(frame))
+            throw Failure(frame, "관리 가공 K 입력 직전 화면 인증 변경 · 입력 없이 정지");
+        ct.ThrowIfCancellationRequested();
+        _input.TapScanCode(scanCode, ct);
+        _evidence.Note("input", $"verified_scan=0x{scanCode:X2}");
+    }
+
+    internal async Task ClickVerifiedFreshAsync(Point point,
+        Func<Bitmap, Task<bool>> verify, CancellationToken ct)
+    {
+        using var frame = Capture(ct);
+        if (!await verify(frame))
+            throw Failure(frame, "관리 가공 메뉴 클릭 직전 화면 인증 변경 · 입력 없이 정지");
+        ct.ThrowIfCancellationRequested();
+        _input.ClickClientPoint(_hwnd, point, ct);
+        _evidence.Note("input", $"verified_click=({point.X},{point.Y})");
+    }
+
     internal void PasteFresh(string text, CancellationToken ct)
     {
         using var frame = Capture(ct);

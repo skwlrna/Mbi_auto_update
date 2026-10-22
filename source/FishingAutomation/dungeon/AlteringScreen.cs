@@ -22,8 +22,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private string? _postTravelProvenFacilityTitle;
     private bool _repeatOcrFreeRecipe;
     private string? _selectedFixedRecipeKey;
-    // Per-F9 AlteringScreen: first K is explicitly started in the ordinary field.
-    // After that first real K input, later unknown->K navigation must
+    // Every managed K, including the first, needs positive ordinary-field proof.
+    // Unknown->K navigation must
     // positively match 3/4 HUD templates on two fresh frames, or
     // K+I / Home+End pairs PLUS independent minimap + life-skill HUD evidence.
     // Both routes keep fresh modal/menu checks and CLI idle before any key.
@@ -754,12 +754,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         const int maxAttempts = 3;
         int hubCardClicks = 0; // Never repeat an unverified fixed-coordinate click.
+        bool foodNavigationIssued = false;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             ct.ThrowIfCancellationRequested();
 
             using (var frame = Capture(ct))
             {
+                // Food quick-crafting has a cyan left tab, so the neutral-only
+                // K navigation detector cannot identify it. Classify it BEFORE
+                // the unknown-field/first-K path. No guessed Esc/K is needed.
+                if (directive != AlteringFacilityEntryDirective.Automatic &&
+                    await TrySelectManagedFoodCraftingTabAsync(frame, plan, directive,
+                        foodNavigationIssued, ct))
+                {
+                    foodNavigationIssued = true;
+                    await WaitForManagedProcessingNavigationReadyAsync(1000, ct);
+                    continue;
+                }
                 if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면={plan.ScreenTitle} · 시설 진입 확인");
@@ -911,37 +923,37 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
                     HasManagedKEntryBlockingModal(frame))
                     Fail(frame, "관리 가공 K 메뉴 진입 전 확인창/이동창 감지 · 입력 차단");
+                Func<Bitmap, Task<bool>>? verifyManagedK = null;
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // First F9 entry has a known ordinary-field start. Re-entry
-                    // keeps the old 3/4-in-two-frames HUD rule. The 14:16:48
+                    // First entry and re-entry both require actual consecutive
+                    // field frames. The 14:16:48
                     // V3.1.99 live field had K/I=0.969/0.910 yet Home/End=0.37/0.39,
                     // so also accept two consecutive K+I plus the independent
                     // minimap-rim and lower-left life-skill HUD visual. Neither
                     // path relaxes the popup/menu veto or last-moment CLI idle.
                     // Limit remains 2 seconds; no unverified extra K is sent.
                     bool firstEntry = !_managedKInputIssued;
-                    var previousHud = firstEntry
-                        ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false, HomeFound: false, EndFound: false)
-                        : DetectManagedWorldHudTemplates(frame);
-                    bool previousField = !firstEntry && HasManagedKEntryFieldHudVisual(frame);
                     var started = Stopwatch.StartNew();
+                    var previousHud = DetectManagedWorldHudTemplates(frame);
+                    bool previousField = HasManagedKEntryFieldHudVisual(frame);
+                    bool NeedsKeyOcr((int Matched, string Scores, bool KFound, bool IFound, bool HomeFound, bool EndFound) hud, bool field)
+                        => hud.Matched < 3 && !(field && (hud.KFound && hud.IFound || hud.HomeFound && hud.EndFound));
+                    var previousKeys = await FindManagedWorldHudKeysAsync(frame, NeedsKeyOcr(previousHud, previousField), ct);
                     int samples = 1;
                     bool menuAppeared = false;
-                    bool fieldFallbackAuthorized = false;
-                    bool homeEndFallbackAuthorized = false;
                     while (true)
                     {
                         await Task.Delay(180, ct);
                         using var freshField = Capture(ct);
-                        var currentHud = firstEntry
-                            ? (Matched: 0, Scores: "최초 시작 · HUD 재진입 검사 제외", KFound: false, IFound: false, HomeFound: false, EndFound: false)
-                            : DetectManagedWorldHudTemplates(freshField);
-                        bool currentField = !firstEntry && HasManagedKEntryFieldHudVisual(freshField);
+                        var currentHud = DetectManagedWorldHudTemplates(freshField);
+                        bool currentField = HasManagedKEntryFieldHudVisual(freshField);
+                        var currentKeys = await FindManagedWorldHudKeysAsync(freshField, NeedsKeyOcr(currentHud, currentField), ct);
                         samples++;
                         bool actualModal = HasManagedKEntryBlockingModal(freshField);
                         bool unexpectedMenu = HasFixedProcessingHubVisual(freshField) ||
-                                              HasManagedProcessingBottomTabVisual(freshField);
+                                              HasManagedProcessingBottomTabVisual(freshField) ||
+                                              HasManagedFoodCraftingNavigationVisual(freshField);
                         Log?.Invoke(
                             $"[자동 가공] F9 K 진입 재판정 · " +
                             $"경로={(firstEntry ? "최초 필드 시작" : "중간 재진입")} · " +
@@ -949,6 +961,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
                             $"필드독립증거={previousField}→{currentField} · " +
                             $"K/I={previousHud.KFound}/{previousHud.IFound}→{currentHud.KFound}/{currentHud.IFound} · " +
+                            $"단축키={previousKeys.Scores}→{currentKeys.Scores} · " +
                             $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
                             $"재확인={samples}프레임/{started.Elapsed.TotalSeconds:F1}초");
 
@@ -967,9 +980,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         // Each successful route must be consecutive across TWO
                         // actual frames. A 2/4 score alone is never authorization.
                         bool templateAuthorized = CanAuthorizeManagedKEntry(
-                            firstEntry, previousHud.Matched, currentHud.Matched,
+                            false, previousHud.Matched, currentHud.Matched,
                             actualModal, unexpectedMenu);
-                        bool fieldAuthorized = !firstEntry &&
+                        bool fieldAuthorized =
                             CanAuthorizeManagedKFieldFallback(
                                 previousHud.KFound, previousHud.IFound,
                                 currentHud.KFound, currentHud.IFound,
@@ -978,59 +991,41 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         // K/I ~0.41/0.61 missed despite two positive field frames.
                         // Require BOTH Home+End on BOTH frames plus the existing
                         // independent gold-minimap/teal-skill field check.
-                        bool homeEndAuthorized = !firstEntry &&
+                        bool homeEndAuthorized =
                             CanAuthorizeManagedKHomeEndFieldFallback(
                                 previousHud.HomeFound, previousHud.EndFound,
                                 currentHud.HomeFound, currentHud.EndFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
-                        if (firstEntry || ((templateAuthorized || fieldAuthorized || homeEndAuthorized) && withinLimit))
+                        bool keysAuthorized = previousKeys.IsConsecutiveWith(currentKeys) &&
+                            previousField && currentField && !actualModal && !unexpectedMenu;
+                        if ((templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
                         {
-                            fieldFallbackAuthorized = fieldAuthorized && !templateAuthorized;
-                            homeEndFallbackAuthorized = homeEndAuthorized && !templateAuthorized;
-                            if (fieldFallbackAuthorized || homeEndFallbackAuthorized)
-                                Log?.Invoke("[자동 가공] K 재진입 필드 보조 인증 · " +
-                                    (homeEndFallbackAuthorized ? "Home/End" : "K/I") +
-                                    " + 미니맵 금색 테두리 + 생활 스킬 K · 연속 2프레임 · 입력 전 최종 재검증");
+                            string route = templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
+                                homeEndAuthorized ? "Home/End" : "key-labels";
+                            verifyManagedK = last => VerifyManagedKFrameAsync(last, route, currentKeys, ct);
+                            Log?.Invoke($"[자동 가공] K 화면 인증 · {route} · 실제 연속 2프레임 · CLI 후 입력 프레임 재검증");
                             break;
                         }
 
                         if (!withinLimit)
                             Fail(freshField,
                                 "관리 가공 K 재진입 HUD 3/4 연속 2프레임 및 " +
-                                "K/I 또는 Home/End + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
+                                "K/I 또는 Home/End 또는 가변배치 단축키 + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
                         previousHud = currentHud;
                         previousField = currentField;
+                        previousKeys = currentKeys;
                     }
                     if (menuAppeared)
                         continue;
-                    if (fieldFallbackAuthorized || homeEndFallbackAuthorized)
-                    {
-                        // A last fresh frame guards against a popup or menu that
-                        // appeared after the consecutive field observations.
-                        // Do not promote stale screenshot evidence into input.
-                        using var finalField = Capture(ct);
-                        var finalHud = DetectManagedWorldHudTemplates(finalField);
-                        bool finalModal = HasManagedKEntryBlockingModal(finalField);
-                        bool finalMenu = HasFixedProcessingHubVisual(finalField) ||
-                                         HasManagedProcessingBottomTabVisual(finalField);
-                        bool finalFieldVisual = HasManagedKEntryFieldHudVisual(finalField);
-                        bool finalKAndI = fieldFallbackAuthorized &&
-                            CanAuthorizeManagedKFieldFallback(
-                                finalHud.KFound, finalHud.IFound,
-                                finalHud.KFound, finalHud.IFound,
-                                finalFieldVisual, finalFieldVisual, finalModal, finalMenu);
-                        bool finalHomeAndEnd = homeEndFallbackAuthorized &&
-                            CanAuthorizeManagedKHomeEndFieldFallback(
-                                finalHud.HomeFound, finalHud.EndFound,
-                                finalHud.HomeFound, finalHud.EndFound,
-                                finalFieldVisual, finalFieldVisual, finalModal, finalMenu);
-                        if (!finalKAndI && !finalHomeAndEnd)
-                            Fail(finalField, "관리 가공 K 재진입 입력 직전 필드/메뉴/팝업 재확인 실패 · 입력 없이 정지");
-                    }
                 }
                 await RequireManagedIdleAsync(plan, directive, "가공 메뉴 K 직전", ct);
-                _ui.TapFresh(0x25, ct);
+                if (directive == AlteringFacilityEntryDirective.Automatic)
+                    _ui.TapFresh(0x25, ct);
+                else if (verifyManagedK is not null)
+                    await _ui.TapVerifiedFreshAsync(0x25, verifyManagedK, ct);
+                else
+                    Fail(frame, "관리 가공 K 화면 인증 근거 없음 · 입력 없이 정지");
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                     _managedKInputIssued = true;
                 Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
@@ -2035,13 +2030,130 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private static bool HasManagedKEntryBlockingModal(Bitmap frame)
         => HasManagedFacilityTravelConfirmationVisual(frame);
 
+    private static readonly Rectangle ManagedHomeKeyArea = new(550, 70, 135, 30);
+    private static readonly Rectangle ManagedEndKeyArea = new(680, 70, 60, 30);
+    private static readonly Rectangle ManagedEscapeKeyArea = new(750, 70, 50, 30);
+
+    internal static ManagedWorldHudKeys DetectManagedWorldHudKeys(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return new("glyph", Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, "크기 불일치");
+        var matcher = new TemplateMatcher(AppContext.BaseDirectory);
+        DetectionResult Find(Rectangle area, string name) => matcher.FindBrightGlyphMultiScale(
+            frame, area, "abyss/templates/" + name, 0.90, 0.95, 1.05, 0.05);
+        var home = Find(ManagedHomeKeyArea, "managed_home_key.png");
+        var mailHome = Find(ManagedHomeKeyArea, "managed_home_mail_key.png");
+        if (mailHome.Score > home.Score) home = mailHome;
+        var end = Find(ManagedEndKeyArea, "managed_end_key.png");
+        var escape = Find(ManagedEscapeKeyArea, "managed_escape_key.png");
+        return new("glyph", home.Found ? home.Bounds : Rectangle.Empty,
+            end.Found ? end.Bounds : Rectangle.Empty, escape.Found ? escape.Bounds : Rectangle.Empty,
+            $"글자 Home={home.Score:F3},End={end.Score:F3},ESC={escape.Score:F3}");
+    }
+
+    private async Task<ManagedWorldHudKeys> FindManagedWorldHudKeysAsync(Bitmap frame, bool allowOcr, CancellationToken ct)
+    {
+        var glyphs = DetectManagedWorldHudKeys(frame);
+        if (glyphs.Found || !allowOcr || !HasManagedKEntryFieldHudVisual(frame)) return glyphs;
+        return await ReadManagedWorldHudKeysAsync(frame, ct);
+    }
+
+    private async Task<ManagedWorldHudKeys> ReadManagedWorldHudKeysAsync(Bitmap frame, CancellationToken ct)
+    {
+        // Tight Latin shortcut labels only; exact compact OCR already retries
+        // enlarged images. Never search arbitrary world/chat/quest text.
+        var home = await _ui.FindCompactAsync(frame, ManagedHomeKeyArea, "Home", ct);
+        var end = await _ui.FindCompactAsync(frame, ManagedEndKeyArea, "End", ct);
+        var escape = await _ui.FindCompactAsync(frame, ManagedEscapeKeyArea, "ESC", ct);
+        return new("ocr", home?.Bounds ?? Rectangle.Empty, end?.Bounds ?? Rectangle.Empty,
+            escape?.Bounds ?? Rectangle.Empty,
+            $"정확 OCR Home={home is not null},End={end is not null},ESC={escape is not null}");
+    }
+
+    private async Task<bool> VerifyManagedKFrameAsync(Bitmap frame, string route,
+        ManagedWorldHudKeys expectedKeys, CancellationToken ct)
+    {
+        if (HasManagedKEntryBlockingModal(frame) || HasFixedProcessingHubVisual(frame) ||
+            HasManagedProcessingBottomTabVisual(frame) || HasManagedFoodCraftingNavigationVisual(frame))
+            return false;
+        if (route == "key-labels")
+        {
+            var keys = expectedKeys.Method == "glyph" ? DetectManagedWorldHudKeys(frame) :
+                await ReadManagedWorldHudKeysAsync(frame, ct);
+            return HasManagedKEntryFieldHudVisual(frame) && expectedKeys.IsConsecutiveWith(keys);
+        }
+        var hud = DetectManagedWorldHudTemplates(frame);
+        return route switch
+        {
+            "templates" => hud.Matched >= 3,
+            "K/I" => hud.KFound && hud.IFound && HasManagedKEntryFieldHudVisual(frame),
+            "Home/End" => hud.HomeFound && hud.EndFound && HasManagedKEntryFieldHudVisual(frame),
+            _ => false
+        };
+    }
+
+    internal static bool HasManagedFoodCraftingNavigationVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        static int Count(Bitmap image, Rectangle area, bool cyan = false)
+        {
+            int n = 0;
+            for (int y = area.Top; y < area.Bottom; y += 2)
+            for (int x = area.Left; x < area.Right; x += 2)
+            {
+                Color p = image.GetPixel(x, y);
+                if (cyan ? p.G >= 100 && p.B >= 130 && p.B >= p.R + 50 :
+                    Math.Min(p.R, Math.Min(p.G, p.B)) >= 140 &&
+                    Math.Max(p.R, Math.Max(p.G, p.B)) - Math.Min(p.R, Math.Min(p.G, p.B)) <= 45)
+                    n++;
+            }
+            return n;
+        }
+        // Active cyan '빠른 제작', three separate navigation labels and a
+        // bright list header. Darkened detail sheets do not satisfy this proof.
+        return Count(frame, new(12, 35, 190, 40)) >= 18 &&
+               Count(frame, new(240, 940, 90, 40), true) >= 12 &&
+               Count(frame, new(325, 940, 75, 40)) >= 8 &&
+               Count(frame, new(410, 940, 75, 40)) >= 8 &&
+               Count(frame, new(490, 940, 85, 40)) >= 8;
+    }
+
+    private async Task<bool> TrySelectManagedFoodCraftingTabAsync(Bitmap first, AlteringPlan plan,
+        AlteringFacilityEntryDirective directive, bool inputAlreadyIssued, CancellationToken ct)
+    {
+        Rectangle header = new(12, 24, 220, 65), tab = new(325, 935, 75, 50);
+        if (!HasManagedFoodCraftingNavigationVisual(first) ||
+            await _ui.FindUniqueAsync(first, header, "음식 제작", ct) is null) return false;
+        if (inputAlreadyIssued) Fail(first, "음식 제작 메뉴에서 가공 탭 전환 미확인 · 중복 입력 없이 정지");
+        if (HasManagedKEntryBlockingModal(first)) Fail(first, "음식 제작 메뉴 위 확인창 감지 · 입력 차단");
+        var firstTab = await _ui.FindUniqueAsync(first, tab, "가공", ct);
+        if (firstTab is null) Fail(first, "음식 제작 메뉴 가공 탭 정확한 글자 미확인 · 입력 차단");
+        await Task.Delay(160, ct);
+        using var second = Capture(ct);
+        var secondTab = await _ui.FindUniqueAsync(second, tab, "가공", ct);
+        if (!HasManagedFoodCraftingNavigationVisual(second) || HasManagedKEntryBlockingModal(second) ||
+            await _ui.FindUniqueAsync(second, header, "음식 제작", ct) is null || secondTab is null ||
+            !ProductionUiRuntime.Stable(firstTab!.Value.Bounds, secondTab.Value.Bounds))
+            Fail(second, "음식 제작 메뉴/가공 탭 연속 2프레임 확인 실패 · 입력 차단");
+        await RequireManagedIdleAsync(plan, directive, "음식 제작에서 가공 탭 복귀 직전", ct);
+        await _ui.ClickVerifiedFreshAsync(secondTab!.Value.Center, async fresh =>
+        {
+            if (!HasManagedFoodCraftingNavigationVisual(fresh) || HasManagedKEntryBlockingModal(fresh) ||
+                await _ui.FindUniqueAsync(fresh, header, "음식 제작", ct) is null) return false;
+            var current = await _ui.FindUniqueAsync(fresh, tab, "가공", ct);
+            return current is not null && ProductionUiRuntime.Stable(secondTab.Value.Bounds, current.Value.Bounds);
+        }, ct);
+        Log?.Invoke("[자동 가공] 음식 제작 메뉴 정확 인증 · 가공 탭 1회 선택 · K/Esc 없이 허브 전환 확인");
+        return true;
+    }
+
     // K is safe only in an idle, modal-free and non-menu world context.
     // CLI idle is checked separately IMMEDIATELY before the real input.
     internal static bool CanAuthorizeManagedKEntry(
         bool firstEntry, int firstHudMatches, int secondHudMatches,
         bool popupVisible, bool processingMenuVisible)
         => !popupVisible && !processingMenuVisible &&
-           (firstEntry || (firstHudMatches >= 3 && secondHudMatches >= 3));
+           firstHudMatches >= 3 && secondHudMatches >= 3;
 
     // V3.2.0: the fallback does not relax the standard 3/4 threshold.
     // K and I must BOTH match and the field minimap/K-disc pixels must BOTH
