@@ -25,5 +25,7 @@
     "Incident fixtures were included in regression development, not a held-out evaluation.",
     "First K input, food-menu tab switch, completed steel receipt and user-PC update/rollback remain unverified.",
     "V3.2.55 remains published. Stop running F9 jobs and back up files, configuration and progress records before updating."
-  ]
+  ],
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
 }
