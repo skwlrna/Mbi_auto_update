@@ -2850,11 +2850,12 @@ var fiveHundredAuto = new AlteringAutomation(
 var first500RawBatch = await fiveHundredAuto.RunBatchAsync(
     fiveHundredPlan, 1, default);
 Check(first500RawBatch == AlteringRunResult.BatchQueued &&
-      fiveHundredHides.Queued.SequenceEqual(new[] { "가죽", "가죽+" }) &&
-      fiveHundredHides.Count("생가죽") == 490 &&
+      fiveHundredHides.Queued.Count(x => x == "가죽") == 7 &&
+      fiveHundredHides.Queued.Count(x => x == "가죽+") == 1 &&
+      fiveHundredHides.Count("생가죽") == 430 &&
       fiveHundredHides.GatherStarts == 0 &&
       fiveHundredAuto.ReservedWings == 0,
-    "500 raw hides + sufficient tannin starts 200-target via intermediate leather, not raw exhaustion");
+    "500 hides + one ticket of tannin allows seven leather intermediates and the first parent work");
 
 // With adequate confirmed stock, one F9 pass fills seven dependency
 // tickets, receives the completed batch, and fills seven parent tickets.
