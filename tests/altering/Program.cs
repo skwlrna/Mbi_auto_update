@@ -2832,6 +2832,30 @@ Check(leatherChainResult == AlteringRunResult.BatchQueued &&
       leatherChainAuto.ReservedWings == 0,
     "recursive leather chain crafts intermediate before parent without raw gathering or wings");
 
+// Customer-reported raw inventory: 500 생가죽 but zero ordinary 가죽.
+// The 200-target must start one verified leather ticket instead of treating
+// the final target quantity or missing intermediate as a raw exhaustion.
+var fiveHundredHides = new RecursiveProductionWorld { IncludeLeather = true };
+fiveHundredHides.SetCount("생가죽", 500);
+fiveHundredHides.SetCount("타닌 가루", 4);
+var fiveHundredResolver = new RecursiveAlteringSupplyResolver(
+    fiveHundredHides, fiveHundredHides, fiveHundredHides, fiveHundredHides,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var fiveHundredPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 3, false);
+var fiveHundredAuto = new AlteringAutomation(
+    fiveHundredHides, fiveHundredHides,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, fiveHundredResolver);
+var first500RawBatch = await fiveHundredAuto.RunBatchAsync(
+    fiveHundredPlan, 1, default);
+Check(first500RawBatch == AlteringRunResult.BatchQueued &&
+      fiveHundredHides.Queued.SequenceEqual(new[] { "가죽", "가죽+" }) &&
+      fiveHundredHides.Count("생가죽") == 490 &&
+      fiveHundredHides.GatherStarts == 0 &&
+      fiveHundredAuto.ReservedWings == 0,
+    "500 raw hides + sufficient tannin starts 200-target via intermediate leather, not raw exhaustion");
+
 // Synthetic full chain: upper leather -> leather+ -> leather. The
 // fixture's recipe costs are test data, not a statement about live CLI.
 var upperLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
