@@ -253,11 +253,29 @@ internal interface IAlteringSupplyResolver
 
 internal static class LeatherRawMaterialPolicy
 {
-    // Leather inputs are raw materials: do not recursively craft or auto-gather
-    // replacements when a leather-facility recipe runs out of ingredients.
+    // Only externally supplied raw hides are terminal. 가죽 and 가죽+ are
+    // craftable intermediates: send their shortage through the existing
+    // recursive crafting scheduler. Do not auto-gather/purchase hides or tannin.
+    internal static bool IsExternalRaw(string itemName)
+    {
+        string normalized = itemName.Replace(" ", "", StringComparison.Ordinal);
+        return normalized.Contains("생가죽", StringComparison.Ordinal) ||
+               string.Equals(normalized, "타닌가루", StringComparison.Ordinal);
+    }
+
     internal static bool EndsOnShortage(AlteringPlan plan, AlteringRecipe recipe)
         => plan.FacilityName == "가죽 가공 시설" &&
-           recipe.MissingIngredients.Count > 0;
+           recipe.MissingIngredients.Any(x => IsExternalRaw(x.DisplayName));
+}
+
+// V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
+// that the game item can never be acquired. No purchase, CLI write or click.
+internal sealed class MaterialSupplyHoldException : InvalidOperationException
+{
+    internal MaterialSupplyHold Evidence { get; }
+    internal MaterialSupplyHoldException(MaterialSupplyHold evidence)
+        : base("현재 허용된 자동 확보 경로 미확인 · " + evidence.Category)
+        => Evidence = evidence;
 }
 
 internal enum AlteringRunResult
@@ -741,7 +759,31 @@ internal sealed class AlteringAutomation
                             Log?.Invoke(
                                 $"[자동 가공] 재료 해결 진입 · {plan.DisplayName} · " +
                                 "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
-                            await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
+                            try
+                            {
+                                // Leather materials are prepared one confirmed ticket
+                                // at a time. Requiring all 67 tickets' raw stock
+                                // before the first one would suppress partial output.
+                                int supplyWorks = plan.FacilityName == "가죽 가공 시설"
+                                    ? 1 : remainingWorks;
+                                await _supplyResolver.ResolveAsync(plan, recipe, supplyWorks, ct);
+                            }
+                            catch (MaterialSupplyHoldException hold)
+                                when (plan.FacilityName == "가죽 가공 시설" &&
+                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item))
+                            {
+                                rawMaterialExhausted = true;
+                                if (_session is not null)
+                                    SaveSession(_session with
+                                    {
+                                        RawMaterialExhausted = true,
+                                        Stage = "외부 가죽 원재료 부족 · 신규 등록 중단"
+                                    });
+                                Log?.Invoke($"[자동 가공] 외부 가죽 원재료 부족 · " +
+                                            $"{hold.Evidence.Item} {hold.Evidence.Observed}/{hold.Evidence.Required} · " +
+                                            "생가죽 계열/타닌 가루 자동 확보 없이 해당 품목만 종료");
+                                break;
+                            }
 
                             recipes = await _data.RecipesAsync(ct);
                             selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();

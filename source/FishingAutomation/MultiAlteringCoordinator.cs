@@ -138,16 +138,6 @@ internal sealed class MultiAlteringFacilityBottleneckTracker
     }
 }
 
-// V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
-// that the game item can never be acquired. No purchase, CLI write or click.
-internal sealed class MaterialSupplyHoldException : InvalidOperationException
-{
-    internal MaterialSupplyHold Evidence { get; }
-    internal MaterialSupplyHoldException(MaterialSupplyHold evidence)
-        : base("현재 허용된 자동 확보 경로 미확인 · " + evidence.Category)
-        => Evidence = evidence;
-}
-
 internal static class MaterialSupplyRoutePolicy
 {
     // Scan the currently selected recipe and recursive *known* producers
@@ -176,6 +166,10 @@ internal static class MaterialSupplyRoutePolicy
             if (current < 0)
                 throw new InvalidDataException("확인되지 않은 음수 재고는 재료 경로 판정에 사용하지 않습니다.");
             if (current >= required) return null;
+            // Raw hides (including higher-tier hides) and tannin must be
+            // supplied by the player. They are not automatic gather/craft inputs.
+            if (LeatherRawMaterialPolicy.IsExternalRaw(item))
+                return new(item, required, current, "external_leather_raw_missing");
             if (depth >= 6 || !path.Add(item))
                 return new(item, required, current, "recursive_route_unverified");
             try

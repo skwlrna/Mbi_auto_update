@@ -298,15 +298,18 @@ public sealed partial class MainForm
                 RefreshProductionDashboard();
             });
 
-            // V3.2.40: inspect food supply using current read-only CLI evidence.
-            // Missing from the gathering catalog is NOT proof that an item is
-            // unobtainable; unknown routes are held without purchases or clicks.
-            async Task<MaterialSupplyHold?> InspectFoodRouteAsync(
+            // Food follows existing route checks. Leather may recursively craft
+            // intermediate hides, but external raw hides/tannin must never be
+            // auto-gathered or purchased. Inspect before any movement or input.
+            async Task<MaterialSupplyHold?> InspectSupplyRouteAsync(
                 AlteringPlan plan, CancellationToken ct,
                 AlteringRecipe? selectedShortageEvidence = null)
             {
-                if (!string.Equals(plan.FacilityName, "식재료 가공 시설",
-                    StringComparison.Ordinal)) return null;
+                bool food = string.Equals(plan.FacilityName, "식재료 가공 시설",
+                    StringComparison.Ordinal);
+                bool leather = string.Equals(plan.FacilityName, "가죽 가공 시설",
+                    StringComparison.Ordinal);
+                if (!food && !leather) return null;
                 var liveRecipes = await managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "food-route-recipes",
                     rawAlteringData.RecipesAsync, ct);
@@ -316,7 +319,7 @@ public sealed partial class MainForm
                 if (selected is null || selected.ProducedPerWork != plan.ProducedPerWork ||
                     AlteringFacilityResolver.Resolve(selected) != plan.FacilityName)
                     throw new InvalidOperationException(
-                        "음식 재료 확인 중 제법 동일성이 불명확해 기존 입력을 중단합니다.");
+                        "재료 경로 확인 중 제법 동일성이 불명확해 기존 입력을 중단합니다.");
                 if (selected.Alterable) return null;
                 // The current global CLI may mask a concrete previously
                 // selected shortage behind queue_full from another facility.
@@ -334,8 +337,14 @@ public sealed partial class MainForm
                 var catalog = await managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "food-route-catalog",
                     gatheringData.CatalogAsync, ct);
+                // F9 registers one ticket at a time. For leather, require
+                // enough raw input for the next ticket, not the entire target;
+                // a partial stock may still produce useful confirmed work.
+                var inspectionPlan = leather
+                    ? plan with { TargetQuantity = plan.ProducedPerWork }
+                    : plan;
                 return await MaterialSupplyRoutePolicy.FindHoldAsync(
-                    plan, evidence, liveRecipes, catalog,
+                    inspectionPlan, evidence, liveRecipes, catalog,
                     (name, token) => managerState.ReadWithRecoveryAsync(
                         LifeSkillStage.Altering, "food-route-inventory",
                         inner => rawAlteringData.ItemCountAsync(name, inner), token),
@@ -424,7 +433,7 @@ public sealed partial class MainForm
                     var supported = new List<MultiAlteringSupplyPreflight>();
                     foreach (var shortage in initialShortages)
                     {
-                        var hold = await InspectFoodRouteAsync(
+                        var hold = await InspectSupplyRouteAsync(
                             shortage.Plan, token, shortage.Recipe);
                         if (hold is null) supported.Add(shortage);
                         else _log.Write(
@@ -584,19 +593,28 @@ public sealed partial class MainForm
                         LifeSkillStage.Altering, "preflight-works",
                         rawAlteringData.WorksAsync, ct), ct);
                 bool occupied = liveWorks.Any(x => x.FacilityName == plan.FacilityName);
-                // Leather is raw material: do not pre-gather or recursively
-                // manufacture a replacement. The batch engine records a normal
-                // partial terminal state once already-queued works finish.
-                // A safe read-only hold must be decided BEFORE material
-                // gathering, movement or any processing registration.
+                // Leather raw hides and tannin are terminal for this selected
+                // item (not a 30-second HOLD). Let the established batch engine
+                // persist the terminal state and safely receive existing jobs.
+                // Unknown routes still use the ordinary isolated HOLD.
                 var unavailable = await ReadBeforeInputAsync(
-                    "preflight-food-route", () => InspectFoodRouteAsync(plan, ct), ct);
+                    "preflight-supply-route", () => InspectSupplyRouteAsync(plan, ct), ct);
+                if (unavailable is not null &&
+                    plan.FacilityName == "가죽 가공 시설" &&
+                    LeatherRawMaterialPolicy.IsExternalRaw(unavailable.Item))
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공] {plan.DisplayName} 외부 원재료 부족 · " +
+                        $"{unavailable.Item} {unavailable.Observed}/{unavailable.Required} · " +
+                        "선행 채집/구매 없이 해당 품목만 종료 · 기존 등록 작업 유지"));
+                    return; // Batch engine owns durable terminal/receipt accounting.
+                }
                 if (unavailable is not null)
                     throw new MaterialSupplyHoldException(unavailable);
                 if (LeatherRawMaterialPolicy.EndsOnShortage(plan, recipe))
                 {
                     Ui(() => _log.Write(
-                        $"[다중가공] {plan.DisplayName} 가죽 원재료 부족 · 선행채집 생략 · 해당 품목만 종료 예정"));
+                        $"[다중가공] {plan.DisplayName} 생가죽 계열/타닌 가루 부족 · 자동 확보 없이 해당 품목 등록 중단"));
                     return;
                 }
                 if (recipe.MissingIngredients.Count == 0)
@@ -680,19 +698,19 @@ public sealed partial class MainForm
                 }
             }
 
-            async Task<MaterialSupplyHold?> RecheckFoodHoldAsync(
+            async Task<MaterialSupplyHold?> RecheckSupplyHoldAsync(
                 AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
             {
                 long now = await managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "food-hold-recheck",
                     inner => rawAlteringData.ItemCountAsync(prior.Item, inner), ct);
                 if (now < 0)
-                    throw new InvalidDataException("음식 재료 재고 음수 · 보류 유지 및 안전 정지");
+                    throw new InvalidDataException("재료 재고 음수 · 보류 유지 및 안전 정지");
                 if (now < prior.Required)
                     return prior with { Observed = now };
                 // Previously missing stock is now present, but no stale UI
                 // observation can directly authorize a game action.
-                return await InspectFoodRouteAsync(plan, ct);
+                return await InspectSupplyRouteAsync(plan, ct);
             }
 
             bool queueFullAtStart = plans.Any(plan =>
@@ -792,7 +810,7 @@ public sealed partial class MainForm
                 readRecipes: ct => managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "scheduler-recipes",
                     rawAlteringData.RecipesAsync, ct),
-                recheckUnavailableRoute: RecheckFoodHoldAsync,
+                recheckUnavailableRoute: RecheckSupplyHoldAsync,
                 // Only the existing F9 manifest persists the hold. No side
                 // car files, automatic character selection or unattended
                 // F10/crash input replay. The explicit recent-run verifier

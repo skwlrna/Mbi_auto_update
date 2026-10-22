@@ -296,6 +296,20 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         if (blockedRecipe.MissingIngredients.Count == 0)
             throw new InvalidOperationException($"부족 재료 목록이 없어 자동으로 해결하지 않습니다: {blockedRecipe.Reason ?? "unknown"}");
 
+        if (string.Equals(parentPlan.FacilityName, "가죽 가공 시설", StringComparison.Ordinal))
+        {
+            // Read-only recursive check before any gathering, travel or
+            // production. Never buy or gather 생가죽 tiers or tannin.
+            var knownRecipes = await _altering.RecipesAsync(ct);
+            var catalog = await _gathering.CatalogAsync(ct);
+            var nextTicket = parentPlan with { TargetQuantity = parentPlan.ProducedPerWork };
+            var hold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+                nextTicket, blockedRecipe, knownRecipes, catalog,
+                _altering.ItemCountAsync, ct);
+            if (hold is not null)
+                throw new MaterialSupplyHoldException(hold);
+        }
+
         // Pre-plan every raw shortage that can be proven from the current missing-
         // ingredient tree, then gather those raws in one field session. The planner
         // is conservative: if the CLI does not expose an ingredient because it is
@@ -406,6 +420,15 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         if (quantity <= 0) return;
         if (quantity > 1_000_000)
             throw new InvalidOperationException($"재료 자동 확보 수량이 안전 한도를 넘었습니다: {itemName} {quantity}개");
+        if (LeatherRawMaterialPolicy.IsExternalRaw(itemName))
+        {
+            long observed = await _altering.ItemCountAsync(itemName, ct);
+            // Defend the recursive entry point even when a producer exposes
+            // a previously hidden shortage after the initial preflight.
+            throw new MaterialSupplyHoldException(
+                new(itemName, checked(observed + quantity), observed,
+                    "external_leather_raw_missing"));
+        }
         if (depth >= _maxDepth)
             throw new InvalidOperationException($"재료 단계가 {_maxDepth}단계를 넘어 자동 처리를 중단합니다: {itemName}");
         if (!_active.Add(itemName))
@@ -601,6 +624,9 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 
             long shortage = await TakeAvailableAsync(itemName, demand);
             if (shortage <= 0) return;
+
+            if (LeatherRawMaterialPolicy.IsExternalRaw(itemName))
+                return; // Never schedule a free gather or raw-input purchase.
 
             var gatherable = catalog.SingleOrDefault(x => x.DisplayName == itemName);
             if (gatherable is not null)

@@ -2701,10 +2701,163 @@ Check(partialStart.Recipes.Single().Alterable &&
       partialLeatherAuto.ReservedWings == 0,
     "leather+ 200 target registers first free work with 100 raw stock; no full-target material gate");
 
-// Leather at the leather facility is a RAW input. A shortage is a normal
-// partial terminal: never invoke recursive supply or fabricate goal completion.
+// Read-only leather route inspection must follow a known craftable
+// intermediary but HOLD on an externally supplied hide shortage.
+var leatherRoutePlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+var leatherRouteRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient", [new("가죽", 3, 0)], "가죽 가공 시설");
+var leatherProducer = new AlteringRecipe("가죽", false, 3,
+    "not_enough_ingredient", [new("상급 생가죽", 10, 0)], "가죽 가공 시설");
+var leatherRouteRecipes = new[] { leatherRouteRecipe, leatherProducer };
+var leatherRouteStop = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, leatherRouteRecipe, leatherRouteRecipes,
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(0L), CancellationToken.None);
+Check(leatherRouteStop is not null &&
+      leatherRouteStop.Item == "상급 생가죽" &&
+      leatherRouteStop.Observed == 0 &&
+      leatherRouteStop.Required == 10 &&
+      leatherRouteStop.Category == "external_leather_raw_missing",
+    "read-only leather inspection follows producer and holds missing higher raw hide");
+var leatherRouteReady = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, leatherRouteRecipe, leatherRouteRecipes,
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(name == "상급 생가죽" ? 10L : 0L),
+    CancellationToken.None);
+Check(leatherRouteReady is null,
+    "enough raw hide for next leather ticket permits verified recursive crafting");
+var tanninRouteRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient", [new("타닌 가루", 2, 0)], "가죽 가공 시설");
+var tanninHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, tanninRouteRecipe, [tanninRouteRecipe],
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(0L), CancellationToken.None);
+Check(tanninHold?.Category == "external_leather_raw_missing" &&
+      tanninHold.Item == "타닌 가루" && tanninHold.Required == 2,
+    "tannin shortage pauses leather before any automatic acquisition");
+
+// Craftable 가죽 is a valid recursive ingredient, not a terminal shortage.
+var craftableLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+var craftableLeatherWorld = new FakeWorld(craftableLeather)
+    { Available = false, MissingIngredient = "가죽" };
+var craftableLeatherResolver = new FakeResolver(craftableLeatherWorld);
+var craftableLeatherAuto = new AlteringAutomation(
+    craftableLeatherWorld, craftableLeatherWorld, (_, _) => Task.CompletedTask,
+    4, craftableLeatherResolver);
+var craftableLeatherResult = await craftableLeatherAuto.RunBatchAsync(
+    craftableLeather, 1, default);
+Check(craftableLeatherResult == AlteringRunResult.BatchQueued &&
+      craftableLeatherResolver.Calls == 1 && craftableLeatherWorld.QueueCalls == 1 &&
+      craftableLeatherAuto.ReservedWings == 0,
+    "craftable leather shortage invokes recursive resolver and registers first free ticket");
+
+// Nested raw shortage must be a normal leather-item terminal, not an
+// unhandled exception that stops all independent facility workers.
+var nestedRawWorld = new FakeWorld(craftableLeather)
+    { Available = false, MissingIngredient = "가죽" };
+var nestedRawResolver = new FakeResolver(nestedRawWorld)
+    { MissingExternalRaw = "상급 생가죽" };
+var nestedRawAuto = new AlteringAutomation(
+    nestedRawWorld, nestedRawWorld, (_, ct) => Task.CompletedTask, 4,
+    nestedRawResolver);
+var nestedRawResult = await nestedRawAuto.RunAsync(craftableLeather, default);
+Check(nestedRawResult == AlteringRunResult.RawMaterialExhausted &&
+      nestedRawResolver.Calls == 1 &&
+      nestedRawWorld.QueueCalls == 0 &&
+      nestedRawAuto.ReservedWings == 0,
+    "missing nested raw hide ends only leather recipe before input with zero wings");
+
+var rawGuardWorld = new RecursiveProductionWorld();
+var rawGuardResolver = new RecursiveAlteringSupplyResolver(
+    rawGuardWorld, rawGuardWorld, rawGuardWorld, rawGuardWorld);
+bool rawGuardRejected = false;
+try
+{
+    await rawGuardResolver.ResolveExternalAsync("타닌 가루", 2, default);
+}
+catch (MaterialSupplyHoldException ex)
+{
+    rawGuardRejected = ex.Evidence.Item == "타닌 가루" &&
+        ex.Evidence.Required == 2 && ex.Evidence.Observed == 0 &&
+        ex.Evidence.Category == "external_leather_raw_missing";
+}
+Check(rawGuardRejected &&
+      rawGuardWorld.GatherStarts == 0 &&
+      rawGuardWorld.FieldExitCalls == 0 &&
+      rawGuardWorld.Queued.Count == 0,
+    "direct resolver entry refuses tannin gathering/crafting before any input");
+
+// Integration: real recursive resolver (not a fake bypass) crafts ordinary
+// leather first and then queues leather+ without gathering raw hide or tannin.
+var leatherChainWorld = new RecursiveProductionWorld { IncludeLeather = true };
+leatherChainWorld.SetCount("생가죽", 10);
+leatherChainWorld.SetCount("타닌 가루", 4);
+var leatherChainResolver = new RecursiveAlteringSupplyResolver(
+    leatherChainWorld, leatherChainWorld, leatherChainWorld, leatherChainWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var leatherChainPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+var leatherChainAuto = new AlteringAutomation(
+    leatherChainWorld, leatherChainWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, leatherChainResolver);
+var leatherChainResult = await leatherChainAuto.RunBatchAsync(
+    leatherChainPlan, 1, default);
+Check(leatherChainResult == AlteringRunResult.BatchQueued &&
+      leatherChainWorld.Queued.SequenceEqual(new[] { "가죽", "가죽+" }) &&
+      leatherChainWorld.Count("가죽") == 0 &&
+      leatherChainWorld.Count("생가죽") == 0 &&
+      leatherChainWorld.Count("타닌 가루") == 0 &&
+      leatherChainWorld.GatherStarts == 0 &&
+      leatherChainWorld.FieldExitCalls == 0 &&
+      leatherChainAuto.ReservedWings == 0,
+    "recursive leather chain crafts intermediate before parent without raw gathering or wings");
+
+// Synthetic full chain: upper leather -> leather+ -> leather. The
+// fixture's recipe costs are test data, not a statement about live CLI.
+var upperLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
+upperLeatherWorld.SetCount("생가죽", 10);
+upperLeatherWorld.SetCount("상급 생가죽", 15);
+upperLeatherWorld.SetCount("타닌 가루", 12);
+var upperLeatherResolver = new RecursiveAlteringSupplyResolver(
+    upperLeatherWorld, upperLeatherWorld, upperLeatherWorld, upperLeatherWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var upperLeatherPlan = new AlteringPlan("가죽 가공 시설", "상급 가죽", 3, 3, false);
+var upperLeatherAuto = new AlteringAutomation(
+    upperLeatherWorld, upperLeatherWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, upperLeatherResolver);
+var upperLeatherResult = await upperLeatherAuto.RunBatchAsync(
+    upperLeatherPlan, 1, default);
+Check(upperLeatherResult == AlteringRunResult.BatchQueued &&
+      upperLeatherWorld.Queued.SequenceEqual(new[] { "가죽", "가죽+", "상급 가죽" }) &&
+      upperLeatherWorld.Count("생가죽") == 0 &&
+      upperLeatherWorld.Count("상급 생가죽") == 0 &&
+      upperLeatherWorld.Count("타닌 가루") == 0 &&
+      upperLeatherWorld.GatherStarts == 0 &&
+      upperLeatherAuto.ReservedWings == 0,
+    "upper leather crafts leather then leather+ before upper recipe with no raw gathering or wings");
+
+// A missing external input anywhere in that recursive chain must hold the
+// parent before production begins, rather than starting intermediate tickets.
+var upperLeatherHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    upperLeatherPlan,
+    (await upperLeatherWorld.RecipesAsync(default)).Single(x => x.DisplayName == "상급 가죽"),
+    await upperLeatherWorld.RecipesAsync(default),
+    Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(
+        name == "상급 생가죽" ? 0L : 100L),
+    default);
+Check(upperLeatherHold is not null &&
+      upperLeatherHold.Item == "상급 생가죽" &&
+      upperLeatherHold.Category == "external_leather_raw_missing",
+    "upper leather read-only preflight refuses missing upper raw hide");
+
+// Only hide-tier raw materials and tannin stop a leather recipe.
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
-var exhaustedWorld = new FakeWorld(exhaustedLeather) { Available = false };
+var exhaustedWorld = new FakeWorld(exhaustedLeather)
+    { Available = false, MissingIngredient = "생가죽" };
 var exhaustedResolver = new FakeResolver(exhaustedWorld);
 var exhaustedAuto = new AlteringAutomation(
     exhaustedWorld, exhaustedWorld, (_, _) => Task.CompletedTask,
@@ -2714,15 +2867,25 @@ Check(exhaustedResult == AlteringRunResult.RawMaterialExhausted &&
       exhaustedWorld.QueueCalls == 0 && exhaustedResolver.Calls == 0 &&
       exhaustedAuto.ReservedWings == 0,
     "raw leather shortage terminates this recipe without replenishment, registration, or wings");
-Check(LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
+Check(!LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
           new AlteringRecipe("가죽+", false, 3, "short", [new("가죽", 1, 0)], "가죽 가공 시설")) &&
+      LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
+          new AlteringRecipe("가죽+", false, 3, "short", [new("상급 생가죽", 1, 0)], "가죽 가공 시설")) &&
+      LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
+          new AlteringRecipe("가죽+", false, 3, "short", [new("타닌 가루", 1, 0)], "가죽 가공 시설")) &&
+      LeatherRawMaterialPolicy.IsExternalRaw("생가죽") &&
+      LeatherRawMaterialPolicy.IsExternalRaw("상급 생가죽") &&
+      LeatherRawMaterialPolicy.IsExternalRaw("타닌가루") &&
+      !LeatherRawMaterialPolicy.IsExternalRaw("가죽") &&
+      !LeatherRawMaterialPolicy.IsExternalRaw("가죽+") &&
       !LeatherRawMaterialPolicy.EndsOnShortage(plan,
           new AlteringRecipe(plan.DisplayName, false, 3, "short", [new("철 광석", 1, 0)], plan.FacilityName)) &&
       MultiAlteringItemStatePolicy.IsTerminal(MultiAlteringItemState.RawMaterialExhausted) &&
       !MultiAlteringItemStatePolicy.IsTerminal(MultiAlteringItemState.InProgress),
-    "only leather-facility shortages are partial terminal, without changing other recipes");
+    "only missing external hides/tannin stop leather; intermediate leather remains craftable");
 
-var oldLeatherWork = new FakeWorld(exhaustedLeather) { Available = false };
+var oldLeatherWork = new FakeWorld(exhaustedLeather)
+    { Available = false, MissingIngredient = "생가죽" };
 oldLeatherWork.AddPending();
 var oldLeatherResult = await new AlteringAutomation(
     oldLeatherWork, oldLeatherWork, (_, _) => Task.CompletedTask, 4)
@@ -2738,7 +2901,8 @@ Check(oldLeatherResult == AlteringRunResult.RawMaterialExhausted &&
 // then the 120-second watchdog stopped all F9 work after 495 seconds.
 // Exercise the ACTUAL managed RunBatch receipt and saved resume checkpoint,
 // including exactly-one receipt, no seventh registration and no wings.
-var sixLeatherComplete = new FakeWorld(exhaustedLeather) { Available = false, Freeze = true };
+var sixLeatherComplete = new FakeWorld(exhaustedLeather)
+    { Available = false, MissingIngredient = "생가죽", Freeze = true };
 for (int i = 0; i < 6; i++) sixLeatherComplete.AddCompleted(3);
 var sixLeatherSnapshot = await sixLeatherComplete.WorksAsync(default);
 var sixLeatherLane = new FacilityLaneState(sixLeatherSnapshot);
@@ -2816,7 +2980,7 @@ finally
 // Five completed plus one running is NOT a valid managed receive-all,
 // even when leather is exhausted. Preserve the unfinished server job.
 var leatherMixedWorld = new FakeWorld(exhaustedLeather)
-    { Available = false, Freeze = true };
+    { Available = false, MissingIngredient = "생가죽", Freeze = true };
 for (int i = 0; i < 5; i++) leatherMixedWorld.AddCompleted(3);
 leatherMixedWorld.AddPending();
 var leatherMixedCheckpoint = AlteringSessionState.Create(
@@ -3379,8 +3543,8 @@ Check(riceRequests.Count == 1 &&
       riceRequests[0].Recipe.MissingIngredients.Single().DisplayName == "물이 든 병" &&
       riceRequests[0].RemainingWorks == 34,
     "F9 retains verified rice-water shortage when global queue_full masks recipe evidence");
-// Leather+ shortage must never enter the global free-gather pass.
-// The actual altering engine terminates this recipe when raw leather is absent.
+// Craftable leather shortage is handled per ticket by the recursive resolver;
+// it must not trigger the GLOBAL free-gather pass before facility activation.
 var leatherPreflightPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
 var leatherPreflightRecipe = new AlteringRecipe(
     "가죽+", false, 3, "not_enough_ingredient",
@@ -3395,7 +3559,7 @@ var mixedPreflight = MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShor
     new[] { leatherPreflightRecipe, riceSelected },
     Array.Empty<MultiAlteringSupplyPreflight>());
 Check(mixedPreflight.Count == 1 && mixedPreflight[0].Plan == ricePlan,
-    "F9 skips leather+ raw shortage but preserves other facilities' free pre-gather");
+    "F9 skips leather intermediates in global gather but preserves other facilities");
 Check(MultiAlteringMaterialPreflightPolicy.SelectInitialKnownShortages(
         new[] { leatherPreflightPlan },
         new[] { leatherPreflightRecipe with {
@@ -3406,13 +3570,13 @@ var riceResolver = new RecursiveAlteringSupplyResolver(
     riceWorld, riceWorld, riceWorld, riceWorld,
     delay: (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
     verificationAttempts: 4);
-// Defensive entry-point check: even a direct resolver call cannot gather leather.
+// Defensive entry-point check: global pre-gather cannot prematurely process leather.
 int preLeatherGatherCount = riceWorld.Gathered.Count;
 int preLeatherFieldExits = riceWorld.FieldExitCalls;
 await riceResolver.PreGatherKnownShortagesAsync(leatherPreflightEvidence, default);
 Check(riceWorld.Gathered.Count == preLeatherGatherCount &&
       riceWorld.FieldExitCalls == preLeatherFieldExits,
-    "direct F9 pre-gather call leaves raw leather inputs and game screens untouched");
+    "global pre-gather bypasses leather without touching the game screen");
 await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
 Check(riceWorld.Count("물이 든 병") >= 68 &&
       riceWorld.Gathered.SequenceEqual(new[] { "물이 든 병" }) &&
@@ -4504,6 +4668,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal bool QueuedWhileExisting;
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
+    internal string MissingIngredient = "철 광석";
     internal long? RawLeatherStock;
     internal long LeatherCost = 2;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
@@ -4516,7 +4681,7 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         var missing = available ? Array.Empty<AlteringIngredient>() :
             RawLeatherStock.HasValue
                 ? new[] { new AlteringIngredient("가죽", LeatherCost, RawLeatherStock.Value) }
-                : new[] { new AlteringIngredient("철 광석", 3, 0) };
+                : new[] { new AlteringIngredient(MissingIngredient, 3, 0) };
         var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : MissingReason, missing, _plan.FacilityName);
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
@@ -4639,10 +4804,14 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 {
     internal int Calls;
     internal bool FailBeforeLeaving;
+    internal string? MissingExternalRaw;
     public Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Calls++;
+        if (MissingExternalRaw is not null)
+            throw new MaterialSupplyHoldException(
+                new(MissingExternalRaw, 10, 0, "external_leather_raw_missing"));
         if (FailBeforeLeaving)
             throw new InvalidOperationException("M1 simulated material validation failure");
         world.Available = true;
@@ -4669,7 +4838,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal FacilityLaneState? ManagerObservedDuringGather;
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
     internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
-        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice;
+        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice, IncludeLeather;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -4723,6 +4892,19 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                         new Dictionary<string,long>(StringComparer.Ordinal) {
                             ["물이 든 병"] = 2 })
                 }
+                : Array.Empty<AlteringRecipe>())
+            .Concat(IncludeLeather
+                ? new[] {
+                    MakeRecipe("가죽", 3, "가죽 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["생가죽"] = 10 }),
+                    MakeRecipe("가죽+", 3, "가죽 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["가죽"] = 3, ["타닌 가루"] = 4 }),
+                    MakeRecipe("상급 가죽", 3, "가죽 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["가죽+"] = 3, ["상급 생가죽"] = 15, ["타닌 가루"] = 8 })
+                }
                 : Array.Empty<AlteringRecipe>()).ToArray());
     }
 
@@ -4762,6 +4944,11 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             "합금괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3 },
             "합성괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["합금괴"] = 2 },
             "밥" when IncludeRice => new Dictionary<string,long>(StringComparer.Ordinal) { ["물이 든 병"] = 2 },
+            "가죽" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) { ["생가죽"] = 10 },
+            "가죽+" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) {
+                ["가죽"] = 3, ["타닌 가루"] = 4 },
+            "상급 가죽" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) {
+                ["가죽+"] = 3, ["상급 생가죽"] = 15, ["타닌 가루"] = 8 },
             _ => throw new InvalidOperationException("unexpected recipe")
         };
         foreach (var ingredient in ingredients)

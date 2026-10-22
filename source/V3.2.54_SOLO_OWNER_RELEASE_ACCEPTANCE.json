@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "version": "V3.2.54",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "leather_recursive_intermediate_rollout",
+  "acceptedOnLocalDate": "2026-10-22",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3254",
+  "aiWatcher": "not_tested_for_v3254",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "disclosures": [
+    "User explicitly requested a public release of PR #275 leather recursive production changes in chat on 2026-10-22.",
+    "Previously published V3.2.53 remains available for rollback. This is a NEW version, not overwrite.",
+    "Actual Mabinogi Mobile game interaction for 가죽 → 가죽+ → 상급 가죽 has NOT BEEN TESTED.",
+    "Windows GitHub Actions tests are simulated/offline evidence only and cannot prove live-game safety.",
+    "Raw hides (생가죽 tier) and 타닌 가루 remain NOT auto-acquired. Missing stock terminates only leather item.",
+    "Unverified real-PC rollback and uninstall recovery: Back up installation and state before auto-update."
+  ],
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested",
+  "leatherChainRealGame": "not_tested",
+  "leatherRawShortageRealGame": "not_tested",
+  "leatherTanninShortageRealGame": "not_tested"
+}
