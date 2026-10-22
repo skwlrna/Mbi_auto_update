@@ -1,0 +1,15 @@
+{
+  "version": "V3.2.56",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "PR #278: compiled Windows regression and incident fixtures only. Live K input, food-tab transition, steel receipt, actual PC install and rollback remain unverified.",
+  "managedKFieldRealGame": "pending",
+  "foodCraftingMenuRealGame": "pending",
+  "facilityReceiptRealGame": "pending"
+}
