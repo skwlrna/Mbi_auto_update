@@ -2787,6 +2787,32 @@ Check(rawGuardRejected &&
       rawGuardWorld.Queued.Count == 0,
     "direct resolver entry refuses tannin gathering/crafting before any input");
 
+// Integration: real recursive resolver (not a fake bypass) crafts ordinary
+// leather first and then queues leather+ without gathering raw hide or tannin.
+var leatherChainWorld = new RecursiveProductionWorld { IncludeLeather = true };
+leatherChainWorld.SetCount("생가죽", 10);
+leatherChainWorld.SetCount("타닌 가루", 4);
+var leatherChainResolver = new RecursiveAlteringSupplyResolver(
+    leatherChainWorld, leatherChainWorld, leatherChainWorld, leatherChainWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var leatherChainPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+var leatherChainAuto = new AlteringAutomation(
+    leatherChainWorld, leatherChainWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, leatherChainResolver);
+var leatherChainResult = await leatherChainAuto.RunBatchAsync(
+    leatherChainPlan, 1, default);
+Check(leatherChainResult == AlteringRunResult.BatchQueued &&
+      leatherChainWorld.Queued.SequenceEqual(new[] { "가죽", "가죽+" }) &&
+      leatherChainWorld.Count("가죽") == 0 &&
+      leatherChainWorld.Count("생가죽") == 0 &&
+      leatherChainWorld.Count("타닌 가루") == 0 &&
+      leatherChainWorld.GatherStarts == 0 &&
+      leatherChainWorld.FieldExitCalls == 0 &&
+      leatherChainAuto.ReservedWings == 0,
+    "recursive leather chain crafts intermediate before parent without raw gathering or wings");
+
 // Only hide-tier raw materials and tannin stop a leather recipe.
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
 var exhaustedWorld = new FakeWorld(exhaustedLeather)
@@ -4771,7 +4797,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal FacilityLaneState? ManagerObservedDuringGather;
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
     internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
-        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice;
+        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice, IncludeLeather;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -4825,6 +4851,16 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                         new Dictionary<string,long>(StringComparer.Ordinal) {
                             ["물이 든 병"] = 2 })
                 }
+                : Array.Empty<AlteringRecipe>())
+            .Concat(IncludeLeather
+                ? new[] {
+                    MakeRecipe("가죽", 3, "가죽 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["생가죽"] = 10 }),
+                    MakeRecipe("가죽+", 3, "가죽 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["가죽"] = 3, ["타닌 가루"] = 4 })
+                }
                 : Array.Empty<AlteringRecipe>()).ToArray());
     }
 
@@ -4864,6 +4900,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             "합금괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["철괴"] = 3 },
             "합성괴" when NestedSameFacilityChain => new Dictionary<string,long>(StringComparer.Ordinal) { ["합금괴"] = 2 },
             "밥" when IncludeRice => new Dictionary<string,long>(StringComparer.Ordinal) { ["물이 든 병"] = 2 },
+            "가죽" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) { ["생가죽"] = 10 },
+            "가죽+" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) {
+                ["가죽"] = 3, ["타닌 가루"] = 4 },
             _ => throw new InvalidOperationException("unexpected recipe")
         };
         foreach (var ingredient in ingredients)
