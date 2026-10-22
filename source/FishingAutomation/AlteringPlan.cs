@@ -253,11 +253,19 @@ internal interface IAlteringSupplyResolver
 
 internal static class LeatherRawMaterialPolicy
 {
-    // Leather inputs are raw materials: do not recursively craft or auto-gather
-    // replacements when a leather-facility recipe runs out of ingredients.
+    // Only externally supplied raw hides are terminal. 가죽 and 가죽+ are
+    // craftable intermediates: send their shortage through the existing
+    // recursive crafting scheduler. Do not auto-gather/purchase hides or tannin.
+    internal static bool IsExternalRaw(string itemName)
+    {
+        string normalized = itemName.Replace(" ", "", StringComparison.Ordinal);
+        return normalized.Contains("생가죽", StringComparison.Ordinal) ||
+               string.Equals(normalized, "타닌가루", StringComparison.Ordinal);
+    }
+
     internal static bool EndsOnShortage(AlteringPlan plan, AlteringRecipe recipe)
         => plan.FacilityName == "가죽 가공 시설" &&
-           recipe.MissingIngredients.Count > 0;
+           recipe.MissingIngredients.Any(x => IsExternalRaw(x.DisplayName));
 }
 
 internal enum AlteringRunResult
