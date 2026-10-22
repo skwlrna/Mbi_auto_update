@@ -2856,6 +2856,58 @@ Check(first500RawBatch == AlteringRunResult.BatchQueued &&
       fiveHundredAuto.ReservedWings == 0,
     "500 raw hides + sufficient tannin starts 200-target via intermediate leather, not raw exhaustion");
 
+// With adequate confirmed stock, one F9 pass fills seven dependency
+// tickets, receives the completed batch, and fills seven parent tickets.
+// Recipe quantities here are synthetic fixtures, NOT live CLI recipe claims.
+var leatherSevenWorld = new RecursiveProductionWorld { IncludeLeather = true };
+leatherSevenWorld.SetCount("생가죽", 500);
+leatherSevenWorld.SetCount("타닌 가루", 28);
+var leatherSevenResolver = new RecursiveAlteringSupplyResolver(
+    leatherSevenWorld, leatherSevenWorld, leatherSevenWorld, leatherSevenWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var leatherSevenPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 200, 3, false);
+var leatherSevenAuto = new AlteringAutomation(
+    leatherSevenWorld, leatherSevenWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, leatherSevenResolver);
+var leatherSevenResult = await leatherSevenAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(leatherSevenResult == AlteringRunResult.BatchQueued &&
+      leatherSevenWorld.Queued.Count(x => x == "가죽") == 7 &&
+      leatherSevenWorld.Queued.Count(x => x == "가죽+") == 7 &&
+      leatherSevenWorld.Queued.Take(7).All(x => x == "가죽") &&
+      leatherSevenWorld.Queued.Skip(7).Take(7).All(x => x == "가죽+") &&
+      leatherSevenWorld.Count("생가죽") == 430 &&
+      leatherSevenWorld.Count("타닌 가루") == 0 &&
+      leatherSevenWorld.GatherStarts == 0 &&
+      leatherSevenAuto.ReservedWings == 0,
+    "500 hides: leather seven-slot child batch and seven-slot parent batch, no gathering or wings");
+
+// Insufficient raw stock for a full seven-slot batch must not prevent the
+// first three safe tickets. Once hides run low, child receipts can satisfy
+// the next parent ticket without inventing the missing fourth input.
+var leatherPartialWorld = new RecursiveProductionWorld { IncludeLeather = true };
+leatherPartialWorld.SetCount("생가죽", 35);
+leatherPartialWorld.SetCount("타닌 가루", 28);
+var leatherPartialResolver = new RecursiveAlteringSupplyResolver(
+    leatherPartialWorld, leatherPartialWorld, leatherPartialWorld, leatherPartialWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var leatherPartialAuto = new AlteringAutomation(
+    leatherPartialWorld, leatherPartialWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, leatherPartialResolver);
+var leatherPartialResult = await leatherPartialAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(leatherPartialResult == AlteringRunResult.BatchQueued &&
+      leatherPartialWorld.Queued.Count(x => x == "가죽") == 3 &&
+      leatherPartialWorld.Queued.Count(x => x == "가죽+") == 3 &&
+      leatherPartialWorld.Count("생가죽") == 5 &&
+      leatherPartialWorld.GatherStarts == 0 &&
+      leatherPartialAuto.ReservedWings == 0,
+    "35 hides produce three leather and three leather+ tickets safely; remaining raw short does not block partial receipt");
+
 // Synthetic full chain: upper leather -> leather+ -> leather. The
 // fixture's recipe costs are test data, not a statement about live CLI.
 var upperLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
