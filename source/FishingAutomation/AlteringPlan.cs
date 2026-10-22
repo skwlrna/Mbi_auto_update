@@ -268,6 +268,16 @@ internal static class LeatherRawMaterialPolicy
            recipe.MissingIngredients.Any(x => IsExternalRaw(x.DisplayName));
 }
 
+// V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
+// that the game item can never be acquired. No purchase, CLI write or click.
+internal sealed class MaterialSupplyHoldException : InvalidOperationException
+{
+    internal MaterialSupplyHold Evidence { get; }
+    internal MaterialSupplyHoldException(MaterialSupplyHold evidence)
+        : base("현재 허용된 자동 확보 경로 미확인 · " + evidence.Category)
+        => Evidence = evidence;
+}
+
 internal enum AlteringRunResult
 {
     Completed,
