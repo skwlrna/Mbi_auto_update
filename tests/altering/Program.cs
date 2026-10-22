@@ -2701,6 +2701,41 @@ Check(partialStart.Recipes.Single().Alterable &&
       partialLeatherAuto.ReservedWings == 0,
     "leather+ 200 target registers first free work with 100 raw stock; no full-target material gate");
 
+// Read-only leather route inspection must follow a known craftable
+// intermediary but HOLD on an externally supplied hide shortage.
+var leatherRoutePlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+var leatherRouteRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient", [new("가죽", 3, 0)], "가죽 가공 시설");
+var leatherProducer = new AlteringRecipe("가죽", false, 3,
+    "not_enough_ingredient", [new("상급 생가죽", 10, 0)], "가죽 가공 시설");
+var leatherRouteRecipes = new[] { leatherRouteRecipe, leatherProducer };
+var leatherRouteStop = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, leatherRouteRecipe, leatherRouteRecipes,
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(0L), CancellationToken.None);
+Check(leatherRouteStop is not null &&
+      leatherRouteStop.Item == "상급 생가죽" &&
+      leatherRouteStop.Observed == 0 &&
+      leatherRouteStop.Required == 10 &&
+      leatherRouteStop.Category == "external_leather_raw_missing",
+    "read-only leather inspection follows producer and holds missing higher raw hide");
+var leatherRouteReady = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, leatherRouteRecipe, leatherRouteRecipes,
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(name == "상급 생가죽" ? 10L : 0L),
+    CancellationToken.None);
+Check(leatherRouteReady is null,
+    "enough raw hide for next leather ticket permits verified recursive crafting");
+var tanninRouteRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient", [new("타닌 가루", 2, 0)], "가죽 가공 시설");
+var tanninHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, tanninRouteRecipe, [tanninRouteRecipe],
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(0L), CancellationToken.None);
+Check(tanninHold?.Category == "external_leather_raw_missing" &&
+      tanninHold.Item == "타닌 가루" && tanninHold.Required == 2,
+    "tannin shortage pauses leather before any automatic acquisition");
+
 // Craftable 가죽 is a valid recursive ingredient, not a terminal shortage.
 var craftableLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
 var craftableLeatherWorld = new FakeWorld(craftableLeather)
