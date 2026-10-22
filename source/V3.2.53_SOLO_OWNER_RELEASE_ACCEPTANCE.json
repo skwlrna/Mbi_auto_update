@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "version": "V3.2.53",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "ai_autofix_recovery_and_regression_registry",
+  "acceptedOnLocalDate": "2026-10-22",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3253",
+  "aiWatcher": "not_tested_for_v3253",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "disclosures": [
+    "User explicitly requested a stable release of PR #271 AI changes.",
+    "V3.2.52 leather F9 first-ticket diagnostics and shortage guard preserved without edits.",
+    "Real Codex execution, local 29-worktree recovery, live-game interaction and real PC rollback are NOT TESTED.",
+    "Windows CI only, may still be encountered by public auto-updater users; independent backups and rollback steps required.",
+    "Do not fabricate successful repair, inventory cleanup, game behavior or PC acceptance."
+  ]
+}
