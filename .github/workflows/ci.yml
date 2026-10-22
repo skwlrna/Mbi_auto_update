@@ -1516,8 +1516,9 @@ jobs:
           # another facility transition is proven, or stall/remote recovery fires.
           $materialEntry = [regex]::Match(
               $alteringPlan,
-              'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, remainingWorks, ct\);').Value
+              'SaveStage\("재료 해결 · "[\s\S]*?await _supplyResolver\.ResolveAsync\(plan, recipe, supplyWorks, ct\);').Value
           if ([string]::IsNullOrWhiteSpace($materialEntry) -or
+              $materialEntry -notmatch 'int supplyWorks = plan\.FacilityName == "가죽 가공 시설"[\s\S]*?\? 1 : remainingWorks;' -or
               $materialEntry -match '_facilityState\?\.InvalidateOnsite' -or
               $materialEntry -notmatch '실제 필드/타 시설 이탈 전 현장확정 유지' -or
               $alterTests -notmatch 'M1: material inspection and same-facility resolution without travel retain manager onsite' -or
