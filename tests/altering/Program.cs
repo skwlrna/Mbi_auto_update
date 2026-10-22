@@ -2751,6 +2751,42 @@ Check(craftableLeatherResult == AlteringRunResult.BatchQueued &&
       craftableLeatherAuto.ReservedWings == 0,
     "craftable leather shortage invokes recursive resolver and registers first free ticket");
 
+// Nested raw shortage must be a normal leather-item terminal, not an
+// unhandled exception that stops all independent facility workers.
+var nestedRawWorld = new FakeWorld(craftableLeather)
+    { Available = false, MissingIngredient = "가죽" };
+var nestedRawResolver = new FakeResolver(nestedRawWorld)
+    { MissingExternalRaw = "상급 생가죽" };
+var nestedRawAuto = new AlteringAutomation(
+    nestedRawWorld, nestedRawWorld, (_, ct) => Task.CompletedTask, 4,
+    nestedRawResolver);
+var nestedRawResult = await nestedRawAuto.RunAsync(craftableLeather, default);
+Check(nestedRawResult == AlteringRunResult.RawMaterialExhausted &&
+      nestedRawResolver.Calls == 1 &&
+      nestedRawWorld.QueueCalls == 0 &&
+      nestedRawAuto.ReservedWings == 0,
+    "missing nested raw hide ends only leather recipe before input with zero wings");
+
+var rawGuardWorld = new RecursiveProductionWorld();
+var rawGuardResolver = new RecursiveAlteringSupplyResolver(
+    rawGuardWorld, rawGuardWorld, rawGuardWorld, rawGuardWorld);
+bool rawGuardRejected = false;
+try
+{
+    await rawGuardResolver.ResolveExternalAsync("타닌 가루", 2, default);
+}
+catch (MaterialSupplyHoldException ex)
+{
+    rawGuardRejected = ex.Evidence.Item == "타닌 가루" &&
+        ex.Evidence.Required == 2 && ex.Evidence.Observed == 0 &&
+        ex.Evidence.Category == "external_leather_raw_missing";
+}
+Check(rawGuardRejected &&
+      rawGuardWorld.GatherStarts == 0 &&
+      rawGuardWorld.FieldExitCalls == 0 &&
+      rawGuardWorld.Queued.Count == 0,
+    "direct resolver entry refuses tannin gathering/crafting before any input");
+
 // Only hide-tier raw materials and tannin stop a leather recipe.
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
 var exhaustedWorld = new FakeWorld(exhaustedLeather)
@@ -4701,10 +4737,14 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
 {
     internal int Calls;
     internal bool FailBeforeLeaving;
+    internal string? MissingExternalRaw;
     public Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Calls++;
+        if (MissingExternalRaw is not null)
+            throw new MaterialSupplyHoldException(
+                new(MissingExternalRaw, 10, 0, "external_leather_raw_missing"));
         if (FailBeforeLeaving)
             throw new InvalidOperationException("M1 simulated material validation failure");
         world.Available = true;
