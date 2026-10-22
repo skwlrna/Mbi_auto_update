@@ -3410,6 +3410,44 @@ Check(integratedLeatherResult == AlteringRunResult.BatchQueued &&
 if (Directory.Exists(integratedLeatherDir))
     Directory.Delete(integratedLeatherDir, recursive: true);
 
+// Partial stock on the real dependency coordinator must safely drain the
+// three-slot child, release its lease, then use those three outputs. A fake
+// resolver alone would miss a terminal-state / scheduler deadlock.
+var integratedPartialWorld = new RecursiveProductionWorld { IncludeLeather = true };
+integratedPartialWorld.SetCount("생가죽", 35);
+integratedPartialWorld.SetCount("타닌 가루", 28);
+string integratedPartialDir = Path.Combine(
+    Path.GetTempPath(), "mabi-partial-leather-" + Guid.NewGuid().ToString("N"));
+var integratedPartialLane = new FacilityLaneState(
+    await integratedPartialWorld.WorksAsync(default));
+var integratedPartialScheduler = new MultiAlteringDependencyScheduler(
+    integratedPartialWorld, integratedPartialWorld, testIdentity,
+    integratedPartialDir,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: integratedPartialLane);
+var integratedPartialResolver = new RecursiveAlteringSupplyResolver(
+    integratedPartialWorld, integratedPartialWorld,
+    integratedPartialWorld, integratedPartialWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, dependencyScheduler: integratedPartialScheduler);
+var integratedPartialAuto = new AlteringAutomation(
+    integratedPartialWorld, integratedPartialWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, integratedPartialResolver, facilityState: integratedPartialLane);
+var integratedPartialResult = await integratedPartialAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(integratedPartialResult == AlteringRunResult.BatchQueued &&
+      integratedPartialWorld.Queued.Count(x => x == "가죽") == 3 &&
+      integratedPartialWorld.Queued.Count(x => x == "가죽+") == 3 &&
+      integratedPartialWorld.Count("생가죽") == 5 &&
+      integratedPartialLane.Snapshot("가죽 가공 시설").IntermediateRegisteredWorks == 3 &&
+      !integratedPartialLane.Snapshot("가죽 가공 시설").IntermediateLease &&
+      integratedPartialWorld.GatherStarts == 0 &&
+      integratedPartialAuto.ReservedWings == 0,
+    "real dependency coordinator uses 3 confirmed child receipts under 35 hides and returns partial stock to parent");
+if (Directory.Exists(integratedPartialDir))
+    Directory.Delete(integratedPartialDir, recursive: true);
+
 var scheduledWorld = new RecursiveProductionWorld();
 scheduledWorld.AddExternalWork(
     "강철괴",
