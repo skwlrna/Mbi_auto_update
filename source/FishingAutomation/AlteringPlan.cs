@@ -764,9 +764,9 @@ internal sealed class AlteringAutomation
                                 // Leather materials are prepared one confirmed ticket
                                 // at a time. Requiring all 67 tickets' raw stock
                                 // before the first one would suppress partial output.
-                                if (plan.FacilityName == "가죽 가공 시설")
-                                    remainingWorks = 1;
-                                await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
+                                int supplyWorks = plan.FacilityName == "가죽 가공 시설"
+                                    ? 1 : remainingWorks;
+                                await _supplyResolver.ResolveAsync(plan, recipe, supplyWorks, ct);
                             }
                             catch (MaterialSupplyHoldException hold)
                                 when (plan.FacilityName == "가죽 가공 시설" &&
