@@ -749,7 +749,31 @@ internal sealed class AlteringAutomation
                             Log?.Invoke(
                                 $"[자동 가공] 재료 해결 진입 · {plan.DisplayName} · " +
                                 "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
-                            await _supplyResolver.ResolveAsync(plan, recipe, remainingWorks, ct);
+                            try
+                            {
+                                // Leather materials are prepared one confirmed ticket
+                                // at a time. Requiring all 67 tickets' raw stock
+                                // before the first one would suppress partial output.
+                                int supplyWorks = plan.FacilityName == "가죽 가공 시설"
+                                    ? 1 : remainingWorks;
+                                await _supplyResolver.ResolveAsync(plan, recipe, supplyWorks, ct);
+                            }
+                            catch (MaterialSupplyHoldException hold)
+                                when (plan.FacilityName == "가죽 가공 시설" &&
+                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item))
+                            {
+                                rawMaterialExhausted = true;
+                                if (_session is not null)
+                                    SaveSession(_session with
+                                    {
+                                        RawMaterialExhausted = true,
+                                        Stage = "외부 가죽 원재료 부족 · 신규 등록 중단"
+                                    });
+                                Log?.Invoke($"[자동 가공] 외부 가죽 원재료 부족 · " +
+                                            $"{hold.Evidence.Item} {hold.Evidence.Observed}/{hold.Evidence.Required} · " +
+                                            "생가죽 계열/타닌 가루 자동 확보 없이 해당 품목만 종료");
+                                break;
+                            }
 
                             recipes = await _data.RecipesAsync(ct);
                             selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();
