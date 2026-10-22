@@ -350,7 +350,14 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
 
             Log?.Invoke($"[재료 해결] {parentPlan.DisplayName} -> {missing.DisplayName} 부족 {deficit}개 " +
                         $"(현재 {current} / 남은 작업 기준 {requiredTotal})");
-            await ResolveItemAsync(missing.DisplayName, deficit, parentPlan, 0, ct);
+            // A leather batch may speculatively prepare up to seven parent
+            // tickets. Only the next confirmed ticket is compulsory; stop a
+            // child at a later genuine raw shortage and use verified partial
+            // output instead of discarding the entire batch.
+            long minimumDeficit = parentPlan.FacilityName == "가죽 가공 시설"
+                ? Math.Max(1, missing.Required - current) : deficit;
+            await ResolveItemAsync(
+                missing.DisplayName, deficit, parentPlan, 0, ct, minimumDeficit);
         }
     }
 
@@ -415,9 +422,13 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         long quantity,
         AlteringPlan? sourceRecipe,
         int depth,
-        CancellationToken ct)
+        CancellationToken ct,
+        long? minimumQuantity = null)
     {
         if (quantity <= 0) return;
+        long minimum = minimumQuantity ?? quantity;
+        if (minimum <= 0 || minimum > quantity)
+            throw new ArgumentOutOfRangeException(nameof(minimumQuantity));
         if (quantity > 1_000_000)
             throw new InvalidOperationException($"재료 자동 확보 수량이 안전 한도를 넘었습니다: {itemName} {quantity}개");
         if (LeatherRawMaterialPolicy.IsExternalRaw(itemName))
@@ -517,7 +528,10 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                     long requiredTotal = checked(missing.Required * (long)subPlan.RequiredWorks);
                     long deficit = Math.Max(0, requiredTotal - current);
                     if (deficit > 0)
-                        await ResolveItemAsync(missing.DisplayName, deficit, subPlan, depth + 1, ct);
+                        await ResolveItemAsync(
+                            missing.DisplayName, deficit, subPlan, depth + 1, ct,
+                            subPlan.FacilityName == "가죽 가공 시설"
+                                ? Math.Max(1, missing.Required - current) : deficit);
                 }
 
                 recipes = await _altering.RecipesAsync(ct);
@@ -546,7 +560,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                     outputBefore,
                     checked((int)quantity),
                     this,
-                    ct);
+                    ct,
+                    minimumAdditionalQuantity: checked((int)minimum));
             }
             else
             {
@@ -568,10 +583,12 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 : await _managerState.ReadFreshCountAsync(
                     LifeSkillStage.Altering, subPlan.OutputName,
                     _altering.ItemCountAsync, ct);
-            if (outputAfter - outputBefore < quantity)
+            if (outputAfter - outputBefore < minimum)
                 throw new InvalidOperationException(
-                    $"{subPlan.OutputName} 중간 가공 후 수량 검증 실패: +{outputAfter - outputBefore} / 필요 +{quantity}");
-            Log?.Invoke($"[재료 해결] 중간 가공 완료 · {subPlan.OutputName} +{outputAfter - outputBefore}개");
+                    $"{subPlan.OutputName} 중간 가공 후 최소 수량 검증 실패: " +
+                    $"+{outputAfter - outputBefore} / 최소 +{minimum} / 묶음 목표 +{quantity}");
+            Log?.Invoke($"[재료 해결] 중간 가공 수령·재고 확인 · {subPlan.OutputName} " +
+                $"+{outputAfter - outputBefore}개 / 묶음 목표 +{quantity}개");
         }
         finally
         {
