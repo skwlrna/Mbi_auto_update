@@ -302,6 +302,31 @@ catch(InvalidDataException) { Check(true, "missing capacity is rejected"); }
 Check(GatheringWeightPolicy.Read(101m, 100m).MustStop,
     "overfilled bag is stopped rather than treated as free space");
 
+// A read-only state observation never establishes packet ID or screen row identity.
+var stableIdle = FakeWorld.Idle;
+Check(GatheringStartCliGuard.IsStableSafeToStart(stableIdle, stableIdle, false),
+    "two fresh matching safe CLI samples may precede guarded screen flow");
+Check(!GatheringStartCliGuard.IsStableSafeToStart(
+        stableIdle, stableIdle with { IsAutoTraveling = true }, false),
+    "new travel between CLI samples blocks start without screen input");
+Check(!GatheringStartCliGuard.IsStableSafeToStart(
+        stableIdle, stableIdle with { IsInCombat = true }, false),
+    "combat in final CLI sample blocks start");
+Check(!GatheringStartCliGuard.IsStableSafeToStart(
+        stableIdle, stableIdle with { IsDialoguePlaying = true }, false),
+    "dialogue in final CLI sample blocks start");
+Check(!GatheringStartCliGuard.IsStableSafeToStart(
+        stableIdle, stableIdle with { IsAutoPlaying = true }, false),
+    "auto-play state changing between reads is unknown, not permission");
+Check(!GatheringStartCliGuard.IsStableSafeToStart(
+        stableIdle with { MainButtonState = "Stop" },
+        stableIdle with { MainButtonState = "Stop" }, false),
+    "CLI Stop flag alone cannot authorize starting another material");
+Check(GatheringStartCliGuard.IsStableSafeToStart(
+        stableIdle with { MainButtonState = "Stop" },
+        stableIdle with { MainButtonState = "Stop" }, true),
+    "stale CLI Stop allowed only after existing independent visual Stop-absence proof");
+
 var plan=new GatheringPlan("철 광석",5);
 try { (plan with {SourceRecipe=new AlteringPlan("금속 가공 시설","철괴(철 광석)",1,3,true)}).Validate(); throw new Exception("paid source accepted"); }
 catch(InvalidDataException){Check(true,"source recipe cannot enable paid altering button");}
@@ -309,6 +334,19 @@ var success=new FakeWorld();
 await new GatheringAutomation(success,success,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(success.Starts==1 && success.Stops==1 && success.Owned==106,"target counts new inventory only and stops after target");
 
+var lateTravelBeforeClick = new FakeWorld { UnsafeOnActivityRead = 3 };
+try
+{
+    await new GatheringAutomation(lateTravelBeforeClick, lateTravelBeforeClick,
+        (_, _) => Task.CompletedTask).RunAsync(plan, default);
+    throw new Exception("late auto-travel was not blocked");
+}
+catch (InvalidOperationException)
+{
+    Check(lateTravelBeforeClick.Starts == 0 && lateTravelBeforeClick.Stops == 0 &&
+          lateTravelBeforeClick.ActivityReads >= 3,
+        "travel appearing in the second preflight CLI sample prevents all screen input");
+}
 var silentComplete=new FakeWorld{SilentCompleteOnStart=true};
 await new GatheringAutomation(silentComplete,silentComplete,(_,_)=>Task.CompletedTask).RunAsync(plan,default);
 Check(silentComplete.Starts==1 && silentComplete.Owned==105 && !silentComplete.State.IsGathering && !silentComplete.State.IsAutoTraveling,
@@ -465,6 +503,7 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen, IGatheringSt
     internal static GatheringActivity Idle => new(false,false,false,false,false,false,false,"NotInDungeon",false,false,false,false,false,false,"Compass",false,"None","None");
     internal GatheringActivity State=Idle;
     internal int Starts,Stops,Gain=2;
+    internal int ActivityReads, UnsafeOnActivityRead=int.MaxValue;
     internal int PreStartCombatPolls,PostStartCombatPolls;
     internal long Owned=100;
     internal bool Tool=true,Full,IgnoreStop,TravelOnStart,SilentCompleteOnStart,StopVisible;
@@ -473,6 +512,9 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen, IGatheringSt
     public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        ActivityReads++;
+        if (Starts == 0 && ActivityReads >= UnsafeOnActivityRead)
+            return Task.FromResult(State with { IsAutoTraveling = true });
         if(Starts==0 && PreStartCombatPolls>0)
         {
             PreStartCombatPolls--;
