@@ -2724,8 +2724,27 @@ var leatherRouteReady = await MaterialSupplyRoutePolicy.FindHoldAsync(
     Array.Empty<GatherableItem>(),
     (name, ct) => Task.FromResult(name == "상급 생가죽" ? 10L : 0L),
     CancellationToken.None);
-Check(leatherRouteReady is null,
-    "enough raw hide for next leather ticket permits verified recursive crafting");
+Check(leatherRouteReady is not null &&
+      leatherRouteReady.Item == "상급 생가죽" &&
+      leatherRouteReady.Category == "leather_recipe_inventory_mismatch" &&
+      leatherRouteReady.Observed == 10,
+    "stale recipe Owned=0 vs get_items=10 must HOLD, not mislabel as raw exhaustion");
+var partialHideRecipe = new AlteringRecipe("가죽", false, 3,
+    "not_enough_ingredient", [new("생가죽", 10, 6)], "가죽 가공 시설");
+var partialHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    new AlteringPlan("가죽 가공 시설", "가죽", 3, 3, false),
+    partialHideRecipe, [partialHideRecipe], Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(6L), CancellationToken.None);
+Check(partialHideHold?.Category == "external_leather_raw_missing" &&
+      partialHideHold.Observed == 6 && partialHideHold.Required == 10,
+    "6 raw hides in inventory are insufficient for one 10-hide ticket, not zero hides");
+var conflictingHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    new AlteringPlan("가죽 가공 시설", "가죽", 3, 3, false),
+    partialHideRecipe, [partialHideRecipe], Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(0L), CancellationToken.None);
+Check(conflictingHideHold?.Category == "leather_recipe_inventory_mismatch" &&
+      conflictingHideHold.Observed == 0,
+    "recipe-owned 6 but parsed bag 0 never proves raw hide exhaustion");
 var tanninRouteRecipe = new AlteringRecipe("가죽+", false, 3,
     "not_enough_ingredient", [new("타닌 가루", 2, 0)], "가죽 가공 시설");
 var tanninHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
@@ -2867,6 +2886,38 @@ Check(exhaustedResult == AlteringRunResult.RawMaterialExhausted &&
       exhaustedWorld.QueueCalls == 0 && exhaustedResolver.Calls == 0 &&
       exhaustedAuto.ReservedWings == 0,
     "raw leather shortage terminates this recipe without replenishment, registration, or wings");
+var partialRawWorld = new FakeWorld(exhaustedLeather) {
+    Available = false, MissingIngredient = "생가죽",
+    MissingIngredientOwned = 2, MissingIngredientRequired = 3,
+    RawObservedOverride = 2
+};
+var partialRawLogs = new List<string>();
+var partialRawAuto = new AlteringAutomation(
+    partialRawWorld, partialRawWorld, (_, _) => Task.CompletedTask, 4);
+partialRawAuto.Log += partialRawLogs.Add;
+var partialRawResult = await partialRawAuto.RunAsync(exhaustedLeather, default);
+Check(partialRawResult == AlteringRunResult.RawMaterialExhausted &&
+      partialRawLogs.Any(x => x.Contains("생가죽 2/3", StringComparison.Ordinal)) &&
+      partialRawLogs.Any(x => x.Contains("원재료 부족", StringComparison.Ordinal)) &&
+      partialRawWorld.QueueCalls == 0,
+    "positive raw hide stock below one-ticket requirement reports 2/3 shortage, not empty stock");
+var conflictingRawWorld = new FakeWorld(exhaustedLeather) {
+    Available = false, MissingIngredient = "생가죽",
+    MissingIngredientOwned = 2, MissingIngredientRequired = 3,
+    RawObservedOverride = 10
+};
+var conflictingRawAuto = new AlteringAutomation(
+    conflictingRawWorld, conflictingRawWorld, (_, _) => Task.CompletedTask, 4);
+bool heldConflict = false;
+try { await conflictingRawAuto.RunAsync(exhaustedLeather, default); }
+catch (MaterialSupplyHoldException ex) {
+    heldConflict = ex.Evidence.Category == "leather_recipe_inventory_mismatch" &&
+        ex.Evidence.Item == "생가죽" && ex.Evidence.Observed == 10;
+}
+Check(heldConflict && conflictingRawWorld.QueueCalls == 0 &&
+      conflictingRawAuto.ReservedWings == 0,
+    "recipe says 2/3 but inventory says 10: no durable raw-exhausted decision and no input");
+
 Check(!LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
           new AlteringRecipe("가죽+", false, 3, "short", [new("가죽", 1, 0)], "가죽 가공 시설")) &&
       LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
@@ -4669,6 +4720,8 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
     internal bool Register = true, Available = true, CreditRewards = true, Duplicate, Freeze, UnlockAfterExisting, TwoStageCollect, TriggerCoordinatorDetailConflict, AggregateCoordinatorDetailConflict, LeaveOtherRecipesOnCollect;
     internal string MissingReason = "not_enough_ingredient";
     internal string MissingIngredient = "철 광석";
+    internal long MissingIngredientOwned, MissingIngredientRequired = 3;
+    internal long? RawObservedOverride;
     internal long? RawLeatherStock;
     internal long LeatherCost = 2;
     internal FakeWorld(AlteringPlan plan) => _plan = plan;
@@ -4681,7 +4734,8 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         var missing = available ? Array.Empty<AlteringIngredient>() :
             RawLeatherStock.HasValue
                 ? new[] { new AlteringIngredient("가죽", LeatherCost, RawLeatherStock.Value) }
-                : new[] { new AlteringIngredient(MissingIngredient, 3, 0) };
+                : new[] { new AlteringIngredient(
+                    MissingIngredient, MissingIngredientRequired, MissingIngredientOwned) };
         var r = new AlteringRecipe(_plan.DisplayName, available, _plan.ProducedPerWork, available ? null : MissingReason, missing, _plan.FacilityName);
         return Task.FromResult<IReadOnlyList<AlteringRecipe>>(Duplicate ? new[] { r with { Alterable = false }, r } : new[] { r });
     }
@@ -4701,7 +4755,13 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         return Task.FromResult<IReadOnlyList<AlteringWork>>(_works.ToArray());
     }
     public Task<long> ItemCountAsync(string name, CancellationToken ct)
-    { ct.ThrowIfCancellationRequested(); if (name != _plan.OutputName) throw new Exception("wrong output mapping"); return Task.FromResult(Owned); }
+    {
+        ct.ThrowIfCancellationRequested();
+        if (name == _plan.OutputName) return Task.FromResult(Owned);
+        if (name == MissingIngredient)
+            return Task.FromResult(RawObservedOverride ?? MissingIngredientOwned);
+        throw new Exception("wrong output mapping");
+    }
     public Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
