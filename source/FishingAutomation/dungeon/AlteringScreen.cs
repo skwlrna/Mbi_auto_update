@@ -25,7 +25,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // Per-F9 AlteringScreen: first K is explicitly started in the ordinary field.
     // After that first real K input, later unknown->K navigation must
     // positively match 3/4 HUD templates on two fresh frames, or
-    // K+I / Home+End pairs PLUS independent minimap + life-skill HUD evidence.
+    // K+I / Home+End / End+I pairs PLUS independent minimap + life-skill HUD evidence.
     // Both routes keep fresh modal/menu checks and CLI idle before any key.
     private bool _managedKInputIssued;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
@@ -930,6 +930,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     bool menuAppeared = false;
                     bool fieldFallbackAuthorized = false;
                     bool homeEndFallbackAuthorized = false;
+                    bool endIFallbackAuthorized = false;
                     while (true)
                     {
                         await Task.Delay(180, ct);
@@ -983,14 +984,22 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 previousHud.HomeFound, previousHud.EndFound,
                                 currentHud.HomeFound, currentHud.EndFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
+                        // End and I can remain stable while Home and K do not match.
+                        // This explicit pair still needs both independent field anchors.
+                        bool endIAuthorized = !firstEntry &&
+                            CanAuthorizeManagedKEndIFieldFallback(
+                                previousHud.EndFound, previousHud.IFound,
+                                currentHud.EndFound, currentHud.IFound,
+                                previousField, currentField, actualModal, unexpectedMenu);
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
-                        if (firstEntry || ((templateAuthorized || fieldAuthorized || homeEndAuthorized) && withinLimit))
+                        if (firstEntry || ((templateAuthorized || fieldAuthorized || homeEndAuthorized || endIAuthorized) && withinLimit))
                         {
                             fieldFallbackAuthorized = fieldAuthorized && !templateAuthorized;
                             homeEndFallbackAuthorized = homeEndAuthorized && !templateAuthorized;
-                            if (fieldFallbackAuthorized || homeEndFallbackAuthorized)
+                            endIFallbackAuthorized = endIAuthorized && !templateAuthorized;
+                            if (fieldFallbackAuthorized || homeEndFallbackAuthorized || endIFallbackAuthorized)
                                 Log?.Invoke("[자동 가공] K 재진입 필드 보조 인증 · " +
-                                    (homeEndFallbackAuthorized ? "Home/End" : "K/I") +
+                                    (homeEndFallbackAuthorized ? "Home/End" : fieldFallbackAuthorized ? "K/I" : "End/I") +
                                     " + 미니맵 금색 테두리 + 생활 스킬 K · 연속 2프레임 · 입력 전 최종 재검증");
                             break;
                         }
@@ -998,13 +1007,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         if (!withinLimit)
                             Fail(freshField,
                                 "관리 가공 K 재진입 HUD 3/4 연속 2프레임 및 " +
-                                "K/I 또는 Home/End + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
+                                "K/I, Home/End 또는 End/I + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
                         previousHud = currentHud;
                         previousField = currentField;
                     }
                     if (menuAppeared)
                         continue;
-                    if (fieldFallbackAuthorized || homeEndFallbackAuthorized)
+                    if (fieldFallbackAuthorized || homeEndFallbackAuthorized || endIFallbackAuthorized)
                     {
                         // A last fresh frame guards against a popup or menu that
                         // appeared after the consecutive field observations.
@@ -1025,7 +1034,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 finalHud.HomeFound, finalHud.EndFound,
                                 finalHud.HomeFound, finalHud.EndFound,
                                 finalFieldVisual, finalFieldVisual, finalModal, finalMenu);
-                        if (!finalKAndI && !finalHomeAndEnd)
+                        bool finalEndAndI = endIFallbackAuthorized &&
+                            CanAuthorizeManagedKEndIFieldFallback(
+                                finalHud.EndFound, finalHud.IFound,
+                                finalHud.EndFound, finalHud.IFound,
+                                finalFieldVisual, finalFieldVisual, finalModal, finalMenu);
+                        if (!finalKAndI && !finalHomeAndEnd && !finalEndAndI)
                             Fail(finalField, "관리 가공 K 재진입 입력 직전 필드/메뉴/팝업 재확인 실패 · 입력 없이 정지");
                     }
                 }
@@ -2065,6 +2079,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         bool popupVisible, bool processingMenuVisible)
         => !popupVisible && !processingMenuVisible &&
            previousHome && previousEnd && currentHome && currentEnd &&
+           previousField && currentField;
+
+    // Cross-region End + inventory templates corroborate the separate minimap
+    // and life-skill anchors. Neither a generic 2/4 count nor field pixels alone
+    // may authorize input; the same pair must persist across both frames.
+    internal static bool CanAuthorizeManagedKEndIFieldFallback(
+        bool previousEnd, bool previousI, bool currentEnd, bool currentI,
+        bool previousField, bool currentField,
+        bool popupVisible, bool processingMenuVisible)
+        => !popupVisible && !processingMenuVisible &&
+           previousEnd && previousI && currentEnd && currentI &&
            previousField && currentField;
 
     // Bounded visual stabilization after Esc; clock runs continuously from
