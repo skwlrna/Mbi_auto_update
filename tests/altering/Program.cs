@@ -3372,6 +3372,43 @@ Check(recursiveWorld.Count("강철괴") == 3 &&
 Check(steelAuto.ReservedWings == 0 && recursiveWorld.ReserveCallbackCalls == 0,
     "recursive steel production never reserves Spirit Wings");
 
+// End-to-end F9 dependency scheduler: one intermediate lease fills seven
+// leather slots, receives the batch, and yields back to seven leather+ jobs.
+var integratedLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
+integratedLeatherWorld.SetCount("생가죽", 500);
+integratedLeatherWorld.SetCount("타닌 가루", 28);
+string integratedLeatherDir = Path.Combine(
+    Path.GetTempPath(), "mabi-seven-leather-" + Guid.NewGuid().ToString("N"));
+var integratedLeatherLane = new FacilityLaneState(
+    await integratedLeatherWorld.WorksAsync(default));
+var integratedLeatherScheduler = new MultiAlteringDependencyScheduler(
+    integratedLeatherWorld, integratedLeatherWorld, testIdentity,
+    integratedLeatherDir,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: integratedLeatherLane);
+var integratedLeatherResolver = new RecursiveAlteringSupplyResolver(
+    integratedLeatherWorld, integratedLeatherWorld,
+    integratedLeatherWorld, integratedLeatherWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, dependencyScheduler: integratedLeatherScheduler);
+var integratedLeatherAuto = new AlteringAutomation(
+    integratedLeatherWorld, integratedLeatherWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, integratedLeatherResolver, facilityState: integratedLeatherLane);
+var integratedLeatherResult = await integratedLeatherAuto.RunBatchAsync(
+    leatherSevenPlan, 7, default);
+Check(integratedLeatherResult == AlteringRunResult.BatchQueued &&
+      integratedLeatherWorld.Queued.Take(7).All(x => x == "가죽") &&
+      integratedLeatherWorld.Queued.Skip(7).Take(7).All(x => x == "가죽+") &&
+      integratedLeatherWorld.Queued.Count == 14 &&
+      integratedLeatherLane.Snapshot("가죽 가공 시설").IntermediateRegisteredWorks == 7 &&
+      !integratedLeatherLane.Snapshot("가죽 가공 시설").IntermediateLease &&
+      integratedLeatherWorld.GatherStarts == 0 &&
+      integratedLeatherAuto.ReservedWings == 0,
+    "real dependency coordinator fills seven leather slots before seven parent registrations and releases lease");
+if (Directory.Exists(integratedLeatherDir))
+    Directory.Delete(integratedLeatherDir, recursive: true);
+
 var scheduledWorld = new RecursiveProductionWorld();
 scheduledWorld.AddExternalWork(
     "강철괴",
