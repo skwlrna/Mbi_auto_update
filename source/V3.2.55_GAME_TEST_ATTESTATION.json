@@ -1,0 +1,17 @@
+{
+  "version": "V3.2.55",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "V3.2.55 seven-slot leather batch and fresh-stock diagnosis: Windows CI only; real-game, end-to-end seven-slot receipt, and owner-PC rollback pending.",
+  "leatherChainRealGame": "pending",
+  "leatherRawShortageRealGame": "pending",
+  "leatherTanninShortageRealGame": "pending",
+  "leatherSevenSlotRealGame": "pending",
+  "leatherPartialStockRealGame": "pending"
+}
