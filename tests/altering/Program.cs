@@ -2813,6 +2813,47 @@ Check(leatherChainResult == AlteringRunResult.BatchQueued &&
       leatherChainAuto.ReservedWings == 0,
     "recursive leather chain crafts intermediate before parent without raw gathering or wings");
 
+// Synthetic full chain: upper leather -> leather+ -> leather. The
+// fixture's recipe costs are test data, not a statement about live CLI.
+var upperLeatherWorld = new RecursiveProductionWorld { IncludeLeather = true };
+upperLeatherWorld.SetCount("생가죽", 10);
+upperLeatherWorld.SetCount("상급 생가죽", 15);
+upperLeatherWorld.SetCount("타닌 가루", 12);
+var upperLeatherResolver = new RecursiveAlteringSupplyResolver(
+    upperLeatherWorld, upperLeatherWorld, upperLeatherWorld, upperLeatherWorld,
+    delay: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4);
+var upperLeatherPlan = new AlteringPlan("가죽 가공 시설", "상급 가죽", 3, 3, false);
+var upperLeatherAuto = new AlteringAutomation(
+    upperLeatherWorld, upperLeatherWorld,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    4, upperLeatherResolver);
+var upperLeatherResult = await upperLeatherAuto.RunBatchAsync(
+    upperLeatherPlan, 1, default);
+Check(upperLeatherResult == AlteringRunResult.BatchQueued &&
+      upperLeatherWorld.Queued.SequenceEqual(new[] { "가죽", "가죽+", "상급 가죽" }) &&
+      upperLeatherWorld.Count("생가죽") == 0 &&
+      upperLeatherWorld.Count("상급 생가죽") == 0 &&
+      upperLeatherWorld.Count("타닌 가루") == 0 &&
+      upperLeatherWorld.GatherStarts == 0 &&
+      upperLeatherAuto.ReservedWings == 0,
+    "upper leather crafts leather then leather+ before upper recipe with no raw gathering or wings");
+
+// A missing external input anywhere in that recursive chain must hold the
+// parent before production begins, rather than starting intermediate tickets.
+var upperLeatherHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    upperLeatherPlan,
+    (await upperLeatherWorld.RecipesAsync(default)).Single(x => x.DisplayName == "상급 가죽"),
+    await upperLeatherWorld.RecipesAsync(default),
+    Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(
+        name == "상급 생가죽" ? 0L : 100L),
+    default);
+Check(upperLeatherHold is not null &&
+      upperLeatherHold.Item == "상급 생가죽" &&
+      upperLeatherHold.Category == "external_leather_raw_missing",
+    "upper leather read-only preflight refuses missing upper raw hide");
+
 // Only hide-tier raw materials and tannin stop a leather recipe.
 var exhaustedLeather = new AlteringPlan("가죽 가공 시설", "가죽+", 9, 3, false);
 var exhaustedWorld = new FakeWorld(exhaustedLeather)
@@ -4859,7 +4900,10 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                             ["생가죽"] = 10 }),
                     MakeRecipe("가죽+", 3, "가죽 가공 시설",
                         new Dictionary<string,long>(StringComparer.Ordinal) {
-                            ["가죽"] = 3, ["타닌 가루"] = 4 })
+                            ["가죽"] = 3, ["타닌 가루"] = 4 }),
+                    MakeRecipe("상급 가죽", 3, "가죽 가공 시설",
+                        new Dictionary<string,long>(StringComparer.Ordinal) {
+                            ["가죽+"] = 3, ["상급 생가죽"] = 15, ["타닌 가루"] = 8 })
                 }
                 : Array.Empty<AlteringRecipe>()).ToArray());
     }
@@ -4903,6 +4947,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             "가죽" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) { ["생가죽"] = 10 },
             "가죽+" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) {
                 ["가죽"] = 3, ["타닌 가루"] = 4 },
+            "상급 가죽" when IncludeLeather => new Dictionary<string,long>(StringComparer.Ordinal) {
+                ["가죽+"] = 3, ["상급 생가죽"] = 15, ["타닌 가루"] = 8 },
             _ => throw new InvalidOperationException("unexpected recipe")
         };
         foreach (var ingredient in ingredients)
