@@ -1,0 +1,17 @@
+{
+  "version": "V3.2.56",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "PR278 HUD and food menu: Windows offline regression only. Real-game K press, food tab, steel receipt, owner-PC rollout/rollback NOT VERIFIED.",
+  "managedKFirstInputRealGame": "pending",
+  "managedKVariableHomeRealGame": "pending",
+  "managedKFinalFrameRealGame": "pending",
+  "foodTabRecoveryRealGame": "pending",
+  "receiptAfterRecoveryRealGame": "pending"
+}

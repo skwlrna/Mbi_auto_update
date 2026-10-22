@@ -24,6 +24,8 @@ permissions:
 
 jobs:
   candidate:
+    # Historical candidate must skip later-version PRs.
+    if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/v3.2.55') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

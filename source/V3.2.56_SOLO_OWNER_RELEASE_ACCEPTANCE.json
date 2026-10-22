@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "version": "V3.2.56",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "managed_k_variable_hud_and_food_tab_recovery",
+  "acceptedOnLocalDate": "2026-10-23",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3256",
+  "aiWatcher": "not_tested_for_v3256",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "disclosures": [
+    "2026-10-23: the user explicitly requested review of PR #278 and production release.",
+    "V3.2.55 is retained; V3.2.56 creates a new auto-update version.",
+    "209 visible test frames and 296 compiled checks do NOT establish accuracy on unseen screens or real game input.",
+    "K first/reentry, variable Home/Y HUD, food menu tab, receipt, owner-PC install and rollback are NOT TESTED in live gameplay.",
+    "Back up ongoing F9 manifests, settings and install. Do not fabricate real-game test signoff."
+  ],
+  "managedKFirstInputRealGame": "not_tested",
+  "managedKVariableHomeRealGame": "not_tested",
+  "managedKFinalFrameRealGame": "not_tested",
+  "foodTabRecoveryRealGame": "not_tested",
+  "receiptAfterRecoveryRealGame": "not_tested",
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
+}
