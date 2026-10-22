@@ -22,5 +22,7 @@
     "Real Codex execution, local 29-worktree recovery, live-game interaction and real PC rollback are NOT TESTED.",
     "Windows CI only, may still be encountered by public auto-updater users; independent backups and rollback steps required.",
     "Do not fabricate successful repair, inventory cleanup, game behavior or PC acceptance."
-  ]
+  ],
+  "bagWeightLiveCli": "not_tested",
+  "bagWeightGatherStop": "not_tested"
 }
