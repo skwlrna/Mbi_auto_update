@@ -6,7 +6,9 @@ internal static class LifeSkillStopPolicy
     // The opposite also happens: IsGathering becomes false while a visible
     // Stop control still owns the active 100-action task. Require BOTH sources.
     internal static bool IsStoppedAfterSpace(GatheringActivity activity, bool stopButtonVisible)
-        => IsStoppedAfterSpace(
+        // AutoPlaying is affirmative activity evidence even when the specific
+        // gathering flag and Stop overlay have already disappeared.
+        => !activity.IsAutoPlaying && IsStoppedAfterSpace(
             activity.IsGathering,
             activity.IsAutoTraveling,
             activity.IsFishing,

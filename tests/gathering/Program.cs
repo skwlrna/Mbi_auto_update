@@ -175,6 +175,11 @@ var staleStopButton = new GatheringActivity(
     "Stop", false, "None", "None");
 Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, false),
     "post-Space completion ignores stale MainButtonState ONLY when Stop UI is absent");
+var hiddenAutoPlay = staleStopButton with { MainButtonState = "Hide", IsAutoPlaying = true };
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(hiddenAutoPlay, false),
+    "target stop vetoes AutoPlaying even with hidden Stop UI and idle specific flags");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(hiddenAutoPlay with { IsAutoPlaying = false }, false),
+    "target stop accepts hidden Stop UI after AutoPlaying also becomes idle");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, true),
     "stale CLI stop with visible Stop UI must not authorize the next material");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false, false),
