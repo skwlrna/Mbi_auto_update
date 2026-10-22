@@ -794,11 +794,18 @@ internal sealed class AlteringAutomation
                                 "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
                             try
                             {
-                                // Leather materials are prepared one confirmed ticket
-                                // at a time. Requiring all 67 tickets' raw stock
-                                // before the first one would suppress partial output.
+                                // For leather, opportunistically fill up to seven
+                                // intermediate tickets per facility batch. The
+                                // resolver still preflights one parent ticket,
+                                // and its child scheduler may stop early at a
+                                // verified raw-hide/tannin boundary. Never
+                                // demand the full 67-ticket target up front.
                                 int supplyWorks = plan.FacilityName == "가죽 가공 시설"
-                                    ? 1 : remainingWorks;
+                                    ? Math.Min(7, remainingWorks) : remainingWorks;
+                                if (plan.FacilityName == "가죽 가공 시설")
+                                    Log?.Invoke(
+                                        $"[자동 가공] 가죽 중간재료 묶음 보충 · 최대 {supplyWorks}회분 · " +
+                                        "원재료 1회분 안전 확인 후 최대 7칸 등록·묶음 수령");
                                 await _supplyResolver.ResolveAsync(plan, recipe, supplyWorks, ct);
                             }
                             catch (MaterialSupplyHoldException hold)
