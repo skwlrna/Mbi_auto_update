@@ -7,7 +7,8 @@ internal interface IAlteringDependencyScheduler
         long requestBaselineQuantity,
         int requiredAdditionalQuantity,
         IAlteringSupplyResolver resolver,
-        CancellationToken ct);
+        CancellationToken ct,
+        int? minimumAdditionalQuantity = null);
 }
 
 /// <summary>
@@ -69,10 +70,14 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         long requestBaselineQuantity,
         int requiredAdditionalQuantity,
         IAlteringSupplyResolver resolver,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? minimumAdditionalQuantity = null)
     {
         if (requiredAdditionalQuantity <= 0)
             return;
+        int minimum = minimumAdditionalQuantity ?? requiredAdditionalQuantity;
+        if (minimum <= 0 || minimum > requiredAdditionalQuantity)
+            throw new ArgumentOutOfRangeException(nameof(minimumAdditionalQuantity));
 
         requestedPlan.Validate();
         string dependencyDir = Path.Combine(_sessionDirectory, "dependencies");
@@ -250,7 +255,13 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                     job,
                     FacilityLaneOwner.Intermediate,
                     registered);
-                return result == AlteringRunResult.Completed;
+                // Only the leather lane may stop an oversized batch on a
+                // newly verified external raw shortage. The minimum one
+                // parent-ticket supply is checked after safe receipt; no
+                // unverified partial production is credited.
+                return result == AlteringRunResult.Completed ||
+                       job.FacilityName == "가죽 가공 시설" &&
+                       result == AlteringRunResult.RawMaterialExhausted;
             },
             _data.WorksAsync,
             _delay,
@@ -267,15 +278,21 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
         long outputAfter = await _data.ItemCountAsync(plan.OutputName, ct);
         long totalGain = outputAfter - requestBaselineQuantity;
-        if (totalGain < requiredAdditionalQuantity)
+        if (totalGain < minimum)
             throw new InvalidOperationException(
-                $"{plan.OutputName} 통합 중간가공 후 수량 검증 실패: " +
-                $"+{totalGain:N0} / 필요 +{requiredAdditionalQuantity:N0}");
+                $"{plan.OutputName} 통합 중간가공 후 최소 수량 검증 실패: " +
+                $"+{totalGain:N0} / 최소 +{minimum:N0} · 목표 +{requiredAdditionalQuantity:N0}");
 
         store.Delete();
-        Log?.Invoke(
-            $"[중간재료 스케줄] 완료 · {plan.OutputName} 요청 기준 +{totalGain:N0}개 · " +
-            "메인 시설 배치로 복귀");
+        if (totalGain < requiredAdditionalQuantity)
+            Log?.Invoke(
+                $"[중간재료 스케줄] 부분 보충 · {plan.OutputName} +{totalGain:N0}개 / " +
+                $"목표 +{requiredAdditionalQuantity:N0}개 · 최소 +{minimum:N0}개 확인 · " +
+                "외부 원재료 부족으로 남은 가공 생략 · 상위 품목 재검증");
+        else
+            Log?.Invoke(
+                $"[중간재료 스케줄] 완료 · {plan.OutputName} 요청 기준 +{totalGain:N0}개 · " +
+                "메인 시설 배치로 복귀");
     }
 
     private async Task<AlteringWork[]> WaitForFacilityBatchBoundaryAsync(
