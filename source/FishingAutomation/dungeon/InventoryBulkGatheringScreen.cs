@@ -418,7 +418,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 $"{targetName} 가까운 위치 결과 확인",
                 ct);
 
-            if (IsOwnedLifeSkillActivity(activity))
+            if (GatheringNavigationPolicy.HasStartedLifeSkillTravel(activity))
             {
                 Log?.Invoke(
                     $"[대량 채집] 가까운 위치 결과=바로 이동형 · {targetName} · " +
