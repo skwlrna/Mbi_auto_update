@@ -1,0 +1,15 @@
+{
+  "version": "V3.2.58",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "PR #289: Windows PR CI and injected 17:58 leather intermediary regression passed; real-game reproduction/repair, installer and rollback unverified.",
+  "leatherChildDrainRealGame": "pending",
+  "leatherMismatchHoldRealGame": "pending",
+  "leatherPeerContinuesRealGame": "pending"
+}
