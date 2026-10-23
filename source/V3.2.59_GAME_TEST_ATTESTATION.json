@@ -1,0 +1,16 @@
+{
+  "version": "V3.2.59",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "PR #292: 2026-10-24 03:33 metal facility/world field false-positive. Captured-image screen tests and Windows CI passed; actual game move, collection, updater and rollback not verified.",
+  "facilityFieldVetoRealGame": "pending",
+  "facilityMovePreClickRealGame": "pending",
+  "remoteMoveFallbackRealGame": "pending",
+  "managedReceiptRealGame": "pending"
+}
