@@ -797,7 +797,7 @@ def mark_interrupted_result(path: Path) -> bool:
 
 def review_retry_id(original: str) -> str:
     """Independent one-shot record for a selected no-patch review."""
-    return original + "-retry-review-v1"
+    return hashlib.sha256(("manual-no-patch-retry-v1:" + original).encode()).hexdigest()[:16]
 
 
 def review_retry_eligible(original: dict[str, Any], original_eid: str, name: str) -> bool:
