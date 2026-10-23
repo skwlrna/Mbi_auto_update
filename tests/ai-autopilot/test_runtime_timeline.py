@@ -116,6 +116,22 @@ class TimelineTests(unittest.TestCase):
                     agent.poll(config)
             self.assertEqual(processed, [retained_runtime.name])
 
+    def test_review_reasons_are_grouped_over_all_local_results(self):
+        """Review counts are derived from stored host reasons, not 100 visible rows."""
+        dashboard = (APP / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
+        self.assertIn("BuildReviewCauseSummary(analyses)", dashboard)
+        self.assertIn('a.Status is "needs_review" or "interrupted_review_required"', dashboard)
+        self.assertIn("review.GroupBy(a => ReviewCause(a.Status, a.Reason))", dashboard)
+        self.assertIn("StatusWithCause(aiStatus, ai?.Reason ?? \"\"))", dashboard)
+        self.assertIn("StatusWithCause(ai.Status, ai.Reason)", dashboard)
+        for category in ("코드 미수정", "회귀 테스트 근거 부족",
+                         "기존 실패안 재등장", "분석 중단", "기타 검토 필요"):
+            self.assertIn(category, dashboard)
+        # Never mistake a candidate review for an actual successful fix.
+        self.assertIn("실게임 해결을 의미하지 않습니다", dashboard)
+        self.assertLess(dashboard.index("BuildReviewCauseSummary(analyses)"),
+                        dashboard.index(".OrderByDescending(x => x.Time).Take(100).ToArray()"))
+
     def test_ui_shows_time_specific_errors_and_next_step(self):
         dashboard = (APP / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
         journal = (APP / "AiRuntimeErrorJournal.cs").read_text(encoding="utf-8")
