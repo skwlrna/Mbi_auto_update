@@ -23,6 +23,7 @@ internal sealed partial class AiAutopilotDashboard : Form
     private readonly Label _overview;
     private readonly Label _pipeline;
     private readonly Label _counts;
+    private readonly Label _reviewCauses;
     private readonly Label _updated;
     private readonly Label _memory;
     private readonly DataGridView _recent;
@@ -79,6 +80,13 @@ internal sealed partial class AiAutopilotDashboard : Form
             ForeColor = UiText,
             Font = new Font("맑은 고딕", 9.5f, FontStyle.Bold),
             Padding = new Padding(18, 5, 12, 0)
+        };
+        _reviewCauses = new Label
+        {
+            Dock = DockStyle.Top, Height = 49,
+            ForeColor = UiText, BackColor = UiPanel,
+            Padding = new Padding(18, 5, 12, 4),
+            Text = "검토 필요 기록의 사유를 일괄 확인합니다. 오류 파일을 개별적으로 열 필요가 없습니다."
         };
         _memory = new Label
         {
@@ -341,6 +349,7 @@ internal sealed partial class AiAutopilotDashboard : Form
         Controls.Add(intro);
         Controls.Add(foot);
         Controls.Add(_memory);
+        Controls.Add(_reviewCauses);
         Controls.Add(_counts);
         Controls.Add(_pipeline);
         Controls.Add(_overview);
@@ -455,6 +464,37 @@ internal sealed partial class AiAutopilotDashboard : Form
         if (status == "blocked") return "AI 분석 또는 안전 검사를 통과하지 못함";
         if (status == "needs_review") return "검증 근거가 부족하여 사람이 확인해야 함";
         return "AI 처리 기록";
+    }
+
+    // Bucket only host-recorded status/reason codes. Never render raw Codex
+    // output or error text in the summary (which may include private data).
+    private static string ReviewCause(string status, string reason)
+    {
+        if (status == "interrupted_review_required") return "분석 중단";
+        if (reason.Contains("agent_no_patch", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("source_access_rechecked_no_patch", StringComparison.OrdinalIgnoreCase))
+            return "코드 미수정";
+        if (reason.Contains("known_failed_candidate", StringComparison.OrdinalIgnoreCase))
+            return "기존 실패안 재등장";
+        if (reason.Contains("regression", StringComparison.OrdinalIgnoreCase) ||
+            reason.Contains("test_project_missing", StringComparison.OrdinalIgnoreCase))
+            return "회귀 테스트 근거 부족";
+        return "기타 검토 필요";
+    }
+
+    private static string BuildReviewCauseSummary(IEnumerable<Analysis> records)
+    {
+        var review = records.Where(a => a.Status is "needs_review" or "interrupted_review_required")
+            .ToArray();
+        if (review.Length == 0) return "검토 필요 결과 없음 · 기존 기록을 삭제하거나 변경하지 않았습니다.";
+        string[] groups = { "코드 미수정", "회귀 테스트 근거 부족", "기존 실패안 재등장",
+            "분석 중단", "기타 검토 필요" };
+        var counts = review.GroupBy(a => ReviewCause(a.Status, a.Reason))
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        var summary = string.Join(" · ", groups.Where(counts.ContainsKey)
+            .Select(name => $"{name} {counts[name]}건"));
+        return $"검토 필요 {review.Length}건 원인 일괄 집계: {summary}" +
+            "\n원인은 로컬 분석 결과 기준 · 코드 수정 성공이나 실게임 해결을 의미하지 않습니다.";
     }
 
     private static string NextStep(string status, string reason, bool running) => status switch
@@ -1221,6 +1261,8 @@ internal sealed partial class AiAutopilotDashboard : Form
                     byEvent[eventName] = analysis; // Files are newest first: do not hide a manual reanalysis.
             }
 
+            // Group every available local analysis, not only the 100 rows on screen.
+            _reviewCauses.Text = BuildReviewCauseSummary(analyses);
             var items = new List<(DateTimeOffset Time, string Title, string Detail,
                 string Status, string Next, string Url, string Pr, string File, string Id, string EventName)>();
             var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
