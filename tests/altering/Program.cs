@@ -4,6 +4,20 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// Unchanged pixels alone cannot authorize another move click.
+Check(AlteringFacilityTravelConfirmPolicy.ShouldRetryUnchangedFixedMove(
+    true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
+    true, false, false, true),
+    "fixed move retry permits one unchanged confirmed button while idle");
+Check(!AlteringFacilityTravelConfirmPolicy.ShouldRetryUnchangedFixedMove(
+    true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
+    true, false, false, false),
+    "fixed move retry vetoes unchanged pixels without a confirmed button");
+foreach (bool? moving in new bool?[] { true, null })
+    Check(!AlteringFacilityTravelConfirmPolicy.ShouldRetryUnchangedFixedMove(
+        true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
+        true, moving, false, true),
+        "confirmed move button cannot override active or unknown travel");
 // V3.2.44: safe pre-input transient reads isolate only the empty lane.
 var v3244Food = new AlteringPlan("식재료 가공 시설", "밥", 1, 1, false);
 var v3244Metal = new AlteringPlan("금속 가공 시설", "철괴", 1, 1, false);

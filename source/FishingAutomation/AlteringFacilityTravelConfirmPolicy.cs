@@ -138,6 +138,7 @@ internal static class AlteringFacilityTravelConfirmPolicy
 
     // Only the manager-requested first facility travel can do a single
     // bounded extra click, and ONLY if the post-click fixed ROI is unchanged.
+    // Unchanged pixels alone do not prove an actionable move control remains.
     // Never retry on a partial screen change, active/unknown travel, modal,
     // uncertain facility, or after a prior repeat. No automatic looping.
     internal static bool ShouldRetryUnchangedFixedMove(
@@ -149,8 +150,9 @@ internal static class AlteringFacilityTravelConfirmPolicy
         TimeSpan elapsedSinceClick,
         bool facilityVisible,
         bool? autoTraveling,
-        bool anyModalVisible)
-        => forcedMove && !alreadyRetried && !sawDeparture &&
+        bool anyModalVisible,
+        bool moveButtonConfirmed)
+        => forcedMove && moveButtonConfirmed && !alreadyRetried && !sawDeparture &&
            fixedRegionChangeRatio <= UnchangedMoveRegionMaxRatio &&
            identicalFrames >= RequiredIdenticalMoveFrames &&
            elapsedSinceClick >= FirstMoveRetryGrace &&
