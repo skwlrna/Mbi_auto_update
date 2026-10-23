@@ -843,10 +843,19 @@ internal sealed partial class AiAutopilotDashboard : Form
                 MessageBox.Show(this, "실제 코드 수정이 없었던 분석 기록에만 사용할 수 있습니다. 다른 검토 사유는 제외됩니다.");
                 return;
             }
-            if (Directory.Exists(Path.Combine(Root, selected.EventId + "-retry-review-v1")))
+            // Retry IDs are intentionally 16-hex for the existing PR and recovery
+            // contracts; the durable original-ID receipt prevents replay here.
+            using (var watchState = ReadBounded(Path.Combine(Root, "watch-state.json")))
             {
-                MessageBox.Show(this, "선택한 오류는 이미 1회 재분석했습니다. 새 결과를 확인하세요.");
-                return;
+                if (watchState is not null &&
+                    watchState.RootElement.TryGetProperty("review_retry_attempted", out var attempts) &&
+                    attempts.ValueKind == JsonValueKind.Array &&
+                    attempts.EnumerateArray().Any(x =>
+                        x.ValueKind == JsonValueKind.String && x.GetString() == selected.EventId))
+                {
+                    MessageBox.Show(this, "선택한 오류는 이미 1회 재분석했습니다. 새 결과를 확인하세요.");
+                    return;
+                }
             }
             string request = Path.Combine(Root, "review-retry-request.json");
             if (File.Exists(request))
