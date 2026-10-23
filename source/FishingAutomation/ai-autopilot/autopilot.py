@@ -580,6 +580,14 @@ def exec_codex(worktree: Path, prompt: str, outdir: Path, c: dict[str, Any],
     return False, "unexpected"
 
 
+def run_consented_codex(worktree: Path, prompt: str, outdir: Path, c: dict[str, Any],
+                        progress=None, image: Path | None = None) -> tuple[bool, str]:
+    """Preserve text-only Codex invocation and attach an image only if present."""
+    if image is None:
+        return exec_codex(worktree, prompt, outdir, c, progress)
+    return exec_codex(worktree, prompt, outdir, c, progress, image=image)
+
+
 def fallback_notes(c: dict[str, Any], context: str, outdir: Path) -> None:
     if not c.get("ollama_fallback_notes_only") or not shutil.which("ollama"):
         return
@@ -1098,7 +1106,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     except (SourceBlocked, RuntimeError) as exc:
         return finish("blocked", "release_source_guard: " + str(exc))
     stage("codex_edit")
-    ok, reason = exec_codex(
+    ok, reason = run_consented_codex(
         worktree, prompt_for(context, c, worktree, image_attached=image is not None),
         result_dir, c, progress, image=image)
     if not ok:
@@ -1132,7 +1140,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
                 "a safe fix, edit source and a registered positive/veto test. "
                 "If the issue is already fixed or cannot be safely reproduced, "
                 "explain that without inventing any code changes.")
-            retry_ok, retry_reason = exec_codex(
+            retry_ok, retry_reason = run_consented_codex(
                 worktree, followup_prompt, followup_dir, c, progress, image=image)
             output["no_patch_followup"]["codex_completion"] = (
                 "verified" if retry_ok else "failed")
@@ -1222,7 +1230,7 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
         except RuntimeError as exc:
             return finish("blocked", str(exc))
         stage("repair")
-        repaired, reason = exec_codex(
+        repaired, reason = run_consented_codex(
             worktree, revised_prompt, rerun_dir, c, progress, image=image)
         if not repaired:
             return finish("blocked", "codex_repair_round_unverified: " + reason)
