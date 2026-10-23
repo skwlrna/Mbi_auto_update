@@ -136,6 +136,38 @@ internal static class AlteringFacilityTravelConfirmPolicy
            autoTraveling == false &&
            !anyModalVisible;
 
+    // V3.2.56 live incidents at 15:07 (leather) and 15:31 (metal):
+    // post-click left-side pixels changed by 62.9% / 62.7-68.3%, a compact
+    // close-X was present, CLI remained idle, but the broad teal shape detector
+    // still reported a move button. Treat this only as a *candidate* for an
+    // independent exact-text veto, not as proof that travel happened.
+    internal const double ChangedRegionArrivalMinRatio = 0.60;
+
+    internal static bool ShouldProbeChangedRegionOnsite(
+        bool managedFreshArrival, bool receiptMode, bool moveClickSent,
+        double fixedRegionChangeRatio, bool facilityVisible,
+        bool onsiteCloseVisible, bool? autoTraveling, bool anyModalVisible)
+        => managedFreshArrival && !receiptMode && moveClickSent &&
+           fixedRegionChangeRatio >= ChangedRegionArrivalMinRatio &&
+           facilityVisible && onsiteCloseVisible &&
+           autoTraveling == false && !anyModalVisible;
+
+    // This route never authorizes a click on its own. The caller must also
+    // confirm the exact remote label is ABSENT in a fresh screenshot, then
+    // enforce seven stable onsite frames over three seconds, independent
+    // 1.2-second final recheck, known-idle CLI and downstream recipe/CLI guards.
+    // A positively read exact "설비로 이동" label always vetoes it.
+    internal static bool HasVerifiedChangedRegionOnsiteCandidate(
+        bool managedFreshArrival, bool receiptMode, bool moveClickSent,
+        double fixedRegionChangeRatio, bool facilityVisible,
+        bool onsiteCloseVisible, bool? autoTraveling, bool anyModalVisible,
+        bool exactRemoteMoveLabelVisible)
+        => ShouldProbeChangedRegionOnsite(
+               managedFreshArrival, receiptMode, moveClickSent,
+               fixedRegionChangeRatio, facilityVisible, onsiteCloseVisible,
+               autoTraveling, anyModalVisible) &&
+           !exactRemoteMoveLabelVisible;
+
     // Only the manager-requested first facility travel can do a single
     // bounded extra click, and ONLY if the post-click fixed ROI is unchanged.
     // Never retry on a partial screen change, active/unknown travel, modal,

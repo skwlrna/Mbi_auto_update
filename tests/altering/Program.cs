@@ -2025,6 +2025,58 @@ Check(!AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
       !AlteringFacilityTravelConfirmPolicy.HasVerifiedManagedInstantArrival(
         true, true, false, true, false, false, false),
     "F01 near-instant branch rejects click-only, absent X, remote UI, unknown/busy CLI or any modal");
+// V3.2.56 production state-log replay. The runtime log records the
+// changed ROI, teal classifier and onsite X, but NOT the independent exact
+// move-label OCR. Therefore this is a conditional candidate replay, not a
+// claimed on-device arrival or proof of what the saved PNG contains.
+foreach (var incident in new[]
+{
+    (Time: "2026-10-23 15:07 leather+", Region: 0.629),
+    (Time: "2026-10-23 15:31 steel low", Region: 0.627),
+    (Time: "2026-10-23 15:31 steel high", Region: 0.683),
+})
+{
+    Check(AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+            managedFreshArrival: true, receiptMode: false, moveClickSent: true,
+            fixedRegionChangeRatio: incident.Region, facilityVisible: true,
+            onsiteCloseVisible: true, autoTraveling: false, anyModalVisible: false) &&
+          AlteringFacilityTravelConfirmPolicy.HasVerifiedChangedRegionOnsiteCandidate(
+            true, false, true, incident.Region, true, true, false, false, false) &&
+          !AlteringFacilityTravelConfirmPolicy.HasVerifiedChangedRegionOnsiteCandidate(
+            true, false, true, incident.Region, true, true, false, false, true),
+        "V3.2.56 " + incident.Time +
+        " changed-button candidate can progress ONLY if fresh remote-label OCR is absent");
+}
+Check(!AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, true, 0.599, true, true, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, false, 0.683, true, true, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, true, true, 0.683, true, true, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        false, false, true, 0.683, true, true, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, true, 0.683, false, true, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, true, 0.683, true, false, false, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, true, 0.683, true, true, null, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, true, 0.683, true, true, true, false) &&
+      !AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+        true, false, true, 0.683, true, true, false, true),
+    "V3.2.56 changed-area arrival blocks small/no change, no click, receipt, missing evidence, unknown/busy CLI and modals");
+Check(AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames == 7 &&
+      AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableDuration ==
+          TimeSpan.FromSeconds(3) &&
+      AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay ==
+          TimeSpan.FromMilliseconds(1200) &&
+      !AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
+          6, TimeSpan.FromSeconds(3)) &&
+      AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
+          7, TimeSpan.FromSeconds(3)),
+    "V3.2.56 changed-region route preserves seven fresh frames, 3s observation and independent 1.2s recheck");
+
 // F01 regression: two unrelated "loading" API rejections with a visible
 // facility title, or two OCR title misses with readable nontravel CLI, are
 // NOT movement evidence. Only positive auto-travel or consecutive correlated
