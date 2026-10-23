@@ -173,6 +173,18 @@ var staleStopButton = new GatheringActivity(
     false, false, false, false, false, false, false,
     "NotInDungeon", false, false, false, false, false, false,
     "Stop", false, "None", "None");
+Check(!GatheringNavigationPolicy.HasStartedLifeSkillTravel(staleStopButton),
+    "nearest-location veto: Stop alone cannot skip recommendation/detail inspection");
+Check(!GatheringNavigationPolicy.HasStartedLifeSkillTravel(
+        staleStopButton with { MainButtonState = "Compass" }),
+    "nearest-location veto: idle activity does not prove travel started");
+foreach (var started in new[] {
+    staleStopButton with { IsAutoTraveling = true },
+    staleStopButton with { LastRunningInteractionType = "Gathering" },
+    staleStopButton with { MainButtonState = "Fishing" },
+    staleStopButton with { MainButtonState = "FishingPull" } })
+    Check(GatheringNavigationPolicy.HasStartedLifeSkillTravel(started),
+        "nearest-location accepts a real travel/gathering/fishing activity");
 Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, false),
     "post-Space completion ignores stale MainButtonState ONLY when Stop UI is absent");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, true),
