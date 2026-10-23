@@ -2786,6 +2786,48 @@ Check(nestedRawResult == AlteringRunResult.RawMaterialExhausted &&
       nestedRawAuto.ReservedWings == 0,
     "missing nested raw hide ends only leather recipe before input with zero wings");
 
+// A child hold is not a receipt or permission to resume the parent lane.
+foreach (bool childLease in new[] { false, true })
+{
+    var holdWorld = new FakeWorld(craftableLeather)
+        { Available = false, MissingIngredient = "가죽" };
+    var holdLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+    var holdResolver = new FakeResolver(holdWorld)
+    {
+        MissingExternalRaw = "생가죽",
+        RawHoldCategory = childLease ? "external_leather_raw_missing" :
+            "leather_recipe_inventory_mismatch",
+        BeforeRawHold = childLease ? () => holdLane.AcquireIntermediate(
+            craftableLeather.FacilityName, Array.Empty<AlteringWork>(), "child") : null
+    };
+    var holdAuto = new AlteringAutomation(holdWorld, holdWorld,
+        (_, _) => Task.CompletedTask, 4, holdResolver, facilityState: holdLane);
+    bool propagated = false;
+    try { await holdAuto.RunBatchAsync(craftableLeather, 1, default); }
+    catch (MaterialSupplyHoldException ex)
+    { propagated = ex.Evidence.Category == holdResolver.RawHoldCategory; }
+    Check(propagated && holdWorld.QueueCalls == 0 && holdResolver.Calls == 1 &&
+          holdLane.Snapshot(craftableLeather.FacilityName).IntermediateDepth ==
+              (childLease ? 1 : 0),
+        childLease ? "unreleased child hold propagates without parent input or lease release" :
+            "nested inventory mismatch is not converted into raw exhaustion");
+}
+
+// An intermediate parent's own lease is preserved on a verified pre-input shortage.
+var ownedRawWorld = new FakeWorld(craftableLeather)
+    { Available = false, MissingIngredient = "가죽" };
+var ownedRawLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+ownedRawLane.AcquireIntermediate(craftableLeather.FacilityName,
+    Array.Empty<AlteringWork>(), "parent");
+var ownedRawAuto = new AlteringAutomation(ownedRawWorld, ownedRawWorld,
+    (_, _) => Task.CompletedTask, 4,
+    new FakeResolver(ownedRawWorld) { MissingExternalRaw = "생가죽" },
+    facilityState: ownedRawLane);
+Check(await ownedRawAuto.RunAsync(craftableLeather, default) ==
+          AlteringRunResult.RawMaterialExhausted && ownedRawWorld.QueueCalls == 0 &&
+      ownedRawLane.Snapshot(craftableLeather.FacilityName).IntermediateDepth == 1,
+    "verified pre-input raw shortage may terminate without dropping the parent's own lease");
+
 var rawGuardWorld = new RecursiveProductionWorld();
 var rawGuardResolver = new RecursiveAlteringSupplyResolver(
     rawGuardWorld, rawGuardWorld, rawGuardWorld, rawGuardWorld);
@@ -5017,13 +5059,18 @@ internal sealed class FakeResolver(FakeWorld world) : IAlteringSupplyResolver
     internal int Calls;
     internal bool FailBeforeLeaving;
     internal string? MissingExternalRaw;
+    internal string RawHoldCategory = "external_leather_raw_missing";
+    internal Action? BeforeRawHold;
     public Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe blockedRecipe, int remainingWorks, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Calls++;
         if (MissingExternalRaw is not null)
+        {
+            BeforeRawHold?.Invoke();
             throw new MaterialSupplyHoldException(
-                new(MissingExternalRaw, 10, 0, "external_leather_raw_missing"));
+                new(MissingExternalRaw, 10, 0, RawHoldCategory));
+        }
         if (FailBeforeLeaving)
             throw new InvalidOperationException("M1 simulated material validation failure");
         world.Available = true;

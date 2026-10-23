@@ -915,4 +915,61 @@ catch (InvalidOperationException ex) when (
 Assert(mixedWoodStopped && mixedWoodManagerCalls == 0,
     "wood: mixed completed/running lane stops before manager input");
 
+// Exercise the real automation hold path through the combined coordinator.
+foreach (int holdCase in new[] { 0, 1, 2 })
+{
+    var holdPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+    var lane = new FacilityLaneState(Array.Empty<AlteringWork>());
+    var world = new CombinedRawHoldWorld(holdPlan, lane, holdCase);
+    var automation = new AlteringAutomation(world, world,
+        (_, _) => Task.CompletedTask, 2, world, facilityState: lane);
+    int turns = 0, abyss = 0;
+    bool refused = false;
+    try
+    {
+        await new MultiAlteringCoordinator(lane).RunAsync(new[] { holdPlan },
+            async (job, slots, token) =>
+            {
+                if (++turns > 1) throw new Exception("parent retried after child hold");
+                return await automation.RunBatchAsync(job, slots, token) ==
+                    AlteringRunResult.RawMaterialExhausted;
+            }, world.WorksAsync, (_, _) => Task.CompletedTask, default,
+            onIdleAbyssRound: _ => { abyss++; return Task.CompletedTask; });
+    }
+    catch (MaterialSupplyHoldException) { refused = true; }
+    Assert(refused == (holdCase != 0) && turns == 1 && world.Inputs == 0 && abyss == 0 &&
+           lane.Snapshot(holdPlan.FacilityName).IntermediateDepth == (holdCase == 2 ? 1 : 0),
+        holdCase == 0 ? "combined: proven pre-input raw shortage ends the item safely" :
+        "combined: uncertain or child-owned raw hold propagates before main retry or Abyss");
+}
+
 Console.WriteLine("Combined scheduler regressions passed.");
+
+internal sealed class CombinedRawHoldWorld(AlteringPlan plan, FacilityLaneState lane, int holdCase)
+    : IAlteringData, IAlteringScreen, IAlteringSupplyResolver
+{
+    internal int Inputs;
+    public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<AlteringRecipe>>(new[] {
+            new AlteringRecipe(plan.DisplayName, false, plan.ProducedPerWork,
+                "not_enough_ingredient", new[] { new AlteringIngredient("가죽", 1, 0) },
+                plan.FacilityName) });
+    public Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>());
+    public Task<long> ItemCountAsync(string name, CancellationToken ct) => Task.FromResult(0L);
+    public Task ResolveAsync(AlteringPlan parentPlan, AlteringRecipe recipe,
+        int remainingWorks, CancellationToken ct)
+    {
+        if (holdCase == 2) lane.AcquireIntermediate(plan.FacilityName,
+            Array.Empty<AlteringWork>(), "child");
+        throw new MaterialSupplyHoldException(new("생가죽", 10, 0,
+            holdCase == 1 ? "leather_recipe_inventory_mismatch" : "external_leather_raw_missing"));
+    }
+    public Task QueueAsync(AlteringPlan job, Action reserve, CancellationToken ct)
+    { Inputs++; throw new Exception("unexpected registration"); }
+    public Task<bool> CollectAsync(AlteringPlan job, CancellationToken ct)
+    { Inputs++; throw new Exception("unexpected receipt"); }
+    public Task<bool> CollectAfterTravelAsync(AlteringPlan job, CancellationToken ct)
+    { Inputs++; throw new Exception("unexpected travel"); }
+    public void Dispose() { }
+}
