@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
@@ -923,10 +923,10 @@ try
         // foliage/world frame. It must not cancel the authorized K press.
         Paint(grassyField, new Rectangle(14, 42, 155, 46), Color.White);
         Paint(grassyField, new Rectangle(15, 144, 230, 48), Color.White);
-        Check(PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
+        Check(!PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
               PixelGate("HasManagedKEntryFieldHudVisual", grassyField) &&
               !PixelGate("HasManagedKEntryBlockingModal", grassyField),
-            "V3.1.73 field HUD and misleading fixed facility header can coexist; no K pre-veto");
+            "field HUD rejects misleading facility anchors while preserving authorized K route");
 
         Paint(realKModal, new Rectangle(175, 754, 450, 218),
             Color.FromArgb(37, 44, 59));
@@ -1036,6 +1036,31 @@ try
     // and retain a real remote-button positive from the 17:21 incident.
     string moveFixtures = Path.Combine("tests", "altering-screen-integration",
         "facility-move-fixtures");
+    // Actual V3.2.58 incident: gray underground minimap, name/currency at
+    // the header anchors. No CLI activity or work counts are inferred here.
+    using (var field = new Bitmap(Path.Combine(moveFixtures,
+        "field-metal-20261024-033339.png")))
+    {
+        Check(PixelGate("HasWorldHudForFacilityVeto", field) &&
+              !PixelGate("HasFixedFacilityHeaderVisual", field),
+            "03:33 real underground field cannot prove a facility from name/currency");
+        foreach (string cache in new[] { "_repeatOcrFreeFacilityTitle", "_postTravelProvenFacilityTitle" })
+        {
+            object probe = RuntimeHelpers.GetUninitializedObject(screen);
+            screen.GetField(cache, all)!.SetValue(probe, "금속 가공");
+            var pending = (Task)Method(screen, "FindFacilityHeaderAsync", 3)
+                .Invoke(probe, new object[] { field, "금속 가공", CancellationToken.None })!;
+            await pending;
+            Check(pending.GetType().GetProperty("Result")!.GetValue(pending) is null,
+                "real field rejects stale " + cache + " before OCR or movement");
+        }
+        object uncached = RuntimeHelpers.GetUninitializedObject(screen);
+        var noOcr = (Task)Method(screen, "FindFacilityHeaderAsync", 3)
+            .Invoke(uncached, new object[] { field, "금속 가공", CancellationToken.None })!;
+        await noOcr;
+        Check(noOcr.GetType().GetProperty("Result")!.GetValue(noOcr) is null,
+            "uncached real field also rejects header without accessing uninitialized OCR");
+    }
     foreach (var (file, expectedMove, recordedChange) in new[] {
         ("onsite-leather-20261023-150720.png", false, .629),
         ("onsite-metal-20261023-153131.png", false, .681),

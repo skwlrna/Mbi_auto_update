@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using FishingAutomation;
 
 namespace DungeonVisionBot;
@@ -67,6 +67,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // This is a visual location check, not a guess based on a stale OCR result.
     private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        // A world name/currency row can occupy both fixed header anchors.
+        // Veto before cached proof AND OCR, so neither can bypass field evidence.
+        if (HasWorldHudForFacilityVeto(frame))
+            return Task.FromResult<DetectionResult?>(null);
         if (string.Equals(_repeatOcrFreeFacilityTitle, title, StringComparison.Ordinal) ||
             string.Equals(_postTravelProvenFacilityTitle, title, StringComparison.Ordinal))
         {
@@ -79,6 +84,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
         _ui?.NoteDiagnostic("header_check", title + "=OCR");
         return _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
+    }
+
+    private static bool HasWorldHudForFacilityVeto(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        // Gold minimap + life-skill disc is the existing independent field
+        // evidence. Underground gray minimaps instead retain the three exact
+        // Home/End/ESC glyphs; use the existing production template matcher.
+        // This is a negative facility veto, never permission to send input.
+        return HasManagedKEntryFieldHudVisual(frame) ||
+               DetectManagedWorldHudKeys(frame).Found;
     }
 
     // The actual 800x1000 facility capture has the large fixed title at
@@ -107,7 +123,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             return count;
         }
         return WhiteGlyphs(frame, new Rectangle(14, 42, 155, 46)) >= 18 &&
-               WhiteGlyphs(frame, new Rectangle(15, 144, 230, 48)) >= 20;
+               WhiteGlyphs(frame, new Rectangle(15, 144, 230, 48)) >= 20 &&
+               !HasWorldHudForFacilityVeto(frame);
     }
 
 
