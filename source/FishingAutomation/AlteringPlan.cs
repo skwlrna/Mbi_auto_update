@@ -810,7 +810,8 @@ internal sealed class AlteringAutomation
                             }
                             catch (MaterialSupplyHoldException hold)
                                 when (plan.FacilityName == "가죽 가공 시설" &&
-                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item))
+                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item) &&
+                                      hold.Evidence.Category == "external_leather_raw_missing")
                             {
                                 rawMaterialExhausted = true;
                                 if (_session is not null)

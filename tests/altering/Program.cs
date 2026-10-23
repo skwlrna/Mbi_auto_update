@@ -4849,10 +4849,41 @@ Check(AlteringReceiptPolicy.ShouldBlockReceiptForMoveButton(
         exactMoveLabelVisible: true),
     "H2: legacy single-altering exact move label still vetoes receipt");
 
+// A nested inventory mismatch must escape the parent, never become a normal
+// raw-exhausted callback return while a child still owns the facility.
+foreach (bool mismatch in new[] { false, true })
+{
+    var holdPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+    using var holdWorld = new NestedLeatherHoldWorld(mismatch);
+    var holdAuto = new AlteringAutomation(holdWorld, holdWorld,
+        (_, _) => Task.CompletedTask, 4, holdWorld);
+    int normalReturns = 0;
+    bool propagatedMismatch = false;
+    try
+    {
+        await new MultiAlteringCoordinator().RunAsync(new[] { holdPlan },
+            async (job, budget, token) =>
+            {
+                var result = await holdAuto.RunBatchAsync(job, budget, token);
+                normalReturns++;
+                return result == AlteringRunResult.RawMaterialExhausted;
+            }, holdWorld.WorksAsync, (_, _) => Task.CompletedTask, default);
+    }
+    catch (MaterialSupplyHoldException ex)
+    {
+        propagatedMismatch = ex.Evidence.Category == "leather_recipe_inventory_mismatch";
+    }
+    Check(propagatedMismatch == mismatch && normalReturns == (mismatch ? 0 : 1)
+          && holdWorld.ResolveCalls == 1 && holdWorld.InputCalls == 0,
+        mismatch ? "nested raw inventory mismatch vetoes normal scheduler completion before input"
+                 : "verified nested external raw shortage still ends the leather item normally");
+}
+
 Console.WriteLine($"PASS {checks} altering workflow checks");
 
 }
 catch(Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+
 
 internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoordinatorQueueScreen, IAlteringCoordinatorReceiptScreen, IAlteringRecoveryScreen, IAlteringCoordinatorStallRecoveryScreen
 {
@@ -5302,4 +5333,29 @@ internal sealed class CountingInternalConsumptionObserver : IAlteringInternalCon
         Commits++;
         return Task.CompletedTask;
     }
+}
+
+sealed class NestedLeatherHoldWorld(bool mismatch) : IAlteringData, IAlteringScreen, IAlteringSupplyResolver
+{
+    internal int ResolveCalls, InputCalls;
+    public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<AlteringRecipe>>(new[] {
+            new AlteringRecipe("가죽+", false, 3, "not_enough_ingredient",
+                new[] { new AlteringIngredient("가죽", 3, 0) }, "가죽 가공 시설") });
+    public Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<AlteringWork>>(Array.Empty<AlteringWork>());
+    public Task<long> ItemCountAsync(string name, CancellationToken ct) => Task.FromResult(0L);
+    public Task ResolveAsync(AlteringPlan plan, AlteringRecipe recipe, int count, CancellationToken ct)
+    {
+        ResolveCalls++;
+        throw new MaterialSupplyHoldException(new("생가죽", 10, mismatch ? 9 : 0,
+            mismatch ? "leather_recipe_inventory_mismatch" : "external_leather_raw_missing"));
+    }
+    public Task QueueAsync(AlteringPlan plan, Action reserve, CancellationToken ct)
+    { InputCalls++; throw new Exception("unexpected queue input"); }
+    public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
+    { InputCalls++; throw new Exception("unexpected receipt input"); }
+    public Task<bool> CollectAfterTravelAsync(AlteringPlan plan, CancellationToken ct)
+    { InputCalls++; throw new Exception("unexpected travel input"); }
+    public void Dispose() { }
 }
