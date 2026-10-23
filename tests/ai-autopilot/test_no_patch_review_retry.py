@@ -73,7 +73,10 @@ class ReviewRetryTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertFalse(agent.review_retry_eligible(
                     {**self.payload, **change}, self.eid, self.folder.name))
-        self.assertEqual(agent.review_retry_id(self.eid), self.eid + "-retry-review-v1")
+        retry = agent.review_retry_id(self.eid)
+        self.assertRegex(retry, r"^[0-9a-f]{16}$")
+        self.assertNotEqual(retry, self.eid)
+        self.assertEqual(retry, agent.review_retry_id(self.eid))
 
     def test_never_automatically_replay_review(self):
         called = self.cycle(lambda *_args, **_kwargs: self.fail("unexpected Codex invocation"))
