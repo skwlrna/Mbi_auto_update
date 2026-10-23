@@ -497,6 +497,11 @@ internal sealed partial class AiAutopilotDashboard : Form
             "\n원인은 로컬 분석 결과 기준 · 코드 수정 성공이나 실게임 해결을 의미하지 않습니다.";
     }
 
+    private static string StatusWithCause(string status, string reason) =>
+        status is "needs_review" or "interrupted_review_required"
+            ? "검토 필요 · " + ReviewCause(status, reason)
+            : StatusText(status);
+
     private static string NextStep(string status, string reason, bool running) => status switch
     {
         "tests_passed_review_required" => "PR 최종 CI 및 실게임 별도 확인",
@@ -1285,7 +1290,7 @@ internal sealed partial class AiAutopilotDashboard : Form
                     string aiStatus = ai?.Status ?? "not_started";
                     string status = ai is null ? (running ? "AI 분석 대기" : "AI 분석 대기 · 꺼짐")
                         : (aiStatus == "in_progress" && (!running || active != name)
-                            ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(aiStatus));
+                            ? "이전 분석 미완료 · 결과 확인 필요" : StatusWithCause(aiStatus, ai?.Reason ?? ""));
                     string explanation = ai is { Status: "blocked" or "tests_failed" or "needs_review" or "interrupted_review_required" }
                         ? detail + " / " + ReasonText(aiStatus, ai.Reason) : detail;
                     if (aiStatus == "tests_passed_review_required")
@@ -1307,7 +1312,7 @@ internal sealed partial class AiAutopilotDashboard : Form
                     ReasonText(ai.Status, ai.Reason) + ai.Provenance +
                     " · 원본 오류는 PC의 로컬 기록에 보관됨",
                     ai.Status == "in_progress" && (!running || active != ai.EventName)
-                        ? "이전 분석 미완료 · 결과 확인 필요" : StatusText(ai.Status),
+                        ? "이전 분석 미완료 · 결과 확인 필요" : StatusWithCause(ai.Status, ai.Reason),
                     NextStep(ai.Status, ai.Reason, running),
                     ai.Url, ai.PrText, ai.FilePath, ai.EventId, ai.EventName));
             }
