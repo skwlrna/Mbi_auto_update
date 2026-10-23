@@ -1,0 +1,289 @@
+name: Publish V3.2.59 Auto Update After Main CI
+
+# Installed clients ignore prereleases. Publish only the CI-approved main.
+# Explicit personal-use rollout authorization is NOT real-game testing.
+# A verified attestation OR explicit sole-operator risk acceptance is required.
+# Public release remains gated by exact main CI, updater ZIP checksum, source,
+# binary smoke, included backup/rollback scripts, and no prior release tag.
+# Manual dispatch retains exactly the same gates.
+on:
+  workflow_run:
+    workflows: ["Check V3 Production Engine"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: v3259-auto-update-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ (github.event_name == 'workflow_dispatch') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.repository.full_name == github.repository) }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Require game signoff OR direct-user-requested unverified rollout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='source/V3.2.59_GAME_TEST_ATTESTATION.json'
+          if(-not (Test-Path $path)){throw 'Missing real-game test attestation'}
+          $att=Get-Content $path -Raw | ConvertFrom-Json
+          $gamePassed=(
+            $att.version -eq 'V3.2.59' -and
+            $att.status -eq 'passed' -and
+            $att.testedBy -match '^[a-zA-Z0-9_-]{3,80}$' -and
+            $att.testedCandidateSha -match '^[a-f0-9]{40}$' -and
+            $att.testedAtUtc -match '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T' -and
+            $att.aiWatcherRealRepair -eq 'passed' -and
+            $att.aiWorkspaceRecovery -eq 'passed' -and
+            $att.oneClickOfflineSmoke -eq 'passed' -and
+            $att.rollbackVerified -eq 'passed'
+          )
+          if($gamePassed){
+            git cat-file -e "$($att.testedCandidateSha)^{commit}"
+            if($LASTEXITCODE-ne0){throw 'Tested source commit not found'}
+            git merge-base --is-ancestor $att.testedCandidateSha HEAD
+            if($LASTEXITCODE-ne0){throw 'Tested commit not ancestor of release'}
+            git diff --quiet $att.testedCandidateSha HEAD -- source/FishingAutomation source/tools tests changes
+            if($LASTEXITCODE-ne0){throw 'Production source changed after tested candidate'}
+          } else {
+            # NEVER fabricate or alter the real-game attestation. Operator
+            # requested the V3.2.59 public release with real-game verification still pending.
+            # This file must be explicitly committed and reviewed in main CI.
+            $soloPath='source/V3.2.59_SOLO_OWNER_RELEASE_ACCEPTANCE.json'
+            if(-not (Test-Path $soloPath)){
+              throw 'Real-game testing or rollback not verified; auto-update blocked'
+            }
+            $solo=Get-Content $soloPath -Raw | ConvertFrom-Json
+            if($att.version -ne 'V3.2.59' -or $att.status -ne 'pending' -or
+               $solo.schema -ne 1 -or $solo.version -ne 'V3.2.59' -or
+               $solo.rolloutMode -ne 'user_requested_unverified_release' -or
+               $solo.releasePurpose -ne 'facility_field_false_positive_move_click_guard_pr292' -or
+               $solo.acceptedOnLocalDate -ne '2026-10-24' -or
+               $solo.acceptanceSource -ne 'user_direct_request_in_chat' -or
+               $solo.scope -ne 'personal_use_only' -or
+               $solo.publicUpdaterReleaseApproved -ne $true -or
+               $solo.allowFabricatedGameTestAttestation -ne $false -or
+               $solo.aiWatcherRealRepair -ne 'not_tested' -or
+               $solo.aiGameBehavior -ne 'not_tested' -or
+               $solo.rollbackExecution -ne 'not_tested' -or
+               $solo.pcOfflineSmoke -ne 'not_tested_for_v3259' -or
+               $solo.aiWatcher -ne 'not_tested_for_v3259' -or
+               $solo.aiErrorManagerUI -ne 'not_tested' -or
+               $solo.aiWorkspaceRecovery -ne 'not_tested' -or
+               $solo.localHistoryDeletion -ne 'not_tested'){
+              throw 'Real-game testing or rollback not verified; auto-update blocked'
+            }
+            foreach($needed in @(
+              'source/tools/ApplyUpdate.ps1',
+              'source/tools/RollbackPrevious.ps1',
+              'source/ROLLBACK_PREVIOUS.cmd',
+              'source/START.cmd'
+            )){
+              if(-not (Test-Path $needed)){throw "Required update/rollback asset missing: $needed"}
+            }
+            Write-Warning 'USER-REQUESTED UNVERIFIED ROLLOUT: facility/field collision, pre-click UI verification and PC rollback are NOT VERIFIED in live game. Exact CI, SHA256 and offline executable smoke are required.'
+          }
+
+      - name: Require CI-approved current main and exact V3.2.59 version
+        id: eligibility
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha=(git rev-parse HEAD).Trim()
+          if($LASTEXITCODE-ne0 -or $sha -ne $env:CI_HEAD_SHA){throw 'Wrong CI checkout SHA'}
+          $remote=(git ls-remote origin refs/heads/main | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($remote)){throw 'main unavailable'}
+          if((($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main moved since CI; abort'}
+          # Automatic and manual promotion both require an already CI-approved main commit.
+          $ci=gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$sha&per_page=20" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $ci){throw 'Cannot verify main CI'}
+          $passed=@($ci.workflow_runs | Where-Object {
+            $_.head_sha -eq $sha -and $_.event -eq 'push' -and
+            $_.status -eq 'completed' -and $_.conclusion -eq 'success'
+          })
+          if($passed.Count -lt 1){throw 'No successful production CI for current main SHA'}
+          $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if($u -notmatch 'CurrentVersion = "V3\.2\.58"'){
+            "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Host 'Not V3.2.59 any more; skip'
+            exit 0
+          }
+          $p=Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          foreach($tag in @('<Version>3.2.59</Version>','<AssemblyVersion>3.2.59.0</AssemblyVersion>','<FileVersion>3.2.59.0</FileVersion>')){
+            if(-not $p.Contains($tag)){throw "Version mismatch: $tag"}
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.2.59.md)){throw 'Release notes missing'}
+          $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list check failed'}
+          if(@($releases | Where-Object { $_.tag_name -eq 'V3.2.59' }).Count -gt 0){
+            "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Host 'V3.2.59 release exists: no automatic overwrite'
+            exit 0
+          }
+          $tag=(git ls-remote --tags origin refs/tags/V3.2.59 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0){throw 'Tag lookup failed'}
+          if(-not [string]::IsNullOrWhiteSpace($tag)){throw 'Tag exists without release; manual recovery required'}
+          "publish=true" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Host "Eligible V3.2.59 CI-approved SHA: $sha"
+
+      - name: Publish verified Windows binaries
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'app restore failed'}
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'watchdog restore failed'}
+          New-Item artifacts/app,artifacts/watchdog -ItemType Directory -Force | Out-Null
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/app
+          if($LASTEXITCODE-ne0){throw 'app publish failed'}
+          dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
+          if($LASTEXITCODE-ne0){throw 'watchdog publish failed'}
+          if((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.2.59.0'){throw 'EXE version mismatch'}
+          if(-not (Test-Path artifacts/watchdog/MacroWatchdog.exe)){throw 'Missing watchdog'}
+
+      - name: Smoke test executable
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path artifacts/app/FishingAutomation.exe).Path
+          $p=Start-Process $exe -WorkingDirectory (Resolve-Path artifacts/app).Path -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep 5
+            $p.Refresh()
+            if($p.HasExited){throw "App exited early: $($p.ExitCode)"}
+          } finally {
+            Stop-Process $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Process MacroWatchdog -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Build updater-compatible Windows Lite, checksum, source
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg=Join-Path $PWD 'artifacts/package'
+          $rel=Join-Path $pkg 'release'
+          $tools=Join-Path $pkg 'tools'
+          $compat=Join-Path $pkg 'FishingAutomation'
+          New-Item $rel,$tools,$compat -ItemType Directory -Force | Out-Null
+          Copy-Item artifacts/app/* $rel -Recurse -Force
+          Copy-Item source/FishingAutomation/interception.dll (Join-Path $rel 'interception.dll') -Force
+          Copy-Item artifacts/watchdog/MacroWatchdog.exe (Join-Path $rel 'MacroWatchdog.exe') -Force
+          Copy-Item source/tools/ApplyUpdate.ps1 (Join-Path $tools 'ApplyUpdate.ps1') -Force
+          Copy-Item source/tools/RollbackPrevious.ps1 (Join-Path $tools 'RollbackPrevious.ps1') -Force
+          Copy-Item source/ROLLBACK_PREVIOUS.cmd (Join-Path $pkg 'ROLLBACK_PREVIOUS.cmd') -Force
+          Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
+          Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
+          'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
+          'MABI AUTO V3.2.59 - Facility/world field veto and guarded move clicks (PR #292)' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          $required=@(
+            'release/FishingAutomation.exe','release/MacroWatchdog.exe',
+            'release/abyss/config/targets.json','release/abyss/config/scenario.json',
+            'release/abyss/templates/managed_home_key.png','release/abyss/templates/managed_home_mail_key.png',
+            'release/abyss/templates/managed_end_key.png','release/abyss/templates/managed_escape_key.png',
+            'release/abyss/templates/loot_v173/loot_hallucination_stone.png',
+            'release/abyss/templates/loot_v173/loot_mor_corsair_tricorne.png',
+            'release/interception.dll','START.cmd','tools/ApplyUpdate.ps1',
+            'release/ai-autopilot/autopilot.py','release/ai-autopilot/quota_handoff.py','release/ai-autopilot/error_memory.py','release/ai-autopilot/github_pr.py','release/ai-autopilot/supervised_codex.py','release/ai-autopilot/regression_policy.py','release/ai-autopilot/review_latest_abyss.py',
+            'release/ai-autopilot/abyss_recovery_gate.py','release/ai-autopilot/pipeline_readiness.py','release/ai-autopilot/release_source.py','release/ai-autopilot/worktree_retention.py','release/ai-autopilot/worktree_recovery.py','release/ai-autopilot/config.json','release/ai-autopilot/one_click_test.py','release/ai-autopilot/draft_dedup.py',
+            'ROLLBACK_PREVIOUS.cmd','tools/RollbackPrevious.ps1')
+          foreach($x in $required){if(-not (Test-Path (Join-Path $pkg $x))){throw "Missing package file: $x"}}
+          $sha=(git rev-parse HEAD).Trim()
+          $sha | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          $zip=Join-Path $PWD 'artifacts/MabiAuto_V3.2.59_Windows_Lite.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($pkg,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MabiAuto_V3.2.59_Windows_Lite.zip" | Set-Content "$zip.sha256" -Encoding ASCII
+          $stage=Join-Path $PWD 'artifacts/source-package'
+          New-Item $stage -ItemType Directory -Force | Out-Null
+          Copy-Item source (Join-Path $stage 'source') -Recurse -Force
+          Copy-Item changes (Join-Path $stage 'changes') -Recurse -Force
+          Copy-Item tests (Join-Path $stage 'tests') -Recurse -Force
+          Copy-Item .github (Join-Path $stage '.github') -Recurse -Force
+          Copy-Item BUILD_VERIFY.ps1,README.txt,GITHUB_MIGRATION.md $stage -Force
+          $sha | Set-Content (Join-Path $stage 'BUILD_COMMIT.txt') -Encoding ASCII
+          $buildDirs=@(Get-ChildItem $stage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') })
+          foreach($d in ($buildDirs | Sort-Object { $_.FullName.Length } -Descending)){
+            if(Test-Path -LiteralPath $d.FullName){
+              $safe=(Resolve-Path -LiteralPath $d.FullName).Path
+              if(-not $safe.StartsWith($stage + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe cleanup'}
+              Remove-Item -LiteralPath $safe -Recurse -Force
+            }
+          }
+          $sourceZip=Join-Path $PWD 'artifacts/MabiAuto_V3.2.59_Source.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($stage,$sourceZip,[IO.Compression.CompressionLevel]::Optimal,$false)
+          foreach($n in @('MabiAuto_V3.2.59_Windows_Lite.zip','MabiAuto_V3.2.59_Windows_Lite.zip.sha256','MabiAuto_V3.2.59_Source.zip')){
+            if((Get-Item (Join-Path 'artifacts' $n)).Length -lt 64){throw "Bad asset: $n"}
+          }
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names=@($archive.Entries | ForEach-Object FullName)
+            foreach($n in $required){if($n -notin $names){throw "ZIP missing: $n"}}
+            if('BUILD_COMMIT.txt' -notin $names){throw 'ZIP has no build provenance'}
+          } finally { $archive.Dispose() }
+          Write-Host "V3.2.59 ZIP SHA256: $hash"
+
+      - name: Retain test-release assets in Actions
+        if: steps.eligibility.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: V3.2.59-verified-release-packages
+          path: |
+            artifacts/MabiAuto_V3.2.59_Windows_Lite.zip
+            artifacts/MabiAuto_V3.2.59_Windows_Lite.zip.sha256
+            artifacts/MabiAuto_V3.2.59_Source.zip
+
+      - name: Publish public auto-update Release
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha=(git rev-parse HEAD).Trim()
+          if($sha -ne $env:CI_HEAD_SHA){throw 'Wrong package source SHA'}
+          $remote=(git ls-remote origin refs/heads/main | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or (($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main changed since CI; abort release'}
+          $tag=(git ls-remote --tags origin refs/tags/V3.2.59 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or -not [string]::IsNullOrWhiteSpace($tag)){throw 'V3.2.59 tag already exists'}
+          git tag V3.2.59 $sha
+          if($LASTEXITCODE-ne0){throw 'tag creation failed'}
+          git push origin refs/tags/V3.2.59
+          if($LASTEXITCODE-ne0){throw 'tag push failed'}
+          gh release create V3.2.59 artifacts/MabiAuto_V3.2.59_Windows_Lite.zip artifacts/MabiAuto_V3.2.59_Windows_Lite.zip.sha256 artifacts/MabiAuto_V3.2.59_Source.zip --draft --verify-tag --title 'Mabi Auto V3.2.59' --notes-file source/RELEASE_NOTES_V3.2.59.md
+          if($LASTEXITCODE-ne0){throw 'Draft release failed'}
+          $expected=@('MabiAuto_V3.2.59_Windows_Lite.zip','MabiAuto_V3.2.59_Windows_Lite.zip.sha256','MabiAuto_V3.2.59_Source.zip')
+          $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Draft release lookup failed'}
+          $draft=@($releases | Where-Object { $_.tag_name -eq 'V3.2.59' }) | Select-Object -First 1
+          if(-not $draft -or -not $draft.draft -or $draft.prerelease){throw 'Draft release invalid'}
+          foreach($n in $expected){if($n -notin $draft.assets.name){throw "Missing release asset: $n"}}
+          gh release edit V3.2.59 --draft=false
+          if($LASTEXITCODE-ne0){throw 'Release publication failed'}
+          $published=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.2.59" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){throw 'Public auto-update not verified'}
+          foreach($n in $expected){if($n -notin $published.assets.name){throw "Published release missing asset: $n"}}
+          Write-Host "Auto-update V3.2.59 publicly published from commit $sha"

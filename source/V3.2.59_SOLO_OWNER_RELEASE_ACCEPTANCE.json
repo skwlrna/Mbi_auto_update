@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "version": "V3.2.59",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "facility_field_false_positive_move_click_guard_pr292",
+  "acceptedOnLocalDate": "2026-10-24",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3259",
+  "aiWatcher": "not_tested_for_v3259",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "facilityFieldVetoRealGame": "not_tested",
+  "facilityMovePreClickRealGame": "not_tested",
+  "remoteMoveFallbackRealGame": "not_tested",
+  "managedReceiptRealGame": "not_tested",
+  "disclosures": [
+    "On 2026-10-24 user directly requested official release of PR #292 despite unverified real-game operation.",
+    "CI tests use real historical screenshots and simulated UI variations, not a live game run.",
+    "No claim that a game move, metal facility receipt, automatic repair, user PC update or rollback was successfully performed.",
+    "Rollback to V3.2.58 remains possible by obtaining previously released package; backup settings, F9 ledger and stop macros before upgrading."
+  ]
+}
