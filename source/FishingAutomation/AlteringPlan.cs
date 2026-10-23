@@ -792,6 +792,7 @@ internal sealed class AlteringAutomation
                             Log?.Invoke(
                                 $"[자동 가공] 재료 해결 진입 · {plan.DisplayName} · " +
                                 "실제 필드/타 시설 이탈 전 현장확정 유지 · 중간관리자 판단 유지");
+                            int dependencyDepthBefore = _facilityState?.Snapshot(plan.FacilityName).IntermediateDepth ?? 0;
                             try
                             {
                                 // For leather, opportunistically fill up to seven
@@ -810,7 +811,12 @@ internal sealed class AlteringAutomation
                             }
                             catch (MaterialSupplyHoldException hold)
                                 when (plan.FacilityName == "가죽 가공 시설" &&
-                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item))
+                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item) &&
+                                      hold.Evidence.Category == "external_leather_raw_missing" &&
+                                      // A failed child still owns its queued work. Do not
+                                      // swallow its failure and resume the parent lane.
+                                      (_facilityState?.Snapshot(plan.FacilityName).IntermediateDepth ?? 0) ==
+                                          dependencyDepthBefore)
                             {
                                 rawMaterialExhausted = true;
                                 if (_session is not null)
