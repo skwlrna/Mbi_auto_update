@@ -41,6 +41,25 @@ internal sealed partial class AiAutopilotDashboard : Form
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "MabiAutoAI", "autopilot-results");
 
+    private static string ImageConsentPath => Path.Combine(Root, "image-opt-in.json");
+
+    // Default OFF. Explicit, durable consent is required before the local
+    // watcher may attach any game screenshot to an external Codex request.
+    internal static bool ImageEvidenceEnabled
+    {
+        get
+        {
+            using var consent = ReadBounded(ImageConsentPath);
+            if (consent is null || consent.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+            var root = consent.RootElement;
+            return Number(root, "schema") == 1 &&
+                   Field(root, "scope", 80) == "local_runtime_screenshot_to_codex" &&
+                   root.TryGetProperty("enabled", out var enabled) &&
+                   enabled.ValueKind == JsonValueKind.True;
+        }
+    }
+
     internal AiAutopilotDashboard(Func<bool> isWatcherRunning, Func<string> watcherStatus)
     {
         _isWatcherRunning = isWatcherRunning;
@@ -315,6 +334,47 @@ internal sealed partial class AiAutopilotDashboard : Form
             button.Height = 29;
             advanced.Controls.Add(button);
         }
+        var attachImage = new CheckBox
+        {
+            Text = "오류 사진을 Codex에 전달 (동의 필요)",
+            Width = 290, Height = 29, ForeColor = UiText,
+            BackColor = UiPanel, Checked = ImageEvidenceEnabled
+        };
+        attachImage.CheckedChanged += (_, _) =>
+        {
+            bool requested = attachImage.Checked;
+            if (requested && MessageBox.Show(this,
+                "앞으로 새로 발생하는 게임 오류에서 화면 사진 1장을 PC에 저장하고, AI 자동수정 시 Codex 서비스에 전송합니다.\\n" +
+                "사진에 캐릭터명이나 게임 내 채팅 등 화면 정보가 포함될 수 있습니다.\\n" +
+                "기존 오류 사진을 자동으로 가져오지 않으며, 원본 이미지는 GitHub PR에 추가하지 않습니다.\\n" +
+                "게임 조작·자동 병합·배포 권한은 주지 않습니다. 허용하겠습니까?",
+                "AI 오류 사진 분석 별도 동의", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                attachImage.Checked = false;
+                return;
+            }
+            try
+            {
+                Directory.CreateDirectory(Root);
+                var target = ImageConsentPath;
+                if (File.Exists(target) && (File.GetAttributes(target) & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("image consent path is linked");
+                string temp = target + ".tmp";
+                File.WriteAllText(temp, JsonSerializer.Serialize(new
+                {
+                    schema = 1, enabled = requested,
+                    scope = "local_runtime_screenshot_to_codex"
+                }));
+                File.Move(temp, target, true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                attachImage.CheckedChanged -= (_, _) => { };
+                MessageBox.Show(this, "사진 분석 설정 저장 실패 · 기존 설정을 확인하세요.");
+            }
+        };
+        advanced.Controls.Add(attachImage);
         foot.Controls.Clear();
         var removeSelected = new Button
         {
