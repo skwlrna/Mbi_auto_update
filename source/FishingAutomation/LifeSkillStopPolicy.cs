@@ -5,8 +5,9 @@ internal static class LifeSkillStopPolicy
     // The CLI can retain a stale Stop indication even after an action really ends.
     // The opposite also happens: IsGathering becomes false while a visible
     // Stop control still owns the active 100-action task. Require BOTH sources.
+    // Hidden main controls can also make IsGathering false during autoplay.
     internal static bool IsStoppedAfterSpace(GatheringActivity activity, bool stopButtonVisible)
-        => IsStoppedAfterSpace(
+        => !activity.IsAutoPlaying && IsStoppedAfterSpace(
             activity.IsGathering,
             activity.IsAutoTraveling,
             activity.IsFishing,
