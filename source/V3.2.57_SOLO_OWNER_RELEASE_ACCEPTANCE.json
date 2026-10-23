@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "version": "V3.2.57",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "facility_move_background_false_positive_pr285",
+  "acceptedOnLocalDate": "2026-10-23",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3257",
+  "aiWatcher": "not_tested_for_v3257",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "facilityMoveRealGame": "not_tested",
+  "facilityArrivalRealGame": "not_tested",
+  "disclosures": [
+    "On 2026-10-23 user directly requested PR #285 review and a formal public release.",
+    "PR #285 Windows CI and incident fixture tests are not live Mabinogi Mobile travel verification.",
+    "Incident fixtures were used in development and regressions, not an unseen hold-out dataset.",
+    "Real onsite arrival, leather/metal processing, updater installation and rollback on the user's PC are unverified.",
+    "V3.2.56 remains available for manual rollback. Stop jobs and back up configuration and progress before updating."
+  ]
+}
