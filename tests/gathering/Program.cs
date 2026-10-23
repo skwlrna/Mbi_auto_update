@@ -175,6 +175,22 @@ var staleStopButton = new GatheringActivity(
     "Stop", false, "None", "None");
 Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, false),
     "post-Space completion ignores stale MainButtonState ONLY when Stop UI is absent");
+// Hidden controls must not turn active autoplay into confirmed completion.
+var hiddenBulkActivity = staleStopButton with
+{
+    MainButtonState = "Hide",
+    LastRunningInteractionType = "Gathering",
+    IsAutoPlaying = true
+};
+Check(!hiddenBulkActivity.IsGathering &&
+      !LifeSkillStopPolicy.IsStoppedAfterSpace(hiddenBulkActivity, false),
+    "hidden Stop UI and false gathering flag cannot confirm completion while autoplay remains active");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(
+        hiddenBulkActivity with { IsAutoPlaying = false }, false),
+    "hidden controls allow completion after autoplay and all activity flags clear");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(
+        hiddenBulkActivity with { IsAutoPlaying = false }, true),
+    "cleared autoplay still cannot override a visible Stop control");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, true),
     "stale CLI stop with visible Stop UI must not authorize the next material");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false, false),
