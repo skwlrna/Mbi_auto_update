@@ -601,7 +601,7 @@ public sealed partial class MainForm
                     "preflight-supply-route", () => InspectSupplyRouteAsync(plan, ct), ct);
                 if (unavailable is not null &&
                     plan.FacilityName == "가죽 가공 시설" &&
-                    LeatherRawMaterialPolicy.IsExternalRaw(unavailable.Item))
+                    LeatherRawMaterialPolicy.IsConfirmedShortage(unavailable))
                 {
                     Ui(() => _log.Write(
                         $"[다중가공] {plan.DisplayName} 외부 원재료 부족 · " +
@@ -701,6 +701,16 @@ public sealed partial class MainForm
             async Task<MaterialSupplyHold?> RecheckSupplyHoldAsync(
                 AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
             {
+                if (plan.FacilityName == "가죽 가공 시설")
+                {
+                    // A mismatch must re-read BOTH sources even if the bag is
+                    // still below one ticket. Once shortage is corroborated,
+                    // let the normal engine persist its per-item terminal.
+                    var leatherHold = await InspectSupplyRouteAsync(plan, ct);
+                    return leatherHold is not null &&
+                        LeatherRawMaterialPolicy.IsConfirmedShortage(leatherHold)
+                            ? null : leatherHold;
+                }
                 long now = await managerState.ReadWithRecoveryAsync(
                     LifeSkillStage.Altering, "food-hold-recheck",
                     inner => rawAlteringData.ItemCountAsync(prior.Item, inner), ct);
@@ -765,9 +775,9 @@ public sealed partial class MainForm
                     var automation = automations[key];
                     var workTicket = alteringWorkFence.Begin(
                         $"alter:{plan.FacilityName}/{plan.DisplayName}/{plan.RecipeOrdinal}");
+                    int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
                     try
                     {
-                        int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
                         var result = await automation.RunBatchAsync(
                             plan,
                             slotBudget,
@@ -790,6 +800,17 @@ public sealed partial class MainForm
                         alteringWorkFence.ConfirmBatchReturn(
                             workTicket, registered, finished);
                         return finished;
+                    }
+                    catch (DrainedMaterialSupplyHoldException hold)
+                        when (hold.FacilityName == plan.FacilityName &&
+                              automation.ConfirmedRegistrationsThisRun == registrationsBefore)
+                    {
+                        // Child receipts/lease release are confirmed by the
+                        // dependency scheduler; the coordinator independently
+                        // rechecks the empty lane before persisting its HOLD.
+                        // No parent registration or terminal result is claimed.
+                        alteringWorkFence.ConfirmBatchReturn(workTicket, 0, false);
+                        throw;
                     }
                     catch (Exception)
                     {

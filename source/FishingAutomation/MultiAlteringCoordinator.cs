@@ -1072,7 +1072,36 @@ internal sealed class MultiAlteringCoordinator
                         prepared.Add(Key(plan));
                     }
                     Efficiency.NoteBatchAttempt(facility);
-                    bool planCompleted = await runBatch(plan, 1, ct);
+                    bool planCompleted;
+                    try
+                    {
+                        planCompleted = await runBatch(plan, 1, ct);
+                    }
+                    catch (DrainedMaterialSupplyHoldException hold)
+                        when (recheckUnavailableRoute is not null &&
+                              hold.FacilityName == facility)
+                    {
+                        // Only a dependency that has finished guarded receipts
+                        // and released its lease can take this lane-local path.
+                        // Re-read here: a live job, outstanding child owner, or
+                        // unverified queue shrink must still stop the whole run.
+                        var afterHold = await readWorks(ct);
+                        _laneState?.AssertAccess(facility, _laneOwner);
+                        _laneState?.Observe(facility, afterHold, allowShrink: false);
+                        if (afterHold.Any(x => x.FacilityName == facility))
+                            throw new InvalidOperationException(
+                                "중간재료 보류 후 시설 작업이 남아 있어 메인 복귀를 차단합니다.", hold);
+                        persistMaterialHold?.Invoke(plan, hold.Evidence);
+                        held[facility] = (plan, hold.Evidence,
+                            _now() + TimeSpan.FromSeconds(30));
+                        prepared.Remove(Key(plan));
+                        works = afterHold;
+                        Log?.Invoke($"[다중가공][중간재료 수령 후 보류] {facility} · " +
+                            $"{plan.DisplayName} · 분류={hold.Evidence.Category} · " +
+                            "대기열 0건/소유권 반환 확인 · 다른 시설 계속 · " +
+                            "재고/제법 재확인 전 등록 없음");
+                        break;
+                    }
                     acted = true;
 
                     if (planCompleted)

@@ -26,6 +26,50 @@ static class Program
 
     static async Task Main()
     {
+        await Test("17:58 leather mismatch persists without false raw exhaustion or input", async () =>
+        {
+            using var temp = new Temp();
+            var leather = new AlteringPlan("가죽 가공 시설", "가죽+", 20, 3, false);
+            AlteringPlan[] plans = [leather];
+            var world = new World(plans);
+            var mismatch = new MaterialSupplyHold("생가죽", 10, 9,
+                "leather_recipe_inventory_mismatch");
+            using (var batch = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(batch, world, plans);
+                batch.RecordMaterialHold(leather, mismatch);
+                Check(!batch.Session(leather).RawMaterialExhausted &&
+                    !MultiAlteringItemStatePolicy.IsTerminal(batch.Session(leather).MultiState),
+                    "Mismatch was converted into terminal raw exhaustion");
+            }
+            using (var reopened = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(reopened, world, plans);
+                Check(reopened.RestoreMaterialHolds(plans).Single().Observed == 9,
+                    "Restart lost the original 9/10 mismatch evidence");
+                // Counts can disagree even when the bag covers a ticket. This
+                // still requires a fresh recipe read and must remain resumable.
+                reopened.RecordMaterialHold(leather, mismatch with { Observed = 500 });
+                Check(MultiAlteringBatchStore.ReadManifestSnapshot(temp.Path)
+                    .MaterialHolds.Single().Observed == 500,
+                    "Sufficient-but-conflicting bag count invalidated the HOLD checkpoint");
+                await Reject(() => {
+                    reopened.RecordMaterialHold(leather, mismatch with {
+                        Category = "external_leather_raw_missing", Observed = 9 });
+                    return Task.CompletedTask;
+                }, "재료 보류 증거");
+                reopened.ClearMaterialHold(leather);
+            }
+            using (var final = new MultiAlteringBatchStore(temp.Path))
+            {
+                await Open(final, world, plans);
+                Check(final.RestoreMaterialHolds(plans).Count == 0 &&
+                    !final.Session(leather).RawMaterialExhausted,
+                    "Clearing a verified HOLD fabricated terminal completion");
+            }
+            Check(world.Registered.Count == 0 && world.Receipts == 0,
+                "Material HOLD persistence performed a game action");
+        });
         await Test("V3.2.41 food hold persists across restart without registering", async () =>
         {
             using var temp = new Temp();

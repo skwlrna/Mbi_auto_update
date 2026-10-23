@@ -271,6 +271,18 @@ internal static class LeatherRawMaterialPolicy
         => IsExternalRaw(ingredient.DisplayName) &&
            inventoryCount != ingredient.Owned;
 
+    internal static bool IsConfirmedShortage(MaterialSupplyHold evidence)
+        => IsExternalRaw(evidence.Item) &&
+           evidence.Category == "external_leather_raw_missing" &&
+           evidence.Required > 0 && evidence.Observed >= 0 &&
+           evidence.Observed < evidence.Required;
+
+    internal static bool CanDrainOnHold(MaterialSupplyHold evidence)
+        => IsConfirmedShortage(evidence) ||
+           IsExternalRaw(evidence.Item) &&
+           evidence.Category == "leather_recipe_inventory_mismatch" &&
+           evidence.Required > 0 && evidence.Observed >= 0;
+
     internal static bool EndsOnShortage(AlteringPlan plan, AlteringRecipe recipe)
         => plan.FacilityName == "가죽 가공 시설" &&
            recipe.MissingIngredients.Any(x =>
@@ -279,12 +291,20 @@ internal static class LeatherRawMaterialPolicy
 
 // V3.2.40: an unavailable route is an evidence-limited HOLD, not a claim
 // that the game item can never be acquired. No purchase, CLI write or click.
-internal sealed class MaterialSupplyHoldException : InvalidOperationException
+internal class MaterialSupplyHoldException : InvalidOperationException
 {
     internal MaterialSupplyHold Evidence { get; }
     internal MaterialSupplyHoldException(MaterialSupplyHold evidence)
         : base("현재 허용된 자동 확보 경로 미확인 · " + evidence.Category)
         => Evidence = evidence;
+}
+
+// Emitted only with a verified empty lane and no intermediate lease (after
+// guarded receipts, or at a read-only empty-main boundary). Never grants input.
+internal sealed class DrainedMaterialSupplyHoldException(
+    string facilityName, MaterialSupplyHold evidence) : MaterialSupplyHoldException(evidence)
+{
+    internal string FacilityName { get; } = facilityName;
 }
 
 internal enum AlteringRunResult
@@ -748,9 +768,10 @@ internal sealed class AlteringAutomation
                                     Log?.Invoke($"[자동 가공][재료 수량 불일치] {plan.DisplayName} · " +
                                         $"{raw.DisplayName} · 제법 Owned={raw.Owned}/{raw.Required} · " +
                                         $"get_items={live} · 원재료 소진 확정 금지 · 신규 입력 보류");
-                                    throw new MaterialSupplyHoldException(new(
+                                    throw await IsolateEmptyMaterialHoldAsync(plan,
+                                        new MaterialSupplyHoldException(new(
                                         raw.DisplayName, raw.Required, live,
-                                        "leather_recipe_inventory_mismatch"));
+                                        "leather_recipe_inventory_mismatch")), ct);
                                 }
                             }
                         }
@@ -810,7 +831,7 @@ internal sealed class AlteringAutomation
                             }
                             catch (MaterialSupplyHoldException hold)
                                 when (plan.FacilityName == "가죽 가공 시설" &&
-                                      LeatherRawMaterialPolicy.IsExternalRaw(hold.Evidence.Item))
+                                      LeatherRawMaterialPolicy.IsConfirmedShortage(hold.Evidence))
                             {
                                 rawMaterialExhausted = true;
                                 if (_session is not null)
@@ -823,6 +844,15 @@ internal sealed class AlteringAutomation
                                             $"{hold.Evidence.Item} {hold.Evidence.Observed}/{hold.Evidence.Required} · " +
                                             "생가죽 계열/타닌 가루 자동 확보 없이 해당 품목만 종료");
                                 break;
+                            }
+                            catch (MaterialSupplyHoldException hold)
+                                when (plan.FacilityName == "가죽 가공 시설" &&
+                                      hold.Evidence.Category == "leather_recipe_inventory_mismatch")
+                            {
+                                // No terminal raw-exhausted checkpoint for
+                                // conflicting CLI counts. Active child leases
+                                // must unwind through their dependency owner.
+                                throw await IsolateEmptyMaterialHoldAsync(plan, hold, ct);
                             }
 
                             recipes = await _data.RecipesAsync(ct);
@@ -976,6 +1006,41 @@ internal sealed class AlteringAutomation
             }
 
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
+        }
+    }
+
+    private async Task<MaterialSupplyHoldException> IsolateEmptyMaterialHoldAsync(
+        AlteringPlan plan, MaterialSupplyHoldException hold, CancellationToken ct)
+    {
+        if (_facilityState is null ||
+            _facilityState.Snapshot(plan.FacilityName).IntermediateLease)
+            return hold;
+        var watch = new MultiAlteringWaitWatchdog(StallThreshold, () => DateTimeOffset.UtcNow);
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var currentWorks = await _data.WorksAsync(ct);
+            _facilityState.Observe(plan.FacilityName, currentWorks, allowShrink: false);
+            var local = currentWorks.Where(x => x.FacilityName == plan.FacilityName).ToArray();
+            _facilityState.AssertAccess(plan.FacilityName, FacilityLaneOwner.Main);
+            if (local.Length == 0)
+                return new DrainedMaterialSupplyHoldException(plan.FacilityName, hold.Evidence);
+            if (local.All(x => x.IsCompleted))
+            {
+                if (!await CollectReadyBatchAsync(plan, ct))
+                    throw new InvalidOperationException("재료 보류 전 메인 배치 수령 미확정", hold);
+                currentWorks = await _data.WorksAsync(ct);
+                _onConfirmedReceipt?.Invoke(plan, currentWorks);
+                _facilityState.Observe(plan.FacilityName, currentWorks, allowShrink: true);
+                _facilityState.ConfirmOnsite(plan.FacilityName,
+                    "재료 불일치 보류 · 기존 메인 배치 전체 수령 확인");
+                continue;
+            }
+            watch.Observe(plan.FacilityName, local);
+            Log?.Invoke($"[자동 가공] 재료 불일치 신규 등록 보류 · {plan.DisplayName} · " +
+                $"기존 {local.Length}작업 전체 완료 대기 · 원재료 소진 확정 아님");
+            await _delay(TimeSpan.FromSeconds(Math.Clamp(local.Where(x => !x.IsCompleted)
+                .Select(x => x.RemainingSeconds).DefaultIfEmpty(5).Min(), 1, 30)), ct);
         }
     }
 
