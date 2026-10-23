@@ -2735,7 +2735,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     AlteringFacilityTravelConfirmPolicy.ShouldRetryUnchangedFixedMove(
                         forceMoveClick, moveRetried, sawDeparture || sawTravel,
                         moveRegionChange, identicalMoveFrames, elapsedSinceMove,
-                        facilityVisible, activity?.IsAutoTraveling, popupVisible);
+                        facilityVisible, activity?.IsAutoTraveling, popupVisible, moveVisible);
                 if (retryCandidate)
                 {
                     // Fresh proof immediately before the optional 2nd click.
@@ -2750,6 +2750,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                          await FindFacilityHeaderAsync(retryFrame, plan.ScreenTitle, ct) is not null) &&
                         !HasFacilityTravelConfirmationVisual(retryFrame) &&
                         !HasBottomConfirmationModal(retryFrame) &&
+                        HasFacilityMoveButtonVisual(retryFrame) &&
+                        await FindAsync(retryFrame,
+                            AlteringFacilityLayout.MoveButtonVisualArea,
+                            "설비로 이동", ct) is not null &&
                         await TryAutoTravelingAsync(ct) == false)
                     {
                         _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);

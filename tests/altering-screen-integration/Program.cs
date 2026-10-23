@@ -273,22 +273,22 @@ try
         "V3.1.65 pixel disappearance requires real change and no popup or movement");
     Check(CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
             true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
-            true, false, false) &&
+            true, false, false, true) &&
           !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
             true, true, false, 0.0, 4, TimeSpan.FromSeconds(4),
-            true, false, false) &&
+            true, false, false, true) &&
           !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
             true, false, false, 0.5, 4, TimeSpan.FromSeconds(4),
-            true, false, false) &&
+            true, false, false, true) &&
           !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
             true, false, false, 0.0, 4, TimeSpan.FromSeconds(1),
-            true, false, false) &&
+            true, false, false, true) &&
           !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
             true, false, true, 0.0, 4, TimeSpan.FromSeconds(4),
-            true, false, false) &&
+            true, false, false, true) &&
           !CallBoolean(travelPolicy, "ShouldRetryUnchangedFixedMove",
             true, false, false, 0.0, 4, TimeSpan.FromSeconds(4),
-            true, null, false),
+            true, null, false, true),
         "V3.1.65 unchanged pixels: only one retry, never if travel/unknown/modal");
     Check(CallBoolean(travelPolicy, "HasVerifiedManagedInstantArrival",
             true, true, true, true, false, false, false) &&
