@@ -251,7 +251,7 @@ try
         "V3.1.64 V3.1.56 instant arrival is eligible for both managed receipt and registration");
     Check(Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
           Has(travel, "ShouldRetryUnchangedFixedMove") &&
-          Count(travel, "ClickFresh") >= 2 &&
+          Count(travel, "ClickVerifiedFreshAsync") >= 2 &&
           Has(travel, "HasStableOnsiteEvidence"),
         "V3.1.65 compiled receipt/registration travel proves pixel loss and bounded retry");
     Check(CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation",
