@@ -1,0 +1,26 @@
+{
+  "notes": "Original 800x1000 screenshots, unchanged. Pixel change scalars come from recent.log; no pre-click frames or raw CLI packets are available. Idle/unknown/moving CLI values in tests are injected scenarios, not inferred from the image. These tests verify recognition and arrival guards, not live game travel.",
+  "frames": [
+    {
+      "file": "onsite-metal-20261023-153131.png",
+      "source": "https://github.com/skwlrna/Mbi_auto_log/blob/main/runtime-errors/2026-10-23/20261023_153131_555_다중가공_오류_8ae168/screen.png",
+      "sha256": "574e30efd3417791a9d6c38b1242ffe24f3f29bc01e8a41962358e1cf792f452",
+      "remoteMoveVisible": false,
+      "recordedPostClickChangeRatio": 0.681
+    },
+    {
+      "file": "onsite-leather-20261023-150720.png",
+      "source": "https://github.com/skwlrna/Mbi_auto_log/blob/main/runtime-errors/2026-10-23/20261023_150720_292_다중가공_오류_a01d04/screen.png",
+      "sha256": "fbe8b7a965653fdaa524c0c9e7bde90bd9be599cbcc5c6ae95a48e139eedc0b2",
+      "remoteMoveVisible": false,
+      "recordedPostClickChangeRatio": 0.629
+    },
+    {
+      "file": "remote-wood-20261007-172137.png",
+      "source": "https://github.com/skwlrna/Mbi_auto_log/blob/main/runtime-errors/2026-10-07/20261007_172137_558_다중가공_오류_9fc3cb/screen.png",
+      "sha256": "9a66c63a4be85fb91f9f94efd5862a9c0f95599afefa4ae602d95033410f8139",
+      "remoteMoveVisible": true,
+      "recordedPostClickChangeRatio": null
+    }
+  ]
+}

@@ -376,11 +376,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     }
 
     private static bool HasFacilityMoveButtonVisual(Bitmap frame)
+        => MeasureFacilityMoveButtonVisual(frame).Accepted;
+
+    private readonly record struct FacilityMoveButtonVisualEvidence(
+        bool Accepted, bool Shape, bool Anchor, double BoundedAnchorRatio);
+
+    private static FacilityMoveButtonVisualEvidence MeasureFacilityMoveButtonVisual(Bitmap frame)
     {
-        // Prove the remote "설비로 이동" pill with TWO left-side signals:
-        // (1) the broad teal shape and (2) teal fill around the fixed click anchor.
+        // The 2026-10-23 leather/metal backgrounds satisfy both legacy colour
+        // gates. Prove a BOUNDED pill too: teal at the fixed anchor must be
+        // brighter than the background both above AND below that same column.
+        // A flat fill or monotonic gradient cannot supply those two edges.
         // The top-right X is advisory only because the 17:21 live failure showed
         // currency digits can mimic it and incorrectly erase a genuine move button.
+        if (frame.Width != 800 || frame.Height != 1000)
+            return default;
         var bounds = new Rectangle(Point.Empty, frame.Size);
         var roi = Rectangle.Intersect(
             AlteringFacilityLayout.MoveButtonVisualArea,
@@ -390,11 +400,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bounds);
         if (roi.Width < 120 || roi.Height < 45 ||
             anchor.Width < 80 || anchor.Height < 24)
-            return false;
+            return default;
 
         static bool IsMoveTeal(Color p)
             => p.B >= 35 && p.G >= 30 && p.R <= 65 &&
-               p.B >= p.R + 18 && p.G >= p.R + 10;
+               p.B >= p.R + 18 && p.G >= p.R + 10 &&
+               p.G * 4 >= p.B * 3;
 
         int sampled = 0;
         int teal = 0;
@@ -416,34 +427,49 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
 
         if (sampled == 0 || teal * 100 < sampled * 5)
-            return false;
+            return default;
 
         int width = maxX - minX;
         int height = maxY - minY;
         bool moveShape = width >= 90 && height >= 18;
         if (!moveShape)
-            return false;
+            return default;
 
         int anchorSampled = 0;
         int anchorTeal = 0;
+        int boundedAnchorTeal = 0;
         for (int y = anchor.Top; y < anchor.Bottom; y += 2)
         for (int x = anchor.Left; x < anchor.Right; x += 2)
         {
             anchorSampled++;
-            if (IsMoveTeal(frame.GetPixel(x, y)))
-                anchorTeal++;
+            Color p = frame.GetPixel(x, y);
+            if (!IsMoveTeal(p))
+                continue;
+            anchorTeal++;
+
+            // Sample outside the fixed pill, not a distant unrelated UI item.
+            // Require both colour channels and both edges in the SAME column.
+            Color above = frame.GetPixel(x, roi.Top);
+            Color below = frame.GetPixel(x, roi.Bottom - 1);
+            if (p.G >= above.G + 12 && p.B >= above.B + 12 &&
+                p.G >= below.G + 12 && p.B >= below.B + 12)
+                boundedAnchorTeal++;
         }
 
-        // The real fixed button fills a large portion of the anchor area.
-        // Sparse blue fragments from other on-site controls cannot satisfy this.
+        // Text/antialiasing may interrupt the fill. A sizeable bounded anchor
+        // must remain; sparse slot-ring fragments are not a remote control.
         bool moveAnchor = anchorSampled > 0 &&
             anchorTeal * 100 >= anchorSampled * 18;
+        bool boundedAnchor = anchorSampled > 0 &&
+            boundedAnchorTeal * 100 >= anchorSampled * 18;
 
         bool onsiteCloseVisible = HasOnsiteCloseButtonVisual(frame);
-        return AlteringFacilityLayout.ShouldAcceptMoveButton(
+        bool accepted = boundedAnchor && AlteringFacilityLayout.ShouldAcceptMoveButton(
             onsiteCloseVisible,
             moveShapeVisible: moveShape,
             moveAnchorVisible: moveAnchor);
+        return new(accepted, moveShape, moveAnchor,
+            anchorSampled == 0 ? 0.0 : (double)boundedAnchorTeal / anchorSampled);
     }
 
     private async Task<bool> WaitForCollectPromptAsync(
@@ -2857,6 +2883,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             }
 
             if (attempt > 0 && attempt % 10 == 0)
+            {
+                var moveEvidence = MeasureFacilityMoveButtonVisual(frame);
+                string arrivalWaitReason = !facilityVisible ? "가공창 미확인" :
+                    activity is null ? "CLI 활동 미확정" :
+                    activity.IsAutoTraveling ? "자동이동 중" :
+                    popupVisible ? "확인 팝업 유지" :
+                    moveVisible ? "이동버튼 양성(경계검증 또는 문구OCR)" :
+                    managedFreshArrival && !confirmedMoveTransition && !instantArrival
+                        ? "이동전환/픽셀소멸 증거 부족" : "현장 안정화/후행 재확인";
                 Log?.Invoke(
                     $"[자동 가공] 설비 이동 대기 · 이동감지={sawTravel} · " +
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
@@ -2865,7 +2900,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"픽셀변화={moveRegionChange:P1} · 픽셀동일연속={identicalMoveFrames} · " +
                     $"재클릭사용={moveRetried} · 현장닫기X={HasOnsiteCloseButtonVisual(frame)} · " +
                     $"파란수령버튼={HasCollectButtonVisual(frame)} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
-                    $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects}");
+                    $"이동확인Space={travelConfirmationSpaces} · CLI로딩거부={loadingCliRejects} · " +
+                    $"이동버튼형태={moveEvidence.Shape} · 중심색상={moveEvidence.Anchor} · " +
+                    $"상하경계앵커={moveEvidence.BoundedAnchorRatio:P1} · " +
+                    $"도착차단={arrivalWaitReason}");
+            }
         }
 
         if (managedTravelClock is not null)
