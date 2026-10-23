@@ -1,0 +1,14 @@
+{
+  "version": "V3.2.57",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "PR #285: Windows CI and compiled screen fixture regression only. Live onsite leather/metal arrival, remote move action, updater install and rollback remain unverified.",
+  "facilityMoveRealGame": "pending",
+  "facilityArrivalRealGame": "pending"
+}
