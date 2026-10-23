@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("N03InputRegression")]
 
 [assembly: InternalsVisibleTo("N02ResumeRegression")]
-[assembly: InternalsVisibleTo("AlteringVisualRegression")]
 
 [assembly: InternalsVisibleTo("F05ConsumptionJournalRegression")]
 

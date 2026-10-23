@@ -1015,7 +1015,12 @@ internal sealed class AlteringAutomation
         if (_facilityState is null ||
             _facilityState.Snapshot(plan.FacilityName).IntermediateLease)
             return hold;
-        var watch = new MultiAlteringWaitWatchdog(StallThreshold, () => DateTimeOffset.UtcNow);
+        // Keep the single-altering engine independent of the multi scheduler.
+        // Only a completed job or a decreasing active countdown is progress;
+        // repeated reads/increasing timers never extend this bounded wait.
+        var progressClock = System.Diagnostics.Stopwatch.StartNew();
+        int previousCompleted = -1;
+        long previousRemaining = long.MaxValue;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
@@ -1036,7 +1041,18 @@ internal sealed class AlteringAutomation
                     "재료 불일치 보류 · 기존 메인 배치 전체 수령 확인");
                 continue;
             }
-            watch.Observe(plan.FacilityName, local);
+            int completed = local.Count(x => x.IsCompleted);
+            long remaining = local.Where(x => !x.IsCompleted && x.State == "InProgress")
+                .Select(x => x.RemainingSeconds).DefaultIfEmpty(long.MaxValue).Min();
+            if (completed > previousCompleted || remaining < previousRemaining)
+            {
+                progressClock.Restart();
+                previousCompleted = completed;
+                previousRemaining = remaining;
+            }
+            if (progressClock.Elapsed >= StallThreshold)
+                throw new InvalidOperationException(
+                    "재료 불일치 보류 중 기존 배치 정체 · 추가 등록/수령 없이 정지합니다.");
             Log?.Invoke($"[자동 가공] 재료 불일치 신규 등록 보류 · {plan.DisplayName} · " +
                 $"기존 {local.Length}작업 전체 완료 대기 · 원재료 소진 확정 아님");
             await _delay(TimeSpan.FromSeconds(Math.Clamp(local.Where(x => !x.IsCompleted)
