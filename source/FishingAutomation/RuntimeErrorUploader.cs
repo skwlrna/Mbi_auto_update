@@ -98,8 +98,11 @@ public sealed class RuntimeErrorUploader
 
     public async Task UploadAlertAsync(RuntimeErrorReport report, bool requestedScreenshot = true)
     {
-        // Local timeline/Autopilot evidence is independent of optional GitHub uploads.
-        AiRuntimeErrorJournal.Record(report, _log, ReadRecentLog(150));
+        // One local screenshot when explicitly opted into Codex image analysis.
+        // Capture happens even if optional GitHub uploading is disabled.
+        byte[]? aiImage = (requestedScreenshot && AiAutopilotDashboard.ImageEvidenceEnabled)
+            ? CaptureGameWindowPng() : null;
+        AiRuntimeErrorJournal.Record(report, _log, ReadRecentLog(150), aiImage);
         var settings = LoadSettings();
         if (!settings.Enabled) return;
         string repo = NormalizeRepository(settings.Repository);
@@ -141,7 +144,7 @@ public sealed class RuntimeErrorUploader
 
             if (requestedScreenshot && settings.SendScreenshot)
             {
-                byte[]? screenshot = CaptureGameWindowPng();
+                byte[]? screenshot = aiImage ?? CaptureGameWindowPng();
                 if (screenshot is not null)
                     await PutFileAsync(repo, branch, token, $"{folder}/screen.png", screenshot, $"runtime screenshot: {report.Title}");
             }

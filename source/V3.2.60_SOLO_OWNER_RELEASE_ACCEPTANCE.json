@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "version": "V3.2.60",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "ai_autofix_photo_evidence_review_reasons_pr294",
+  "acceptedOnLocalDate": "2026-10-24",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3260",
+  "aiWatcher": "not_tested_for_v3260",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "facilityFieldVetoRealGame": "not_tested",
+  "facilityMovePreClickRealGame": "not_tested",
+  "remoteMoveFallbackRealGame": "not_tested",
+  "managedReceiptRealGame": "not_tested",
+  "disclosures": [
+    "On 2026-10-24 the user directly requested public release of the AI automatic-repair changes from PR #294 in this conversation.",
+    "No image is forwarded to Codex by default. Only a separate opt-in allows transmission of subsequent bounded local runtime screenshots.",
+    "Windows tests do not establish real-PC Codex login, image upload, actual AI source repair, game behavior, installer update, or rollback success.",
+    "Previous 61 needs-review results remain unresolved; prior event screenshots are not reconstructed.",
+    "Rollback to V3.2.59 by the previously released package remains possible but has not been tested on the user's PC."
+  ],
+  "screenshotToCodexOnPc": "not_tested",
+  "reviewReasonDisplayOnPc": "not_tested",
+  "retryNoPatchOnPc": "not_tested"
+}

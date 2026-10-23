@@ -1,0 +1,15 @@
+{
+  "version": "V3.2.60",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "aiWatcherRealRepair": "pending",
+  "aiWorkspaceRecovery": "pending",
+  "oneClickOfflineSmoke": "pending",
+  "rollbackVerified": "pending",
+  "notes": "PR #294 screenshot-to-Codex consent and review reasons. Windows CI checks only; live-game repair, user PC screenshot sending, upgrade and rollback not tested.",
+  "imageTransmissionOnPc": "pending",
+  "reviewReasonDisplayOnPc": "pending",
+  "retryNoPatchOnPc": "pending"
+}
