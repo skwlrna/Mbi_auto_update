@@ -77,6 +77,10 @@ class ReviewRetryTests(unittest.TestCase):
         self.assertRegex(retry, r"^[0-9a-f]{16}$")
         self.assertNotEqual(retry, self.eid)
         self.assertEqual(retry, agent.review_retry_id(self.eid))
+        from github_pr import safe_branch
+        from worktree_retention import IDENTIFIER
+        self.assertTrue(safe_branch("ai/autopilot-" + retry))
+        self.assertIsNotNone(IDENTIFIER.fullmatch(retry))
 
     def test_never_automatically_replay_review(self):
         called = self.cycle(lambda *_args, **_kwargs: self.fail("unexpected Codex invocation"))
