@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>N02ResumeRegression</AssemblyName><UseAppHost>false</UseAppHost><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <Compile Include="../../source/FishingAutomation/LifeSkillManagerState.cs" Link="LifeSkillManagerState.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringPlan.cs" Link="AlteringPlan.cs" />
     <Compile Include="../../source/FishingAutomation/AlteringRecipeIdentityPolicy.cs" Link="AlteringRecipeIdentityPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/MultiAlteringConsumptionLedger.cs" Link="MultiAlteringConsumptionLedger.cs" />

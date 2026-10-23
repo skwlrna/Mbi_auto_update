@@ -525,8 +525,9 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             if (item is null || MultiAlteringItemStatePolicy.IsTerminal(item.MultiState) ||
                 string.IsNullOrWhiteSpace(hold.Item) || hold.Item.Length > 160 ||
                 string.IsNullOrWhiteSpace(hold.Category) || hold.Category.Length > 128 ||
-                hold.Required <= 0 || hold.Observed < 0 ||
-                hold.Observed >= hold.Required || hold.Rechecks < 0 ||
+                !CanPersistMaterialHold(hold.FacilityName,
+                    new(hold.Item, hold.Required, hold.Observed, hold.Category)) ||
+                hold.Rechecks < 0 ||
                 hold.FirstHeldAt == default || hold.LastCheckedAt < hold.FirstHeldAt)
                 throw new InvalidDataException("F9 재료 보류 기록 손상/완료 품목 충돌 · 안전 정지");
         }
@@ -565,9 +566,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
     {
         if (Batch.State != MultiAlteringBatchState.Active ||
             MultiAlteringItemStatePolicy.IsTerminal(Session(plan).MultiState) ||
-            !string.Equals(plan.FacilityName, "식재료 가공 시설", StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(evidence.Item) ||
-            evidence.Required <= evidence.Observed || evidence.Observed < 0)
+            !CanPersistMaterialHold(plan.FacilityName, evidence))
             throw new InvalidOperationException("재료 보류 증거/상태 불일치 · 자동 재개 차단");
         string key = Key(plan);
         var previous = Batch.MaterialHolds.SingleOrDefault(h => h.FacilityName == plan.FacilityName);
@@ -592,6 +592,13 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 .Append(next).ToArray()
         });
     }
+
+    private static bool CanPersistMaterialHold(string facility, MaterialSupplyHold evidence)
+        => evidence.Required > 0 && evidence.Observed >= 0 &&
+           (facility == "식재료 가공 시설" && evidence.Observed < evidence.Required ||
+            facility == "가죽 가공 시설" &&
+            LeatherRawMaterialPolicy.IsExternalRaw(evidence.Item) &&
+            evidence.Category == "leather_recipe_inventory_mismatch");
 
     internal void ClearMaterialHold(AlteringPlan plan)
     {

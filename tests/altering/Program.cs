@@ -3448,6 +3448,150 @@ Check(integratedPartialResult == AlteringRunResult.BatchQueued &&
 if (Directory.Exists(integratedPartialDir))
     Directory.Delete(integratedPartialDir, recursive: true);
 
+// 2026-10-23 17:58 replay: four child jobs, then recipe Owned=0 versus
+// fresh bag=9/10. Counts and asynchronous completion are injected test I/O;
+// the actual resolver, dependency scheduler, automation and main coordinator run.
+async Task ReplayLeatherShortageAsync(bool mismatch, string failure = "")
+{
+    var incidentPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 20, 3, false);
+    var peerPlan = new AlteringPlan("금속 가공 시설", "강철괴", 3, 3, false);
+    var world = new RecursiveProductionWorld {
+        IncludeLeather = true, DelayLeatherCompletion = true,
+        StaleRawOwnedWhenShort = mismatch, RejectReceipt = failure == "receipt",
+        SuppressReceiptCredit = failure == "output"
+    };
+    world.SetCount("생가죽", 49);
+    world.SetCount("가죽", 1);
+    world.SetCount("타닌 가루", 28);
+    var lane = new FacilityLaneState(await world.WorksAsync(default));
+    string dir = Path.Combine(Path.GetTempPath(), "mabi-1758-" + Guid.NewGuid().ToString("N"));
+    using var stop = new CancellationTokenSource();
+    int waits = 0, peerCalls = 0, holds = 0, rechecks = 0, clears = 0;
+    bool observedUnfinishedLease = false;
+    DateTimeOffset clock = DateTimeOffset.UtcNow;
+    var logs = new List<string>();
+    Task ChildDelay(TimeSpan time, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        waits++;
+        observedUnfinishedLease |= lane.Snapshot(incidentPlan.FacilityName).IntermediateLease;
+        Check(lane.Snapshot(incidentPlan.FacilityName).IntermediateLease &&
+              world.Queued.Count(x => x == "가죽") == 4 &&
+              !world.Queued.Contains("가죽+") && world.CollectionCalls == 0,
+            "17:58 four child jobs keep lease; no parent input or premature receipt");
+        if (failure == "cancel") { stop.Cancel(); ct.ThrowIfCancellationRequested(); }
+        if (waits == 1) world.CompleteFirstWork();
+        else world.CompleteAllWorks();
+        return Task.CompletedTask;
+    }
+    var scheduler = new MultiAlteringDependencyScheduler(world, world, testIdentity,
+        dir, ChildDelay, 4, laneState: lane);
+    scheduler.Log += logs.Add;
+    var resolver = new RecursiveAlteringSupplyResolver(world, world, world, world,
+        delay: ChildDelay, verificationAttempts: 4, dependencyScheduler: scheduler);
+    var store = new AlteringSessionStore(AlteringSessionStore.MultiPlanPath(dir, incidentPlan));
+    var session = AlteringSessionState.Create(incidentPlan, testIdentity, 0, 0);
+    store.Save(session);
+    var parent = new AlteringAutomation(world, world, ChildDelay, 4, resolver,
+        store, session, facilityState: lane,
+        onConfirmedReceipt: (p, works) => lane.Observe(p.FacilityName, works, allowShrink: true));
+    var main = new MultiAlteringCoordinator(lane, now: () => clock);
+    main.Log += logs.Add;
+    bool failedAsExpected = false;
+    try
+    {
+        await main.RunAsync(new[] { incidentPlan, peerPlan },
+            async (p, budget, ct) =>
+            {
+                if (p == peerPlan) { peerCalls++; return true; }
+                int before = parent.ConfirmedRegistrationsThisRun;
+                var result = await parent.RunBatchAsync(p, budget, ct);
+                lane.NoteRegistration(p, FacilityLaneOwner.Main,
+                    parent.ConfirmedRegistrationsThisRun - before);
+                return result is AlteringRunResult.Completed or AlteringRunResult.RawMaterialExhausted;
+            }, world.WorksAsync,
+            (time, ct) => { ct.ThrowIfCancellationRequested(); clock += TimeSpan.FromSeconds(31); return Task.CompletedTask; },
+            stop.Token,
+            recheckUnavailableRoute: async (p, prior, ct) =>
+            {
+                rechecks++;
+                Check(peerCalls == 1 && holds == 1 && !store.Load()!.RawMaterialExhausted &&
+                      !lane.Snapshot(p.FacilityName).IntermediateLease &&
+                      !(await world.WorksAsync(ct)).Any(x => x.FacilityName == p.FacilityName),
+                    "17:58 mismatch holds only leather after receipt; healthy peer continues; no terminal flag");
+                world.StaleRawOwnedWhenShort = false; // independent fresh sources now agree 9/10
+                var recipes = await world.RecipesAsync(ct);
+                var evidence = await MaterialSupplyRoutePolicy.FindHoldAsync(p,
+                    recipes.Single(x => x.DisplayName == p.DisplayName), recipes,
+                    Array.Empty<GatherableItem>(), world.ItemCountAsync, ct);
+                Check(evidence is not null && LeatherRawMaterialPolicy.IsConfirmedShortage(evidence),
+                    "17:58 fresh corroborated 9/10 is a shortage, not a stock mismatch");
+                return null; // rerun normal engine guards; this read never authorizes an input
+            },
+            persistMaterialHold: (p, evidence) => {
+                Check(evidence.Category == "leather_recipe_inventory_mismatch",
+                    "17:58 runtime mismatch keeps original category"); holds++;
+            },
+            clearMaterialHold: p => clears++);
+    }
+    catch (OperationCanceledException) when (failure == "cancel") { failedAsExpected = true; }
+    catch (InvalidOperationException ex) when (failure == "receipt" &&
+        ex.Message.Contains("수령")) { failedAsExpected = true; }
+    catch (InvalidOperationException ex) when (failure == "output" &&
+        ex.Message.Contains("산출량 미확정")) { failedAsExpected = true; }
+    if (failure == "output")
+        Check(failedAsExpected && !lane.Snapshot(incidentPlan.FacilityName).IntermediateLease &&
+              (await world.WorksAsync(default)).Count == 0 && !world.Queued.Contains("가죽+") &&
+              holds == 0 && !store.Load()!.RawMaterialExhausted &&
+              Directory.EnumerateFiles(Path.Combine(dir, "dependencies"), "*.json").Any(),
+            "17:58 missing receipt output is a hard failure; checkpoint kept, no HOLD or parent input");
+    else if (failure.Length > 0)
+        Check(failedAsExpected && lane.Snapshot(incidentPlan.FacilityName).IntermediateLease &&
+              (await world.WorksAsync(default)).Count == 4 && !world.Queued.Contains("가죽+") &&
+              holds == 0 && !store.Load()!.RawMaterialExhausted,
+            $"17:58 {failure}: unfinished/unverified child never releases lease or becomes main HOLD");
+    else
+        Check(waits == 2 && observedUnfinishedLease && peerCalls == 1 &&
+              world.Queued.Count(x => x == "가죽") == 4 &&
+              world.Queued.Count(x => x == "가죽+") == 4 && world.Count("생가죽") == 9 &&
+              world.Count("가죽+") == 12 && (await world.WorksAsync(default)).Count == 0 &&
+              !lane.Snapshot(incidentPlan.FacilityName).IntermediateLease &&
+              store.Load() is null && holds == (mismatch ? 1 : 0) &&
+              rechecks == holds && clears == holds && world.GatherStarts == 0 && parent.ReservedWings == 0,
+            $"17:58 mismatch={mismatch}: drain four child jobs, use twelve leather, stop short item, continue peer");
+    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+}
+await ReplayLeatherShortageAsync(mismatch: true);
+await ReplayLeatherShortageAsync(mismatch: false);
+await ReplayLeatherShortageAsync(mismatch: true, failure: "cancel");
+await ReplayLeatherShortageAsync(mismatch: true, failure: "receipt");
+await ReplayLeatherShortageAsync(mismatch: true, failure: "output");
+
+// A stale/forged drained marker cannot hide live work or an active child lease.
+foreach (bool liveWork in new[] { false, true })
+{
+    var guardedPlan = new AlteringPlan("가죽 가공 시설", "가죽+", 3, 3, false);
+    AlteringWork[] jobs = liveWork
+        ? [new("가죽", guardedPlan.FacilityName, "Completed", true, 0)] : [];
+    var guardLane = new FacilityLaneState(jobs);
+    if (!liveWork) guardLane.AcquireIntermediate(guardedPlan.FacilityName, []);
+    int persistedHolds = 0;
+    bool rejected = false;
+    try
+    {
+        await new MultiAlteringCoordinator(guardLane).RunAsync([guardedPlan],
+            (p, n, ct) => throw new DrainedMaterialSupplyHoldException(p.FacilityName,
+                new("생가죽", 10, 9, "leather_recipe_inventory_mismatch")),
+            ct => Task.FromResult<IReadOnlyList<AlteringWork>>(jobs),
+            (_, ct) => Task.CompletedTask, default,
+            recheckUnavailableRoute: (p, e, ct) => Task.FromResult<MaterialSupplyHold?>(e),
+            persistMaterialHold: (p, e) => persistedHolds++);
+    }
+    catch (InvalidOperationException) { rejected = true; }
+    Check(rejected && persistedHolds == 0,
+        $"17:58 drained marker cannot isolate liveWork={liveWork} or bypass an intermediate lease");
+}
+
 var scheduledWorld = new RecursiveProductionWorld();
 scheduledWorld.AddExternalWork(
     "강철괴",
@@ -5050,7 +5194,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal FacilityLaneState? ManagerObservedDuringGather;
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
     internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
-        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice, IncludeLeather;
+        HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice, IncludeLeather,
+        DelayLeatherCompletion, StaleRawOwnedWhenShort, RejectReceipt, SuppressReceiptCredit;
+    internal int CollectionCalls;
 
     internal long Count(string name) => _items.GetValueOrDefault(name);
     internal void SetCount(string name, long value) => _items[name] = value;
@@ -5076,6 +5222,12 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
                 IsCompleted = true,
                 RemainingSeconds = 0
             };
+    }
+
+    internal void CompleteFirstWork()
+    {
+        if (_works.Count > 0)
+            _works[0] = _works[0] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
     }
 
     public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
@@ -5124,7 +5276,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     {
         var missing = ingredients
             .Where(x => Count(x.Key) < x.Value)
-            .Select(x => new AlteringIngredient(x.Key, x.Value, Count(x.Key)))
+            .Select(x => new AlteringIngredient(x.Key, x.Value,
+                StaleRawOwnedWhenShort && x.Key == "생가죽" ? 0 : Count(x.Key)))
             .ToArray();
         return new(display, missing.Length == 0, produced,
             missing.Length == 0 ? null : "not_enough_ingredient", missing, facility);
@@ -5166,7 +5319,9 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
         foreach (var ingredient in ingredients)
             _items[ingredient.Key] = Count(ingredient.Key) - ingredient.Value;
         Queued.Add(plan.DisplayName);
-        _works.Add(new(plan.OutputName, plan.FacilityName, "Completed", true, 0));
+        bool deferred = DelayLeatherCompletion && plan.DisplayName == "가죽";
+        _works.Add(new(plan.OutputName, plan.FacilityName,
+            deferred ? "InProgress" : "Completed", !deferred, deferred ? 20 : 0));
     }
 
     public Task QueueAsync(
@@ -5183,6 +5338,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        CollectionCalls++;
+        if (RejectReceipt) return Task.FromResult(false);
         var completed = _works
             .Where(x => x.FacilityName == plan.FacilityName && x.IsCompleted)
             .ToArray();
@@ -5200,7 +5357,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
             string output = System.Text.RegularExpressions.Regex
                 .Replace(work.DisplayName, @"\([^()]*\)$", "")
                 .Trim();
-            _items[output] = Count(output) + produced;
+            if (!SuppressReceiptCredit) _items[output] = Count(output) + produced;
         }
         _works.RemoveAll(x => x.FacilityName == plan.FacilityName && x.IsCompleted);
         if (InjectResidualAfterReceipt)

@@ -244,28 +244,58 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             $"[중간재료 스케줄] 메인과 동일한 시설 7칸 Coordinator 시작 · " +
             $"{plan.DisplayName} {plan.RequiredWorks}작업");
 
-        await coordinator.RunAsync(
-            new[] { plan },
-            async (job, slotBudget, token) =>
+        MaterialSupplyHoldException? materialHold = null;
+        try
+        {
+            await coordinator.RunAsync(
+                new[] { plan },
+                async (job, slotBudget, token) =>
+                {
+                    int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
+                    var result = await automation.RunBatchAsync(job, slotBudget, token);
+                    int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
+                    _laneState?.NoteRegistration(
+                        job,
+                        FacilityLaneOwner.Intermediate,
+                        registered);
+                    // Only the leather lane may stop an oversized batch on a
+                    // newly verified external raw shortage. The minimum one
+                    // parent-ticket supply is checked after safe receipt; no
+                    // unverified partial production is credited.
+                    return result == AlteringRunResult.Completed ||
+                           job.FacilityName == "가죽 가공 시설" &&
+                           result == AlteringRunResult.RawMaterialExhausted;
+                },
+                _data.WorksAsync,
+                _delay,
+                ct);
+        }
+        catch (MaterialSupplyHoldException hold)
+            when (plan.FacilityName == "가죽 가공 시설" &&
+                  LeatherRawMaterialPolicy.CanDrainOnHold(hold.Evidence))
+        {
+            // The 17:58 incident already had four registered child jobs.
+            // Never return control to the Main owner or clear the lease while
+            // they are outstanding. Stop registrations, wait for the WHOLE
+            // batch, and reuse the original journalled receipt implementation.
+            materialHold = hold;
+            Log?.Invoke($"[중간재료 스케줄] {plan.DisplayName} 신규 등록 보류 · " +
+                $"분류={hold.Evidence.Category} · {hold.Evidence.Item} " +
+                $"{hold.Evidence.Observed}/{hold.Evidence.Required} · " +
+                "중간재료 소유권 유지 · 등록 작업 전체 완료/수령 대기");
+            var pending = await WaitForFacilityBatchBoundaryAsync(plan, ct);
+            if (pending.Length > 0)
             {
-                int registrationsBefore = automation.ConfirmedRegistrationsThisRun;
-                var result = await automation.RunBatchAsync(job, slotBudget, token);
-                int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
-                _laneState?.NoteRegistration(
-                    job,
-                    FacilityLaneOwner.Intermediate,
-                    registered);
-                // Only the leather lane may stop an oversized batch on a
-                // newly verified external raw shortage. The minimum one
-                // parent-ticket supply is checked after safe receipt; no
-                // unverified partial production is credited.
-                return result == AlteringRunResult.Completed ||
-                       job.FacilityName == "가죽 가공 시설" &&
-                       result == AlteringRunResult.RawMaterialExhausted;
-            },
-            _data.WorksAsync,
-            _delay,
-            ct);
+                _laneState?.AssertAccess(plan.FacilityName, FacilityLaneOwner.Intermediate);
+                if (!await automation.CollectReadyBatchAsync(plan, ct))
+                    throw new InvalidOperationException(
+                        "중간재료 보류 배치 수령 미확정 · 소유권 유지 및 메인 복귀 차단", hold);
+                var afterReceipt = await _data.WorksAsync(ct);
+                _laneState?.Observe(plan.FacilityName, afterReceipt, allowShrink: true);
+                _laneState?.ConfirmOnsite(plan.FacilityName,
+                    "중간재료 등록 보류 · 전체 작업 수령 및 시설 복귀 확인");
+            }
+        }
 
         var finalWorks = await _data.WorksAsync(ct);
         var finalFacilityWorks = finalWorks
@@ -278,17 +308,34 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
         long outputAfter = await _data.ItemCountAsync(plan.OutputName, ct);
         long totalGain = outputAfter - requestBaselineQuantity;
+        if (totalGain < 0)
+            throw new InvalidOperationException(
+                "중간재료 수령 후 재고가 요청 기준보다 감소했습니다 · 재료 보류로 축소하지 않습니다.");
         if (totalGain < minimum)
+        {
+            // A material HOLD cannot explain missing outputs from a batch
+            // whose registrations should already cover the minimum request.
+            int registered = store.Load()?.QueuedWorks ?? 0;
+            if (registered * (long)plan.ProducedPerWork >= minimum)
+                throw new InvalidOperationException(
+                    $"중간재료 수령 후 산출량 미확정 · 등록 {registered}건 / 재고 증가 {totalGain} · 보류로 축소하지 않습니다.");
+            if (materialHold is not null)
+                throw new DrainedMaterialSupplyHoldException(
+                    plan.FacilityName, materialHold.Evidence);
             throw new InvalidOperationException(
                 $"{plan.OutputName} 통합 중간가공 후 최소 수량 검증 실패: " +
                 $"+{totalGain:N0} / 최소 +{minimum:N0} · 목표 +{requiredAdditionalQuantity:N0}");
+        }
 
         store.Delete();
         if (totalGain < requiredAdditionalQuantity)
             Log?.Invoke(
                 $"[중간재료 스케줄] 부분 보충 · {plan.OutputName} +{totalGain:N0}개 / " +
                 $"목표 +{requiredAdditionalQuantity:N0}개 · 최소 +{minimum:N0}개 확인 · " +
-                "외부 원재료 부족으로 남은 가공 생략 · 상위 품목 재검증");
+                (materialHold is null
+                    ? "외부 원재료 부족으로 남은 가공 생략 · 상위 품목 재검증"
+                    : $"분류={materialHold.Evidence.Category} · 신규 등록 보류 · " +
+                      "수령 확인된 재고만 사용 · 상위 품목 재검증"));
         else
             Log?.Invoke(
                 $"[중간재료 스케줄] 완료 · {plan.OutputName} 요청 기준 +{totalGain:N0}개 · " +
