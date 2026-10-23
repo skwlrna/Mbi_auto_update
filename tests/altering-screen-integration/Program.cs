@@ -1031,6 +1031,93 @@ try
         Check(!PixelGate("HasBottomConfirmationModal", move),
             "real teal move screen is not a completion confirmation popup");
     }
+    // Both 2026-10-23 incident screenshots used to yield move=true from
+    // background colour alone. Invoke the actual compiled screen detector,
+    // and retain a real remote-button positive from the 17:21 incident.
+    string moveFixtures = Path.Combine("tests", "altering-screen-integration",
+        "facility-move-fixtures");
+    foreach (var (file, expectedMove, recordedChange) in new[] {
+        ("onsite-leather-20261023-150720.png", false, .629),
+        ("onsite-metal-20261023-153131.png", false, .681),
+        ("remote-wood-20261007-172137.png", true, 0.0) })
+    {
+        using var actual = new Bitmap(Path.Combine(moveFixtures, file));
+        bool actualMove = PixelGate("HasFacilityMoveButtonVisual", actual);
+        Check(actualMove == expectedMove,
+            $"incident {file}: production move detector distinguishes background from remote pill");
+        if (expectedMove)
+        {
+            // A real remote pill must win even if an X-like overlay is seen.
+            using var closeFrame = new Bitmap(Path.Combine(moveFixtures,
+                "onsite-metal-20261023-153131.png"));
+            using var remoteWithClose = new Bitmap(actual);
+            using (var graphics = Graphics.FromImage(remoteWithClose))
+                graphics.DrawImage(closeFrame, new Rectangle(744, 42, 44, 44),
+                    new Rectangle(744, 42, 44, 44), GraphicsUnit.Pixel);
+            Check(PixelGate("HasOnsiteCloseButtonVisual", remoteWithClose) &&
+                  PixelGate("HasFacilityMoveButtonVisual", remoteWithClose),
+                "real remote pill is never canceled by an unrelated close-X signal");
+            continue;
+        }
+
+        bool header = PixelGate("HasFixedFacilityHeaderVisual", actual);
+        bool onsiteClose = PixelGate("HasOnsiteCloseButtonVisual", actual);
+        bool popup = PixelGate("HasFacilityTravelConfirmationVisual", actual) ||
+            PixelGate("HasBottomConfirmationModal", actual);
+        Check(header && onsiteClose && !popup,
+            $"incident {file}: independent facility/close/modal anchors remain intact");
+        // Recorded change is an observed log scalar; the baseline frame is
+        // unavailable. CLI idle below is INJECTED, never claimed as image data.
+        bool PixelArrival(bool click, double change, bool visible, bool x,
+            bool? moving, bool modal) => CallBoolean(travelPolicy,
+                "HasVerifiedFixedMovePixelDisappearance", click, change,
+                visible, x, actualMove, moving, modal);
+        Check(PixelArrival(true, recordedChange, header, onsiteClose, false, popup) &&
+              !PixelArrival(false, recordedChange, header, onsiteClose, false, popup) &&
+              !PixelArrival(true, 0.0, header, onsiteClose, false, popup) &&
+              !PixelArrival(true, recordedChange, false, onsiteClose, false, popup) &&
+              !PixelArrival(true, recordedChange, header, false, false, popup) &&
+              !PixelArrival(true, recordedChange, header, onsiteClose, null, popup) &&
+              !PixelArrival(true, recordedChange, header, onsiteClose, true, popup) &&
+              !PixelArrival(true, recordedChange, header, onsiteClose, false, true),
+            $"incident {file}: pixel-arrival path opens only with independent evidence and known idle CLI");
+    }
+    foreach (var colour in new[] {
+        Color.FromArgb(25, 108, 175), Color.FromArgb(28, 166, 230) })
+    {
+        using var blueAtAnchor = BlackFrame();
+        Paint(blueAtAnchor, new Rectangle(20, 214, 135, 43), colour);
+        Check(!PixelGate("HasFacilityMoveButtonVisual", blueAtAnchor),
+            "blue receive fill at move anchor cannot become remote-move proof");
+    }
+    using (var flatTeal = BlackFrame())
+    {
+        Paint(flatTeal, new Rectangle(15, 205, 155, 65), Color.FromArgb(0, 58, 67));
+        Check(!PixelGate("HasFacilityMoveButtonVisual", flatTeal),
+            "flat teal background has no bounded pill even when shape and anchor colours match");
+    }
+    using (var gradient = BlackFrame())
+    {
+        for (int y = 205; y < 270; y++)
+            Paint(gradient, new Rectangle(15, y, 155, 1),
+                Color.FromArgb(0, 35 + (y - 205) / 2, 40 + (y - 205) / 2));
+        Check(!PixelGate("HasFacilityMoveButtonVisual", gradient),
+            "monotonic teal gradient cannot supply upper and lower pill edges");
+    }
+    using (var dimMove = BlackFrame())
+    {
+        Paint(dimMove, new Rectangle(20, 214, 135, 43), Color.FromArgb(0, 58, 67));
+        Check(PixelGate("HasFacilityMoveButtonVisual", dimMove) &&
+              !CallBoolean(travelPolicy, "HasVerifiedFixedMovePixelDisappearance",
+                  true, .629, true, true, true, false, false),
+            "dim bounded remote pill remains positive and blocks pixel-arrival proof");
+    }
+    using (var wrongSize = new Bitmap(799, 1000))
+    {
+        Paint(wrongSize, new Rectangle(20, 214, 135, 43), Color.FromArgb(0, 116, 134));
+        Check(!PixelGate("HasFacilityMoveButtonVisual", wrongSize),
+            "unknown client geometry cannot prove the fixed remote control");
+    }
     using (var blue = BlackFrame())
     {
         Paint(blue, new Rectangle(20, 285, 80, 45), Color.FromArgb(28, 166, 230));
