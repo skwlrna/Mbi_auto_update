@@ -559,6 +559,16 @@ def trusted_source_hints(context: str) -> list[str]:
             "tests/altering-screen-integration/Program.cs "
             "(compiled visual decision tests and positive/veto regressions)",
         ]
+    if (any(term in lower for term in ("다중가공", "금속 가공", "목재 가공", "가죽 가공", "altering"))
+            and any(term in lower for term in ("시설", "설비", "이동", "가공 창", "가공창"))):
+        return [
+            "source/FishingAutomation/dungeon/AlteringScreen.cs "
+            "(facility panel evidence, safe travel and managed receipt)",
+            "tests/altering-screen-integration/Program.cs "
+            "(compiled positive/veto visual regressions)",
+            "tests/altering/Program.cs "
+            "(registered altering behavior regression)",
+        ]
     # Fixed hints are code navigation only, never instructions from the event.
     # In the 2026-10-21 real incident, egg collection failed on the 생활 스킬
     # screen after selecting 일상 채집: the 둥지 row was off-screen.
@@ -785,6 +795,21 @@ def mark_interrupted_result(path: Path) -> bool:
     return True
 
 
+def review_retry_id(original: str) -> str:
+    """Independent one-shot record for a selected no-patch review."""
+    return original + "-retry-review-v1"
+
+
+def review_retry_eligible(original: dict[str, Any], original_eid: str, name: str) -> bool:
+    """Do not replay successful, blocked, test-failed or ambiguous diagnoses."""
+    return (isinstance(original, dict) and
+            original.get("event_id") == original_eid and
+            original.get("event") == name and
+            original.get("status") == "needs_review" and
+            original.get("missing_patch") is True and
+            str(original.get("reason", "")).startswith("agent_no_patch;"))
+
+
 def retention_retry_id(original: str) -> str:
     return original + "-retry-retention-v1"
 
@@ -823,7 +848,7 @@ def repair_outcome_category(status: str, reason: str,
 def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
             progress=None, retry_interrupted: bool = False,
             retry_quota: bool = False, retry_retention: bool = False,
-            phase=None) -> dict[str, Any]:
+            retry_review: bool = False, phase=None) -> dict[str, Any]:
     # Only host-authored stage names reach the UI (no raw Codex output).
     def stage(name: str) -> None:
         if phase is not None:
@@ -832,8 +857,17 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
     stage("evidence")
     original_eid = event_id(folder)
     eid = original_eid
-    if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota, retry_retention)) > 1:
+    if sum(bool(x) for x in (retry_cli_error, retry_interrupted, retry_quota,
+                               retry_retention, retry_review)) > 1:
         return {"status": "blocked", "reason": "conflicting_manual_retry_modes"}
+    if retry_review:
+        previous = expand(str(c["results_dir"])) / original_eid / "result.json"
+        if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
+            return {"status": "blocked", "reason": "review_original_missing"}
+        original = read_json(previous)
+        if not review_retry_eligible(original, original_eid, folder.name):
+            return {"status": "blocked", "reason": "review_original_not_eligible"}
+        eid = review_retry_id(original_eid)
     if retry_retention:
         previous = expand(str(c["results_dir"])) / original_eid / "result.json"
         if previous.is_symlink() or not previous.is_file() or previous.stat().st_size > 131072:
@@ -885,6 +919,9 @@ def process(folder: Path, c: dict[str, Any], retry_cli_error: bool = False,
                               "status": "blocked", "note": "No changes to live game or deployed software."}
 
     memory_context: str | None = None
+    if retry_review:
+        output["retry_of"] = original_eid
+        output["retry_reason"] = "explicit_ui_no_patch_reanalysis_once"
     if retry_retention:
         output["retry_of"] = original_eid
         output["retry_reason"] = "verified_worktree_space_available"
@@ -1315,6 +1352,36 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                             quota_retry_folder = candidate
             except (OSError, ValueError, TypeError):
                 pass
+        # No-patch reviews are never automatically replayed. A user-confirmed,
+        # ID-only request permits one new isolated Codex analysis.
+        review_retry_file = results_dir / "review-retry-request.json"
+        review_retry_folder = None
+        if (not single and retry_folder is None and quota_retry_folder is None
+                and not state.get("quota_pause") and review_retry_file.is_file()
+                and not review_retry_file.is_symlink()):
+            try:
+                request = (read_json(review_retry_file)
+                           if review_retry_file.stat().st_size <= 1024 else {})
+                requested_id = request.get("event_id") if isinstance(request, dict) else None
+                attempted = state.get("review_retry_attempted", [])
+                if (isinstance(request, dict) and
+                        request.get("action") == "retry_no_patch_once"
+                        and isinstance(requested_id, str)
+                        and re.fullmatch(r"[0-9a-f]{16}", requested_id)
+                        and isinstance(attempted, list) and requested_id not in attempted):
+                    candidate = next((p for p in all_evidence_folders(c)
+                                      if event_id(p) == requested_id), None)
+                    previous = results_dir / requested_id / "result.json"
+                    retry_path = results_dir / review_retry_id(requested_id) / "result.json"
+                    if (candidate is not None and
+                            stable(candidate, int(c["settle_seconds"])) and
+                            previous.is_file() and not previous.is_symlink() and
+                            previous.stat().st_size <= 131072 and not retry_path.exists()
+                            and review_retry_eligible(read_json(previous), requested_id,
+                                                      candidate.name)):
+                        review_retry_folder = candidate
+            except (OSError, ValueError, TypeError):
+                pass
         # Retention is opt-in: select a clean terminal candidate or retry an
         # explicitly blocked error. Keep old evidence/results immutable.
         retention_retry_file = results_dir / "retention-retry-request.json"
@@ -1479,6 +1546,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
                 pass
 
+        if review_retry_folder is not None:
+            pending = [review_retry_folder] + [p for p in pending if p != review_retry_folder]
         if retry_folder is not None:
             pending = [retry_folder] + [p for p in pending if p != retry_folder]
         elif quota_retry_folder is not None:
@@ -1496,12 +1565,16 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
             manual_retry = retry_folder is not None and folder == retry_folder
             manual_quota = quota_retry_folder is not None and folder == quota_retry_folder
             manual_retention = retention_retry_folder is not None and folder == retention_retry_folder
-            if eid in seen and not (single and latest) and not manual_retry and not manual_quota and not manual_retention:
+            manual_review = review_retry_folder is not None and folder == review_retry_folder
+            if (eid in seen and not (single and latest) and not manual_retry
+                    and not manual_quota and not manual_retention and not manual_review):
                 continue
             # No arbitrary per-day run cap. Codex decides the actual account
             # quota; the explicit quota error triggers a bounded local ChatGPT
             # handoff and stops additional Codex calls safely.
-            signature = duplicate_signature(folder) if not single and not manual_retry and not manual_quota and not manual_retention else None
+            signature = (duplicate_signature(folder) if
+                         not single and not any((manual_retry, manual_quota,
+                                                 manual_retention, manual_review)) else None)
             last_seen = recent_signatures.get(signature) if signature else None
             if last_seen is not None and abs(folder.stat().st_mtime - last_seen) <= 600:
                 reason = "identical_mcp_error_evidence_within_10_minutes"
@@ -1573,8 +1646,12 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                      phase=phase_name, phase_started=phase_started)
             print(f"처리 시작: {folder.name} · 대기 {max(0, len(pending)-1)}건", flush=True)
             notification_id = (interrupted_retry_id(eid) if manual_retry else
-                               quota_retry_id(eid) if manual_quota else
-                               eid if manual_retention else eid)
+                               quota_retry_id(eid) if manual_quota else eid)
+            if manual_review:
+                # Persist the one-shot receipt BEFORE using any Codex tokens.
+                previous_attempts = state.get("review_retry_attempted", [])
+                state["review_retry_attempted"] = (previous_attempts + [eid])[-1000:]
+                write_json(statefile, state)
             print(f"AI 알림: started {notification_id}", flush=True)
             print(f"AI 단계: {phase_name}", flush=True)
             try:
@@ -1590,7 +1667,8 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 # Simultaneous requests never authorise two replays of one event.
                 result = process(folder, c, retry_cli_error=retry_cli_error,
                                  progress=on_codex_progress, retry_interrupted=manual_retry,
-                                 retry_quota=manual_quota, retry_retention=manual_retention, phase=on_phase)
+                                 retry_quota=manual_quota, retry_retention=manual_retention,
+                                 retry_review=manual_review, phase=on_phase)
             except Exception as exc:
                 print("SAFE STOP:", type(exc).__name__, str(exc)[:300], flush=True)
                 result = {"status": "blocked", "reason": f"unhandled_{type(exc).__name__}"}
@@ -1606,6 +1684,9 @@ def poll(c: dict[str, Any], single: bool = False, latest: bool = False, retry_cl
                 except OSError: pass
             if manual_retention:
                 try: retention_retry_file.unlink(missing_ok=True)
+                except OSError: pass
+            if manual_review:
+                try: review_retry_file.unlink(missing_ok=True)
                 except OSError: pass
             if signature:
                 recent_signatures[signature] = folder.stat().st_mtime
