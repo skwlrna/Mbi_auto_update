@@ -1047,6 +1047,7 @@ try
     {
         Check(PixelGate("HasWorldHudForFacilityVeto", field) &&
               !PixelGate("HasFixedFacilityHeaderVisual", field) &&
+              !PixelGate("HasFacilityPanelStructureVisual", field) &&
               !PixelGate("HasVerifiedFacilityMoveClickScreen", field),
             "03:33 real underground field cannot prove a facility from name/currency");
         foreach (string cache in new[] { "_repeatOcrFreeFacilityTitle", "_postTravelProvenFacilityTitle" })
@@ -1066,7 +1067,8 @@ try
         {
             using (var graphics = Graphics.FromImage(hiddenHud))
                 graphics.FillRectangle(Brushes.Black, new Rectangle(550, 65, 250, 42));
-            Check(!PixelGate("HasVerifiedFacilityMoveClickScreen", hiddenHud),
+            Check(!PixelGate("HasFacilityPanelStructureVisual", hiddenHud) &&
+                  !PixelGate("HasVerifiedFacilityMoveClickScreen", hiddenHud),
                 "03:33 world frame with missing shortcut glyphs still cannot authorize move click");
         }
         object uncached = RuntimeHelpers.GetUninitializedObject(screen);
@@ -1083,6 +1085,8 @@ try
     {
         using var actual = new Bitmap(Path.Combine(moveFixtures, file));
         bool actualMove = PixelGate("HasFacilityMoveButtonVisual", actual);
+        Check(PixelGate("HasFacilityPanelStructureVisual", actual),
+            $"real {file}: category pill and three product cards independently prove facility panel");
         Check(PixelGate("HasVerifiedFacilityMoveClickScreen", actual),
             $"real {file}: facility layout plus independent control permits safe move-entry verification");
         Check(actualMove == expectedMove,

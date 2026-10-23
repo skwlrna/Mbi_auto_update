@@ -97,6 +97,47 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                DetectManagedWorldHudKeys(frame).Found;
     }
 
+    // The "전체" search pill and THREE physically separated dark item cards
+    // are present on both captured onsite and remote facility screens.
+    // A world HUD may imitate top-left text and even a close-X detector, so
+    // require these additional independent layout anchors before a move click.
+    // This is never a travel/receipt authorization on its own.
+    private static bool HasFacilityPanelStructureVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+
+        int capsuleWhite = 0;
+        for (int y = 106; y < 130; y += 3)
+        for (int x = 75; x < 124; x += 3)
+        {
+            var p = frame.GetPixel(x, y);
+            if (Math.Min(p.R, Math.Min(p.G, p.B)) >= 182 &&
+                Math.Max(p.R, Math.Max(p.G, p.B)) -
+                Math.Min(p.R, Math.Min(p.G, p.B)) <= 40)
+                capsuleWhite++;
+        }
+        if (capsuleWhite < 32) return false;
+
+        static int DarkCardSamples(Bitmap image, Rectangle area)
+        {
+            int count = 0;
+            for (int y = area.Top; y < area.Bottom; y += 4)
+            for (int x = area.Left; x < area.Right; x += 4)
+            {
+                var p = image.GetPixel(x, y);
+                if (Math.Max(p.R, Math.Max(p.G, p.B)) <= 74 &&
+                    Math.Max(p.R, Math.Max(p.G, p.B)) -
+                    Math.Min(p.R, Math.Min(p.G, p.B)) <= 48)
+                    count++;
+            }
+            return count;
+        }
+        // Three separate product-card interiors (onsite and remote fixtures).
+        return DarkCardSamples(frame, new Rectangle(178, 383, 83, 95)) >= 260 &&
+               DarkCardSamples(frame, new Rectangle(300, 383, 83, 95)) >= 260 &&
+               DarkCardSamples(frame, new Rectangle(421, 383, 83, 95)) >= 260;
+    }
+
     // The move command is a fixed-coordinate input. A white title/subtitle
     // (or OCR/cached title) alone must never authorize a click: the 03:33
     // ordinary field had both bright anchors. Require an independent facility
@@ -105,6 +146,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // This is a pre-input guard, not proof that travel/arrival completed.
     private static bool HasVerifiedFacilityMoveClickScreen(Bitmap frame)
         => HasFixedFacilityHeaderVisual(frame) &&
+           HasFacilityPanelStructureVisual(frame) &&
            !HasFacilityTravelConfirmationVisual(frame) &&
            !HasBottomConfirmationModal(frame) &&
            (HasFacilityMoveButtonVisual(frame) || HasOnsiteCloseButtonVisual(frame));
