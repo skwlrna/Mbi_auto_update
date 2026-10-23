@@ -97,6 +97,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                DetectManagedWorldHudKeys(frame).Found;
     }
 
+    // The move command is a fixed-coordinate input. A white title/subtitle
+    // (or OCR/cached title) alone must never authorize a click: the 03:33
+    // ordinary field had both bright anchors. Require an independent facility
+    // UI control in the same latest frame; the true remote pill and onsite
+    // close X both count, and neither requires an unreliable move-button OCR.
+    // This is a pre-input guard, not proof that travel/arrival completed.
+    private static bool HasVerifiedFacilityMoveClickScreen(Bitmap frame)
+        => HasFixedFacilityHeaderVisual(frame) &&
+           !HasFacilityTravelConfirmationVisual(frame) &&
+           !HasBottomConfirmationModal(frame) &&
+           (HasFacilityMoveButtonVisual(frame) || HasOnsiteCloseButtonVisual(frame));
+
     // The actual 800x1000 facility capture has the large fixed title at
     // x=20,y=50 and a separate fixed 'facility Lv.' subtitle at x=20,y=155.
     // Neither is a dynamic OCR coordinate. Require BOTH independent anchors:
@@ -2374,9 +2386,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             using var confirmed = Capture(ct);
             // Fixed title/subtitle pixels are primary; first-entry OCR is
             // secondary and never by itself blocks a valid fixed facility UI.
-            if (!HasFixedFacilityHeaderVisual(confirmed) &&
-                await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
-                Fail(confirmed, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
+            if (!HasVerifiedFacilityMoveClickScreen(confirmed))
+                Fail(confirmed, "설비 이동 전 실제 시설창의 제목/독립 UI 구조를 확인하지 못했습니다 · 일반 필드 좌표 클릭 차단");
 
             // V3.1.65: K/facility always has a move control. Its OCR/teal
             // detector is unreliable; use the fixed pixel baseline taken
@@ -2442,7 +2453,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
                 $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
                 "첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능 · 품목 선택 전 실행");
-            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+            // ClickFresh captures a fresh image but never checks its contents.
+            // Revalidate the actual latest image inside the input boundary,
+            // after CLI idle and before the fixed coordinate is sent.
+            await _ui.ClickVerifiedFreshAsync(
+                AlteringFacilityLayout.MoveButtonPoint,
+                latest => Task.FromResult(HasVerifiedFacilityMoveClickScreen(latest)), ct);
             moveClickSent = true;
             moveClickAt = DateTime.UtcNow;
         }
@@ -2763,13 +2779,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         moveBaseline, retryFrame, AlteringFacilityLayout.MoveButtonVisualArea,
                         sampleStep: 3, channelDelta: 24);
                     if (retryChange <= AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio &&
-                        (HasFixedFacilityHeaderVisual(retryFrame) ||
-                         await FindFacilityHeaderAsync(retryFrame, plan.ScreenTitle, ct) is not null) &&
-                        !HasFacilityTravelConfirmationVisual(retryFrame) &&
-                        !HasBottomConfirmationModal(retryFrame) &&
+                        HasVerifiedFacilityMoveClickScreen(retryFrame) &&
                         await TryAutoTravelingAsync(ct) == false)
                     {
-                        _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+                        // The awaited activity read and ClickFresh's own
+                        // recapture can race a field/menu transition. The
+                        // final click boundary must independently check both
+                        // the facility UI and the unchanged move-button ROI.
+                        await _ui.ClickVerifiedFreshAsync(
+                            AlteringFacilityLayout.MoveButtonPoint,
+                            latest => Task.FromResult(
+                                HasVerifiedFacilityMoveClickScreen(latest) &&
+                                ProductionUiRuntime.MeasureVisualChangeRatio(
+                                    moveBaseline!, latest,
+                                    AlteringFacilityLayout.MoveButtonVisualArea,
+                                    sampleStep: 3, channelDelta: 24) <=
+                                AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio),
+                            ct);
                         moveRetried = true;
                         moveClickAt = DateTime.UtcNow;
                         identicalMoveFrames = 0;

@@ -228,6 +228,10 @@ try
           Has(travel, "StartNew") &&
           Has(travel, "HasStableOnsiteEvidence"),
         "V3.1.76 actual travel async IL uses monotonic clock + fixed five-minute manager deadline and retains onsite proof");
+    Check(Has(travel, "HasVerifiedFacilityMoveClickScreen") &&
+          Count(travel, "ClickVerifiedFreshAsync") >= 2 &&
+          !Has(travel, "ClickFresh"),
+        "real compiled travel gates BOTH fixed-coordinate clicks on a freshly verified facility UI");
     Check(Has(travel, "IsManagedFreshArrivalObservation") &&
           Has(travel, "HasVerifiedManagedMoveTransition") &&
           Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
@@ -1042,7 +1046,8 @@ try
         "field-metal-20261024-033339.png")))
     {
         Check(PixelGate("HasWorldHudForFacilityVeto", field) &&
-              !PixelGate("HasFixedFacilityHeaderVisual", field),
+              !PixelGate("HasFixedFacilityHeaderVisual", field) &&
+              !PixelGate("HasVerifiedFacilityMoveClickScreen", field),
             "03:33 real underground field cannot prove a facility from name/currency");
         foreach (string cache in new[] { "_repeatOcrFreeFacilityTitle", "_postTravelProvenFacilityTitle" })
         {
@@ -1053,6 +1058,16 @@ try
             await pending;
             Check(pending.GetType().GetProperty("Result")!.GetValue(pending) is null,
                 "real field rejects stale " + cache + " before OCR or movement");
+        }
+        // A gray minimap can lose its Home/End/ESC glyphs or change HUD
+        // layout. No HUD veto on its own must ever turn a bright world label
+        // into the facility UI required by a fixed-coordinate input.
+        using (var hiddenHud = new Bitmap(field))
+        {
+            using (var graphics = Graphics.FromImage(hiddenHud))
+                graphics.FillRectangle(Brushes.Black, new Rectangle(550, 65, 250, 42));
+            Check(!PixelGate("HasVerifiedFacilityMoveClickScreen", hiddenHud),
+                "03:33 world frame with missing shortcut glyphs still cannot authorize move click");
         }
         object uncached = RuntimeHelpers.GetUninitializedObject(screen);
         var noOcr = (Task)Method(screen, "FindFacilityHeaderAsync", 3)
@@ -1068,6 +1083,8 @@ try
     {
         using var actual = new Bitmap(Path.Combine(moveFixtures, file));
         bool actualMove = PixelGate("HasFacilityMoveButtonVisual", actual);
+        Check(PixelGate("HasVerifiedFacilityMoveClickScreen", actual),
+            $"real {file}: facility layout plus independent control permits safe move-entry verification");
         Check(actualMove == expectedMove,
             $"incident {file}: production move detector distinguishes background from remote pill");
         if (expectedMove)
@@ -1106,6 +1123,15 @@ try
               !PixelArrival(true, recordedChange, header, onsiteClose, true, popup) &&
               !PixelArrival(true, recordedChange, header, onsiteClose, false, true),
             $"incident {file}: pixel-arrival path opens only with independent evidence and known idle CLI");
+    }
+    // Bright fake facility anchors on an ordinary field are insufficient,
+    // even when HUD templates are absent. No real pill/X -> no coordinate.
+    using (var fakeFacility = BlackFrame())
+    {
+        Paint(fakeFacility, new Rectangle(14, 42, 155, 46), Color.White);
+        Paint(fakeFacility, new Rectangle(15, 144, 230, 48), Color.White);
+        Check(!PixelGate("HasVerifiedFacilityMoveClickScreen", fakeFacility),
+            "white world name/currency at both header anchors cannot authorize move without facility UI");
     }
     foreach (var colour in new[] {
         Color.FromArgb(25, 108, 175), Color.FromArgb(28, 166, 230) })
