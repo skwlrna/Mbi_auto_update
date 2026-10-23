@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "version": "V3.2.58",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "leather_intermediate_shortage_owner_recovery_pr289",
+  "acceptedOnLocalDate": "2026-10-23",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "aiWatcherRealRepair": "not_tested",
+  "aiWorkspaceRecovery": "not_tested",
+  "aiGameBehavior": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3258",
+  "aiWatcher": "not_tested_for_v3258",
+  "aiErrorManagerUI": "not_tested",
+  "localHistoryDeletion": "not_tested",
+  "leatherChildDrainRealGame": "not_tested",
+  "leatherMismatchHoldRealGame": "not_tested",
+  "leatherPeerContinuesRealGame": "not_tested",
+  "disclosures": [
+    "On 2026-10-23 user directly requested review of PR #289 and formal release.",
+    "PR #289 Windows CI and simulated child batch tests are not confirmation of live Mabinogi Mobile activity.",
+    "No claim that injected material inventory, timers, or CLI conditions were actually observed in the real game.",
+    "Real leather intermediate batch drain, mismatch isolation, peer-lane continuation and user PC rollback remain unverified.",
+    "V3.2.57 remains published. Stop F9 jobs and back up configuration and progress before updating."
+  ]
+}
