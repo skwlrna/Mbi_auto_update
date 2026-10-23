@@ -80,14 +80,20 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.59"') { throw 'version constant mismatch' }
+          if ($u -notmatch 'CurrentVersion = "V3\.2\.60"') { throw 'version constant mismatch' }
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.59</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3259-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.59"')) {
+          if ($p -notmatch '<Version>3\.2\.60</Version>') { throw 'project version mismatch' }
+          $release = Get-Content .github/workflows/release-v3260-auto-update.yml -Raw
+          if (-not $release.Contains('CurrentVersion = "V3\.2\.60"')) {
             throw 'release workflow eligibility version mismatch'
           }
+
+      - name: V3.2.60 AI evidence release safety policy
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/release -p 'test_v3260_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.60 release safety policy failed' }
 
       - name: V3.2.59 facility field travel release safety policy
         shell: pwsh
