@@ -146,7 +146,7 @@ class TimelineTests(unittest.TestCase):
         self.assertIn("timeLocal", journal)
         self.assertIn("summary.json", journal)
         self.assertIn("error.txt", journal)
-        self.assertLess(uploader.index("AiRuntimeErrorJournal.Record(report, _log, ReadRecentLog(150))"),
+        self.assertLess(uploader.index("AiRuntimeErrorJournal.Record(report, _log, ReadRecentLog(150), aiImage)"),
                         uploader.index("if (!settings.Enabled) return;"))
         self.assertIn("child.Kill(entireProcessTree: true)", (APP / "AiAutopilotHost.cs").read_text(encoding="utf-8"))
 
