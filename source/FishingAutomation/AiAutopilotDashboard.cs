@@ -136,6 +136,13 @@ internal sealed partial class AiAutopilotDashboard : Form
             BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
         retryQuota.Click += (_, _) => RequestQuotaRetry();
+        var retryNoPatch = new Button
+        {
+            Text = "코드 미수정 재분석", Dock = DockStyle.Right, Width = 156,
+            BackColor = UiButton, ForeColor = UiText, UseVisualStyleBackColor = false,
+            FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+        };
+        retryNoPatch.Click += (_, _) => RequestNoPatchRetry();
         var refresh = new Button
         {
             Text = "새로고침", Dock = DockStyle.Right, Width = 105,
@@ -143,7 +150,7 @@ internal sealed partial class AiAutopilotDashboard : Form
             Cursor = Cursors.Hand
         };
         foreach (var button in new[] { confirmed, recurred, reset, handoff, resumeCodex,
-            retryInterrupted, retryQuota, refresh })
+            retryInterrupted, retryQuota, retryNoPatch, refresh })
         {
             button.FlatAppearance.BorderColor = UiBorder;
             button.FlatAppearance.MouseOverBackColor = UiAccentSoft;
@@ -155,6 +162,7 @@ internal sealed partial class AiAutopilotDashboard : Form
         foot.Controls.Add(resumeCodex);
         foot.Controls.Add(retryInterrupted);
         foot.Controls.Add(retryQuota);
+        foot.Controls.Add(retryNoPatch);
         foot.Controls.Add(reset);
         foot.Controls.Add(recurred);
         foot.Controls.Add(confirmed);
@@ -293,7 +301,7 @@ internal sealed partial class AiAutopilotDashboard : Form
             AutoScroll = true, BackColor = UiPanel, Padding = new Padding(8, 5, 8, 5)
         };
         foreach (var button in new[] { confirmed, recurred, reset, handoff,
-            resumeCodex, retryInterrupted, retryQuota, checkPipeline, retentionRetry })
+            resumeCodex, retryInterrupted, retryQuota, retryNoPatch, checkPipeline, retentionRetry })
         {
             button.Dock = DockStyle.None;
             button.Height = 29;
@@ -456,6 +464,8 @@ internal sealed partial class AiAutopilotDashboard : Form
         "interrupted_review_required" => running ? "해당 오류 선택 → 중단 작업 재분석" : "AI 감시 시작 → 중단 작업 재분석",
         "needs_review" when reason.Contains("regression_test_suite_not_registered", StringComparison.OrdinalIgnoreCase) =>
             "기존 테스트 프로젝트 등록 상태 점검 후 재검증",
+        "needs_review" when reason.StartsWith("agent_no_patch;", StringComparison.Ordinal) =>
+            "해당 오류 선택 → 고급 → 코드 미수정 재분석",
         "needs_review" => "수정안·오류 증거 검토",
         "tests_failed" => "실패한 테스트 기록 확인",
         "blocked" when reason.Contains("worktree_retention_limit_reached", StringComparison.OrdinalIgnoreCase) =>
@@ -785,6 +795,82 @@ internal sealed partial class AiAutopilotDashboard : Form
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             MessageBox.Show(this, "재분석 요청을 저장하지 못했습니다. 기존 결과는 그대로 유지됩니다.");
+        }
+    }
+
+    private void RequestNoPatchRetry()
+    {
+        if (_recent.CurrentRow?.Tag is not ResultItem selected ||
+            selected.EventId.Length != 16 || !ValidEventId(selected.EventId))
+        {
+            MessageBox.Show(this, "코드 수정 없이 종료된 오류 기록 한 건을 선택하세요.");
+            return;
+        }
+        if (!_isWatcherRunning())
+        {
+            MessageBox.Show(this, "AI 감시를 켠 상태에서만 재분석을 요청할 수 있습니다.");
+            return;
+        }
+        try
+        {
+            string activityPath = Path.Combine(Root, "watch-activity.json");
+            using var activity = ReadBounded(activityPath);
+            if (activity is null || Field(activity.RootElement, "status") != "watching" ||
+                File.GetLastWriteTimeUtc(activityPath) < DateTime.UtcNow.AddMinutes(-2))
+            {
+                MessageBox.Show(this, "AI가 오류를 처리 중이거나 감시 상태가 확인되지 않습니다. 상태를 확인하세요.");
+                return;
+            }
+            string directory = Path.Combine(Root, selected.EventId);
+            string original = Path.Combine(directory, "result.json");
+            if (!string.Equals(original, selected.FilePath, StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(directory) ||
+                (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            {
+                MessageBox.Show(this, "원본 오류 결과만 1회 재분석할 수 있습니다.");
+                return;
+            }
+            using var result = ReadBounded(original);
+            if (result is null ||
+                Field(result.RootElement, "event_id", 40) != selected.EventId ||
+                Field(result.RootElement, "event", 140) != selected.EventName ||
+                Field(result.RootElement, "status", 64) != "needs_review" ||
+                !Field(result.RootElement, "reason", 500).StartsWith("agent_no_patch;",
+                    StringComparison.Ordinal) ||
+                !result.RootElement.TryGetProperty("missing_patch", out var missing) ||
+                missing.ValueKind != JsonValueKind.True)
+            {
+                MessageBox.Show(this, "실제 코드 수정이 없었던 분석 기록에만 사용할 수 있습니다. 다른 검토 사유는 제외됩니다.");
+                return;
+            }
+            if (Directory.Exists(Path.Combine(Root, selected.EventId + "-retry-review-v1")))
+            {
+                MessageBox.Show(this, "선택한 오류는 이미 1회 재분석했습니다. 새 결과를 확인하세요.");
+                return;
+            }
+            string request = Path.Combine(Root, "review-retry-request.json");
+            if (File.Exists(request))
+            {
+                MessageBox.Show(this, "기존 코드 미수정 재분석 요청이 대기 중입니다.");
+                return;
+            }
+            if (MessageBox.Show(this,
+                "AI가 기존 오류에서 실제 소스 수정을 하지 않았습니다. 이 오류 한 건만 새 격리 공간에서 Codex로 다시 분석할까요?\n" +
+                "기존 결과와 오류 증거는 보존되며 Codex 사용량이 추가 발생합니다.\n" +
+                "회귀 테스트 없이 성공 처리하거나 게임·배포에 자동 적용하지 않습니다.",
+                "코드 미수정 오류 1회 재분석", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            string temp = request + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new
+            {
+                action = "retry_no_patch_once", event_id = selected.EventId
+            }));
+            File.Move(temp, request, false);
+            MessageBox.Show(this, "1회 재분석 요청을 기록했습니다. 감시기가 별도 결과로 처리합니다.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, "재분석 요청 저장 실패 · 기존 기록은 유지됩니다.");
         }
     }
 
