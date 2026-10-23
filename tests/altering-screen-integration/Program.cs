@@ -236,6 +236,25 @@ try
           Has(travel, "HasOnsiteCloseButtonVisual") &&
           Has(travel, "HasFacilityMoveButtonPositiveEvidenceAsync"),
         "V3.1.65 real Fresh travel compares post-click fixed pixels and checks safety gates");
+    // V3.2.56 regression is wired through the ACTUAL compiled travel loop:
+    // the static pixel-color move detector may remain positive on the
+    // changed facility screen. An independent exact remote-label read must
+    // veto the alternative path in both candidate and final captures.
+    Check(Count(travel, "ShouldProbeChangedRegionOnsite") >= 2 &&
+          Count(travel, "HasVerifiedChangedRegionOnsiteCandidate") >= 2 &&
+          Has(travel, "FindAsync") &&
+          Has(travel, "HasStableOnsiteEvidence") &&
+          Has(travel, "IsManagedFreshArrivalObservation"),
+        "V3.2.56 real async travel checks changed ROI and exact-label veto twice with existing onsite/CLI verification");
+    Check(CallBoolean(travelPolicy, "ShouldProbeChangedRegionOnsite",
+            true, false, true, 0.629, true, true, false, false) &&
+          CallBoolean(travelPolicy, "ShouldProbeChangedRegionOnsite",
+            true, false, true, 0.681, true, true, false, false) &&
+          !CallBoolean(travelPolicy, "HasVerifiedChangedRegionOnsiteCandidate",
+            true, false, true, 0.681, true, true, false, false, true) &&
+          CallBoolean(travelPolicy, "HasVerifiedChangedRegionOnsiteCandidate",
+            true, false, true, 0.681, true, true, false, false, false),
+        "V3.2.56 compiled policy replays both 5-min incidents only conditionally; positive exact remote OCR blocks them");
     // V3.1.64: V3.1.56 instant-arrival proof must run on managed
     // receipt travel as well as first registration. The 13:41 failure had
     // pre-click remote proof, no post-click remote button, and idle CLI, but
