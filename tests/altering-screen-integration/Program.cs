@@ -1031,6 +1031,23 @@ try
         Check(!PixelGate("HasBottomConfirmationModal", move),
             "real teal move screen is not a completion confirmation popup");
     }
+    // Receive colours already used below must not become remote-move proof
+    // when a broad receive control overlaps the fixed move anchor.
+    foreach (var colour in new[] { Color.FromArgb(25, 108, 175), Color.FromArgb(28, 166, 230) })
+    {
+        using var receiveAtAnchor = BlackFrame();
+        Paint(receiveAtAnchor, new Rectangle(20, 214, 135, 43), colour);
+        Check(!PixelGate("HasFacilityMoveButtonVisual", receiveAtAnchor),
+            "blue receive fill at move anchor cannot veto arrival as a remote move button");
+    }
+    // Keep remote-move protection under dim capture brightness as well.
+    using (var dimMove = BlackFrame())
+    {
+        Paint(dimMove, new Rectangle(20, 214, 135, 43), Color.FromArgb(0, 58, 67));
+        Check(PixelGate("HasFacilityMoveButtonVisual", dimMove),
+            "dim teal remote button still vetoes arrival");
+    }
+
     using (var blue = BlackFrame())
     {
         Paint(blue, new Rectangle(20, 285, 80, 45), Color.FromArgb(28, 166, 230));
