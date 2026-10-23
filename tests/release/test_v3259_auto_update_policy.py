@@ -41,7 +41,7 @@ class V3259ReleaseSafetyContract(unittest.TestCase):
         # immutable V3.2.59 workflow/attestation requirements remain intact.
         updater = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        match = re.search(r'CurrentVersion = "V(\\d+)\\.(\\d+)\\.(\\d+)"', updater)
+        match = re.search(r'CurrentVersion = "V(\d+)\.(\d+)\.(\d+)"', updater)
         self.assertIsNotNone(match)
         parts = tuple(int(value) for value in match.groups())
         self.assertGreaterEqual(parts, (3, 2, 59))
