@@ -340,18 +340,22 @@ internal sealed partial class AiAutopilotDashboard : Form
             Width = 290, Height = 29, ForeColor = UiText,
             BackColor = UiPanel, Checked = ImageEvidenceEnabled
         };
+        bool imageConsentSyncing = false;
         attachImage.CheckedChanged += (_, _) =>
         {
+            if (imageConsentSyncing) return;
             bool requested = attachImage.Checked;
             if (requested && MessageBox.Show(this,
-                "앞으로 새로 발생하는 게임 오류에서 화면 사진 1장을 PC에 저장하고, AI 자동수정 시 Codex 서비스에 전송합니다.\\n" +
-                "사진에 캐릭터명이나 게임 내 채팅 등 화면 정보가 포함될 수 있습니다.\\n" +
-                "기존 오류 사진을 자동으로 가져오지 않으며, 원본 이미지는 GitHub PR에 추가하지 않습니다.\\n" +
+                "앞으로 새로 발생하는 게임 오류에서 화면 사진 1장을 PC에 저장하고, AI 자동수정 시 Codex 서비스에 전송합니다.\n" +
+                "사진에 캐릭터명이나 게임 내 채팅 등 화면 정보가 포함될 수 있습니다.\n" +
+                "기존 오류 사진을 자동으로 가져오지 않으며, 원본 이미지는 GitHub PR에 추가하지 않습니다.\n" +
                 "게임 조작·자동 병합·배포 권한은 주지 않습니다. 허용하겠습니까?",
                 "AI 오류 사진 분석 별도 동의", MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) != DialogResult.Yes)
             {
+                imageConsentSyncing = true;
                 attachImage.Checked = false;
+                imageConsentSyncing = false;
                 return;
             }
             try
@@ -370,7 +374,9 @@ internal sealed partial class AiAutopilotDashboard : Form
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                attachImage.CheckedChanged -= (_, _) => { };
+                imageConsentSyncing = true;
+                attachImage.Checked = ImageEvidenceEnabled;
+                imageConsentSyncing = false;
                 MessageBox.Show(this, "사진 분석 설정 저장 실패 · 기존 설정을 확인하세요.");
             }
         };
