@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
@@ -228,6 +228,10 @@ try
           Has(travel, "StartNew") &&
           Has(travel, "HasStableOnsiteEvidence"),
         "V3.1.76 actual travel async IL uses monotonic clock + fixed five-minute manager deadline and retains onsite proof");
+    Check(Has(travel, "HasVerifiedFacilityMoveClickScreen") &&
+          Count(travel, "ClickVerifiedFreshAsync") >= 2 &&
+          !Has(travel, "ClickFresh"),
+        "real compiled travel gates BOTH fixed-coordinate clicks on a freshly verified facility UI");
     Check(Has(travel, "IsManagedFreshArrivalObservation") &&
           Has(travel, "HasVerifiedManagedMoveTransition") &&
           Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
@@ -247,7 +251,7 @@ try
         "V3.1.64 V3.1.56 instant arrival is eligible for both managed receipt and registration");
     Check(Has(travel, "HasVerifiedFixedMovePixelDisappearance") &&
           Has(travel, "ShouldRetryUnchangedFixedMove") &&
-          Count(travel, "ClickFresh") >= 2 &&
+          Count(travel, "ClickVerifiedFreshAsync") >= 2 &&
           Has(travel, "HasStableOnsiteEvidence"),
         "V3.1.65 compiled receipt/registration travel proves pixel loss and bounded retry");
     Check(CallBoolean(travelPolicy, "IsManagedFreshArrivalObservation",
@@ -923,10 +927,10 @@ try
         // foliage/world frame. It must not cancel the authorized K press.
         Paint(grassyField, new Rectangle(14, 42, 155, 46), Color.White);
         Paint(grassyField, new Rectangle(15, 144, 230, 48), Color.White);
-        Check(PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
+        Check(!PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
               PixelGate("HasManagedKEntryFieldHudVisual", grassyField) &&
               !PixelGate("HasManagedKEntryBlockingModal", grassyField),
-            "V3.1.73 field HUD and misleading fixed facility header can coexist; no K pre-veto");
+            "field HUD rejects misleading facility anchors while preserving authorized K route");
 
         Paint(realKModal, new Rectangle(175, 754, 450, 218),
             Color.FromArgb(37, 44, 59));
@@ -1036,6 +1040,45 @@ try
     // and retain a real remote-button positive from the 17:21 incident.
     string moveFixtures = Path.Combine("tests", "altering-screen-integration",
         "facility-move-fixtures");
+    // Actual V3.2.58 incident: gray underground minimap, name/currency at
+    // the header anchors. No CLI activity or work counts are inferred here.
+    using (var field = new Bitmap(Path.Combine(moveFixtures,
+        "field-metal-20261024-033339.png")))
+    {
+        Check(PixelGate("HasWorldHudForFacilityVeto", field) &&
+              !PixelGate("HasFixedFacilityHeaderVisual", field) &&
+              !PixelGate("HasFacilityPanelStructureVisual", field) &&
+              !PixelGate("HasFacilityQueueSlotStructureVisual", field) &&
+              !PixelGate("HasVerifiedFacilityMoveClickScreen", field),
+            "03:33 real underground field cannot prove a facility from name/currency");
+        foreach (string cache in new[] { "_repeatOcrFreeFacilityTitle", "_postTravelProvenFacilityTitle" })
+        {
+            object probe = RuntimeHelpers.GetUninitializedObject(screen);
+            screen.GetField(cache, all)!.SetValue(probe, "금속 가공");
+            var pending = (Task)Method(screen, "FindFacilityHeaderAsync", 3)
+                .Invoke(probe, new object[] { field, "금속 가공", CancellationToken.None })!;
+            await pending;
+            Check(pending.GetType().GetProperty("Result")!.GetValue(pending) is null,
+                "real field rejects stale " + cache + " before OCR or movement");
+        }
+        // A gray minimap can lose its Home/End/ESC glyphs or change HUD
+        // layout. No HUD veto on its own must ever turn a bright world label
+        // into the facility UI required by a fixed-coordinate input.
+        using (var hiddenHud = new Bitmap(field))
+        {
+            using (var graphics = Graphics.FromImage(hiddenHud))
+                graphics.FillRectangle(Brushes.Black, new Rectangle(550, 65, 250, 42));
+            Check(!PixelGate("HasFacilityPanelStructureVisual", hiddenHud) &&
+                  !PixelGate("HasVerifiedFacilityMoveClickScreen", hiddenHud),
+                "03:33 world frame with missing shortcut glyphs still cannot authorize move click");
+        }
+        object uncached = RuntimeHelpers.GetUninitializedObject(screen);
+        var noOcr = (Task)Method(screen, "FindFacilityHeaderAsync", 3)
+            .Invoke(uncached, new object[] { field, "금속 가공", CancellationToken.None })!;
+        await noOcr;
+        Check(noOcr.GetType().GetProperty("Result")!.GetValue(noOcr) is null,
+            "uncached real field also rejects header without accessing uninitialized OCR");
+    }
     foreach (var (file, expectedMove, recordedChange) in new[] {
         ("onsite-leather-20261023-150720.png", false, .629),
         ("onsite-metal-20261023-153131.png", false, .681),
@@ -1043,6 +1086,10 @@ try
     {
         using var actual = new Bitmap(Path.Combine(moveFixtures, file));
         bool actualMove = PixelGate("HasFacilityMoveButtonVisual", actual);
+        Check(PixelGate("HasFacilityPanelStructureVisual", actual),
+            $"real {file}: category pill and three product cards independently prove facility panel");
+        Check(PixelGate("HasVerifiedFacilityMoveClickScreen", actual),
+            $"real {file}: facility layout plus independent control permits safe move-entry verification");
         Check(actualMove == expectedMove,
             $"incident {file}: production move detector distinguishes background from remote pill");
         if (expectedMove)
@@ -1081,6 +1128,32 @@ try
               !PixelArrival(true, recordedChange, header, onsiteClose, true, popup) &&
               !PixelArrival(true, recordedChange, header, onsiteClose, false, true),
             $"incident {file}: pixel-arrival path opens only with independent evidence and known idle CLI");
+    }
+    // Regression for the historical remote teal-pill false negative:
+    // the seven-slot lane, header, category pill and three card panels remain
+    // structurally present even after deliberately masking the pill.
+    using (var remote = new Bitmap(Path.Combine(moveFixtures,
+        "remote-wood-20261007-172137.png")))
+    using (var pillMiss = new Bitmap(remote))
+    {
+        using (var g = Graphics.FromImage(pillMiss))
+        using (var b = new SolidBrush(remote.GetPixel(180, 230)))
+            g.FillRectangle(b, new Rectangle(15, 205, 155, 65));
+        Check(!PixelGate("HasFacilityMoveButtonVisual", pillMiss) &&
+              !PixelGate("HasOnsiteCloseButtonVisual", pillMiss) &&
+              PixelGate("HasFacilityPanelStructureVisual", pillMiss) &&
+              PixelGate("HasFacilityQueueSlotStructureVisual", pillMiss) &&
+              PixelGate("HasVerifiedFacilityMoveClickScreen", pillMiss),
+            "remote facility remains input-eligible when teal pill pixels are missed but work-ring structure is intact");
+    }
+    // Bright fake facility anchors on an ordinary field are insufficient,
+    // even when HUD templates are absent. No real pill/X -> no coordinate.
+    using (var fakeFacility = BlackFrame())
+    {
+        Paint(fakeFacility, new Rectangle(14, 42, 155, 46), Color.White);
+        Paint(fakeFacility, new Rectangle(15, 144, 230, 48), Color.White);
+        Check(!PixelGate("HasVerifiedFacilityMoveClickScreen", fakeFacility),
+            "white world name/currency at both header anchors cannot authorize move without facility UI");
     }
     foreach (var colour in new[] {
         Color.FromArgb(25, 108, 175), Color.FromArgb(28, 166, 230) })

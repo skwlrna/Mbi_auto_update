@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using FishingAutomation;
 
 namespace DungeonVisionBot;
@@ -67,6 +67,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // This is a visual location check, not a guess based on a stale OCR result.
     private Task<DetectionResult?> FindFacilityHeaderAsync(Bitmap frame, string title, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        // A world name/currency row can occupy both fixed header anchors.
+        // Veto before cached proof AND OCR, so neither can bypass field evidence.
+        if (HasWorldHudForFacilityVeto(frame))
+            return Task.FromResult<DetectionResult?>(null);
         if (string.Equals(_repeatOcrFreeFacilityTitle, title, StringComparison.Ordinal) ||
             string.Equals(_postTravelProvenFacilityTitle, title, StringComparison.Ordinal))
         {
@@ -80,6 +85,105 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         _ui?.NoteDiagnostic("header_check", title + "=OCR");
         return _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, title, ct);
     }
+
+    private static bool HasWorldHudForFacilityVeto(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        // Gold minimap + life-skill disc is the existing independent field
+        // evidence. Underground gray minimaps instead retain the three exact
+        // Home/End/ESC glyphs; use the existing production template matcher.
+        // This is a negative facility veto, never permission to send input.
+        return HasManagedKEntryFieldHudVisual(frame) ||
+               DetectManagedWorldHudKeys(frame).Found;
+    }
+
+    // The "전체" search pill and THREE physically separated dark item cards
+    // are present on both captured onsite and remote facility screens.
+    // A world HUD may imitate top-left text and even a close-X detector, so
+    // require these additional independent layout anchors before a move click.
+    // This is never a travel/receipt authorization on its own.
+    private static bool HasFacilityPanelStructureVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+
+        int capsuleWhite = 0;
+        for (int y = 106; y < 130; y += 3)
+        for (int x = 75; x < 124; x += 3)
+        {
+            var p = frame.GetPixel(x, y);
+            if (Math.Min(p.R, Math.Min(p.G, p.B)) >= 182 &&
+                Math.Max(p.R, Math.Max(p.G, p.B)) -
+                Math.Min(p.R, Math.Min(p.G, p.B)) <= 40)
+                capsuleWhite++;
+        }
+        if (capsuleWhite < 32) return false;
+
+        static int DarkCardSamples(Bitmap image, Rectangle area)
+        {
+            int count = 0;
+            for (int y = area.Top; y < area.Bottom; y += 4)
+            for (int x = area.Left; x < area.Right; x += 4)
+            {
+                var p = image.GetPixel(x, y);
+                if (Math.Max(p.R, Math.Max(p.G, p.B)) <= 74 &&
+                    Math.Max(p.R, Math.Max(p.G, p.B)) -
+                    Math.Min(p.R, Math.Min(p.G, p.B)) <= 48)
+                    count++;
+            }
+            return count;
+        }
+        // Three separate product-card interiors (onsite and remote fixtures).
+        return DarkCardSamples(frame, new Rectangle(178, 383, 83, 95)) >= 260 &&
+               DarkCardSamples(frame, new Rectangle(300, 383, 83, 95)) >= 260 &&
+               DarkCardSamples(frame, new Rectangle(421, 383, 83, 95)) >= 260;
+    }
+
+    // Both onsite and remote panels have seven horizontally repeated work
+    // rings, even when the teal remote-move pill has not rendered clearly.
+    // This is a third INDEPENDENT structural signal, not permission to click
+    // outside the full facility header + category pill + three item cards.
+    private static bool HasFacilityQueueSlotStructureVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        static int Light(Color p) => (p.R + p.G + p.B) / 3;
+        // Real onsite / remote slot centers, respectively.
+        foreach (int centerY in new[] { 275, 309 })
+        {
+            int rings = 0;
+            foreach (int centerX in new[] { 153, 230, 307, 384, 461, 538, 615 })
+            {
+                int edges = 0;
+                foreach (var (dx, dy) in new (int, int)[] {
+                    (-32, 0), (32, 0), (0, -32), (0, 32)
+                })
+                {
+                    var rim = frame.GetPixel(centerX + dx, centerY + dy);
+                    var outside = frame.GetPixel(
+                        centerX + dx * 46 / 32, centerY + dy * 46 / 32);
+                    if (Light(rim) >= 40 && Light(rim) >= Light(outside) + 13)
+                        edges++;
+                }
+                if (edges >= 2) rings++;
+            }
+            if (rings >= 3) return true;
+        }
+        return false;
+    }
+
+    // The move command is a fixed-coordinate input. A white title/subtitle
+    // (or OCR/cached title) alone must never authorize a click: the 03:33
+    // ordinary field had both bright anchors. Require an independent facility
+    // UI control in the same latest frame; the true remote pill and onsite
+    // close X both count, and neither requires an unreliable move-button OCR.
+    // This is a pre-input guard, not proof that travel/arrival completed.
+    private static bool HasVerifiedFacilityMoveClickScreen(Bitmap frame)
+        => HasFixedFacilityHeaderVisual(frame) &&
+           HasFacilityPanelStructureVisual(frame) &&
+           !HasFacilityTravelConfirmationVisual(frame) &&
+           !HasBottomConfirmationModal(frame) &&
+           (HasFacilityMoveButtonVisual(frame) ||
+            HasOnsiteCloseButtonVisual(frame) ||
+            HasFacilityQueueSlotStructureVisual(frame));
 
     // The actual 800x1000 facility capture has the large fixed title at
     // x=20,y=50 and a separate fixed 'facility Lv.' subtitle at x=20,y=155.
@@ -107,7 +211,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             return count;
         }
         return WhiteGlyphs(frame, new Rectangle(14, 42, 155, 46)) >= 18 &&
-               WhiteGlyphs(frame, new Rectangle(15, 144, 230, 48)) >= 20;
+               WhiteGlyphs(frame, new Rectangle(15, 144, 230, 48)) >= 20 &&
+               !HasWorldHudForFacilityVeto(frame);
     }
 
 
@@ -2357,9 +2462,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             using var confirmed = Capture(ct);
             // Fixed title/subtitle pixels are primary; first-entry OCR is
             // secondary and never by itself blocks a valid fixed facility UI.
-            if (!HasFixedFacilityHeaderVisual(confirmed) &&
-                await FindFacilityHeaderAsync(confirmed, plan.ScreenTitle, ct) is null)
-                Fail(confirmed, "설비 이동 전 선택한 가공 시설 화면을 확인하지 못했습니다.");
+            if (!HasVerifiedFacilityMoveClickScreen(confirmed))
+                Fail(confirmed, "설비 이동 전 실제 시설창의 제목/독립 UI 구조를 확인하지 못했습니다 · 일반 필드 좌표 클릭 차단");
 
             // V3.1.65: K/facility always has a move control. Its OCR/teal
             // detector is unreliable; use the fixed pixel baseline taken
@@ -2425,7 +2529,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"[자동 가공] {plan.ScreenTitle} · 설비로 이동 고정좌표 클릭 " +
                 $"({AlteringFacilityLayout.MoveButtonPoint.X},{AlteringFacilityLayout.MoveButtonPoint.Y}) · " +
                 "첫 입력 1회 · 픽셀 동일할 때만 추가 1회 가능 · 품목 선택 전 실행");
-            _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+            // ClickFresh captures a fresh image but never checks its contents.
+            // Revalidate the actual latest image inside the input boundary,
+            // after CLI idle and before the fixed coordinate is sent.
+            await _ui.ClickVerifiedFreshAsync(
+                AlteringFacilityLayout.MoveButtonPoint,
+                latest => Task.FromResult(HasVerifiedFacilityMoveClickScreen(latest)), ct);
             moveClickSent = true;
             moveClickAt = DateTime.UtcNow;
         }
@@ -2746,13 +2855,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         moveBaseline, retryFrame, AlteringFacilityLayout.MoveButtonVisualArea,
                         sampleStep: 3, channelDelta: 24);
                     if (retryChange <= AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio &&
-                        (HasFixedFacilityHeaderVisual(retryFrame) ||
-                         await FindFacilityHeaderAsync(retryFrame, plan.ScreenTitle, ct) is not null) &&
-                        !HasFacilityTravelConfirmationVisual(retryFrame) &&
-                        !HasBottomConfirmationModal(retryFrame) &&
+                        HasVerifiedFacilityMoveClickScreen(retryFrame) &&
                         await TryAutoTravelingAsync(ct) == false)
                     {
-                        _ui.ClickFresh(AlteringFacilityLayout.MoveButtonPoint, ct);
+                        // The awaited activity read and ClickFresh's own
+                        // recapture can race a field/menu transition. The
+                        // final click boundary must independently check both
+                        // the facility UI and the unchanged move-button ROI.
+                        await _ui.ClickVerifiedFreshAsync(
+                            AlteringFacilityLayout.MoveButtonPoint,
+                            latest => Task.FromResult(
+                                HasVerifiedFacilityMoveClickScreen(latest) &&
+                                ProductionUiRuntime.MeasureVisualChangeRatio(
+                                    moveBaseline!, latest,
+                                    AlteringFacilityLayout.MoveButtonVisualArea,
+                                    sampleStep: 3, channelDelta: 24) <=
+                                AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio),
+                            ct);
                         moveRetried = true;
                         moveClickAt = DateTime.UtcNow;
                         identicalMoveFrames = 0;
