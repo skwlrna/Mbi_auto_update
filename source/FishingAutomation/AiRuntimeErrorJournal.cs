@@ -5,7 +5,7 @@ namespace FishingAutomation;
 
 /// <summary>
 /// Local, bounded diagnostic index shared by the UI and the opted-in Codex watcher.
-/// Not a network uploader and never stores screenshots, secrets, or full runtime logs.
+/// Not a network uploader; optional, separately consented screenshots stay local until Codex analysis.
 /// </summary>
 internal static class AiRuntimeErrorJournal
 {
@@ -20,7 +20,8 @@ internal static class AiRuntimeErrorJournal
         return singleLine.Length > limit ? singleLine[..limit] : singleLine;
     }
 
-    internal static void Record(RuntimeErrorReport report, AppLog log, string recentLog)
+    internal static void Record(RuntimeErrorReport report, AppLog log, string recentLog,
+        byte[]? optedInScreenshot = null)
     {
         try
         {
@@ -56,6 +57,13 @@ internal static class AiRuntimeErrorJournal
                 string excerpt = recentLog.Length > 12000 ? recentLog[^12000..] : recentLog;
                 File.WriteAllText(Path.Combine(directory, "fishing.log"), excerpt, Encoding.UTF8);
             }
+            // Screenshot is local-only and opt-in; the Python watcher separately
+            // revalidates explicit consent before passing it to Codex. Reject
+            // oversized/non-PNG data, never write images into repository source.
+            if (optedInScreenshot is { Length: >= 24 and <= 4194304 } &&
+                optedInScreenshot.AsSpan(0, 8).SequenceEqual(
+                    new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
+                File.WriteAllBytes(Path.Combine(directory, "screen.png"), optedInScreenshot);
             log.Write("[AI 오류기록] 로컬 오류 저장 완료 · " + eventName);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
