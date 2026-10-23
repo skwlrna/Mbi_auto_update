@@ -36,10 +36,16 @@ class V3259ReleaseSafetyContract(unittest.TestCase):
                     'CurrentVersion = "V3\\.2\\.59"'):
             self.assertIn(key, s)
         self.assertEqual(s.count("CI_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}"),2)
-        self.assertIn('CurrentVersion = "V3.2.59"',
-            (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8"))
-        self.assertIn('<Version>3.2.59</Version>',
-            (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8"))
+        # This contract is about the historical V3.2.59 release. Once a new
+        # version is published, the installed version can advance while the
+        # immutable V3.2.59 workflow/attestation requirements remain intact.
+        updater = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
+        match = re.search(r'CurrentVersion = "V(\\d+)\\.(\\d+)\\.(\\d+)"', updater)
+        self.assertIsNotNone(match)
+        parts = tuple(int(value) for value in match.groups())
+        self.assertGreaterEqual(parts, (3, 2, 59))
+        self.assertIn(f'<Version>{".".join(str(value) for value in parts)}</Version>', project)
 
     def test_real_game_pending_not_falsified(self):
         self.assertEqual(self.att["version"], "V3.2.59")
