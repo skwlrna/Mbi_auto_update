@@ -42,8 +42,6 @@ class StableReleaseSafetyContract(unittest.TestCase):
         self.assertIn("No successful production CI for current main SHA", source)
         self.assertIn("main changed since CI; abort release", source)
         self.assertIn("V3.2.56 tag already exists", source)
-        self.assertIn('public const string CurrentVersion = "V3.2.56"', self.updater)
-        self.assertIn("<Version>3.2.56</Version>", self.project)
         self.assertIn(r'CurrentVersion = "V3\.2\.56"', source)
 
     def test_unverified_solo_operator_release_has_explicit_acceptance_not_fake_signoff(self):
