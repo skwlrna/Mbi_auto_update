@@ -394,7 +394,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         static bool IsMoveTeal(Color p)
             => p.B >= 35 && p.G >= 30 && p.R <= 65 &&
-               p.B >= p.R + 18 && p.G >= p.R + 10;
+               p.B >= p.R + 18 && p.G >= p.R + 10 &&
+               // Blue receive controls satisfy the brightness gates too.
+               // Require teal hue at BOTH the shape and click anchor.
+               p.G * 4 >= p.B * 3;
 
         int sampled = 0;
         int teal = 0;
