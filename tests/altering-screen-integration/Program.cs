@@ -1048,6 +1048,7 @@ try
         Check(PixelGate("HasWorldHudForFacilityVeto", field) &&
               !PixelGate("HasFixedFacilityHeaderVisual", field) &&
               !PixelGate("HasFacilityPanelStructureVisual", field) &&
+              !PixelGate("HasFacilityQueueSlotStructureVisual", field) &&
               !PixelGate("HasVerifiedFacilityMoveClickScreen", field),
             "03:33 real underground field cannot prove a facility from name/currency");
         foreach (string cache in new[] { "_repeatOcrFreeFacilityTitle", "_postTravelProvenFacilityTitle" })
@@ -1127,6 +1128,23 @@ try
               !PixelArrival(true, recordedChange, header, onsiteClose, true, popup) &&
               !PixelArrival(true, recordedChange, header, onsiteClose, false, true),
             $"incident {file}: pixel-arrival path opens only with independent evidence and known idle CLI");
+    }
+    // Regression for the historical remote teal-pill false negative:
+    // the seven-slot lane, header, category pill and three card panels remain
+    // structurally present even after deliberately masking the pill.
+    using (var remote = new Bitmap(Path.Combine(moveFixtures,
+        "remote-wood-20261007-172137.png")))
+    using (var pillMiss = new Bitmap(remote))
+    {
+        using (var g = Graphics.FromImage(pillMiss))
+        using (var b = new SolidBrush(remote.GetPixel(180, 230)))
+            g.FillRectangle(b, new Rectangle(15, 205, 155, 65));
+        Check(!PixelGate("HasFacilityMoveButtonVisual", pillMiss) &&
+              !PixelGate("HasOnsiteCloseButtonVisual", pillMiss) &&
+              PixelGate("HasFacilityPanelStructureVisual", pillMiss) &&
+              PixelGate("HasFacilityQueueSlotStructureVisual", pillMiss) &&
+              PixelGate("HasVerifiedFacilityMoveClickScreen", pillMiss),
+            "remote facility remains input-eligible when teal pill pixels are missed but work-ring structure is intact");
     }
     // Bright fake facility anchors on an ordinary field are insufficient,
     // even when HUD templates are absent. No real pill/X -> no coordinate.

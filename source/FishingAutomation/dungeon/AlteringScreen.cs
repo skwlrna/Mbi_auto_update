@@ -138,6 +138,38 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                DarkCardSamples(frame, new Rectangle(421, 383, 83, 95)) >= 260;
     }
 
+    // Both onsite and remote panels have seven horizontally repeated work
+    // rings, even when the teal remote-move pill has not rendered clearly.
+    // This is a third INDEPENDENT structural signal, not permission to click
+    // outside the full facility header + category pill + three item cards.
+    private static bool HasFacilityQueueSlotStructureVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        static int Light(Color p) => (p.R + p.G + p.B) / 3;
+        // Real onsite / remote slot centers, respectively.
+        foreach (int centerY in new[] { 275, 309 })
+        {
+            int rings = 0;
+            foreach (int centerX in new[] { 153, 230, 307, 384, 461, 538, 615 })
+            {
+                int edges = 0;
+                foreach (var (dx, dy) in new (int, int)[] {
+                    (-32, 0), (32, 0), (0, -32), (0, 32)
+                })
+                {
+                    var rim = frame.GetPixel(centerX + dx, centerY + dy);
+                    var outside = frame.GetPixel(
+                        centerX + dx * 46 / 32, centerY + dy * 46 / 32);
+                    if (Light(rim) >= 40 && Light(rim) >= Light(outside) + 13)
+                        edges++;
+                }
+                if (edges >= 2) rings++;
+            }
+            if (rings >= 3) return true;
+        }
+        return false;
+    }
+
     // The move command is a fixed-coordinate input. A white title/subtitle
     // (or OCR/cached title) alone must never authorize a click: the 03:33
     // ordinary field had both bright anchors. Require an independent facility
@@ -149,7 +181,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
            HasFacilityPanelStructureVisual(frame) &&
            !HasFacilityTravelConfirmationVisual(frame) &&
            !HasBottomConfirmationModal(frame) &&
-           (HasFacilityMoveButtonVisual(frame) || HasOnsiteCloseButtonVisual(frame));
+           (HasFacilityMoveButtonVisual(frame) ||
+            HasOnsiteCloseButtonVisual(frame) ||
+            HasFacilityQueueSlotStructureVisual(frame));
 
     // The actual 800x1000 facility capture has the large fixed title at
     // x=20,y=50 and a separate fixed 'facility Lv.' subtitle at x=20,y=155.
