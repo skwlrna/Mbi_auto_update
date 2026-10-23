@@ -321,7 +321,7 @@ def safe_quarantine_summary(directory: Path) -> list[str]:
 
 
 def context_for(folder: Path) -> str:
-    """Bounded, redacted log excerpts. Screenshots are not uploaded to cloud.
+    """Bounded, redacted log excerpts. Images are not included in textual context; separate consent permits a bounded image attachment.
 
     Include only the trusted local diagnostic timeline for the failing screen,
     whether the error started in gathering, crafting, or altering.
@@ -410,7 +410,7 @@ def context_for(folder: Path) -> str:
     except (OSError, ValueError):
         pass
     images = [p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")]
-    lines.append("Screenshot filenames (image contents not submitted): " + ", ".join(images[:20]))
+    lines.append("Local screenshot filenames (attachment requires separate explicit opt-in): " + ", ".join(images[:20]))
     return "\n".join(lines)[:45000]
 
 
@@ -444,9 +444,9 @@ def consented_error_image(folder: Path, c: dict[str, Any]) -> Path | None:
             return None
         with image.open("rb") as stream:
             header = stream.read(24)
-        if (header[:8] != b"\\x89PNG\\r\\n\\x1a\\n" or
+        if (header[:8] != b"\x89PNG\r\n\x1a\n" or
                 header[12:16] != b"IHDR" or
-                header[8:12] != b"\\x00\\x00\\x00\\x0d"):
+                header[8:12] != b"\x00\x00\x00\x0d"):
             return None
         width = int.from_bytes(header[16:20], "big")
         height = int.from_bytes(header[20:24], "big")
