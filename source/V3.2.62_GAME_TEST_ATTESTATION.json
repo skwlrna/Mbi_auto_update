@@ -1,0 +1,10 @@
+{
+  "version": "V3.2.62",
+  "status": "pending",
+  "testedBy": "",
+  "testedCandidateSha": "",
+  "testedAtUtc": "",
+  "macroModesRealGame": "pending",
+  "rollbackVerified": "pending",
+  "notes": "Legacy AutoFix removed; actual PC gameplay and rollback not yet verified."
+}
