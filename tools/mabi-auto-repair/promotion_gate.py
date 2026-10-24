@@ -254,15 +254,31 @@ def promote_ci_only(number: int, acknowledge_unverified: bool,
         raise GateError("Candidate changed after approval; CI-only merge cancelled")
     gh(["pr", "merge", str(number), "--repo", REPO,
         "--squash", "--match-head-commit", details["head_sha"]], 120)
+    # The approval is the single user confirmation point. Dispatch the
+    # next-version workflow *after* merge, not from scheduled watch. That job
+    # waits for successful exact-main CI, checks approval provenance, prepares
+    # version metadata, and triggers a fresh CI-gated Windows release.
+    try:
+        gh(["workflow", "run", "prepare-reviewed-repair-release.yml",
+            "--repo", REPO, "--ref", "main",
+            "-f", f"repair_pr={number}",
+            "-f", f"reviewed_head_sha={details['head_sha']}",
+            "-f", "acknowledge_unverified=true"], 45)
+    except GateError as exc:
+        # The merge already happened. Surface a precise recovery action instead
+        # of pretending the release automation was started.
+        raise GateError("Repair merged, but release preparation dispatch failed. "
+                        "Check Actions and dispatch the reviewed release workflow manually.") from exc
     return {
-        "pr": number, "status": "ci_only_merge_requested",
+        "pr": number, "status": "ci_only_merge_and_release_queue_requested",
         "tested_head_sha": details["head_sha"],
         "real_game_verified": False, "rollback_game_verified": False,
         "verification": "offline_regression_and_production_ci_only",
-        "release": "blocked_pending_new_version_and_release_validation",
-        "next": "Run exact-main post-merge CI, Windows executable/package smoke, "
-                "SHA256 checks and offline rollback tests before a new release. "
-                "Do not label this candidate game-tested.",
+        "release": "workflow_queued_not_published",
+        "next": "GitHub Actions must still pass exact-main production CI and "
+                "Windows ZIP/EXE smoke, checksum and rollback artifact checks. "
+                "Installed idle macro then downloads verified public release, "
+                "updates and relaunches; game validation not claimed.",
     }
 
 
