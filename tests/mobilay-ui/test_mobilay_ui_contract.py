@@ -18,8 +18,6 @@ class MobilayPresentationContract(unittest.TestCase):
         cls.palette = (UI / "MainForm.Dashboard.cs").read_text(encoding="utf-8")
         cls.shell = (UI / "MainForm.ReferenceUI.cs").read_text(encoding="utf-8")
         cls.grid = (UI / "MainForm.MobilayDashboard.cs").read_text(encoding="utf-8")
-        cls.ai_panel = (UI / "MainForm.AiAutopilot.cs").read_text(encoding="utf-8")
-        cls.ai_dashboard = (UI / "AiAutopilotDashboard.cs").read_text(encoding="utf-8")
 
     def test_charcoal_purple_theme_and_proportions(self):
         for rgb in ("23, 23, 24", "13, 14, 18", "171, 143, 249",
@@ -102,20 +100,11 @@ class MobilayPresentationContract(unittest.TestCase):
         # The implementation remains in place; this change only hides the nav entry.
         self.assertIn('if (string.Equals(mode, "페카 심층"', self.shell)
 
-    def test_ai_diagnostic_colors_match_dark_application(self):
-        self.assertIn("BackColor = PanelBg", self.ai_panel)
-        self.assertNotIn("BackColor = Color.White", self.ai_panel)
-        self.assertIn("ForeColor = Muted", self.ai_panel)
-        for color in ("UiBackground", "UiPanel", "UiButton", "UiText", "UiMuted",
-                      "UiBorder", "UiError"):
-            self.assertIn(color, self.ai_dashboard)
-        self.assertNotIn("Color.White", self.ai_dashboard)
-        for item in ("EnableHeadersVisualStyles = false",
-                     "ColumnHeadersDefaultCellStyle",
-                     "AlternatingRowsDefaultCellStyle",
-                     "SelectionBackColor = UiAccentSoft",
-                     "ForeColor = UiText"):
-            self.assertIn(item, self.ai_dashboard)
+    def test_error_logging_remains_available_after_ai_removal(self):
+        self.assertIn("new RuntimeErrorUploader(_log, runtimeLogPath)", self.main)
+        self.assertNotIn("AutoStartAiAutopilot", self.main)
+        self.assertNotIn("BuildAiAutopilotPanel", self.main)
+        self.assertIn("ShowErrorUploadSettings()", self.grid)
 
     def test_dashboard_reuses_gdi_fonts_and_skips_unchanged_layout(self):
         self.assertIn("_textFonts.TryGetValue", self.shell)

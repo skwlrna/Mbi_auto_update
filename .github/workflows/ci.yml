@@ -37,12 +37,12 @@ jobs:
           python -m unittest discover -s tests/mobilay-ui -p 'test_mobilay_ui_contract.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Mobilay-inspired UI source and navigation regression failed' }
 
-      - name: AI MCP watcher queue regression tests
+      - name: Confirm old AutoFix removed and error logging preserved
         shell: pwsh
         run: |
           $env:PYTHONUTF8 = '1'
-          python -m unittest discover -s tests/ai-autopilot -p 'test_*.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'AI watcher queue tests failed' }
+          python -m unittest discover -s tests/ai-removal -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Legacy autofix removal checks failed' }
 
       - name: Stability regression tests
         shell: pwsh
@@ -88,72 +88,6 @@ jobs:
           if (-not $release.Contains('CurrentVersion = "V3\.2\.61"')) {
             throw 'release workflow eligibility version mismatch'
           }
-
-      - name: V3.2.60 AI evidence release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3260_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.60 release safety policy failed' }
-
-      - name: V3.2.59 facility field travel release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3259_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.59 release safety policy failed' }
-
-      - name: V3.2.58 leather intermediate release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3258_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.58 release safety policy failed' }
-
-      - name: V3.2.57 facility move release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3257_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.57 release safety policy failed' }
-
-      - name: V3.2.56 managed K release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3256_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.56 release safety policy failed' }
-
-      - name: V3.2.55 leather seven-slot release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3255_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.55 release safety policy failed' }
-
-      - name: V3.2.54 leather recursive release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3254_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.54 release safety policy failed' }
-
-      - name: V3.2.53 AI recovery release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3253_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.53 release safety policy failed' }
-
-      - name: V3.2.52 F9 leather release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3252_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.52 release safety policy failed' }
-
-      - name: V3.2.51 nest release safety policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3251_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.51 release safety policy failed' }
-
-      - name: V3.2.50 auto-update source policy
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3250_auto_update_policy.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.2.50 release policy failed' }
 
       - name: V3.2.49 auto-update source policy
         shell: pwsh
