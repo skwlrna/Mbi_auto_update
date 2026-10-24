@@ -196,6 +196,49 @@ class PromoteGateTests(unittest.TestCase):
             self.assertNotIn("--auto", commands[1])
             self.assertNotIn("release", " ".join(" ".join(args) for args in commands))
 
+    def test_ci_only_requires_explicit_review_and_merge_ack(self):
+        for unverified, merge in ((False, False), (True, False), (False, True)):
+            with self.subTest(unverified=unverified, merge=merge):
+                with mock.patch.object(gate, "audit",
+                                       side_effect=AssertionError("No Github read")):
+                    with self.assertRaisesRegex(gate.GateError, "acknowledge-unverified"):
+                        gate.promote_ci_only(PR, unverified, merge)
+
+    def test_ci_only_promotes_reviewed_fix_but_never_calls_release(self):
+        data = responses()
+        commands = []
+        with self.audit_with(data), mock.patch.object(
+                gate, "gh", side_effect=lambda args, timeout=30: (commands.append(args) or "")):
+            result = gate.promote_ci_only(PR, True, True)
+        self.assertEqual(result["status"], "ci_only_merge_requested")
+        self.assertFalse(result["real_game_verified"])
+        self.assertFalse(result["rollback_game_verified"])
+        self.assertEqual(result["release"], "blocked_pending_new_version_and_release_validation")
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:3], ["pr", "ready", str(PR)])
+        self.assertEqual(commands[1][:3], ["pr", "merge", str(PR)])
+        self.assertIn("--match-head-commit", commands[1])
+        self.assertFalse(any("release" in " ".join(cmd) for cmd in commands))
+
+    def test_ci_only_fails_for_stale_ci_and_head_changes(self):
+        for conclusion in ("pending", "failure"):
+            with self.subTest(conclusion=conclusion), self.audit_with(
+                    responses(conclusion=conclusion)), mock.patch.object(gate, "gh") as command:
+                with self.assertRaisesRegex(gate.GateError, "production CI"):
+                    gate.promote_ci_only(PR, True, True)
+                command.assert_not_called()
+        states = [
+            {"pr": PR, "head_sha": HEAD, "base_sha": BASE,
+             "status": "ci_passed_waiting_game", "is_draft": True},
+            {"pr": PR, "head_sha": "d"*40, "base_sha": BASE,
+             "status": "ci_passed_waiting_game", "is_draft": False},
+        ]
+        with mock.patch.object(gate, "audit", side_effect=states), \
+             mock.patch.object(gate, "gh") as gh:
+            with self.assertRaisesRegex(gate.GateError, "changed"):
+                gate.promote_ci_only(PR, True, True)
+            self.assertEqual(gh.call_count, 1)
+
     def test_pr_changed_after_ready_blocks_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
             attestation = report(Path(tmp))
