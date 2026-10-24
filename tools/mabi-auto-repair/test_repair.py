@@ -17,58 +17,58 @@ def incident(detail="시설 UI 미확인, 안전 정지"):
 class OfflineTests(TestCase):
     def test_deduplicate_reimport_without_extra_count(self):
         with TemporaryDirectory() as tmp:
-            state = repair.State(Path(tmp))
-            key = state.add("github:one", incident())
-            self.assertEqual(state.add("github:one", incident()), key)
-            self.assertEqual(state.add("github:two", incident()), key)
-            self.assertEqual(state.job(key)["hits"], 2)
-            self.assertEqual(len(state.jobs()), 1)
-            self.assertEqual(state.job(key)["calls"], 0)
+            with repair.State(Path(tmp)) as state:
+                key = state.add("github:one", incident())
+                self.assertEqual(state.add("github:one", incident()), key)
+                self.assertEqual(state.add("github:two", incident()), key)
+                self.assertEqual(state.job(key)["hits"], 2)
+                self.assertEqual(len(state.jobs()), 1)
+                self.assertEqual(state.job(key)["calls"], 0)
 
     def test_paths_and_secrets_redacted_before_storage(self):
         with TemporaryDirectory() as tmp:
-            state = repair.State(Path(tmp))
-            key = state.add("sample", incident(r"C:\Users\private-user\Desktop\a.png token=secret-value"))
-            self.assertNotIn("private-user", state.job(key)["detail"])
-            self.assertNotIn("secret-value", state.job(key)["detail"])
-            self.assertIn("<path>", state.job(key)["detail"])
+            with repair.State(Path(tmp)) as state:
+                key = state.add("sample", incident(r"C:\Users\private-user\Desktop\a.png token=secret-value"))
+                self.assertNotIn("private-user", state.job(key)["detail"])
+                self.assertNotIn("secret-value", state.job(key)["detail"])
+                self.assertIn("<path>", state.job(key)["detail"])
 
     def test_non_runtime_record_rejected(self):
         with TemporaryDirectory() as tmp:
-            state = repair.State(Path(tmp))
-            row = incident()
-            row["source"] = "visual-test"
-            self.assertIsNone(state.add("not-runtime", row))
-            self.assertEqual(state.jobs(), [])
+            with repair.State(Path(tmp)) as state:
+                row = incident()
+                row["source"] = "visual-test"
+                self.assertIsNone(state.add("not-runtime", row))
+                self.assertEqual(state.jobs(), [])
 
     def test_dry_run_makes_zero_subprocess_calls(self):
         with TemporaryDirectory() as tmp:
-            state = repair.State(Path(tmp))
-            key = state.add("first", incident())
-            with mock.patch.object(repair, "shell", side_effect=AssertionError("Paid tool called")):
-                report = repair.run_one(state, key, None, False, False, 1)
-            self.assertIn("DRY_RUN", report["next"])
-            self.assertEqual(state.job(key)["calls"], 0)
+            with repair.State(Path(tmp)) as state:
+                key = state.add("first", incident())
+                with mock.patch.object(repair, "shell", side_effect=AssertionError("Paid tool called")):
+                    report = repair.run_one(state, key, None, False, False, 1)
+                self.assertIn("DRY_RUN", report["next"])
+                self.assertEqual(state.job(key)["calls"], 0)
 
     def test_explicit_cost_ack_required(self):
         with TemporaryDirectory() as tmp:
-            state = repair.State(Path(tmp))
-            key = state.add("first", incident())
-            with self.assertRaisesRegex(ValueError, "acknowledge-cost"):
-                repair.run_one(state, key, Path(tmp), True, False, 1)
-            self.assertEqual(state.job(key)["calls"], 0)
+            with repair.State(Path(tmp)) as state:
+                key = state.add("first", incident())
+                with self.assertRaisesRegex(ValueError, "acknowledge-cost"):
+                    repair.run_one(state, key, Path(tmp), True, False, 1)
+                self.assertEqual(state.job(key)["calls"], 0)
 
     def test_quota_and_one_shot_veto(self):
         with TemporaryDirectory() as tmp:
-            state = repair.State(Path(tmp))
-            a = state.add("one", incident())
-            b = state.add("two", incident("전혀 다른 오류"))
-            state.reserve(a, 1)
-            with self.assertRaisesRegex(ValueError, "Daily"):
-                state.reserve(b, 1)
-            with self.assertRaisesRegex(ValueError, "repeated"):
-                state.reserve(a, 3)
-            self.assertEqual(state.job(b)["calls"], 0)
+            with repair.State(Path(tmp)) as state:
+                a = state.add("one", incident())
+                b = state.add("two", incident("전혀 다른 오류"))
+                state.reserve(a, 1)
+                with self.assertRaisesRegex(ValueError, "Daily"):
+                    state.reserve(b, 1)
+                with self.assertRaisesRegex(ValueError, "repeated"):
+                    state.reserve(a, 3)
+                self.assertEqual(state.job(b)["calls"], 0)
 
     def test_existing_registered_modes(self):
         self.assertEqual(repair.suite_for("다중가공"), "tests/altering/Regression.csproj")
@@ -113,34 +113,34 @@ class OfflineTests(TestCase):
             csproj = src / "source/FishingAutomation/FishingAutomation.csproj"
             csproj.parent.mkdir(parents=True)
             csproj.write_text("<Project/>", encoding="utf-8")
-            state = repair.State(root / "state")
-            key = state.add("fixture", incident())
-            calls = []
-            sha = "a" * 40
-            def fake(command, cwd, timeout=30, prompt=None):
-                calls.append(command[0:2])
-                if command[:2] == ["git", "rev-parse"]:
-                    return subprocess.CompletedProcess(command, 0, sha + "\n", "")
-                if command[:2] == ["git", "status"]:
-                    changes = "" if cwd == src else (
-                        " M source/FishingAutomation/AlteringPlan.cs\n"
-                        " M tests/altering/Regression.csproj\n")
-                    return subprocess.CompletedProcess(command, 0, changes, "")
-                if command[:3] == ["git", "worktree", "add"]:
-                    Path(command[4]).mkdir(parents=True)
-                return subprocess.CompletedProcess(command, 0, "", "")
-            with mock.patch.object(repair.shutil, "which", return_value="/mock/tool"), \
-                 mock.patch.object(repair, "shell", side_effect=fake):
-                result = repair.run_one(state, key, src, True, True, 1)
-            self.assertEqual(result["status"], "candidate_passed")
-            self.assertEqual(state.job(key)["calls"], 1)
-            self.assertEqual(state.job(key)["status"], "candidate_passed")
-            self.assertEqual(len([c for c in calls if c[0] == "codex"]), 1)
-            self.assertEqual(len([c for c in calls if c[0] == "dotnet"]), 1)
-            with self.assertRaisesRegex(ValueError, "repeated"):
-                state.reserve(key, 3)
-            self.assertTrue((root / "state" / "workspaces" / key / "result.json").exists())
+            with repair.State(root / "state") as state:
+                key = state.add("fixture", incident())
+                calls = []
+                sha = "a" * 40
+                def fake(command, cwd, timeout=30, prompt=None):
+                    calls.append(command[0:2])
+                    if command[:2] == ["git", "rev-parse"]:
+                        return subprocess.CompletedProcess(command, 0, sha + "\n", "")
+                    if command[:2] == ["git", "status"]:
+                        changes = "" if "workspaces" not in str(cwd) else (
+                            " M source/FishingAutomation/AlteringPlan.cs\n"
+                            " M tests/altering/Regression.csproj\n")
+                        return subprocess.CompletedProcess(command, 0, changes, "")
+                    if command[:3] == ["git", "worktree", "add"]:
+                        Path(command[4]).mkdir(parents=True)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                with mock.patch.object(repair.shutil, "which", return_value="/mock/tool"), \
+                     mock.patch.object(repair, "shell", side_effect=fake):
+                    result = repair.run_one(state, key, src, True, True, 1)
+                self.assertEqual(result["status"], "candidate_passed")
+                self.assertEqual(state.job(key)["calls"], 1)
+                self.assertEqual(state.job(key)["status"], "candidate_passed")
+                self.assertEqual(len([c for c in calls if c[0] == "codex"]), 1)
+                self.assertEqual(len([c for c in calls if c[0] == "dotnet"]), 1)
+                with self.assertRaisesRegex(ValueError, "repeated"):
+                    state.reserve(key, 3)
+                self.assertTrue((root / "state" / "workspaces" / key / "result.json").exists())
 
 
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
