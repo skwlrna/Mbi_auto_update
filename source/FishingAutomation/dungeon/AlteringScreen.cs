@@ -332,11 +332,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // irreversible receive Space on blue pixels at fixed coordinates.
     // This independently refreshes facility UI, popup, activity and ALL
     // jobs in the exact facility. Fail closed on unknown CLI or partial work.
+    // Cached/OCR title evidence alone cannot authorize receipt on an unknown UI.
+    private static bool HasManagedReceiptPanelVisual(Bitmap frame)
+        => HasFixedFacilityHeaderVisual(frame) &&
+           HasFacilityPanelStructureVisual(frame);
+
     private async Task<bool> HasManagedCollectReadyAsync(
         Bitmap frame, AlteringPlan plan, CancellationToken ct)
     {
-        bool facility = await FindFacilityHeaderAsync(
-            frame, plan.ScreenTitle, ct) is not null;
+        bool facility = HasManagedReceiptPanelVisual(frame) &&
+            await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
         bool confirmation = HasBottomConfirmationModal(frame) ||
                             HasManagedFacilityTravelConfirmationVisual(frame);
         bool travelDialog = await IsFacilityTravelDialogAsync(frame, ct);
