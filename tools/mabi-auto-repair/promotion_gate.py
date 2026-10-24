@@ -2,10 +2,10 @@
 """Audit auto-repair Draft PR CI, and safely promote *only* with real-game signoff.
 
 The 5-minute watcher may call audit() with no GitHub writes. A passed offline
-regression does NOT prove game behavior. A merge requires an operator-written
-attestation plus a separate explicit CLI action. Never create a release, tag,
-or updater ZIP; versioned release workflows are distinct and cannot recycle
-the existing V3.2.62 asset.
+regression does NOT prove game behavior. Promotion supports EITHER explicit
+operator real-game attestation OR separately acknowledged CI-only unverified
+promotion. Neither path is an automatic watcher action. Never create a release,
+tag or updater ZIP; versioned release workflows remain separately gated.
 """
 from __future__ import annotations
 
@@ -232,6 +232,40 @@ def promote(number: int, report: Path, acknowledge_merge: bool) -> dict:
                     "Windows executable smoke, asset checksums, rollback and explicit release signoff"}
 
 
+def promote_ci_only(number: int, acknowledge_unverified: bool,
+                    acknowledge_merge: bool) -> dict:
+    """Explicit unverified-offline promotion; never claim real-game validation.
+
+    Unlike game-attested promotion, this has no gameplay prerequisite.
+    The same strict PR provenance, current main, candidate source/test scope,
+    exact-head Windows production CI and immutable-head checks still apply.
+    """
+    if not acknowledge_unverified or not acknowledge_merge:
+        raise GateError("CI-only promotion requires --acknowledge-unverified AND --acknowledge-merge")
+    details = audit(number)
+    if details["status"] != "ci_passed_waiting_game":
+        raise GateError("Current candidate's exact-head production CI must pass")
+    if details["is_draft"]:
+        gh(["pr", "ready", str(number), "--repo", REPO], 40)
+    fresh = audit(number)
+    if (fresh["status"] != "ci_passed_waiting_game"
+            or fresh["head_sha"] != details["head_sha"]
+            or fresh["base_sha"] != details["base_sha"]):
+        raise GateError("Candidate changed after approval; CI-only merge cancelled")
+    gh(["pr", "merge", str(number), "--repo", REPO,
+        "--squash", "--match-head-commit", details["head_sha"]], 120)
+    return {
+        "pr": number, "status": "ci_only_merge_requested",
+        "tested_head_sha": details["head_sha"],
+        "real_game_verified": False, "rollback_game_verified": False,
+        "verification": "offline_regression_and_production_ci_only",
+        "release": "blocked_pending_new_version_and_release_validation",
+        "next": "Run exact-main post-merge CI, Windows executable/package smoke, "
+                "SHA256 checks and offline rollback tests before a new release. "
+                "Do not label this candidate game-tested.",
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Offline-safe auto-repair PR CI and merge gate")
     sub = parser.add_subparsers(dest="action", required=True)
@@ -241,12 +275,20 @@ def main(argv=None) -> int:
     merge.add_argument("pr", type=int)
     merge.add_argument("--game-test-report", type=Path, required=True)
     merge.add_argument("--acknowledge-merge", action="store_true")
+    offline = sub.add_parser("promote-ci-only",
+                             help="Explicit unverified game-skip after exact-head CI; no release")
+    offline.add_argument("pr", type=int)
+    offline.add_argument("--acknowledge-unverified", action="store_true")
+    offline.add_argument("--acknowledge-merge", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.action == "audit":
             result = audit(args.pr)
-        else:
+        elif args.action == "promote":
             result = promote(args.pr, args.game_test_report, args.acknowledge_merge)
+        else:
+            result = promote_ci_only(args.pr, args.acknowledge_unverified,
+                                     args.acknowledge_merge)
         print(json.dumps(result, indent=2, ensure_ascii=True))
         return 0
     except (GateError, OSError) as exc:
