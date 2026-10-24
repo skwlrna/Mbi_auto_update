@@ -20,6 +20,7 @@ from pathlib import Path
 REPO = "skwlrna/Mbi_auto_update"
 PR_BRANCH = re.compile(r"auto-repair/([a-f0-9]{24})-([a-f0-9]{8})\Z")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
+DIGEST = re.compile(r"[a-f0-9]{64}\Z")
 TEST_FOLDERS = frozenset(("altering", "gathering", "crafting", "loot-retry", "retry-flow"))
 RELEASE_VERSION = re.compile(r"V\d+\.\d+\.\d+\Z")
 
@@ -189,7 +190,8 @@ def check_attestation(report: Path, audited: dict) -> dict:
             or evidence.get("new_runtime_errors") != 0
             or not isinstance(evidence.get("session_id"), str)
             or not re.fullmatch(r"[a-f0-9]{24}", evidence["session_id"])
-            or not all(_sha(evidence.get(h)) for h in hashes)
+            or not all(isinstance(evidence.get(h), str) and DIGEST.fullmatch(evidence[h])
+                       for h in hashes)
             or evidence["candidate_executable_sha256"] == evidence["stable_executable_sha256"]
             or evidence["candidate_proof_sha256"] == evidence["rollback_proof_sha256"]):
         raise GateError("Invalid candidate, game proof or rollback binding")
