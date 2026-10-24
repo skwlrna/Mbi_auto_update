@@ -2491,7 +2491,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // Fixed title/subtitle pixels are primary; first-entry OCR is
             // secondary and never by itself blocks a valid fixed facility UI.
             if (!stableFacility || !HasVerifiedFacilityMoveClickScreen(confirmed))
+            {
+                Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 시설 전환 검증 실패 · " +
+                    $"연속2프레임={stableFacility} · 전체시설UI={HasFacilityPanelStructureVisual(confirmed)} · " +
+                    $"시설제목={HasFixedFacilityHeaderVisual(confirmed)} · " +
+                    $"이동버튼={HasFacilityMoveButtonVisual(confirmed)} · " +
+                    $"현장닫기={HasOnsiteCloseButtonVisual(confirmed)} · " +
+                    $"작업슬롯={HasFacilityQueueSlotStructureVisual(confirmed)}");
                 Fail(confirmed, "설비 이동 전 실제 시설창의 제목/독립 UI 구조를 확인하지 못했습니다 · 일반 필드 좌표 클릭 차단");
+            }
 
             // V3.1.65: K/facility always has a move control. Its OCR/teal
             // detector is unreliable; use the fixed pixel baseline taken
