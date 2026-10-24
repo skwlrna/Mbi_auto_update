@@ -251,6 +251,9 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
     test = suite_for(job["mode"])
     result = {"id": key, "status": job["status"], "occurrences": job["hits"],
               "codex_calls": job["calls"], "test": test, "cost_usd": None}
+    # Explicit operator cost consent takes precedence over any checkout access.
+    if execute and (not cost_ack or repo is None):
+        raise ValueError("--repo and --acknowledge-cost required")
     # Offline preflight never invokes Git or Codex and never consumes tokens.
     readiness = incident_preflight(job, test, repo)
     result.update(readiness)
@@ -259,8 +262,6 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
                           if not readiness["ready_for_ai"]
                           else "DRY_RUN: --execute --acknowledge-cost required")
         return result
-    if not cost_ack or repo is None:
-        raise ValueError("--repo and --acknowledge-cost required")
     if not readiness["ready_for_ai"]:
         raise ValueError("Preflight blocked before AI: " + ",".join(readiness["preflight_reasons"]))
     if not all(shutil.which(x) for x in ("git", "codex", "dotnet")):
