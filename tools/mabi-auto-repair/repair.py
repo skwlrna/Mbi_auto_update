@@ -122,9 +122,10 @@ class State:
         key = digest(summary)
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            if self.conn.execute("SELECT 1 FROM seen WHERE source=?", (source,)).fetchone():
+            existing = self.conn.execute("SELECT job_id FROM seen WHERE source=?", (source,)).fetchone()
+            if existing:
                 self.conn.execute("COMMIT")
-                return key
+                return existing["job_id"]
             self.conn.execute("""INSERT OR IGNORE INTO jobs (id,title,mode,detail,version,source)
                 VALUES (?,?,?,?,?,?)""",
                 (key, *(sanitized(summary.get(x)) for x in ("title","mode","detail","version")), source))
@@ -202,19 +203,67 @@ def candidate_files(workspace: Path) -> list[str]:
     return files
 
 
+VERSION_PATTERN = re.compile(r'public const string CurrentVersion\s*=\s*"(V\d+\.\d+\.\d+)"')
+VISUAL_EVIDENCE_TERMS = ("시설창", "독립 UI", "픽셀", "OCR", "스크린샷", "템플릿", "화면 인식")
+
+
+def current_source_version(repo: Path) -> str:
+    """Read the checkout version without Git/Codex/network calls."""
+    file = repo / "source" / "FishingAutomation" / "UpdateManager.cs"
+    if not file.is_file():
+        raise ValueError("Missing UpdateManager.cs: cannot verify source version")
+    match = VERSION_PATTERN.search(file.read_text(encoding="utf-8"))
+    if match is None:
+        raise ValueError("Source version cannot be verified")
+    return match.group(1)
+
+
+def incident_preflight(job: dict, suite: str | None, repo: Path | None) -> dict:
+    """Deterministic, free vetoes before even reserving one Codex call.
+
+    Earlier-version logs cannot establish that a defect persists in this source.
+    Visual/UI recognition bugs need evidence beyond summary.json; photographs
+    and recent.log are deliberately neither retrieved nor sent by this tool.
+    """
+    reasons = []
+    if suite is None:
+        reasons.append("no_registered_regression")
+    if repo is None:
+        source_version = None
+        reasons.append("source_checkout_not_supplied")
+    else:
+        source_version = current_source_version(repo)
+        if job["version"] != source_version:
+            reasons.append("source_version_not_reproduced")
+    if any(term.casefold() in job["detail"].casefold() for term in VISUAL_EVIDENCE_TERMS):
+        reasons.append("visual_evidence_missing")
+    return {
+        "source_version": source_version,
+        "error_version": job["version"],
+        "ready_for_ai": not reasons,
+        "preflight_reasons": reasons,
+    }
+
+
 def run_one(state: State, key: str, repo: Path | None, execute: bool,
             cost_ack: bool, daily: int) -> dict:
     job = state.job(key)
     test = suite_for(job["mode"])
     result = {"id": key, "status": job["status"], "occurrences": job["hits"],
               "codex_calls": job["calls"], "test": test, "cost_usd": None}
-    if not execute:
-        result["next"] = "DRY_RUN: --execute --acknowledge-cost required"
-        return result
-    if not cost_ack or repo is None:
+    # Explicit operator cost consent takes precedence over any checkout access.
+    if execute and (not cost_ack or repo is None):
         raise ValueError("--repo and --acknowledge-cost required")
-    if not test:
-        raise ValueError("No registered regression suite: blocked before AI")
+    # Offline preflight never invokes Git or Codex and never consumes tokens.
+    readiness = incident_preflight(job, test, repo)
+    result.update(readiness)
+    if not execute:
+        result["next"] = ("DRY_RUN: blocked: " + ",".join(readiness["preflight_reasons"])
+                          if not readiness["ready_for_ai"]
+                          else "DRY_RUN: --execute --acknowledge-cost required")
+        return result
+    if not readiness["ready_for_ai"]:
+        raise ValueError("Preflight blocked before AI: " + ",".join(readiness["preflight_reasons"]))
     if not all(shutil.which(x) for x in ("git", "codex", "dotnet")):
         raise ValueError("Git, Codex and dotnet required; no model invocation")
     repo = repo.resolve()
