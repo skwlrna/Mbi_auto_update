@@ -72,12 +72,12 @@ NEXT_ACTION = {
     "retry_exhausted": "Resolve local prerequisite and request manual review; no paid retry",
     "needs_review": "Inspect pipeline result and evidence; same fingerprint will not call AI again",
     "pr_needs_review": "Inspect remote branch and GitHub authentication; do not republish blindly",
-    "pr_opened": "Watch PR CI; real-game and rollback verification are required",
-    "candidate_passed": "Offline candidate only; verify actual game before promotion",
+    "pr_opened": "Wait for exact-head Windows CI; then review code/tests and approve CI-only release (game test optional)",
+    "candidate_passed": "Offline tests passed only; prepare Draft PR and Windows CI, not a proven game fix",
     "diagnosed_no_patch": "Obtain same-version screenshot/log reproduction before patching",
     "ci_failed": "Review failed PR CI; do not merge",
     "pr_ci_needs_review": "Inspect GitHub authorization or CI run",
-    "ci_passed_waiting_game": "Run actual game and rollback validation before merge",
+    "ci_passed_waiting_game": "Review the source and CI, then run promote-ci-only with --acknowledge-unverified --acknowledge-merge; no game test required",
 }
 
 
