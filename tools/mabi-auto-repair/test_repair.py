@@ -161,8 +161,8 @@ class OfflineTests(TestCase):
                         return subprocess.CompletedProcess(args, 0, "a" * 40, "")
                     if args[:2] == ["git", "status"]:
                         diff = "" if "workspaces" not in str(cwd) else (
-                            " M source/FishingAutomation/AlteringPlan.cs\\n"
-                            " M tests/altering/Program.cs\\n")
+                            " M source/FishingAutomation/AlteringPlan.cs\n"
+                            " M tests/altering/Program.cs\n")
                         return subprocess.CompletedProcess(args, 0, diff, "")
                     if args[:3] == ["git", "worktree", "add"]:
                         Path(args[4]).mkdir(parents=True)
@@ -202,8 +202,8 @@ class OfflineTests(TestCase):
                         return subprocess.CompletedProcess(args, 0, "a"*40, "")
                     if args[:2] == ["git", "status"]:
                         diff = "" if "workspaces" not in str(cwd) else (
-                            " M source/FishingAutomation/AlteringPlan.cs\\n"
-                            " M tests/altering/Program.cs\\n")
+                            " M source/FishingAutomation/AlteringPlan.cs\n"
+                            " M tests/altering/Program.cs\n")
                         return subprocess.CompletedProcess(args, 0, diff, "")
                     if args[:3] == ["git", "worktree", "add"]:
                         Path(args[4]).mkdir(parents=True)
