@@ -9,6 +9,12 @@ import repair
 
 DETAIL = "시설 카드 원래 좌표 미반응, 고유 OCR 대체 좌표 미검증"
 HEAD = "a" * 40
+EVIDENCE = {
+    "image_status": "image_analysis_returned",
+    "image_sha256": "b" * 64,
+    "diagnostic": "Screenshot inspected; location uncertain",
+    "log_excerpt": "Dialogue=True · 관리 가공 입력 차단"
+}
 
 
 def setup_case(root: Path):
@@ -94,7 +100,7 @@ class NoSourceChangeTests(TestCase):
                 runner = fake_shell_factory([""], prompts)
                 with mock.patch.object(repair.shutil, "which", return_value="/mock/tool"), \
                      mock.patch.object(repair, "shell", side_effect=runner):
-                    out = repair.run_one(state, key, repo, True, True, None)
+                    out = repair.run_one(state, key, repo, True, True, None, evidence=EVIDENCE)
                 self.assertEqual(out["status"], "needs_review")
                 self.assertEqual(out["reason"], "No C# source change")
                 self.assertEqual(out["patch_attempts"], 1)
@@ -121,7 +127,7 @@ class NoSourceChangeTests(TestCase):
                 with mock.patch.object(repair.shutil, "which", return_value="/mock/tool"), \
                      mock.patch.object(repair, "shell", side_effect=runner):
                     out = repair.run_one(state, key, repo, True, True, None,
-                                         retry_regression_once=True)
+                                         evidence=EVIDENCE, retry_regression_once=True)
                 self.assertEqual(out["status"], "candidate_passed")
                 self.assertEqual(out["patch_attempts"], 2)
                 self.assertEqual(out["codex_calls"], 2)
@@ -139,7 +145,7 @@ class NoSourceChangeTests(TestCase):
                 with mock.patch.object(repair.shutil, "which", return_value="/mock/tool"), \
                      mock.patch.object(repair, "shell", side_effect=runner):
                     out = repair.run_one(state, key, repo, True, True, None,
-                                         retry_regression_once=True)
+                                         evidence=EVIDENCE, retry_regression_once=True)
                 self.assertEqual(out["status"], "needs_review")
                 self.assertEqual(out["patch_attempts"], 2)
                 self.assertEqual(len(prompts), 2)
