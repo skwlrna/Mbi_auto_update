@@ -106,10 +106,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Offline repair regressions failed' }
           python tools/mabi-auto-repair/prepare_release.py --repo . --latest-release "$env:PUBLISHED_VERSION" --repair-pr "$env:PR_NUMBER" --approved-head-sha "$env:APPROVED_HEAD" --reviewed-merge-sha "$env:REVIEWED_MERGE_SHA"
           if ($LASTEXITCODE -ne 0) { throw 'Version-only preparation rejected' }
-          if (@(git status --porcelain).Count -ne 6) { throw 'Unexpected version preparation files' }
-          git add -- source/FishingAutomation/UpdateManager.cs source/FishingAutomation/FishingAutomation.csproj .github/workflows/ci.yml
-          git add -- source/RELEASE_NOTES_V*.md source/V*_CI_ONLY_REPAIR_APPROVAL.json .github/workflows/release-v*-auto-update.yml
-          if (@(git diff --cached --name-only).Count -ne 6) { throw 'Unexpected release file scope' }
+          if (@(git status --porcelain).Count -ne 4) { throw 'Unexpected version preparation files' }
+          git add -- source/FishingAutomation/UpdateManager.cs source/FishingAutomation/FishingAutomation.csproj
+          git add -- source/RELEASE_NOTES_V*.md source/V*_CI_ONLY_REPAIR_APPROVAL.json
+          if (@(git diff --cached --name-only).Count -ne 4) { throw 'Unexpected release file scope' }
+          # Workflow files remain unchanged; GitHub's built-in automation token
+          # cannot reliably push edits to .github/workflows/**.
           git -c user.name="MabiAuto Release Bot" -c user.email="ci-release@users.noreply.github.com" commit -m "chore(release): CI-only reviewed repair from PR #$env:PR_NUMBER"
           if ($LASTEXITCODE -ne 0) { throw 'Version commit rejected' }
 
