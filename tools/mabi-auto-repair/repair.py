@@ -374,10 +374,12 @@ def main(argv=None) -> int:
                 raise ValueError("--max-daily range: 1..3")
             result = run_one(state, args.fingerprint, args.repo, args.execute,
                              args.acknowledge_cost, args.max_daily)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        # ASCII-safe JSON for Windows legacy console encodings (cp1252/mbcs).
+        # json.loads restores all Korean strings without loss.
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return 0
     except (ValueError, OSError, json.JSONDecodeError, sqlite3.Error) as exc:
-        print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"error": str(exc)}, ensure_ascii=True), file=sys.stderr)
         return 2
 
 
