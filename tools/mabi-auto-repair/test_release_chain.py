@@ -1,6 +1,7 @@
 """Static CI-only pipeline safety contract: no API, publishing or game actions."""
 from pathlib import Path
 import unittest
+import re
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -36,6 +37,12 @@ class ApprovalReleaseChainTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, pub)
         self.assertNotIn("git tag V3.2.62", pub)
+        # GitHub rejects the entire YAML before jobs can run if a step has
+        # the same id key twice, even if the rest of the CI-only flow passes.
+        ids = re.findall(r"^\\s{8}id:\\s*([a-zA-Z_][a-zA-Z0-9_-]*)$", pub, re.M)
+        self.assertEqual(len(ids), len(set(ids)), "Duplicate workflow step IDs")
+        self.assertEqual(ids, ["approval", "eligibility"])
+        self.assertNotIn("        id: eligibility\\n        id: eligibility", pub)
 
     def test_release_prep_is_workflow_token_safe(self):
         wf = self.read(".github/workflows/prepare-reviewed-repair-release.yml")
