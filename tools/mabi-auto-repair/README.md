@@ -2,6 +2,20 @@
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
 
+## PC 최종 진단: 읽기 전용 단일 명령
+
+업데이트된 Windows 저장소에서 아래 명령만 실행하면 **Git 동기화·청결 상태, Windows 작업 스케줄러 예약/직전 실행, 유료분석/자동 Draft PR 플래그, Python/.NET/Git/Codex/gh 도구, GitHub CLI 로그인, watcher 기준선/상태**를 JSON으로 확인합니다.
+
+~~~powershell
+cd "$HOME\Mbi_auto_update"
+git pull --ff-only origin main
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\mabi-auto-repair\doctor.ps1
+~~~
+
+진단기는 읽기 전용입니다. AI 비용을 사용하지 않고, 기존 작업을 재등록하거나 매크로를 중단·실행하지 않으며, 릴리스도 생성하지 않습니다. `ready_for_next_real_error`이면 PC 사전조건이 충족된 것이며, **새로운 오류가 발생해 수정 PR이 생기고 실제 정식 패키지가 PC에 설치·재시작된 사실까지 증명하는 것은 아닙니다.** `attention_required`이면 `problems` 원인을 우선 해결하세요. 외부 인터넷이 필요한 최신 GitHub 커밋 확인은 이 진단에 포함하지 않으므로 `git pull`을 먼저 실행합니다.
+
+CI 성공한 자동수정 PR의 과거 상태 코드 `ci_passed_waiting_game`은 SQLite/기존 자동화 호환을 위해 남겨둡니다. 실제 안내는 **코드와 회귀 테스트 검토 후 `promote-ci-only` 명령으로 승인 가능**이고, 실게임 테스트는 선택입니다.
+
 ## v0.10: 승인된 수정안은 실게임 검증 대신 정확한 CI로 병합 선택
 
 **요구된 최종 목표:** 신규 오류 → AI 코드 수정 및 회귀 테스트 → 사람이 수정안 내용과 CI를 검토·승인 → 새로운 버전의 정식 릴리스 → 설치 매크로 자동업데이트 → 새 버전 매크로 자동 재시작. 기존 `ApplyUpdate.ps1`에 백업, 시작 확인, 실패 롤백 및 `START.cmd` 재시작 기능이 이미 있습니다. **새 버전 준비와 CI-gated 릴리스 워크플로우를 이번 개선에서 연결합니다.** 실제 자동수정 PR에서 끝까지 성공했는지에 대한 실전 검증은 아직 별개입니다. 현재 공개 버전은 V3.2.62입니다.
