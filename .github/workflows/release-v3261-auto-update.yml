@@ -120,7 +120,7 @@ jobs:
           })
           if($passed.Count -lt 1){throw 'No successful production CI for current main SHA'}
           $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if($u -notmatch 'CurrentVersion = "V3\.2\.60"'){
+          if($u -notmatch 'CurrentVersion = "V3\.2\.61"'){
             "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
             Write-Host 'Not V3.2.61 any more; skip'
             exit 0
@@ -197,7 +197,7 @@ jobs:
           Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
           Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
           'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
-          'MABI AUTO V3.2.61 - AI consented image evidence and grouped review reasons (PR #294)' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          'MABI AUTO V3.2.61 - facility transition stability and diagnostics (PR #296)' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
           $required=@(
             'release/FishingAutomation.exe','release/MacroWatchdog.exe',
             'release/abyss/config/targets.json','release/abyss/config/scenario.json',
