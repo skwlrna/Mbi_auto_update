@@ -36,6 +36,12 @@ class ApprovalReleaseChainTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, pub)
         self.assertNotIn("git tag V3.2.62", pub)
+        # GitHub rejects the entire YAML before jobs can run if a step has
+        # the same id key twice, even if the rest of the CI-only flow passes.
+        ids = [line.split(":", 1)[1].strip() for line in pub.splitlines()
+               if line.startswith("        id: ")]
+        self.assertEqual(len(ids), len(set(ids)), "Duplicate workflow step IDs")
+        self.assertEqual(ids, ["approval", "eligibility"])
 
     def test_release_prep_is_workflow_token_safe(self):
         wf = self.read(".github/workflows/prepare-reviewed-repair-release.yml")

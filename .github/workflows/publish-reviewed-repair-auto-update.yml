@@ -117,7 +117,6 @@ jobs:
       - name: Require exact-main CI success and never overwrite a release
         if: steps.approval.outputs.reviewed == 'true'
         id: eligibility
-        id: eligibility
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
