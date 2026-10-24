@@ -63,29 +63,23 @@ jobs:
             # NEVER fabricate or alter the real-game attestation. Operator
             # requested the V3.2.61 public release with real-game verification still pending.
             # This file must be explicitly committed and reviewed in main CI.
-            $soloPath='source/V3.2.60_SOLO_OWNER_RELEASE_ACCEPTANCE.json'
+            $soloPath='source/V3.2.61_SOLO_OWNER_RELEASE_ACCEPTANCE.json'
             if(-not (Test-Path $soloPath)){
-              throw 'Real-game testing or rollback not verified; auto-update blocked'
+              throw 'V3.2.61 operator authorization missing; auto-update blocked'
             }
             $solo=Get-Content $soloPath -Raw | ConvertFrom-Json
             if($att.version -ne 'V3.2.60' -or $att.status -ne 'pending' -or
-               $solo.schema -ne 1 -or $solo.version -ne 'V3.2.60' -or
+               $solo.schema -ne 1 -or $solo.version -ne 'V3.2.61' -or
                $solo.rolloutMode -ne 'user_requested_unverified_release' -or
-               $solo.releasePurpose -ne 'ai_autofix_photo_evidence_review_reasons_pr294' -or
-               $solo.acceptedOnLocalDate -ne '2026-10-24' -or
+               $solo.releasePurpose -ne 'facility_transition_stability_pr296' -or
                $solo.acceptanceSource -ne 'user_direct_request_in_chat' -or
                $solo.scope -ne 'personal_use_only' -or
                $solo.publicUpdaterReleaseApproved -ne $true -or
                $solo.allowFabricatedGameTestAttestation -ne $false -or
-               $solo.aiWatcherRealRepair -ne 'not_tested' -or
-               $solo.aiGameBehavior -ne 'not_tested' -or
+               $solo.facilityTransitionRealGame -ne 'not_tested' -or
                $solo.rollbackExecution -ne 'not_tested' -or
-               $solo.pcOfflineSmoke -ne 'not_tested_for_v3261' -or
-               $solo.aiWatcher -ne 'not_tested_for_v3261' -or
-               $solo.aiErrorManagerUI -ne 'not_tested' -or
-               $solo.aiWorkspaceRecovery -ne 'not_tested' -or
-               $solo.localHistoryDeletion -ne 'not_tested'){
-              throw 'Real-game testing or rollback not verified; auto-update blocked'
+               $solo.pcOfflineSmoke -ne 'not_tested_for_v3261'){
+              throw 'V3.2.61 operator authorization invalid; auto-update blocked'
             }
             foreach($needed in @(
               'source/tools/ApplyUpdate.ps1',
