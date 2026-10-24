@@ -36,12 +36,13 @@ class V3260ReleasePolicy(unittest.TestCase):
         ):
             self.assertIn(token, s)
         self.assertNotIn("  push:\n", s)
-        self.assertIn('CurrentVersion = "V3.2.60"',
+        # Historical release policy is immutable; current application version advances.
+        self.assertIn('CurrentVersion = "V3.2.61"',
             (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8"))
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        for version in ("<Version>3.2.60</Version>",
-                        "<AssemblyVersion>3.2.60.0</AssemblyVersion>",
-                        "<FileVersion>3.2.60.0</FileVersion>"):
+        for version in ("<Version>3.2.61</Version>",
+                        "<AssemblyVersion>3.2.61.0</AssemblyVersion>",
+                        "<FileVersion>3.2.61.0</FileVersion>"):
             self.assertIn(version, project)
 
     def test_unverified_user_request_not_misrepresented_as_game_success(self):
