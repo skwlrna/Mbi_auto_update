@@ -1,6 +1,23 @@
-# MabiAutoRepair v0.7 — 자동 Draft PR + PR CI 감사 + 게임 검증 후 안전 병합
+# MabiAutoRepair v0.8 — 자동 Draft PR + CI 감사 + 제한적 복구 + 실게임 검증 게이트
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
+
+## v0.8: 실패 원인 보고 + 비용 없는 안전 재시도 + 추가 유료 수정 1회 선택
+
+- **환경 준비 실패만 자동 재시도**: `missing_runtime` (Git/.NET/Codex 누락), `checkout_not_clean` (Git 작업 트리 오염)은 5분 간격 감시에서 **최대 2회 추가 확인**합니다. 재시도는 SQLite 트랜잭션으로 횟수를 예약하고, 원본 오류 지문·소스 버전·사용된 Codex 호출 수·PR 유무를 다시 검사합니다. 조건이 계속 충족되지 않으면 `retry_exhausted`로 중단합니다. **이 재시도는 AI를 재호출하지 않습니다.** 기존 사용자 예약 작업에도 별도 설정 없이 적용됩니다.
+- **원인 비교와 조치 안내**: `watch.py status`에 원인 `reason`, 다음 조치 `next_action`, 무료 재시도 횟수 `preflight_retries`, 동일 오류 지문으로 중복 발견된 이전 사건의 `first_report`와 `first_status`, PR CI 별도 `ci_next_action`을 표시합니다. 종전의 `needs_review`에도 분석/테스트의 실패 요약이 표시됩니다.
+- **추가 유료 모델 호출은 별도 동의**: 첫 Codex 수정 후보가 등록된 .NET 회귀 테스트에 실패한 경우에만, 같은 격리 worktree에서 **최대 1회** 추가 Codex 수정을 허용합니다. `-EnablePatchRetry`를 명시적으로 선택해야 하며, 오류당 모델 사용량이 늘 수 있습니다. 일반 AI 실행 실패·증거 부족·코드/테스트 누락·PR 발행 실패·이미 시도한 지문은 **재호출하지 않습니다**. 스케줄러가 중단되거나 재시작되어도 같은 사건을 다시 유료 처리하지 않습니다.
+
+추가 유료 수정 1회까지 허용하려면 Windows PC에서 다음 명령을 **직접** 실행합니다. 이미 저장된 222건 등의 baseline은 유지됩니다.
+
+~~~powershell
+cd "$HOME\Mbi_auto_update"
+git pull --ff-only origin main
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\mabi-auto-repair\install_watch.ps1 -EnablePaidAnalysis -EnableAutoPR -EnablePatchRetry
+python .\tools\mabi-auto-repair\watch.py status
+~~~
+
+추가 비용을 허용하지 않으려면 `-EnablePatchRetry`를 생략하면 됩니다. 어느 경우든 유료 수정 실패 후의 무제한 재시도, AI 자체의 자동 재실행, Draft PR 자동 병합, 실게임 조작, 자동 릴리스 및 업데이터 배포는 수행하지 않습니다.
 
 ## v0.7: Draft PR 자동 CI 결과 추적, 실제 게임 검증 후에만 병합
 
