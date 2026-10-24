@@ -241,9 +241,10 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
             f"Mode: {job['mode']}\nTitle: {job['title']}\nDetail: {job['detail']}\n"
             f"Registered regression: {test}\n</untrusted-incident>"
         )
-        last = workspace.parent / "codex-last.txt"
+        # Keep Codex outputs in memory. Writing outside the sandbox workspace
+        # can fail on Windows, and a report inside the worktree would taint diffs.
         agent = shell(["codex", "exec", "--sandbox", "workspace-write", "--cd",
-                       str(workspace), "--output-last-message", str(last), "-"],
+                       str(workspace), "-"],
                       workspace, timeout=300, prompt=prompt)
         if agent.returncode:
             state.finish(key, "needs_review", "Codex failed without retry")
