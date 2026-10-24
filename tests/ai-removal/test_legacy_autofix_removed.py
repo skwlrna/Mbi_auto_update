@@ -21,6 +21,15 @@ class LegacyAutofixRetirement(unittest.TestCase):
             self.assertNotIn(token, main)
         self.assertNotIn("ai-autopilot", csproj)
 
+    def test_release_policy_and_rollback_preserved(self):
+        workflow = (BASE / ".github/workflows/release-v3262-auto-update.yml").read_text(encoding="utf-8")
+        self.assertIn("Legacy AutoFix accidentally packaged", workflow)
+        self.assertIn("Legacy AutoFix found in updater ZIP", workflow)
+        self.assertNotIn("'release/ai-autopilot/autopilot.py'", workflow)
+        self.assertIn("No successful production CI for current main SHA", workflow)
+        self.assertIn("ROLLBACK_PREVIOUS.cmd", workflow)
+        self.assertIn("V3.2.62", workflow)
+
     def test_runtime_logging_works_independently(self):
         main = (APP / "MainForm.cs").read_text(encoding="utf-8")
         upload = (APP / "RuntimeErrorUploader.cs").read_text(encoding="utf-8")
