@@ -90,6 +90,8 @@ class PromoteGateTests(unittest.TestCase):
         self.assertFalse(result["may_merge"])
         self.assertTrue(result["is_draft"])
         self.assertEqual(result["ci_run_id"], 778899)
+        self.assertIn("real-game verification is optional", result["reason"])
+        self.assertIn("explicit CI-only acknowledgment", result["reason"])
 
     def test_ci_pending_or_failed_is_not_eligible(self):
         for conclusion, expected in (("pending", "ci_pending"),
