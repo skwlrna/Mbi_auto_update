@@ -25,6 +25,7 @@ SHA = re.compile(r"[a-f0-9]{40}\Z")
 ERROR_SUMMARY = re.compile(r"runtime-errors/\d{4}-\d{2}-\d{2}/[^/]+/summary\.json\Z")
 MAX_SUMMARY = 8192
 MAX_PROOF = 25 * 1024 * 1024
+MAX_EXECUTABLE = 1024 * 1024 * 1024
 
 
 class EvidenceError(ValueError):
@@ -106,7 +107,8 @@ def start(pr: int, candidate_root: Path, candidate_exe: Path, stable_exe: Path,
         raise EvidenceError("Candidate executable must be inside isolated PR checkout")
     if _within(stable_exe, candidate_root) or candidate_exe.resolve() == stable_exe.resolve():
         raise EvidenceError("Stable installed macro must be outside isolated candidate checkout")
-    candidate_hash, stable_hash = digest_file(candidate_exe), digest_file(stable_exe)
+    candidate_hash, stable_hash = (digest_file(candidate_exe, MAX_EXECUTABLE),
+                                   digest_file(stable_exe, MAX_EXECUTABLE))
     if candidate_hash == stable_hash:
         raise EvidenceError("Candidate and installed stable executable are identical")
     if output.exists() or output.is_symlink():
@@ -138,9 +140,9 @@ def inspect(session_file: Path) -> dict:
     session = _load_session(session_file)
     if repo_head(Path(session["candidate_root"])) != session["tested_head_sha"]:
         raise EvidenceError("Candidate source SHA changed since session start")
-    if digest_file(Path(session["candidate_exe"])) != session["candidate_sha256"]:
+    if digest_file(Path(session["candidate_exe"]), MAX_EXECUTABLE) != session["candidate_sha256"]:
         raise EvidenceError("Candidate executable changed since session start")
-    if digest_file(Path(session["stable_exe"])) != session["stable_sha256"]:
+    if digest_file(Path(session["stable_exe"]), MAX_EXECUTABLE) != session["stable_sha256"]:
         raise EvidenceError("Stable installed executable changed; rollback unsafe")
     known = session["known_runtime_errors"]
     current = incident_snapshot(Path(session["log_root"]))
