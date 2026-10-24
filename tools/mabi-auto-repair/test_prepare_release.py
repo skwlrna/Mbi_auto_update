@@ -86,6 +86,33 @@ class ReleasePrepTests(unittest.TestCase):
             stage.prepare(self.root, "V3.2.62", 4321, "unsafe", MERGE)
         self.assertFalse((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").exists())
 
+    def test_real_repository_release_template_stages_next_version_offline(self):
+        # Exercise the actual checked-in ~280-line packaging workflow and
+        # >1000-line production CI version contract, never an invented sample.
+        source = Path(__file__).resolve().parents[2]
+        needed = (
+            "source/FishingAutomation/UpdateManager.cs",
+            "source/FishingAutomation/FishingAutomation.csproj",
+            ".github/workflows/ci.yml",
+            ".github/workflows/release-v3262-auto-update.yml",
+        )
+        if not all((source / n).is_file() for n in needed):
+            self.skipTest("Actual source tree unavailable")
+        for relative in needed:
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((source / relative).read_bytes())
+        outcome = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
+        release = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text()
+        self.assertEqual(outcome["new_version"], "V3.2.63")
+        self.assertIn("MabiAuto_V3.2.63_Windows_Lite.zip.sha256", release)
+        self.assertIn("RollbackPrevious.ps1", release)
+        self.assertIn("reviewed repair and explicit CI-only", release)
+        self.assertNotIn("V3.2.62_Windows_Lite.zip", release)
+        self.assertIn("workflow_dispatch", release)
+        self.assertIn("release-v3263-auto-update.yml",
+                      (self.root / ".github/workflows/ci.yml").read_text())
+
     def test_next_patch_sequence_is_monotonic_and_requires_published_release(self):
         self.assertEqual(stage.next_tag("V3.2.63", "V3.2.63"), "V3.2.64")
         with self.assertRaises(stage.ReleasePrepError):
