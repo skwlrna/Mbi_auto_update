@@ -4,6 +4,20 @@ public sealed partial class MainForm
 {
     private ReleaseUpdateInfo? _pendingUpdate;
     private bool _updateCheckRunning;
+    private DateTimeOffset _nextIdleUpdateCheckUtc = DateTimeOffset.UtcNow.AddMinutes(5);
+
+    private void CheckApprovedReleaseWhenIdle()
+    {
+        // Startup already checks immediately. During an active game job, defer
+        // release installation; it must not interrupt movement or macro input.
+        if (IsDisposed || Disposing || _updateCheckRunning || AnyRunning)
+            return;
+        var now = DateTimeOffset.UtcNow;
+        if (now < _nextIdleUpdateCheckUtc)
+            return;
+        _nextIdleUpdateCheckUtc = now.AddMinutes(5);
+        _ = CheckForUpdatesAsync(userInitiated: false);
+    }
 
     private async Task CheckForUpdatesAsync(bool userInitiated)
     {

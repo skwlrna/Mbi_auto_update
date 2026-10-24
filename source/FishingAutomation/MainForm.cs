@@ -210,6 +210,10 @@ public sealed partial class MainForm : Form
                 _log.Write("[스케줄러 상태] 15분간 새 작업 활동 로그를 확인하지 못했습니다. 정상 대기 여부를 확인하세요. 자동 중단/재시작 없음.");
             CheckAlertHealth();
             CheckAutoStop();
+            // Test harness must never contact GitHub. In production, an idle
+            // macro sees newly approved releases without needing a manual restart.
+            if (cliFactory is null)
+                CheckApprovedReleaseWhenIdle();
             UpdateStats();
             RefreshProductionDashboard();
         };
