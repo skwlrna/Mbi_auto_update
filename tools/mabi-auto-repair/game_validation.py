@@ -64,6 +64,19 @@ def repo_head(root: Path) -> str:
     return sha
 
 
+def sync_log_root(log_root: Path) -> None:
+    """Fail closed if the GitHub error uploader's latest entries are unavailable."""
+    if not (log_root / ".git").exists():
+        raise EvidenceError("Mbi_auto_log must be a Git checkout for fresh evidence")
+    try:
+        result = subprocess.run(["git", "-C", str(log_root), "pull", "--ff-only", "origin", "main"],
+                                capture_output=True, text=True, timeout=90, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise EvidenceError("Cannot synchronize GitHub runtime error log") from exc
+    if result.returncode:
+        raise EvidenceError("Runtime error Git sync failed; verification blocked")
+
+
 def incident_snapshot(log_root: Path) -> dict:
     """Read only local metadata, never edit or upload the error log checkout."""
     if not log_root.is_dir() or log_root.is_symlink():
@@ -115,6 +128,7 @@ def start(pr: int, candidate_root: Path, candidate_exe: Path, stable_exe: Path,
         raise EvidenceError("Existing session cannot be replaced")
     if _within(output, candidate_root) or _within(output, log_root):
         raise EvidenceError("Session must be outside candidate and log checkout")
+    sync_log_root(log_root)
     initial = incident_snapshot(log_root)
     now = utc_now()
     session = {
@@ -145,6 +159,7 @@ def inspect(session_file: Path) -> dict:
     if digest_file(Path(session["stable_exe"]), MAX_EXECUTABLE) != session["stable_sha256"]:
         raise EvidenceError("Stable installed executable changed; rollback unsafe")
     known = session["known_runtime_errors"]
+    sync_log_root(Path(session["log_root"]))
     current = incident_snapshot(Path(session["log_root"]))
     new = sorted(name for name, stat in current.items() if name not in known or stat != known[name])
     return {
