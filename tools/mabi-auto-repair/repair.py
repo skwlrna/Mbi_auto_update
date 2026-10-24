@@ -262,7 +262,8 @@ def incident_preflight(job: dict, suite: str | None, repo: Path | None,
 
 def run_one(state: State, key: str, repo: Path | None, execute: bool,
             cost_ack: bool, daily: int | None,
-            evidence: dict | None = None) -> dict:
+            evidence: dict | None = None,
+            retry_regression_once: bool = False) -> dict:
     job = state.job(key)
     test = suite_for(job["mode"])
     result = {"id": key, "status": job["status"], "occurrences": job["hits"],
@@ -320,41 +321,62 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
         )
         # Keep Codex outputs in memory. Writing outside the sandbox workspace
         # can fail on Windows, and a report inside the worktree would taint diffs.
-        agent = shell(["codex", "exec", "--model", "gpt-6.1-sol",
-                       "-c", "model_reasoning_effort=low",
-                       "--sandbox", "workspace-write", "--cd",
-                       str(workspace), "-"],
-                      workspace, timeout=300, prompt=prompt)
-        if agent.returncode:
-            state.finish(key, "needs_review", "Codex failed without retry")
-            result["reason"] = "Codex failed"
-            return result
-        files = candidate_files(workspace)
-        result["changed_files"] = files
-        # A changed .csproj or unrelated test file does not prove a real fix.
-        # Require C# source code plus a C# test in the REGISTERED suite folder.
-        source_changed = any(p.startswith("source/FishingAutomation/") and p.endswith(".cs")
-                             for p in files)
-        test_folder = Path(test).parent.as_posix() + "/"
-        registered_test_changed = any(p.startswith(test_folder) and p.endswith(".cs")
-                                      for p in files)
-        if not source_changed:
-            state.finish(key, "needs_review", "No C# source change")
-            result["reason"] = "No C# source change"
-            return result
-        if not registered_test_changed:
-            state.finish(key, "needs_review", "No registered C# regression test change")
-            result["reason"] = "No registered C# regression test change"
-            return result
-        checked = shell(["dotnet", "run", "--project", test, "-c", "Release"], workspace, 420)
-        result["test_returncode"] = checked.returncode
-        if checked.returncode:
-            state.finish(key, "needs_review", "Regression failed")
-            result["reason"] = "Regression failed"
-            return result
-        state.finish(key, "candidate_passed", "Offline test passed; game not verified")
-        result["status"] = "candidate_passed"
-        return result
+        # An operator may explicitly opt in to one additional paid correction
+        # after a real registered regression fails. Never retry a failed tool,
+        # missing test/source, invalid paths, or a crashed/scheduled job.
+        next_prompt = prompt
+        max_attempts = 2 if retry_regression_once else 1
+        for attempt in range(max_attempts):
+            result["patch_attempts"] = attempt + 1
+            result["codex_calls"] = attempt + 1
+            agent = shell(["codex", "exec", "--model", "gpt-6.1-sol",
+                           "-c", "model_reasoning_effort=low",
+                           "--sandbox", "workspace-write", "--cd",
+                           str(workspace), "-"],
+                          workspace, timeout=300, prompt=next_prompt)
+            if agent.returncode:
+                state.finish(key, "needs_review", "Codex failed without retry")
+                result["reason"] = "Codex failed"
+                return result
+            files = candidate_files(workspace)
+            result["changed_files"] = files
+            source_changed = any(p.startswith("source/FishingAutomation/") and p.endswith(".cs")
+                                 for p in files)
+            test_folder = Path(test).parent.as_posix() + "/"
+            registered_test_changed = any(p.startswith(test_folder) and p.endswith(".cs")
+                                          for p in files)
+            if not source_changed:
+                state.finish(key, "needs_review", "No C# source change")
+                result["reason"] = "No C# source change"
+                return result
+            if not registered_test_changed:
+                state.finish(key, "needs_review", "No registered C# regression test change")
+                result["reason"] = "No registered C# regression test change"
+                return result
+            checked = shell(["dotnet", "run", "--project", test, "-c", "Release"],
+                            workspace, 420)
+            result["test_returncode"] = checked.returncode
+            if not checked.returncode:
+                state.finish(key, "candidate_passed", "Offline test passed; game not verified")
+                result["status"] = "candidate_passed"
+                return result
+            if attempt + 1 >= max_attempts:
+                state.finish(key, "needs_review", "Regression failed after bounded attempt")
+                result["reason"] = "Regression failed"
+                return result
+            # Treat build/test logs as untrusted. No new filesystem/network
+            # authority is granted to the second attempt.
+            failure = sanitized((checked.stdout + "\\n" + checked.stderr)[-1600:])
+            next_prompt = (
+                prompt
+                + "\\nThe prior candidate failed the registered regression. "
+                + "You have ONE remaining correction attempt in this SAME isolated "
+                + "worktree. Repair the code and registered C# test; if insufficient "
+                + "evidence, make no additional changes. No commits or publishing.\\n"
+                + "<untrusted-regression-output>\\n"
+                + failure
+                + "\\n</untrusted-regression-output>"
+            )
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         state.finish(key, "needs_review", "Execution failed or timed out")
         result["reason"] = type(exc).__name__
