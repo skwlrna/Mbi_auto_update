@@ -37,6 +37,8 @@ class ReleasePrepTests(unittest.TestCase):
             "name: Publish V3.2.62 Legacy AutoFix Retirement Auto Update After Main CI\n"
             "on:\n  workflow_run:\n"
             "    github.event.workflow_run.event == 'push'\n"
+            '    actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=\n'
+            "    $_.event -eq 'push' -and\n"
             "concurrency:\n  group: v3262-auto-update-release\n"
             "      - name: Require game signoff OR direct-user-requested unverified rollout\n"
             "        shell: pwsh\n        run: |\n          Write-Host 'Game requirement'\n"
@@ -62,6 +64,8 @@ class ReleasePrepTests(unittest.TestCase):
         self.assertIn("ci_only_unverified", workflow)
         self.assertNotIn("Require game signoff OR", workflow)
         self.assertIn("workflow_dispatch", workflow)
+        self.assertIn("$_.event -in @('push','workflow_dispatch')", workflow)
+        self.assertNotIn("ci.yml/runs?branch=main&event=push", workflow)
         approval = json.loads((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").read_text(encoding="utf-8"))
         self.assertEqual(approval["approved_head_sha"], HEAD)
         self.assertEqual(approval["reviewed_merge_sha"], MERGE)
