@@ -1,6 +1,53 @@
-# MabiAutoRepair v0.8 — 자동 Draft PR + CI 감사 + 제한적 복구 + 실게임 검증 게이트
+# MabiAutoRepair v0.9 — 자동 Draft PR + CI 감사 + 제한적 복구 + 실게임 증거 게이트
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
+
+## v0.9: 실제 게임 후보 관찰과 롤백 증거 연결 (기존 매크로 유지)
+
+**V3.2.62 정식 매크로를 그대로 사용합니다.** 이 기능은 신규 오류에서 생성된 **아직 병합되지 않은** `auto-repair/...` Draft PR 후보를 별도 Windows 작업 폴더에 빌드하고, **사람이 실제 게임에서 테스트**하는 동안 증거를 관리하는 독립 CLI입니다. 사용 중인 매크로 실행 파일을 바꾸거나 자동으로 게임을 조작하지 않습니다.
+
+- 시작 시 GitHub PR **현재 HEAD SHA와 해당 CI 성공**, 별도 Git 작업 트리의 정확한 SHA 및 청결 상태를 확인합니다.
+- 분리된 후보 실행 파일과 설치된 안정 버전 실행 파일의 **각기 다른 SHA256**을 저장합니다.
+- `Mbi_auto_log`를 `git pull --ff-only origin main`으로 최신 동기화합니다. 동기화가 실패하면 **판정 자체를 차단**합니다.
+- 게임 테스트 전후 새 `runtime-errors/.../summary.json`가 수집되면 **검증 실패 차단**합니다. 오류 기록이 없더라도 **자동 성공으로 간주하지 않습니다.**
+- 테스트한 후보 화면/로그와 이전 안정 버전으로 돌아온 화면/로그를 각각 별도 파일로 남기고, 게임 행동·재현 절차·결과를 실제로 확인한 운영자가 직접 서명 형식으로 기록해야 합니다.
+- `promotion_gate.py promote`는 이 근거와 SHA가 묶인 보고서만 인정합니다. 두 증거가 같거나 누락되고, 후보/원본 실행 파일이 변경되었거나, PR SHA가 바뀌었으면 병합 불가입니다.
+- 해당 기록은 **운영자 확인을 강제하는 메타데이터일 뿐**, 실제 게임 성공을 AI나 시스템이 기계적으로 증명하는 것은 아닙니다. 실제 화면의 작업 성공과 롤백 성공을 운영자가 확인해야 합니다. 게임 화면 조작 및 실게임 자동 판정은 아직 지원되지 않습니다.
+
+**향후 오류 수정 Draft PR #번호가 만들어진 뒤에만** 아래처럼 진행합니다. 현재 완료된 PR #307은 자동수정기 자체 변경이므로 게임 테스트 후보 PR이 아닙니다.
+
+~~~powershell
+cd "$HOME\Mbi_auto_update"
+git pull --ff-only origin main
+
+$pr = 1234 # 실제 아직 열린 자동수정 Draft PR 번호로 교체
+git fetch origin "pull/$pr/head"
+$candidateRoot = Join-Path $HOME "MabiAutoCandidatePR$pr"
+git worktree add --detach $candidateRoot FETCH_HEAD
+
+dotnet publish "$candidateRoot\source\FishingAutomation\FishingAutomation.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$candidateRoot\bin\game-test"
+
+# Windows에서 사용 중인 안정 버전 실행 파일의 실제 위치를 설정합니다.
+$stableExe = "C:\PATH\TO\CURRENT\FishingAutomation.exe"
+$session = Join-Path $HOME "game-test-pr-$pr-session.json"
+$report = Join-Path $HOME "game-test-pr-$pr-verified.json"
+
+python .\tools\mabi-auto-repair\game_validation.py start --pr $pr --candidate-root $candidateRoot --candidate-exe "$candidateRoot\bin\game-test\FishingAutomation.exe" --stable-exe $stableExe --log-root "$HOME\Mbi_auto_log" --out $session
+~~~
+
+이후 실제 게임에서 후보 매크로를 분리 실행해 기존 오류 상황을 재현하고, 문제가 없어지는 것을 확인합니다. 후보를 종료하고 원래 안정 버전을 실행하여 롤백을 확인합니다. **후보/안정 버전을 동시에 실행하지 마세요.** 결과 화면을 서로 다른 위치의 `candidate-proof.png`, `rollback-proof.png` 등으로 저장합니다.
+
+~~~powershell
+python .\tools\mabi-auto-repair\game_validation.py inspect --session $session
+
+# 아래 명령은 사람이 실제 게임과 롤백을 모두 확인한 후에만 사용합니다.
+python .\tools\mabi-auto-repair\game_validation.py attest --session $session --candidate-proof "$HOME\candidate-proof.png" --rollback-proof "$HOME\rollback-proof.png" --tested-by 실제_GitHub_아이디 --test-details "실제 게임 모드와 이전 실패 재현 절차, 후보 성공 내용, 안정버전 복구 절차를 상세히 기술" --candidate-passed --rollback-passed --acknowledge-real-game --out $report
+
+# PR 병합은 자동으로 하지 않고 운영자가 별도 실행
+python .\tools\mabi-auto-repair\promotion_gate.py promote $pr --game-test-report $report --acknowledge-merge
+~~~
+
+`attest`가 반환하는 `operator_attestation_recorded`는 운영자가 게임 결과를 기록했다는 의미이지, 프로그램이 게임 성공을 직접 관측했다는 뜻이 아닙니다. 실게임 확인 증거 없이 `--candidate-passed`를 실행하면 안 됩니다.
 
 ## v0.8: 실패 원인 보고 + 비용 없는 안전 재시도 + 추가 유료 수정 1회 선택
 
