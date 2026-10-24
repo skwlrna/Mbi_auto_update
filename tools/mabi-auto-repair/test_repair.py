@@ -113,6 +113,9 @@ class OfflineTests(TestCase):
             csproj = src / "source/FishingAutomation/FishingAutomation.csproj"
             csproj.parent.mkdir(parents=True)
             csproj.write_text("<Project/>", encoding="utf-8")
+            version_file = src / "source/FishingAutomation/UpdateManager.cs"
+            version_file.write_text('public const string CurrentVersion = "V3.2.60";',
+                                    encoding="utf-8")
             with repair.State(root / "state") as state:
                 key = state.add("fixture", incident())
                 calls = []
@@ -142,5 +145,58 @@ class OfflineTests(TestCase):
                 self.assertTrue((root / "state" / "workspaces" / key / "result.json").exists())
 
 
-    if __name__ == "__main__":
-        main()
+    def test_latest_github_incident_replay_blocks_paid_codex(self):
+        # Real Mbi_auto_log runtime summary, with private absolute paths removed.
+        fixtures = Path(__file__).resolve().parent / "fixtures"
+        records = repair.fetch_local(fixtures, 10)
+        self.assertEqual(len(records), 1)
+        source, incident = records[0]
+        self.assertEqual(incident["title"], "다중가공 오류")
+        self.assertEqual(incident["version"], "V3.2.60")
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = root / "app"
+            version = code / "source/FishingAutomation/UpdateManager.cs"
+            version.parent.mkdir(parents=True)
+            version.write_text('public const string CurrentVersion = "V3.2.62";', encoding="utf-8")
+            with repair.State(root / "db") as state:
+                key = state.add(source, incident)
+                with mock.patch.object(repair, "shell",
+                                       side_effect=AssertionError("No subprocess expected")):
+                    preview = repair.run_one(state, key, code, False, False, 1)
+                    with self.assertRaisesRegex(ValueError, "Preflight blocked before AI"):
+                        repair.run_one(state, key, code, True, True, 1)
+                self.assertEqual(preview["source_version"], "V3.2.62")
+                self.assertEqual(preview["error_version"], "V3.2.60")
+                self.assertEqual(set(preview["preflight_reasons"]),
+                                 {"source_version_not_reproduced", "visual_evidence_missing"})
+                self.assertEqual(state.job(key)["calls"], 0)
+
+    def test_visual_log_without_photo_stays_blocked_even_on_same_version(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = root / "app"
+            version = code / "source/FishingAutomation/UpdateManager.cs"
+            version.parent.mkdir(parents=True)
+            version.write_text('public const string CurrentVersion = "V3.2.60";', encoding="utf-8")
+            with repair.State(root / "db") as state:
+                key = state.add("image-gap", incident("실제 시설창의 독립 UI 구조 확인 불가"))
+                output = repair.run_one(state, key, code, False, False, 1)
+                self.assertEqual(output["preflight_reasons"], ["visual_evidence_missing"])
+                self.assertEqual(output["codex_calls"], 0)
+                with self.assertRaisesRegex(ValueError, "visual_evidence_missing"):
+                    repair.run_one(state, key, code, True, True, 1)
+                self.assertEqual(state.job(key)["calls"], 0)
+
+    def test_same_source_reimport_never_misattributes_new_payload(self):
+        with TemporaryDirectory() as tmp:
+            with repair.State(Path(tmp)) as state:
+                original = state.add("one-source", incident("First cause"))
+                reimport = state.add("one-source", incident("Different later payload"))
+                self.assertEqual(original, reimport)
+                self.assertEqual(len(state.jobs()), 1)
+                self.assertEqual(state.job(original)["hits"], 1)
+
+
+if __name__ == "__main__":
+    main()
