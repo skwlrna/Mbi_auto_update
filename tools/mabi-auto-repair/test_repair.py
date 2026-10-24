@@ -124,7 +124,7 @@ class OfflineTests(TestCase):
                     if command[:2] == ["git", "status"]:
                         changes = "" if "workspaces" not in str(cwd) else (
                             " M source/FishingAutomation/AlteringPlan.cs\n"
-                            " M tests/altering/Regression.csproj\n")
+                            " M tests/altering/Program.cs\n")
                         return subprocess.CompletedProcess(command, 0, changes, "")
                     if command[:3] == ["git", "worktree", "add"]:
                         Path(command[4]).mkdir(parents=True)
