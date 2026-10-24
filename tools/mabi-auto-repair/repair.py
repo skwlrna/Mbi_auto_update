@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import urllib.request
+from image_probe import inspect_image
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -147,16 +148,19 @@ class State:
             raise ValueError("Unknown error fingerprint; sync first")
         return dict(row)
 
-    def reserve(self, key: str, max_daily: int) -> None:
+    def reserve(self, key: str, max_daily: int | None = None) -> None:
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             row = self.conn.execute("SELECT status,calls FROM jobs WHERE id=?", (key,)).fetchone()
             if row is None or row["calls"] or row["status"] != "new":
                 raise ValueError("No repeated AI calls for this fingerprint")
             day = datetime.now(timezone.utc).date().isoformat()
-            used = self.conn.execute("SELECT COUNT(*) FROM usage WHERE day=?", (day,)).fetchone()[0]
-            if used >= max_daily:
-                raise ValueError("Daily AI call cap reached")
+            # No daily cap during functional evaluation. Operators can opt in
+            # later via --max-daily; the no-auto-retry guard above stays active.
+            if max_daily is not None:
+                used = self.conn.execute("SELECT COUNT(*) FROM usage WHERE day=?", (day,)).fetchone()[0]
+                if used >= max_daily:
+                    raise ValueError("Daily AI call cap reached")
             self.conn.execute("INSERT INTO usage(job_id,day) VALUES (?,?)", (key, day))
             self.conn.execute("UPDATE jobs SET calls=1,status='running' WHERE id=?", (key,))
             self.conn.execute("COMMIT")
@@ -299,7 +303,9 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
         )
         # Keep Codex outputs in memory. Writing outside the sandbox workspace
         # can fail on Windows, and a report inside the worktree would taint diffs.
-        agent = shell(["codex", "exec", "--sandbox", "workspace-write", "--cd",
+        agent = shell(["codex", "exec", "--model", "gpt-6.1-sol",
+                       "-c", "model_reasoning_effort=low",
+                       "--sandbox", "workspace-write", "--cd",
                        str(workspace), "-"],
                       workspace, timeout=300, prompt=prompt)
         if agent.returncode:
@@ -355,7 +361,17 @@ def main(argv=None) -> int:
     run.add_argument("--repo", type=Path)
     run.add_argument("--execute", action="store_true")
     run.add_argument("--acknowledge-cost", action="store_true")
-    run.add_argument("--max-daily", type=int, default=1)
+    run.add_argument("--max-daily", type=int, default=None,
+                     help="Optional future daily cap (disabled by default)")
+    picture = sub.add_parser("inspect-image", help="Review one PNG; dry-run unless opted in")
+    picture.add_argument("fingerprint")
+    picture_source = picture.add_mutually_exclusive_group(required=True)
+    picture_source.add_argument("--image", type=Path, help="Local PNG screenshot path")
+    picture_source.add_argument("--github-image", action="store_true",
+                                help="Read linked GitHub log screen.png")
+    picture.add_argument("--execute", action="store_true",
+                         help="Explicitly invoke Codex 6.1 Sol Light once")
+    picture.add_argument("--acknowledge-cost", action="store_true")
     args = parser.parse_args(argv)
     try:
         state = State(args.state)
@@ -369,9 +385,12 @@ def main(argv=None) -> int:
         elif args.task == "status":
             jobs = state.jobs()
             result = {"jobs": jobs, "codex_calls_reserved": sum(x["calls"] for x in jobs)}
+        elif args.task == "inspect-image":
+            result = inspect_image(state.job(args.fingerprint), args.image,
+                                   args.github_image, args.execute, args.acknowledge_cost)
         else:
-            if not 1 <= args.max_daily <= 3:
-                raise ValueError("--max-daily range: 1..3")
+            if args.max_daily is not None and args.max_daily < 1:
+                raise ValueError("--max-daily must be positive when specified")
             result = run_one(state, args.fingerprint, args.repo, args.execute,
                              args.acknowledge_cost, args.max_daily)
         # ASCII-safe JSON for Windows legacy console encodings (cp1252/mbcs).
