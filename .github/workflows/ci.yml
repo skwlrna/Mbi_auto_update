@@ -1,6 +1,7 @@
 name: Check V3 Production Engine
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, fix/n02-multi-altering-resume, fix/f05-durable-consumption-journal ]
   pull_request:
@@ -80,13 +81,21 @@ jobs:
         shell: pwsh
         run: |
           $u = Get-Content source/FishingAutomation/UpdateManager.cs -Raw
-          if ($u -notmatch 'CurrentVersion = "V3\.2\.62"') { throw 'version constant mismatch' }
+          $match = [regex]::Match($u, 'CurrentVersion = "(V[0-9]+\.[0-9]+\.[0-9]+)"')
+          if (-not $match.Success) { throw 'version constant mismatch' }
+          $version = $match.Groups[1].Value.Substring(1)
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          if ($p -notmatch '<Version>3\.2\.62</Version>') { throw 'project version mismatch' }
-          $release = Get-Content .github/workflows/release-v3262-auto-update.yml -Raw
-          if (-not $release.Contains('CurrentVersion = "V3\.2\.62"')) {
-            throw 'release workflow eligibility version mismatch'
+          foreach ($required in @("<Version>$version</Version>",
+                                   "<AssemblyVersion>$version.0</AssemblyVersion>",
+                                   "<FileVersion>$version.0</FileVersion>")) {
+            if (-not $p.Contains($required)) { throw 'project version mismatch' }
+          }
+          $publisher = Get-Content .github/workflows/publish-reviewed-repair-auto-update.yml -Raw
+          if ($publisher -notmatch 'CI-only reviewed release:' -or
+              $publisher -notmatch 'MabiAuto_.*Windows_Lite.zip.sha256' -or
+              $publisher -notmatch 'RollbackPrevious.ps1') {
+            throw 'Generic reviewed-repair release safety gates missing'
           }
 
       - name: V3.2.49 auto-update source policy

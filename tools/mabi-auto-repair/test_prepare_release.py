@@ -1,4 +1,4 @@
-"""Offline acceptance of next-version preparation; no GitHub/game/release calls."""
+"""Offline acceptance: version-only release changes never touch workflow YAML."""
 from __future__ import annotations
 
 import json
@@ -18,111 +18,115 @@ class ReleasePrepTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        def put(path, value):
-            target = self.root / path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(value, encoding="utf-8")
+
+        def put(name, data):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(data, encoding="utf-8")
+
         put("source/FishingAutomation/UpdateManager.cs",
             'public const string CurrentVersion = "V3.2.62";')
         put("source/FishingAutomation/FishingAutomation.csproj",
             "<Version>3.2.62</Version>\n"
             "<AssemblyVersion>3.2.62.0</AssemblyVersion>\n"
             "<FileVersion>3.2.62.0</FileVersion>\n")
-        put(".github/workflows/ci.yml",
-            'on:\n  push:\n    branches: [main]\n'
-            '''if ($u -notmatch 'CurrentVersion = "V3\\.2\\.62"') { throw 'bad' }\n'''
-            '''if ($p -notmatch '<Version>3\\.2\\.62</Version>') { throw 'bad' }\n'''
-            "$release = Get-Content .github/workflows/release-v3262-auto-update.yml -Raw\n")
-        put(".github/workflows/release-v3262-auto-update.yml",
-            "name: Publish V3.2.62 Legacy AutoFix Retirement Auto Update After Main CI\n"
-            "on:\n  workflow_run:\n"
-            "    github.event.workflow_run.event == 'push'\n"
-            '    actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=\n'
-            "    $_.event -eq 'push' -and\n"
-            "concurrency:\n  group: v3262-auto-update-release\n"
-            "      - name: Require game signoff OR direct-user-requested unverified rollout\n"
-            "        shell: pwsh\n        run: |\n          Write-Host 'Game requirement'\n"
-            "      - name: Require CI-approved current main and exact V3.2.62 version\n"
-            '''          if ($u -notmatch 'CurrentVersion = "V3\\.2\\.62"') { throw 'bad' }\n'''
-            "          Write-Host 'MabiAuto_V3.2.62_Windows_Lite.zip'\n"
-            "          Write-Host '<Version>3.2.62</Version>'\n")
+        put(".github/workflows/publish-reviewed-repair-auto-update.yml",
+            "name: Static reviewed repair release\n")
+        put(".github/workflows/ci.yml", "name: Static CI workflow\n")
 
-    def test_ci_only_version_stage_uses_next_patch_and_does_not_claim_game_verified(self):
-        staged = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
-        self.assertEqual(staged["new_version"], "V3.2.63")
-        self.assertFalse(staged["real_game_verified"])
-        self.assertEqual(len(staged["files"]), 6)
-        updater = (self.root / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
-        self.assertIn('CurrentVersion = "V3.2.63"', updater)
-        ci = (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        self.assertIn("  workflow_dispatch:", ci)
-        self.assertIn("release-v3263-auto-update.yml", ci)
-        self.assertIn("V3\\.2\\.63", ci)
-        workflow = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text(encoding="utf-8")
-        self.assertIn("V3.2.63", workflow)
-        self.assertIn("MabiAuto_V3.2.63_Windows_Lite.zip", workflow)
-        self.assertIn("ci_only_unverified", workflow)
-        self.assertNotIn("Require game signoff OR", workflow)
-        self.assertIn("workflow_dispatch", workflow)
-        self.assertIn("$_.event -in @('push','workflow_dispatch')", workflow)
-        self.assertNotIn("ci.yml/runs?branch=main&event=push", workflow)
-        approval = json.loads((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").read_text(encoding="utf-8"))
+    def test_first_stage_modifies_only_four_version_metadata_files(self):
+        result = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
+        self.assertEqual(result["new_version"], "V3.2.63")
+        self.assertEqual(len(result["files"]), 4)
+        self.assertFalse(result["real_game_verified"])
+        self.assertTrue(all(not name.startswith(".github") for name in result["files"]))
+        self.assertEqual(result["release_workflow"],
+                         "publish-reviewed-repair-auto-update.yml")
+        updated = (self.root / "source/FishingAutomation/UpdateManager.cs").read_text(
+            encoding="utf-8")
+        self.assertIn('CurrentVersion = "V3.2.63"', updated)
+        project = (self.root / "source/FishingAutomation/FishingAutomation.csproj").read_text(
+            encoding="utf-8")
+        self.assertIn("<Version>3.2.63</Version>", project)
+        self.assertIn("<FileVersion>3.2.63.0</FileVersion>", project)
+        self.assertEqual((self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
+                         "name: Static CI workflow\n")
+        self.assertEqual((self.root /
+            ".github/workflows/publish-reviewed-repair-auto-update.yml").read_text(
+                encoding="utf-8"), "name: Static reviewed repair release\n")
+        approval = json.loads((self.root /
+            "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").read_text(encoding="utf-8"))
         self.assertEqual(approval["approved_head_sha"], HEAD)
         self.assertEqual(approval["reviewed_merge_sha"], MERGE)
         self.assertFalse(approval["real_game_verified"])
         self.assertTrue(approval["operator_reviewed"])
-        self.assertIn("not tested", (self.root / "source/RELEASE_NOTES_V3.2.63.md").read_text(encoding="utf-8"))
+        self.assertTrue(approval["rollback_required"])
+        notes = (self.root / "source/RELEASE_NOTES_V3.2.63.md").read_text(encoding="utf-8")
+        self.assertIn("not tested", notes)
 
-    def test_refuse_source_public_version_mismatch_without_changes(self):
+    def test_second_release_works_without_workflow_regeneration(self):
+        stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
+        result = stage.prepare(self.root, "V3.2.63", 4322, "c" * 40, "d" * 40)
+        self.assertEqual(result["new_version"], "V3.2.64")
+        self.assertEqual(len(result["files"]), 4)
+        self.assertIn("<Version>3.2.64</Version>",
+            (self.root / "source/FishingAutomation/FishingAutomation.csproj").read_text(
+                encoding="utf-8"))
+        self.assertEqual((self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
+                         "name: Static CI workflow\n")
+
+    def test_version_mismatch_causes_no_write(self):
         with self.assertRaisesRegex(stage.ReleasePrepError, "must equal"):
             stage.prepare(self.root, "V3.2.61", 4321, HEAD, MERGE)
         self.assertFalse((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").exists())
 
-    def test_refuse_duplicate_release_assets_without_overwriting(self):
-        p = self.root / "source/RELEASE_NOTES_V3.2.63.md"
-        p.write_text("keep-original")
+    def test_duplicate_assets_cannot_be_overwritten(self):
+        file = self.root / "source/RELEASE_NOTES_V3.2.63.md"
+        file.write_text("original", encoding="utf-8")
         with self.assertRaisesRegex(stage.ReleasePrepError, "already exist"):
             stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
-        self.assertEqual(p.read_text(), "keep-original")
+        self.assertEqual(file.read_text(encoding="utf-8"), "original")
 
-    def test_refuse_bad_approved_sha(self):
+    def test_invalid_head_sha_fails_closed(self):
         with self.assertRaisesRegex(stage.ReleasePrepError, "40-character"):
-            stage.prepare(self.root, "V3.2.62", 4321, "unsafe", MERGE)
-        self.assertFalse((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").exists())
+            stage.prepare(self.root, "V3.2.62", 4321, "oops", MERGE)
 
-    def test_real_repository_release_template_stages_next_version_offline(self):
-        # Exercise the actual checked-in ~280-line packaging workflow and
-        # >1000-line production CI version contract, never an invented sample.
+    def test_current_repository_contract_works_without_mutating_ci(self):
+        # Run the real production source through the version preparer, but
+        # never push, publish, dispatch, or access the game.
         source = Path(__file__).resolve().parents[2]
-        needed = (
+        required = (
             "source/FishingAutomation/UpdateManager.cs",
             "source/FishingAutomation/FishingAutomation.csproj",
             ".github/workflows/ci.yml",
-            ".github/workflows/release-v3262-auto-update.yml",
+            ".github/workflows/publish-reviewed-repair-auto-update.yml",
         )
-        if not all((source / n).is_file() for n in needed):
-            self.skipTest("Actual source tree unavailable")
-        for relative in needed:
-            target = self.root / relative
+        if not all((source / file).is_file() for file in required):
+            self.skipTest("Not running inside complete repository")
+        for file in required:
+            target = self.root / file
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes((source / relative).read_bytes())
-        outcome = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
-        release = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text(encoding="utf-8")
-        self.assertEqual(outcome["new_version"], "V3.2.63")
-        self.assertIn("MabiAuto_V3.2.63_Windows_Lite.zip.sha256", release)
-        self.assertIn("RollbackPrevious.ps1", release)
-        self.assertIn("reviewed repair and explicit CI-only", release)
-        self.assertNotIn("V3.2.62_Windows_Lite.zip", release)
-        self.assertIn("workflow_dispatch", release)
-        self.assertIn("release-v3263-auto-update.yml",
-                      (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+            target.write_bytes((source / file).read_bytes())
+        ci_before = (self.root / ".github/workflows/ci.yml").read_bytes()
+        publisher_before = (self.root /
+            ".github/workflows/publish-reviewed-repair-auto-update.yml").read_bytes()
+        result = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
+        self.assertEqual(result["new_version"], "V3.2.63")
+        self.assertEqual(ci_before, (self.root / ".github/workflows/ci.yml").read_bytes())
+        self.assertEqual(publisher_before, (self.root /
+            ".github/workflows/publish-reviewed-repair-auto-update.yml").read_bytes())
+        published = publisher_before.decode("utf-8-sig")
+        self.assertIn("RollbackPrevious.ps1", published)
+        self.assertIn("Windows_Lite.zip.sha256", published)
+        self.assertIn("reviewed=true", published)
+        self.assertIn("workflow_run", published)
 
-    def test_next_patch_sequence_is_monotonic_and_requires_published_release(self):
+    def test_next_patch_version_is_monotonic(self):
         self.assertEqual(stage.next_tag("V3.2.63", "V3.2.63"), "V3.2.64")
         with self.assertRaises(stage.ReleasePrepError):
             stage.next_tag("V3.2.63", "V3.2.62")
         with self.assertRaises(stage.ReleasePrepError):
-            stage.next_tag("not-a-version", "not-a-version")
+            stage.next_tag("V3.2.9999", "V3.2.9999")
 
 
 if __name__ == "__main__":
