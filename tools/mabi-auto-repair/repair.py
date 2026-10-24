@@ -108,6 +108,12 @@ class State:
             CREATE TABLE IF NOT EXISTS usage (job_id TEXT PRIMARY KEY, day TEXT NOT NULL);
         """)
 
+    def __enter__(self) -> "State":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.conn.close()
+
     def add(self, source: str, summary: dict) -> str | None:
         if summary.get("schema") != 1 or summary.get("source") != "runtime":
             return None
