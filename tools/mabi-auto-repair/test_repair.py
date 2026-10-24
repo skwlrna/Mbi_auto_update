@@ -188,6 +188,103 @@ class OfflineTests(TestCase):
                     repair.run_one(state, key, code, True, True, 1)
                 self.assertEqual(state.job(key)["calls"], 0)
 
+    def test_two_recent_real_github_errors_import_and_preflight_without_codex(self):
+        # Anonymized from Mbi_auto_log 2026-10-24 18:13 / 18:35 KST.
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        import json
+        import subprocess
+        import sys
+        fixtures = Path(__file__).resolve().parent / "fixtures-recent"
+        loaded = repair.fetch_local(fixtures, 10)
+        self.assertEqual(len(loaded), 2)
+        by_version = {origin: data for origin, data in loaded}
+        self.assertTrue(all(item["version"] == "V3.2.61" for item in by_version.values()))
+        self.assertTrue(all(item["mode"] == "가공" for item in by_version.values()))
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = root / "code"
+            version = code / "source/FishingAutomation/UpdateManager.cs"
+            version.parent.mkdir(parents=True)
+            version.write_text(
+                'public const string CurrentVersion = "V3.2.62";',
+                encoding="utf-8")
+            with repair.State(root / "db") as state:
+                keys = [state.add(source, record) for source, record in loaded]
+                self.assertEqual(len(set(keys)), 2, "Two different failure stages")
+                # Importing the same actual source paths again must not increase hits.
+                for source, record in loaded:
+                    state.add(source, record)
+                self.assertEqual(len(state.jobs()), 2)
+                self.assertTrue(all(j["hits"] == 1 for j in state.jobs()))
+                with mock.patch.object(repair, "shell",
+                                       side_effect=AssertionError("Unexpected paid execution")):
+                    for key in keys:
+                        preview = repair.run_one(state, key, code, False, False, 1)
+                        self.assertFalse(preview["ready_for_ai"])
+                        self.assertEqual(preview["source_version"], "V3.2.62")
+                        self.assertEqual(preview["error_version"], "V3.2.61")
+                        self.assertEqual(
+                            set(preview["preflight_reasons"]),
+                            {"source_version_not_reproduced", "visual_evidence_missing"})
+                        with self.assertRaisesRegex(ValueError, "Preflight blocked before AI"):
+                            repair.run_one(state, key, code, True, True, 1)
+                self.assertEqual(sum(j["calls"] for j in state.jobs()), 0)
+                self.assertTrue(all(j["status"] == "new" for j in state.jobs()))
+            # Simulate a matching source version: lack of image access STILL blocks.
+            version.write_text(
+                'public const string CurrentVersion = "V3.2.61";',
+                encoding="utf-8")
+            with repair.State(root / "db") as state:
+                with mock.patch.object(repair, "shell",
+                                       side_effect=AssertionError("No Codex allowed")):
+                    for key in keys:
+                        preview = repair.run_one(state, key, code, False, False, 1)
+                        self.assertEqual(
+                            preview["preflight_reasons"], ["visual_evidence_missing"])
+                        with self.assertRaisesRegex(ValueError, "visual_evidence_missing"):
+                            repair.run_one(state, key, code, True, True, 1)
+                self.assertEqual(sum(j["calls"] for j in state.jobs()), 0)
+
+    def test_latest_real_github_log_cli_sync_status_and_dry_run(self):
+        import subprocess
+        import sys
+        import os
+        # Reproduce Windows systems where redirected stdout is cp1252, which
+        # cannot directly encode Korean error descriptions.
+        process_env = dict(os.environ, PYTHONIOENCODING="cp1252")
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = Path(repair.__file__).resolve()
+            fixtures = script.parent / "fixtures-recent"
+            state_dir = root / "state"
+            command = [sys.executable, str(script), "--state", str(state_dir)]
+            sync = subprocess.run(command + ["sync", "--dir", str(fixtures), "--limit", "10"],
+                                  text=True, capture_output=True, timeout=30, env=process_env)
+            self.assertEqual(sync.returncode, 0, sync.stderr)
+            payload = repair.json.loads(sync.stdout)
+            self.assertEqual(payload["read"], 2)
+            self.assertEqual(payload["accepted"], 2)
+            self.assertEqual(payload["unique"], 2)
+            self.assertEqual(payload["codex_calls"], 0)
+            again = subprocess.run(command + ["sync", "--dir", str(fixtures), "--limit", "10"],
+                                   text=True, capture_output=True, timeout=30, env=process_env)
+            self.assertEqual(again.returncode, 0)
+            status = subprocess.run(command + ["status"], text=True,
+                                    capture_output=True, timeout=30, env=process_env)
+            self.assertEqual(status.returncode, 0, status.stderr)
+            jobs = repair.json.loads(status.stdout)["jobs"]
+            self.assertEqual(len(jobs), 2)
+            self.assertTrue(all(j["hits"] == 1 and j["calls"] == 0 for j in jobs))
+            for job in jobs:
+                preview = subprocess.run(command + ["run", job["id"]], text=True,
+                                         capture_output=True, timeout=30, env=process_env)
+                self.assertEqual(preview.returncode, 0, preview.stderr)
+                output = repair.json.loads(preview.stdout)
+                self.assertFalse(output["ready_for_ai"])
+                self.assertEqual(output["codex_calls"], 0)
+                self.assertIn("DRY_RUN", output["next"])
+
     def test_same_source_reimport_never_misattributes_new_payload(self):
         with TemporaryDirectory() as tmp:
             with repair.State(Path(tmp)) as state:
