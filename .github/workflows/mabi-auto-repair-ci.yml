@@ -1,0 +1,38 @@
+name: MabiAutoRepair independent offline tests
+
+on:
+  pull_request:
+    paths:
+      - 'tools/mabi-auto-repair/**'
+      - '.github/workflows/mabi-auto-repair-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/mabi-auto-repair/**'
+      - '.github/workflows/mabi-auto-repair-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  standalone-offline:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Isolated offline tests, no AI and no game actions
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tools/mabi-auto-repair -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Standalone repair tests failed" }
+      - name: CLI syntax and help
+        shell: pwsh
+        run: |
+          python tools/mabi-auto-repair/repair.py --help
+          if ($LASTEXITCODE -ne 0) { throw "CLI failed" }
