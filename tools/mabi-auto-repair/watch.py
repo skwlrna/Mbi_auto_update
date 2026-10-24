@@ -56,7 +56,30 @@ CREATE TABLE IF NOT EXISTS watch_fingerprints(
  source TEXT NOT NULL,
  recorded_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS watch_retries(
+ source TEXT PRIMARY KEY,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ checked_at TEXT NOT NULL
+);
 """
+
+# Only environment/preflight failures may be reclaimed: no image/patch/PR ran.
+RETRYABLE_PRECHECK = frozenset(("missing_runtime", "checkout_not_clean"))
+MAX_PRECHECK_RETRIES = 2
+NEXT_ACTION = {
+    "missing_runtime": "Install Git/dotnet/Codex; watcher retries twice without AI until ready",
+    "checkout_not_clean": "Restore clean checkout; watcher retries twice without AI until ready",
+    "retry_exhausted": "Resolve local prerequisite and request manual review; no paid retry",
+    "needs_review": "Inspect pipeline result and evidence; same fingerprint will not call AI again",
+    "pr_needs_review": "Inspect remote branch and GitHub authentication; do not republish blindly",
+    "pr_opened": "Watch PR CI; real-game and rollback verification are required",
+    "candidate_passed": "Offline candidate only; verify actual game before promotion",
+    "diagnosed_no_patch": "Obtain same-version screenshot/log reproduction before patching",
+    "ci_failed": "Review failed PR CI; do not merge",
+    "pr_ci_needs_review": "Inspect GitHub authorization or CI run",
+    "ci_passed_waiting_game": "Run actual game and rollback validation before merge",
+}
+
 
 
 def utc() -> str:
@@ -153,6 +176,54 @@ def finalize(state: repair.State, source: str, status: str, reason: str = "") ->
         (status, repair.sanitized(reason)[:200], utc(), source))
 
 
+def reclaim_precheck(state: repair.State, source: str) -> bool:
+    """Reclaim at most two *unpaid* preflight failures, atomically.
+
+    Never retry image analysis, Codex, source patches, PR creation or an event
+    whose fingerprint is no longer owned by this source.
+    """
+    state.conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = state.conn.execute(
+            "SELECT status,fingerprint FROM watch_events WHERE source=?", (source,)).fetchone()
+        if row is None or row["status"] not in RETRYABLE_PRECHECK:
+            state.conn.execute("COMMIT")
+            return False
+        attempts = state.conn.execute(
+            "SELECT attempts FROM watch_retries WHERE source=?", (source,)).fetchone()
+        used = attempts["attempts"] if attempts else 0
+        if used >= MAX_PRECHECK_RETRIES:
+            state.conn.execute(
+                "UPDATE watch_events SET status='retry_exhausted',reason=?,recorded_at=? "
+                "WHERE source=?", ("Preflight retry budget exhausted", utc(), source))
+            state.conn.execute("COMMIT")
+            return False
+        job = state.conn.execute(
+            "SELECT j.calls,j.status FROM seen s JOIN jobs j ON j.id=s.job_id "
+            "WHERE s.source=?", (source,)).fetchone()
+        owner = state.conn.execute(
+            "SELECT source FROM watch_fingerprints WHERE fingerprint=?",
+            (row["fingerprint"],)).fetchone()
+        published = state.conn.execute(
+            "SELECT 1 FROM watch_prs WHERE source=?", (source,)).fetchone()
+        if (not job or job["calls"] != 0 or job["status"] != "new"
+                or not owner or owner["source"] != source or published):
+            state.conn.execute("COMMIT")
+            return False
+        state.conn.execute(
+            "INSERT INTO watch_retries(source,attempts,checked_at) VALUES (?,1,?) "
+            "ON CONFLICT(source) DO UPDATE SET attempts=attempts+1,checked_at=excluded.checked_at",
+            (source, utc()))
+        state.conn.execute(
+            "UPDATE watch_events SET status='claimed',recorded_at=? WHERE source=?",
+            (utc(), source))
+        state.conn.execute("COMMIT")
+        return True
+    except BaseException:
+        state.conn.execute("ROLLBACK")
+        raise
+
+
 def monitor_published_prs(state: repair.State) -> dict:
     """Re-evaluate PR production CI without granting merge or release rights."""
     prepare(state)
@@ -190,7 +261,10 @@ def monitor_published_prs(state: repair.State) -> dict:
 
 
 def poll(state: repair.State, root: Path, repo: Path, execute: bool,
-         cost_ack: bool, auto_pr: bool = False) -> dict:
+         cost_ack: bool, auto_pr: bool = False,
+         retry_patch_once: bool = False) -> dict:
+    if retry_patch_once and (not execute or not cost_ack):
+        raise ValueError("Patch retry requires --execute and --acknowledge-cost")
     if execute and not cost_ack:
         raise ValueError("--acknowledge-cost required for recurring Codex analysis")
     prepare(state)
@@ -215,10 +289,23 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
                   "reason": repair.sanitized(detail)[:160]}
         if pr_url:
             record["pr_url"] = pr_url
+        if status in NEXT_ACTION:
+            record["next_action"] = NEXT_ACTION[status]
+        if status == "duplicate_fingerprint":
+            row = state.conn.execute(
+                "SELECT f.source,e.status FROM watch_events w "
+                "JOIN watch_fingerprints f ON f.fingerprint=w.fingerprint "
+                "LEFT JOIN watch_events e ON e.source=f.source WHERE w.source=?",
+                (source,)).fetchone()
+            if row and row["source"] != source:
+                record["first_report"] = row["source"]
+                record["first_status"] = row["status"]
         recent.append(record)
 
     for source, summary in events:
-        if state.conn.execute("SELECT 1 FROM watch_events WHERE source=?", (source,)).fetchone():
+        previous = state.conn.execute(
+            "SELECT status FROM watch_events WHERE source=?", (source,)).fetchone()
+        if previous and previous["status"] not in RETRYABLE_PRECHECK:
             continue
         if not isinstance(summary, dict) or summary.get("schema") != 1 or summary.get("source") != "runtime":
             if claim_event(state, source, "", False) == "claimed":
@@ -232,7 +319,12 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
                 emit("skipped_version", source)
             continue
         fingerprint = repair.digest(summary)
-        claimed = claim_event(state, source, fingerprint, reserve_fingerprint=execute)
+        if previous:
+            if not execute or not reclaim_precheck(state, source):
+                continue
+            claimed = "claimed"
+        else:
+            claimed = claim_event(state, source, fingerprint, reserve_fingerprint=execute)
         if claimed == "duplicate_source":
             continue
         if claimed == "duplicate_fingerprint":
@@ -265,9 +357,12 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
                 continue
             # Real image/log diagnosis, then isolated source/test patch if and
             # only if the same-version safety gate is satisfied.
-            result = pipeline.investigate(state, key, repo, root, True, True)
+            result = pipeline.investigate(
+                state, key, repo, root, True, True,
+                retry_regression_once=retry_patch_once)
             status = str(result["status"])
-            reason = ""
+            candidate = result.get("candidate") or {}
+            reason = str(result.get("reason") or candidate.get("reason") or "")
             pr_url = ""
             if status == "candidate_passed" and auto_pr:
                 try:
@@ -304,6 +399,12 @@ def report_status(state: repair.State) -> dict:
     counts = {r["status"]: r["n"] for r in state.conn.execute(
         "SELECT status,COUNT(*) AS n FROM watch_events GROUP BY status")}
     for record in items:
+        retry = state.conn.execute(
+            "SELECT attempts FROM watch_retries WHERE source=?", (record["source"],)).fetchone()
+        if retry:
+            record["preflight_retries"] = retry["attempts"]
+        if record["status"] in NEXT_ACTION:
+            record["next_action"] = NEXT_ACTION[record["status"]]
         link = state.conn.execute(
             "SELECT pr_url FROM watch_prs WHERE source=?", (record["source"],)).fetchone()
         if link:
@@ -313,6 +414,8 @@ def report_status(state: repair.State) -> dict:
                 (record["source"],)).fetchone()
             if check:
                 record["pr_ci"] = dict(check)
+                if check["status"] in NEXT_ACTION:
+                    record["ci_next_action"] = NEXT_ACTION[check["status"]]
     return {"status": "watch_status", "counts": counts, "recent_events": items}
 
 
@@ -332,6 +435,8 @@ def main(argv=None) -> int:
     checking.add_argument("--acknowledge-cost", action="store_true")
     checking.add_argument("--auto-pr", action="store_true",
                           help="Opt in to creating DRAFT GitHub PRs for tested candidates")
+    checking.add_argument("--retry-patch-once", action="store_true",
+                          help="Opt in to ONE extra paid Codex patch attempt only after a failed regression")
     sub.add_parser("status", help="Show event history and outcomes")
     args = parser.parse_args(argv)
     state = None
@@ -343,7 +448,7 @@ def main(argv=None) -> int:
             result = initialize(state, args.log_root)
         elif args.mode == "poll":
             result = poll(state, args.log_root, args.repo, args.execute,
-                          args.acknowledge_cost, args.auto_pr)
+                          args.acknowledge_cost, args.auto_pr, args.retry_patch_once)
         else:
             result = report_status(state)
         print(json.dumps(result, ensure_ascii=True, indent=2))
