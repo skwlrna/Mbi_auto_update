@@ -1,6 +1,48 @@
-# MabiAutoRepair v0.4 — 이미지·로그·수정 후보 통합 연결
+# MabiAutoRepair v0.5 — Windows 새 오류 자동 감시 + 이미지·로그·코드수정
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
+
+## v0.5: 오류가 언제 발생할지 몰라도 PC에서 자동 감시
+
+비공개 로그 저장소를 로컬 Git으로 이미 복제한 경우(예: `$HOME\Mbi_auto_log`) **Windows 작업 스케줄러를 5분 주기로 등록**해 새 오류만 확인할 수 있습니다. 작업이 시작될 때 로컬 로그 저장소를 `git pull --ff-only`로 갱신하므로 비공개 저장소도 사용자의 Windows Git 인증으로 접근합니다. Codex는 사용자의 로컬 로그인 세션을 이용합니다.
+
+**PC PowerShell에서 설치 (자동 분석·수정 활성화):**
+
+```powershell
+cd "$HOME\Mbi_auto_update"
+git pull --ff-only origin main
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\mabi-auto-repair\install_watch.ps1 -EnablePaidAnalysis
+python .\tools\mabi-auto-repair\watch.py status
+```
+
+이 설치 명령의 `-EnablePaidAnalysis`는 **앞으로 새로 발견되는 일치 버전 오류마다 Codex 호출 비용이 발생할 수 있다는 명시적 동의**입니다. 기존 로그에 대한 초기 기준선 등록에서는 Codex를 호출하지 않습니다. 비용 없이 알림용 신규 오류만 기록하려면 이 옵션을 생략할 수 있지만, 그러면 실제 AI 분석·수정 단계가 실행되지 않습니다.
+
+작동 규칙:
+- 설치 순간 존재하는 이전 오류 기록은 전부 `baseline`: **오래된 오류를 소급해 일괄 분석하지 않음**
+- 이후 5분마다 **Windows 사용자가 로그인되어 있고 PC가 켜져 있을 때** `Mbi_auto_log` Git 저장소 업데이트 → 새 `summary.json` 확인
+- **현재 Mbi_auto_update 소스와 오류 보고 버전이 다르면 AI 호출 없이 `skipped_version`**. 같은 버전의 새 오류만 이미지·최근 로그·Codex 진단 후 격리 코드 수정과 .NET 테스트 시도
+- 같은 이벤트 경로·오류 지문은 SQLite 트랜잭션으로 **비용 발생 전에 처리 예약**하여 재실행·PC 재시작·동시 작업이 있어도 재분석하지 않음. 실패한 오류도 무한 재시도하지 않음
+- **하루 몇 회 같은 인위적 호출 한도는 설정하지 않음**. 대신 다른 고유 새 오류만 처리
+- 후보 수정 파일은 격리된 Git worktree에 남고 **PR, 병합, 정식 릴리스, 게임 입력은 자동 수행하지 않음**
+- **매크로 본체 버전은 변경하지 않음**. `watch.py`도 별도 Python 프로그램임
+
+수동 확인/즉시 1회 검사:
+
+```powershell
+python .\tools\mabi-auto-repair\watch.py poll --log-root "$HOME\Mbi_auto_log" --repo . --execute --acknowledge-cost
+python .\tools\mabi-auto-repair\watch.py status
+Get-ScheduledTask -TaskName "MabiAutoRepair-Watch"
+```
+
+`watch.py poll`을 그냥 실행하면 신규 오류만 기록하고 **유료 호출은 하지 않습니다**. 위 예시의 `--execute --acknowledge-cost`를 지정하면 비용이 발생할 수 있습니다. 첫 설치에서 비용 동의 옵션을 빠뜨리면 스케줄러 등록도 무료 모드입니다.
+
+자동 감시 종료:
+
+```powershell
+Unregister-ScheduledTask -TaskName "MabiAutoRepair-Watch" -Confirm:$false
+```
+
+**주의:** Git pull 실패(인증·연결), PC 종료/로그아웃, Codex 로그인 만료 시에는 자동 처리가 진행되지 않습니다. 작업 기록은 `python .\tools\mabi-auto-repair\watch.py status`로 확인하세요. CI는 감시 규칙·중복 처리·드라이런·모의 Codex 호출을 검증하지만 **실제 Windows 작업 등록, 실시간 오류 발생, 사용자 PC의 백그라운드 Codex 실행은 별도로 확인해야 합니다.**
 
 ## v0.4: 1건의 오류를 끝까지 연결
 
