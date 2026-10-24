@@ -154,7 +154,8 @@ def audit(number: int) -> dict:
         "head_sha": head_sha, "base_sha": main_sha,
         "is_draft": bool(pr.get("draft")), "ci_run_id": run_id,
         "changed_files": names, "may_merge": False,
-        "reason": "Real-game and rollback signoff required before promotion",
+        "reason": ("Source/test review and explicit CI-only acknowledgment required; "
+                   "real-game verification is optional and has not been claimed"),
     }
 
 
@@ -292,7 +293,7 @@ def main(argv=None) -> int:
     merge.add_argument("--game-test-report", type=Path, required=True)
     merge.add_argument("--acknowledge-merge", action="store_true")
     offline = sub.add_parser("promote-ci-only",
-                             help="Explicit unverified game-skip after exact-head CI; no release")
+                             help="Approve exact-head CI, merge reviewed PR and queue release preparation")
     offline.add_argument("pr", type=int)
     offline.add_argument("--acknowledge-unverified", action="store_true")
     offline.add_argument("--acknowledge-merge", action="store_true")
