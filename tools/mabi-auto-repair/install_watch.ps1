@@ -12,7 +12,8 @@ param(
     [string]$LogRoot = "",
     [string]$TaskName = "MabiAutoRepair-Watch",
     [switch]$EnablePaidAnalysis,
-    [switch]$EnableAutoPR
+    [switch]$EnableAutoPR,
+    [switch]$EnablePatchRetry
 )
 $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
@@ -32,6 +33,9 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "Git required"
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw ".NET 8 SDK required" }
 if ($EnablePaidAnalysis -and -not (Get-Command codex -ErrorAction SilentlyContinue)) {
     throw "Codex CLI is not available in PATH"
+}
+if ($EnablePatchRetry -and -not $EnablePaidAnalysis) {
+    throw "-EnablePatchRetry requires -EnablePaidAnalysis (one extra paid Codex call per failed regression)"
 }
 if ($EnableAutoPR) {
     if (-not $EnablePaidAnalysis) { throw "-EnableAutoPR requires -EnablePaidAnalysis" }
@@ -56,6 +60,11 @@ if ($EnablePaidAnalysis) {
 if ($EnableAutoPR) {
     $parameters += " --auto-pr"
 }
+if ($EnablePatchRetry) {
+    # Additional opt-in: at most two Codex patch calls in one claimed event,
+    # and only if the first registered .NET regression fails.
+    $parameters += " --retry-patch-once"
+}
 $action = New-ScheduledTaskAction -Execute $python -Argument $parameters -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
@@ -64,5 +73,6 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Pr
 Write-Host ("Installed Windows task: {0} (every 5 minutes while logged on)" -f $TaskName)
 Write-Host ("Paid recurring Codex analysis: {0}" -f [bool]$EnablePaidAnalysis)
 Write-Host ("Automatic DRAFT PRs: {0}" -f [bool]$EnableAutoPR)
+Write-Host ("Extra paid regression correction (max 1): {0}" -f [bool]$EnablePatchRetry)
 Write-Host ("See results: python .\tools\mabi-auto-repair\watch.py status")
 Write-Host ('Stop: Unregister-ScheduledTask -TaskName "{0}" -Confirm:$false' -f $TaskName)
