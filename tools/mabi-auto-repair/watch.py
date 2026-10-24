@@ -23,6 +23,7 @@ from pathlib import Path
 
 import repair
 import pipeline
+import publish_candidate
 
 TASK_SQL = """
 CREATE TABLE IF NOT EXISTS watch_meta(
@@ -34,6 +35,11 @@ CREATE TABLE IF NOT EXISTS watch_events(
  fingerprint TEXT NOT NULL DEFAULT '',
  status TEXT NOT NULL,
  reason TEXT NOT NULL DEFAULT '',
+ recorded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS watch_prs(
+ source TEXT PRIMARY KEY,
+ pr_url TEXT NOT NULL,
  recorded_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS watch_fingerprints(
@@ -139,10 +145,16 @@ def finalize(state: repair.State, source: str, status: str, reason: str = "") ->
 
 
 def poll(state: repair.State, root: Path, repo: Path, execute: bool,
-         cost_ack: bool) -> dict:
+         cost_ack: bool, auto_pr: bool = False) -> dict:
     if execute and not cost_ack:
         raise ValueError("--acknowledge-cost required for recurring Codex analysis")
     prepare(state)
+    if auto_pr:
+        if not execute or not cost_ack:
+            raise ValueError("Automatic PR requires --execute and --acknowledge-cost")
+        if not shutil.which("gh"):
+            raise ValueError("GitHub CLI gh required before automatic PR analysis")
+        publish_candidate.command(["gh", "auth", "status"], repo)
     if not state.conn.execute("SELECT 1 FROM watch_meta WHERE name='initialized'").fetchone():
         raise ValueError("Watcher has no baseline; run 'watch.py init' first")
     version = repair.current_source_version(repo)
@@ -152,10 +164,13 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
     counts = {}
     recent = []
 
-    def emit(status: str, source: str, detail: str = ""):
+    def emit(status: str, source: str, detail: str = "", pr_url: str = ""):
         counts[status] = counts.get(status, 0) + 1
-        recent.append({"source": source, "status": status,
-                       "reason": repair.sanitized(detail)[:160]})
+        record = {"source": source, "status": status,
+                  "reason": repair.sanitized(detail)[:160]}
+        if pr_url:
+            record["pr_url"] = pr_url
+        recent.append(record)
 
     for source, summary in events:
         if state.conn.execute("SELECT 1 FROM watch_events WHERE source=?", (source,)).fetchone():
@@ -207,8 +222,21 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
             # only if the same-version safety gate is satisfied.
             result = pipeline.investigate(state, key, repo, root, True, True)
             status = str(result["status"])
-            finalize(state, source, status)
-            emit(status, source)
+            reason = ""
+            pr_url = ""
+            if status == "candidate_passed" and auto_pr:
+                try:
+                    pr_url = publish_candidate.publish(state, key, repo, result)
+                except publish_candidate.PublishBlocked as exc:
+                    status = "pr_needs_review"
+                    reason = str(exc)
+                else:
+                    status = "pr_opened"
+                    state.conn.execute(
+                        "INSERT INTO watch_prs(source,pr_url,recorded_at) VALUES (?,?,?)",
+                        (source, pr_url, utc()))
+            finalize(state, source, status, reason)
+            emit(status, source, reason, pr_url)
         except (ValueError, OSError, sqlite3.Error, TimeoutError) as exc:
             # One-shot failure; human can inspect and trigger a *new* manual
             # command. Scheduled retries would risk duplicate paid model calls.
@@ -217,7 +245,7 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
     return {"status": "poll_completed", "source_version": version,
             "scanned": len(events), "new_count": len(recent),
             "outcomes": counts, "new_events": recent[-30:],
-            "automatic_pr": False, "automatic_deployment": False}
+            "automatic_pr": auto_pr, "automatic_deployment": False}
 
 
 def report_status(state: repair.State) -> dict:
@@ -227,6 +255,11 @@ def report_status(state: repair.State) -> dict:
         "FROM watch_events ORDER BY recorded_at DESC,source DESC LIMIT 20")]
     counts = {r["status"]: r["n"] for r in state.conn.execute(
         "SELECT status,COUNT(*) AS n FROM watch_events GROUP BY status")}
+    for record in items:
+        link = state.conn.execute(
+            "SELECT pr_url FROM watch_prs WHERE source=?", (record["source"],)).fetchone()
+        if link:
+            record["pr_url"] = link["pr_url"]
     return {"status": "watch_status", "counts": counts, "recent_events": items}
 
 
@@ -244,6 +277,8 @@ def main(argv=None) -> int:
     checking.add_argument("--no-pull", action="store_true")
     checking.add_argument("--execute", action="store_true")
     checking.add_argument("--acknowledge-cost", action="store_true")
+    checking.add_argument("--auto-pr", action="store_true",
+                          help="Opt in to creating DRAFT GitHub PRs for tested candidates")
     sub.add_parser("status", help="Show event history and outcomes")
     args = parser.parse_args(argv)
     state = None
@@ -255,7 +290,7 @@ def main(argv=None) -> int:
             result = initialize(state, args.log_root)
         elif args.mode == "poll":
             result = poll(state, args.log_root, args.repo, args.execute,
-                          args.acknowledge_cost)
+                          args.acknowledge_cost, args.auto_pr)
         else:
             result = report_status(state)
         print(json.dumps(result, ensure_ascii=True, indent=2))

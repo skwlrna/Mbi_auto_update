@@ -1,6 +1,43 @@
-# MabiAutoRepair v0.5 — Windows 새 오류 자동 감시 + 이미지·로그·코드수정
+# MabiAutoRepair v0.6 — Windows 신규 오류 감시 + 테스트 통과 후보 자동 Draft PR
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
+
+## v0.6: 신규 오류 → 검증된 수정 후보 → GitHub Draft PR 자동 생성
+
+**안전 기본값:** 자동 PR은 별도 opt-in이고, **승인·병합·릴리스·업데이터 실행은 하지 않습니다.** 실제 게임에서 문제가 해결됐다고 간주하지 않습니다.
+
+1. Windows의 기존 MabiAutoRepair-Watch는 5분마다 비공개 오토로그를 로컬 Git 인증으로 pull하고 신규 오류만 확인합니다.
+2. 새 사건이 현재 소스 버전과 일치하면 Codex 6.1 Sol Light 이미지·로그 진단을 합니다.
+3. 이미지 검증 후 격리 worktree에서 수정하며, 등록된 .NET 회귀 테스트가 **성공한 경우에만** PR 게시 후보가 됩니다.
+4. 실제 변경 파일을 다시 검사합니다. **C# 소스 + 해당 기능의 C# 테스트**, 한도 12개 파일, 파일당 256 KiB 이하, 버전 변경 및 비등록 테스트/기타 파일 변경 차단.
+5. 원본 소스 SHA, 현재 checkout SHA, GitHub main SHA가 모두 같고 origin이 허용한 저장소에만 연결되어 있을 때, 고유 \`auto-repair/...\` 브랜치를 **강제 push 없이** 게시합니다.
+6. \`gh pr create --draft\`로 초안 PR을 만듭니다. PR 제목/본문에는 오류 지문 및 테스트 통과 여부만 기록하고 원본 \`screen.png\`, \`recent.log\`, AI 진단 전문이나 자격증명은 첨부하지 않습니다. Windows CI 및 실제 게임 동작 검증은 **PR 작성 이후** 별도로 해야 합니다.
+
+**PC 최초 설정:**
+
+GitHub CLI(\`gh\`)가 없다면 [GitHub CLI 공식 설치 안내](https://cli.github.com/)로 설치하세요. Windows 환경에서는 \`winget install --id GitHub.cli -e\`로 설치할 수 있습니다. 설치한 후 PowerShell을 새로 열고 다음을 실행합니다.
+
+~~~powershell
+gh auth login
+gh auth status
+cd "$HOME\Mbi_auto_update"
+git pull --ff-only origin main
+powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\Mbi_auto_update\tools\mabi-auto-repair\install_watch.ps1" -EnablePaidAnalysis -EnableAutoPR
+Get-ScheduledTask -TaskName "MabiAutoRepair-Watch"
+~~~
+
+기존 스케줄러는 **재설치 명령으로 등록 옵션을 업데이트**해야 \`--auto-pr\`가 적용됩니다. \`-EnableAutoPR\`는 **이미 설치된 \`-EnablePaidAnalysis\`와 별도 선택**입니다. 작업 스케줄러가 사용하는 Windows 사용자로 \`gh auth login\`을 완료해야 합니다.
+
+모의 테스트 (실제 GitHub에 PR 생성하지 않음):
+
+~~~powershell
+python -m unittest discover -s tools/mabi-auto-repair -p "test_*.py" -v
+python .\tools\mabi-auto-repair\watch.py status
+~~~
+
+실제 새 오류의 결과는 \`watch.py status\`의 \`pr_opened\`(초안 PR 링크), \`pr_needs_review\`(인증/원격/테스트 후보 검증 차단), \`needs_review\`(AI나 패치 실패), \`skipped_version\`(구버전 오류) 등으로 확인합니다. 같은 오류에서 GitHub push가 성공하고 PR 생성이 실패했을 수 있으므로 **자동 재시도하지 않습니다**. 분리된 Git branch를 수동 검토해야 합니다.
+
+**검증 범위:** Windows/Linux CI에서는 Git 커밋·로컬 bare remote push, 모의 \`gh pr create\`, 에러별 한 번만 PR 요청, GitHub 인증/원격 검증/버전/변경 파일 차단을 검사합니다. CI는 사용자의 GitHub CLI 실제 인증·실제 GitHub PR 또는 게임 문제 해결을 보증하지 않습니다.
 
 ## v0.5: 오류가 언제 발생할지 몰라도 PC에서 자동 감시
 
@@ -23,7 +60,7 @@ python .\tools\mabi-auto-repair\watch.py status
 - **현재 Mbi_auto_update 소스와 오류 보고 버전이 다르면 AI 호출 없이 `skipped_version`**. 같은 버전의 새 오류만 이미지·최근 로그·Codex 진단 후 격리 코드 수정과 .NET 테스트 시도
 - 같은 이벤트 경로·오류 지문은 SQLite 트랜잭션으로 **비용 발생 전에 처리 예약**하여 재실행·PC 재시작·동시 작업이 있어도 재분석하지 않음. 실패한 오류도 무한 재시도하지 않음
 - **하루 몇 회 같은 인위적 호출 한도는 설정하지 않음**. 대신 다른 고유 새 오류만 처리
-- 후보 수정 파일은 격리된 Git worktree에 남고 **PR, 병합, 정식 릴리스, 게임 입력은 자동 수행하지 않음**
+- 후보 수정 파일은 격리된 Git worktree에 남고 **별도 -EnableAutoPR 동의 시 초안 PR만 생성**. 병합·정식 릴리스·게임 입력은 자동 수행하지 않음
 - **매크로 본체 버전은 변경하지 않음**. `watch.py`도 별도 Python 프로그램임
 
 수동 확인/즉시 1회 검사:
@@ -70,7 +107,7 @@ python tools/mabi-auto-repair/repair.py investigate 오류지문 --repo 깨끗�
 - 버전이 일치하고 대상 회귀 테스트가 있는 경우만 별도 Git worktree에서 Codex 소스 수정 1회를 진행합니다. 실제 C# 소스와 등록된 C# 테스트의 변경 + .NET 테스트 통과 시 `candidate_passed` (게임 해결 확정 아님).
 - 진단 모델 및 수정 모델은 `gpt-6.1-sol`, `model_reasoning_effort=low`.
 - **일일 호출 상한은 기본 비활성화**이며 사용자가 원할 때 `--max-daily`로 설정합니다. 같은 오류의 코드 수정 자동 재시도는 차단합니다.
-- `candidate_passed`라도 **자동 PR·병합·릴리스·게임 입력은 하지 않습니다.** 이후 단계로 별도로 연결할 계획입니다.
+- `candidate_passed` 후 watcher에 `--auto-pr`를 명시한 경우에만 안전 조건을 확인해 Draft PR을 생성합니다. 자동 병합·릴리스·게임 입력은 하지 않습니다.
 - 원본 최근 로그·사진은 리포트에 첨부하거나 별도 DB에 저장하지 않습니다. AI 진단 문구와 파일 SHA-256/크기만 응답에 나타납니다. 파일 경로 마스킹은 알려진 패턴에 대한 최선의 노력이며 민감한 자료가 포함될 수 있으므로 실제 유료 실행 전에 원본 로그를 확인하세요.
 
 **검증**: 테스트에서는 실제 PNG/로그 파일을 생성하고 Linux·Windows에서 실제 Git worktree 및 .NET 8 레드/그린 회귀 테스트를 실행합니다. 다만 Codex 자체는 모의 호출하므로, Codex 계정 인증 및 실제 이미지 추론과 게임 오류 수정은 별도 현장 확인이 필요합니다.

@@ -188,5 +188,90 @@ class WatchTests(unittest.TestCase):
                     watch.pull_logs(path)
 
 
+    def test_paid_new_error_creates_at_most_one_draft_pr(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "log"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                source = write_incident(logs, "2026-10-24", "fresh-for-pr")
+                calls = []
+                def mocked_pipeline(*args, **kwargs):
+                    calls.append(args[1])
+                    return {"status": "candidate_passed",
+                            "candidate_verified": True}
+                link = "https://github.com/skwlrna/Mbi_auto_update/pull/54321"
+                with mock.patch.object(watch.pipeline, "investigate",
+                                       side_effect=mocked_pipeline), \
+                     mock.patch.object(watch.repair, "clean_git_repo", return_value="a" * 40), \
+                     mock.patch.object(watch.shutil, "which", return_value="installed"), \
+                     mock.patch.object(watch.publish_candidate, "command", return_value=""), \
+                     mock.patch.object(watch.publish_candidate, "publish", return_value=link) as pub:
+                    first = watch.poll(state, logs, checkout, True, True, auto_pr=True)
+                    self.assertEqual(first["outcomes"], {"pr_opened": 1})
+                    self.assertEqual(first["new_events"][0]["pr_url"], link)
+                    self.assertEqual(first["new_events"][0]["source"], source)
+                    pub.assert_called_once()
+                    second = watch.poll(state, logs, checkout, True, True, auto_pr=True)
+                    self.assertEqual(second["new_count"], 0)
+                    self.assertEqual(len(calls), 1)
+                    self.assertEqual(pub.call_count, 1)
+                record = watch.report_status(state)
+                self.assertEqual(record["counts"]["pr_opened"], 1)
+                self.assertEqual(record["recent_events"][0]["pr_url"], link)
+
+    def test_failed_publish_requires_review_and_never_retries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "logs"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                write_incident(logs, "2026-10-24", "new-source")
+                with mock.patch.object(watch.pipeline, "investigate",
+                                       return_value={"status": "candidate_passed"}), \
+                     mock.patch.object(watch.repair, "clean_git_repo",
+                                       return_value="b" * 40), \
+                     mock.patch.object(watch.shutil, "which", return_value="installed"), \
+                     mock.patch.object(watch.publish_candidate, "command", return_value=""), \
+                     mock.patch.object(watch.publish_candidate, "publish",
+                                       side_effect=watch.publish_candidate.PublishBlocked(
+                                           "Not authorized")) as pub:
+                    result = watch.poll(state, logs, checkout, True, True, auto_pr=True)
+                    self.assertEqual(result["outcomes"], {"pr_needs_review": 1})
+                    self.assertEqual(result["new_events"][0]["reason"], "Not authorized")
+                    again = watch.poll(state, logs, checkout, True, True, auto_pr=True)
+                    self.assertEqual(again["new_count"], 0)
+                    pub.assert_called_once()
+                self.assertEqual(watch.report_status(state)["counts"]["pr_needs_review"], 1)
+
+    def test_auto_pr_must_be_explicit_and_gh_available_before_ai(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "log"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                write_incident(logs, "2026-10-24", "new")
+                with self.assertRaisesRegex(ValueError, "requires --execute"):
+                    watch.poll(state, logs, checkout, False, False, auto_pr=True)
+                with mock.patch.object(watch.shutil, "which", return_value=None):
+                    with self.assertRaisesRegex(ValueError, "GitHub CLI gh required"):
+                        watch.poll(state, logs, checkout, True, True, auto_pr=True)
+                with mock.patch.object(watch.pipeline, "investigate",
+                                       side_effect=AssertionError("Never invoke model")), \
+                     mock.patch.object(watch.shutil, "which", return_value="installed"), \
+                     mock.patch.object(watch.publish_candidate, "command",
+                                       side_effect=watch.publish_candidate.PublishBlocked(
+                                           "not logged in")):
+                    with self.assertRaises(watch.publish_candidate.PublishBlocked):
+                        watch.poll(state, logs, checkout, True, True, auto_pr=True)
+                self.assertEqual(watch.report_status(state)["counts"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
