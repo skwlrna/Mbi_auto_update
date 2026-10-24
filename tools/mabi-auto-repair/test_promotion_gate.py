@@ -210,15 +210,32 @@ class PromoteGateTests(unittest.TestCase):
         with self.audit_with(data), mock.patch.object(
                 gate, "gh", side_effect=lambda args, timeout=30: (commands.append(args) or "")):
             result = gate.promote_ci_only(PR, True, True)
-        self.assertEqual(result["status"], "ci_only_merge_requested")
+        self.assertEqual(result["status"], "ci_only_merge_and_release_queue_requested")
         self.assertFalse(result["real_game_verified"])
         self.assertFalse(result["rollback_game_verified"])
-        self.assertEqual(result["release"], "blocked_pending_new_version_and_release_validation")
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(result["release"], "workflow_queued_not_published")
+        self.assertEqual(len(commands), 3)
         self.assertEqual(commands[0][:3], ["pr", "ready", str(PR)])
         self.assertEqual(commands[1][:3], ["pr", "merge", str(PR)])
         self.assertIn("--match-head-commit", commands[1])
-        self.assertFalse(any("release" in " ".join(cmd) for cmd in commands))
+        self.assertEqual(commands[2][:3], ["workflow", "run", "prepare-reviewed-repair-release.yml"])
+        self.assertIn(f"repair_pr={PR}", commands[2])
+        self.assertIn(f"reviewed_head_sha={HEAD}", commands[2])
+        self.assertIn("acknowledge_unverified=true", commands[2])
+        self.assertNotIn("release create", " ".join(" ".join(cmd) for cmd in commands))
+
+    def test_ci_only_dispatch_failure_is_reported_after_merge(self):
+        commands = []
+        def fake(args, timeout=30):
+            commands.append(args)
+            if args[:2] == ["workflow", "run"]:
+                raise gate.GateError("dispatch blocked")
+            return ""
+        with self.audit_with(responses()), mock.patch.object(gate, "gh", side_effect=fake):
+            with self.assertRaisesRegex(gate.GateError, "merged, but release preparation"):
+                gate.promote_ci_only(PR, True, True)
+        self.assertEqual(len(commands), 3)
+        self.assertEqual(commands[1][:3], ["pr", "merge", str(PR)])
 
     def test_ci_only_fails_for_stale_ci_and_head_changes(self):
         for conclusion in ("pending", "failure"):
