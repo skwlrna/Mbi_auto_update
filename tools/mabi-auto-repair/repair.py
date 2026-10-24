@@ -373,6 +373,7 @@ def main(argv=None) -> int:
                          help="Explicitly invoke Codex 6.1 Sol Light once")
     picture.add_argument("--acknowledge-cost", action="store_true")
     args = parser.parse_args(argv)
+    state = None
     try:
         state = State(args.state)
         if args.task == "sync":
@@ -400,6 +401,11 @@ def main(argv=None) -> int:
     except (ValueError, OSError, json.JSONDecodeError, sqlite3.Error) as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=True), file=sys.stderr)
         return 2
+    finally:
+        # Critical on Windows: otherwise SQLite stays locked through temporary
+        # fixture cleanup or repeated CLI invocations in an embedded process.
+        if state is not None:
+            state.conn.close()
 
 
 if __name__ == "__main__":
