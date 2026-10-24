@@ -208,7 +208,9 @@ class WatchTests(unittest.TestCase):
                      mock.patch.object(watch.repair, "clean_git_repo", return_value="a" * 40), \
                      mock.patch.object(watch.shutil, "which", return_value="installed"), \
                      mock.patch.object(watch.publish_candidate, "command", return_value=""), \
-                     mock.patch.object(watch.publish_candidate, "publish", return_value=link) as pub:
+                     mock.patch.object(watch.publish_candidate, "publish", return_value=link) as pub, \
+                     mock.patch.object(watch.promotion_gate, "audit", return_value={
+                         "status": "ci_pending", "ci_run_id": None}):
                     first = watch.poll(state, logs, checkout, True, True, auto_pr=True)
                     self.assertEqual(first["outcomes"], {"pr_opened": 1})
                     self.assertEqual(first["new_events"][0]["pr_url"], link)
