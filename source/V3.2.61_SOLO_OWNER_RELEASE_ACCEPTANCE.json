@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.61",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "facility_transition_stability_pr296",
+  "acceptedOnLocalDate": "2026-10-24",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "facilityTransitionRealGame": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3261",
+  "disclosures": [
+    "User explicitly requested completion of PR #296 V3.2.61 public release and automatic update.",
+    "Real-game facility transition, user PC installation, and rollback execution have not been verified.",
+    "CI, smoke, checksums and rollback assets remain mandatory release gates."
+  ]
+}
