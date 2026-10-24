@@ -176,6 +176,23 @@ def check_attestation(report: Path, audited: dict) -> dict:
     if (not isinstance(tester, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{3,80}", tester)
             or not isinstance(description, str) or not 20 <= len(description) <= 1000):
         raise GateError("Insufficient human test attribution and details")
+    # Promotion must be tied to a distinct PR checkout/build and fresh
+    # operator-collected candidate + stable rollback evidence. A quiet log
+    # or CI run cannot automatically assert that the live game worked.
+    evidence = data.get("game_evidence")
+    if not isinstance(evidence, dict):
+        raise GateError("Separate real-game session evidence is required")
+    hashes = ("candidate_executable_sha256", "stable_executable_sha256",
+              "candidate_proof_sha256", "rollback_proof_sha256")
+    if (evidence.get("candidate_source_sha") != audited["head_sha"]
+            or evidence.get("verification") != "operator_attested"
+            or evidence.get("new_runtime_errors") != 0
+            or not isinstance(evidence.get("session_id"), str)
+            or not re.fullmatch(r"[a-f0-9]{24}", evidence["session_id"])
+            or not all(_sha(evidence.get(h)) for h in hashes)
+            or evidence["candidate_executable_sha256"] == evidence["stable_executable_sha256"]
+            or evidence["candidate_proof_sha256"] == evidence["rollback_proof_sha256"]):
+        raise GateError("Invalid candidate, game proof or rollback binding")
     try:
         tested = dt.datetime.fromisoformat(str(data.get("tested_at_utc", "")).replace("Z", "+00:00"))
     except ValueError as exc:
@@ -187,7 +204,7 @@ def check_attestation(report: Path, audited: dict) -> dict:
         raise GateError("Game-test report too old or dated in the future")
     return {"pr": audited["pr"], "head_sha": audited["head_sha"],
             "game_test": "operator_attested", "rollback": "operator_attested",
-            "note": "No automatic game validation was performed"}
+            "note": "Operator supplied game and rollback evidence; live outcome is not AI-proven"}
 
 
 def promote(number: int, report: Path, acknowledge_merge: bool) -> dict:
