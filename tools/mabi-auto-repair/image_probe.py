@@ -66,7 +66,8 @@ def read_png(source: str, local_file: Path | None, github_image: bool) -> bytes:
 
 
 def inspect_image(job: dict, local_file: Path | None, github_image: bool,
-                  execute: bool, acknowledge_cost: bool) -> dict:
+                  execute: bool, acknowledge_cost: bool,
+                  log_excerpt: str = "") -> dict:
     if execute and not acknowledge_cost:
         raise ValueError("--acknowledge-cost is required for paid image analysis")
     data = read_png(job["source"], local_file, github_image)
@@ -97,6 +98,7 @@ def inspect_image(job: dict, local_file: Path | None, github_image: bool,
             "uncertainties. Incident:\n<untrusted-incident>\n"
             f"Title: {job['title']}\nMode: {job['mode']}\n"
             f"Version: {job['version']}\nDetail: {job['detail']}\n"
+            f"Recent log (redacted and truncated): {log_excerpt[:5000]}\n"
             "</untrusted-incident>")
         argv = ["codex", "exec", "--model", MODEL,
                 "-c", "model_reasoning_effort=low",
