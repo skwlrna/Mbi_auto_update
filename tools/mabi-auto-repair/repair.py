@@ -366,16 +366,16 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
                 return result
             # Treat build/test logs as untrusted. No new filesystem/network
             # authority is granted to the second attempt.
-            failure = sanitized((checked.stdout + "\\n" + checked.stderr)[-1600:])
+            failure = sanitized((checked.stdout + "\n" + checked.stderr)[-1600:])
             next_prompt = (
                 prompt
-                + "\\nThe prior candidate failed the registered regression. "
+                + "\nThe prior candidate failed the registered regression. "
                 + "You have ONE remaining correction attempt in this SAME isolated "
                 + "worktree. Repair the code and registered C# test; if insufficient "
-                + "evidence, make no additional changes. No commits or publishing.\\n"
-                + "<untrusted-regression-output>\\n"
+                + "evidence, make no additional changes. No commits or publishing.\n"
+                + "<untrusted-regression-output>\n"
                 + failure
-                + "\\n</untrusted-regression-output>"
+                + "\n</untrusted-regression-output>"
             )
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         state.finish(key, "needs_review", "Execution failed or timed out")
