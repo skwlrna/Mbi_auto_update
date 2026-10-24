@@ -35,7 +35,7 @@ if ($EnablePaidAnalysis -and -not (Get-Command codex -ErrorAction SilentlyContin
     throw "Codex CLI is not available in PATH"
 }
 if ($EnablePatchRetry -and -not $EnablePaidAnalysis) {
-    throw "-EnablePatchRetry requires -EnablePaidAnalysis (one extra paid Codex call per failed regression)"
+    throw "-EnablePatchRetry requires -EnablePaidAnalysis (one extra paid Codex call for no C# change or failed regression)"
 }
 if ($EnableAutoPR) {
     if (-not $EnablePaidAnalysis) { throw "-EnableAutoPR requires -EnablePaidAnalysis" }
@@ -73,6 +73,6 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Pr
 Write-Host ("Installed Windows task: {0} (every 5 minutes while logged on)" -f $TaskName)
 Write-Host ("Paid recurring Codex analysis: {0}" -f [bool]$EnablePaidAnalysis)
 Write-Host ("Automatic DRAFT PRs: {0}" -f [bool]$EnableAutoPR)
-Write-Host ("Extra paid regression correction (max 1): {0}" -f [bool]$EnablePatchRetry)
+Write-Host ("Extra paid no-change/regression correction (max 1): {0}" -f [bool]$EnablePatchRetry)
 Write-Host ("See results: python .\tools\mabi-auto-repair\watch.py status")
 Write-Host ('Stop: Unregister-ScheduledTask -TaskName "{0}" -Confirm:$false' -f $TaskName)
