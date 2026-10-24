@@ -121,6 +121,15 @@ public sealed partial class MainForm
                 if (!IsDisposed) _updateStatusValue.Text = $"다운로드 {p}%";
             });
             string zip = await UpdateManager.DownloadAsync(info, progress);
+            // An idle macro may start a new job during network download.
+            // Re-check before replacement: do not interrupt active game input.
+            if (AnyRunning)
+            {
+                try { File.Delete(zip); } catch { }
+                _log.Write("[업데이트] 다운로드 중 매크로 작업 시작. 업데이트는 유휴 시 다시 시도합니다.");
+                _updateStatusValue.Text = "작업 종료 후 업데이트 재시도";
+                return;
+            }
             _updateStatusValue.Text = "검증 완료 · 업데이트 준비";
             _log.Write($"[업데이트] {info.Tag} 다운로드 완료: {info.AssetName}");
             UpdateManager.LaunchUpdater(zip);
