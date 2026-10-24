@@ -208,7 +208,9 @@ class WatchTests(unittest.TestCase):
                      mock.patch.object(watch.repair, "clean_git_repo", return_value="a" * 40), \
                      mock.patch.object(watch.shutil, "which", return_value="installed"), \
                      mock.patch.object(watch.publish_candidate, "command", return_value=""), \
-                     mock.patch.object(watch.publish_candidate, "publish", return_value=link) as pub:
+                     mock.patch.object(watch.publish_candidate, "publish", return_value=link) as pub, \
+                     mock.patch.object(watch.promotion_gate, "audit", return_value={
+                         "status": "ci_pending", "ci_run_id": None}):
                     first = watch.poll(state, logs, checkout, True, True, auto_pr=True)
                     self.assertEqual(first["outcomes"], {"pr_opened": 1})
                     self.assertEqual(first["new_events"][0]["pr_url"], link)
@@ -271,6 +273,41 @@ class WatchTests(unittest.TestCase):
                     with self.assertRaises(watch.publish_candidate.PublishBlocked):
                         watch.poll(state, logs, checkout, True, True, auto_pr=True)
                 self.assertEqual(watch.report_status(state)["counts"], {})
+
+
+    def test_created_pr_ci_monitored_without_automatic_merge_or_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with repair.State(root / "state") as state:
+                watch.prepare(state)
+                source = "local:runtime-errors/2026-10-24/sample/summary.json"
+                url = "https://github.com/skwlrna/Mbi_auto_update/pull/4321"
+                state.conn.execute(
+                    "INSERT INTO watch_prs(source,pr_url,recorded_at) VALUES (?,?,?)",
+                    (source, url, watch.utc()))
+                audit_result = {"pr": 4321, "status": "ci_passed_waiting_game",
+                                "ci_run_id": 667788, "may_merge": False}
+                with mock.patch.object(watch.promotion_gate, "audit",
+                                       return_value=audit_result) as auditor:
+                    one = watch.monitor_published_prs(state)
+                self.assertEqual(one["checked"], 1)
+                self.assertFalse(one["automatic_merge"])
+                self.assertFalse(one["automatic_release"])
+                auditor.assert_called_once_with(4321)
+                self.assertEqual(one["prs"][0]["status"], "ci_passed_waiting_game")
+                saved = state.conn.execute(
+                    "SELECT status,ci_run_id FROM watch_pr_ci WHERE source=?",
+                    (source,)).fetchone()
+                self.assertEqual(saved["status"], "ci_passed_waiting_game")
+                self.assertEqual(saved["ci_run_id"], 667788)
+                # API outage at next poll is recorded for review, not promoted
+                with mock.patch.object(watch.promotion_gate, "audit",
+                                       side_effect=watch.promotion_gate.GateError("gh unavailable")):
+                    two = watch.monitor_published_prs(state)
+                self.assertEqual(two["prs"][0]["status"], "pr_ci_needs_review")
+                self.assertEqual(state.conn.execute(
+                    "SELECT status FROM watch_pr_ci WHERE source=?",
+                    (source,)).fetchone()["status"], "pr_ci_needs_review")
 
 
 if __name__ == "__main__":

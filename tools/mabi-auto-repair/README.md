@@ -1,6 +1,51 @@
-# MabiAutoRepair v0.6 — Windows 신규 오류 감시 + 테스트 통과 후보 자동 Draft PR
+# MabiAutoRepair v0.7 — 자동 Draft PR + PR CI 감사 + 게임 검증 후 안전 병합
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
+
+## v0.7: Draft PR 자동 CI 결과 추적, 실제 게임 검증 후에만 병합
+
+기존 \`MabiAutoRepair-Watch\`가 \`--auto-pr\` 모드로 동작 중이라면 **추가 옵션/새 작업 등록 없이** 새 버전의 \`watch.py\`가 5분마다 *이미 게시된* 자동수정 Draft PR의 **Windows Production CI 결과**도 추적합니다. 현재 로그/PR 상태는 \`watch.py status\`의 \`recent_events[].pr_ci\`에서 확인합니다. CI 통과 시 \`ci_passed_waiting_game\`, 진행 중 \`ci_pending\`, 실패 시 \`ci_failed\`로 표시됩니다.
+
+CI 자동 검증은 PR에 해당하는 정확한 SHA와 \`Check V3 Production Engine\` / \`.github/workflows/ci.yml\`의 가장 최근 \`pull_request\` 워크플로우 실행만 인정합니다. PR 하나의 단일 commit + 정확한 main 부모 + 예상 브랜치명·오류 지문·원본 SHA + 12개 이하의 C# 소스/등록된 테스트 파일만 허용합니다. 다른 브랜치나 main으로 우회한 기록, 테스트를 실패한 commit, 오래된 main, 버전 변경·출처 불명 경로는 차단합니다. **PR CI 성공은 실제 게임 문제 해결을 보증하지 않습니다.**
+
+자동 검토 상태는 **읽기 전용**이며, PC 예약 작업과 코덱스는 승인·병합·릴리스·업데이터 배포를 자동 실행하지 않습니다. 동작을 확인하려면:
+
+~~~powershell
+cd "$HOME\Mbi_auto_update"
+git pull --ff-only origin main
+python .\tools\mabi-auto-repair\watch.py status
+# Draft PR이 생성된 이후, 그 번호를 넣어 직접 CI 감사:
+python .\tools\mabi-auto-repair\promotion_gate.py audit 실제_PR번호
+~~~
+
+**실제 게임에서 동일 PR의 수정 HEAD 코드를 테스트하고 복구(롤백)를 검증한 후에만** PC의 Git 저장소 외부에 JSON 기록을 직접 작성할 수 있습니다. 값 \`passed\`는 AI/자동 테스트가 임의 생성하거나 추정하면 안 됩니다. 기록 구조:
+
+~~~json
+{
+  "schema": 1,
+  "pr": 1234,
+  "tested_head_sha": "해당_Draft_PR_HEAD_40자리_SHA",
+  "game_result": "passed",
+  "rollback_result": "passed",
+  "tested_by": "your_github_handle",
+  "tested_at_utc": "2026-10-24T13:00:00Z",
+  "test_details": "실제 게임에서 테스트한 모드·절차·확인 결과를 20자 이상 기재"
+}
+~~~
+
+실제 검증이 완료되지 않았거나 실행하는 코드의 SHA가 다르면 위 값을 \`passed\`라고 작성해서는 안 됩니다. 유효한 기록은 PR 번호/SHA, 7일 이내 UTC 시각, 테스트한 사용자, 게임·롤백 성공 및 상세 내용을 요구합니다. 검증을 진짜 수행했는지는 사람이 책임져야 하며, 파일만으로 게임 동작이 자동 검증되지는 않습니다.
+
+정식으로 게임 테스트를 끝낸 후 사용자 PC에서 **명시적으로** 호출하는 병합 명령:
+
+~~~powershell
+python .\tools\mabi-auto-repair\promotion_gate.py promote 실제_PR번호 --game-test-report "$HOME\verified-repair-pr.json" --acknowledge-merge
+~~~
+
+이 명령은 GitHub CLI 사용자 인증을 사용해 해당 Draft PR의 CI와 SHA를 *다시* 감사하고, Draft 해제 후 \`gh pr merge --squash --match-head-commit\`을 수행합니다. GitHub가 요구하는 리뷰/브랜치 정책은 우회하지 않습니다. SHA가 바뀌었거나 CI가 실패하면 병합하지 않습니다.
+
+**릴리스·업데이터는 여기서 별도 차단:** 현재 정식 배포 버전은 V3.2.62이고 기존 \`.github/workflows/release-v3262-auto-update.yml\`은 이미 발행된 버전/태그의 재게시를 금지합니다. 후속 실제 수정 PR을 병합했더라도 **새 릴리스 버전, 정식 Windows 빌드/스모크 테스트, 업데이트 ZIP·SHA256·백업/롤백, 병합 main SHA의 CI 성공 및 명시적 출시 승인**을 별도로 구성·검증하기 전에는 자동으로 정식 배포하지 않습니다. 기존 V3.2.62를 덮어쓰거나 새 태그를 자동 생성하지 않습니다.
+
+**검증 경계:** 이 기능의 CI는 Windows와 Linux에서 PR API/CI/동일 SHA 검증, 수동 검증 기록, 실패·구버전 차단, 명시적 병합 흐름을 GitHub CLI mock으로 실행합니다. 실제 사용자 PC의 \`gh\` 세션에서 성공한 임의의 PR 병합이나 게임 테스트는 CI로 대신할 수 없습니다.
 
 ## v0.6: 신규 오류 → 검증된 수정 후보 → GitHub Draft PR 자동 생성
 

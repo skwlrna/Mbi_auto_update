@@ -87,7 +87,9 @@ class SyntheticFullFlow(unittest.TestCase):
                 with mock.patch.object(repair, "shell", side_effect=simulated_shell), \
                      mock.patch.object(repair.shutil, "which", side_effect=simulated_which), \
                      mock.patch.object(pipeline, "inspect_image", side_effect=simulated_image), \
-                     mock.patch.object(publish_candidate, "command", side_effect=simulated_publish):
+                     mock.patch.object(publish_candidate, "command", side_effect=simulated_publish), \
+                     mock.patch.object(watch.promotion_gate, "audit", return_value={
+                         "status": "ci_pending", "ci_run_id": None}):
                     first = watch.poll(state, logs, source, True, True, auto_pr=True)
                     second = watch.poll(state, logs, source, True, True, auto_pr=True)
                 self.assertEqual(first["outcomes"], {"pr_opened": 1})
