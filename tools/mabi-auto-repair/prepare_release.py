@@ -132,12 +132,25 @@ def prepare(root: Path, published: str, repair_pr: int,
         "github.event.workflow_run.event == 'push'",
         "(github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')",
         "workflow dispatch source")
+    # The version-only commit is pushed by GITHUB_TOKEN. Regular push CI
+    # does not run for such pushes; the preparation workflow explicitly
+    # dispatches ci.yml. The release audit must accept that exact SHA's
+    # successful workflow_dispatch run, not insist on a missing push run.
+    release = required_replace(
+        release,
+        "actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=",
+        "actions/workflows/ci.yml/runs?branch=main&head_sha=",
+        "main CI API event filter")
+    release = required_replace(
+        release, "$_.event -eq 'push' -and",
+        "$_.event -in @('push','workflow_dispatch') -and",
+        "exact main CI event filter")
     release = required_replace(release, BASE_RELEASE, new, "release tag")
     release = required_replace(release, BASE_RELEASE[1:], new_digits, "release package version")
     release = required_replace(release, "v3262", f"v{new_short}", "workflow id")
     release = release.replace("V3\\.2\\.62", "V" + escaped_new)
     release = release.replace("3\\.2\\.62", escaped_new)
-    release = release.replace("Publish V3.2.62 Legacy AutoFix Retirement Auto Update After Main CI",
+    release = release.replace(f"Publish {new} Legacy AutoFix Retirement Auto Update After Main CI",
                               f"Publish {new} CI-only Reviewed Repair Auto Update After Main CI")
     if f"MabiAuto_{new}_Windows_Lite.zip" not in release:
         raise ReleasePrepError("Missing new Windows updater archive contract")
