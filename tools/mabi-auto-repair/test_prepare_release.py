@@ -50,24 +50,24 @@ class ReleasePrepTests(unittest.TestCase):
         self.assertEqual(staged["new_version"], "V3.2.63")
         self.assertFalse(staged["real_game_verified"])
         self.assertEqual(len(staged["files"]), 6)
-        updater = (self.root / "source/FishingAutomation/UpdateManager.cs").read_text()
+        updater = (self.root / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
         self.assertIn('CurrentVersion = "V3.2.63"', updater)
-        ci = (self.root / ".github/workflows/ci.yml").read_text()
+        ci = (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("  workflow_dispatch:", ci)
         self.assertIn("release-v3263-auto-update.yml", ci)
         self.assertIn("V3\\.2\\.63", ci)
-        workflow = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text()
+        workflow = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text(encoding="utf-8")
         self.assertIn("V3.2.63", workflow)
         self.assertIn("MabiAuto_V3.2.63_Windows_Lite.zip", workflow)
         self.assertIn("ci_only_unverified", workflow)
         self.assertNotIn("Require game signoff OR", workflow)
         self.assertIn("workflow_dispatch", workflow)
-        approval = json.loads((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").read_text())
+        approval = json.loads((self.root / "source/V3.2.63_CI_ONLY_REPAIR_APPROVAL.json").read_text(encoding="utf-8"))
         self.assertEqual(approval["approved_head_sha"], HEAD)
         self.assertEqual(approval["reviewed_merge_sha"], MERGE)
         self.assertFalse(approval["real_game_verified"])
         self.assertTrue(approval["operator_reviewed"])
-        self.assertIn("not tested", (self.root / "source/RELEASE_NOTES_V3.2.63.md").read_text())
+        self.assertIn("not tested", (self.root / "source/RELEASE_NOTES_V3.2.63.md").read_text(encoding="utf-8"))
 
     def test_refuse_source_public_version_mismatch_without_changes(self):
         with self.assertRaisesRegex(stage.ReleasePrepError, "must equal"):
@@ -103,7 +103,7 @@ class ReleasePrepTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((source / relative).read_bytes())
         outcome = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
-        release = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text()
+        release = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text(encoding="utf-8")
         self.assertEqual(outcome["new_version"], "V3.2.63")
         self.assertIn("MabiAuto_V3.2.63_Windows_Lite.zip.sha256", release)
         self.assertIn("RollbackPrevious.ps1", release)
@@ -111,7 +111,7 @@ class ReleasePrepTests(unittest.TestCase):
         self.assertNotIn("V3.2.62_Windows_Lite.zip", release)
         self.assertIn("workflow_dispatch", release)
         self.assertIn("release-v3263-auto-update.yml",
-                      (self.root / ".github/workflows/ci.yml").read_text())
+                      (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
 
     def test_next_patch_sequence_is_monotonic_and_requires_published_release(self):
         self.assertEqual(stage.next_tag("V3.2.63", "V3.2.63"), "V3.2.64")
