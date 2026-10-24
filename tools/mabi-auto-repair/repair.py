@@ -252,13 +252,20 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
             return result
         files = candidate_files(workspace)
         result["changed_files"] = files
-        if not any(p.startswith("source/FishingAutomation/") for p in files):
-            state.finish(key, "needs_review", "No source change")
-            result["reason"] = "No source change"
+        # A changed .csproj or unrelated test file does not prove a real fix.
+        # Require C# source code plus a C# test in the REGISTERED suite folder.
+        source_changed = any(p.startswith("source/FishingAutomation/") and p.endswith(".cs")
+                             for p in files)
+        test_folder = Path(test).parent.as_posix() + "/"
+        registered_test_changed = any(p.startswith(test_folder) and p.endswith(".cs")
+                                      for p in files)
+        if not source_changed:
+            state.finish(key, "needs_review", "No C# source change")
+            result["reason"] = "No C# source change"
             return result
-        if not any(p.startswith("tests/") for p in files):
-            state.finish(key, "needs_review", "No regression test change")
-            result["reason"] = "No test change"
+        if not registered_test_changed:
+            state.finish(key, "needs_review", "No registered C# regression test change")
+            result["reason"] = "No registered C# regression test change"
             return result
         checked = shell(["dotnet", "run", "--project", test, "-c", "Release"], workspace, 420)
         result["test_returncode"] = checked.returncode
