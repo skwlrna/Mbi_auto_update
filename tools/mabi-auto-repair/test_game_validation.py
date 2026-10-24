@@ -37,10 +37,13 @@ class GameVerificationTests(unittest.TestCase):
         self.report = self.root / "verified.json"
         self.sha = mock.patch.object(verify, "repo_head", return_value=HEAD)
         self.ci = mock.patch.object(verify.promotion_gate, "audit", return_value=dict(AUDIT))
+        self.sync = mock.patch.object(verify, "sync_log_root", return_value=None)
         self.sha.start()
         self.ci.start()
+        self.sync.start()
         self.addCleanup(self.sha.stop)
         self.addCleanup(self.ci.stop)
+        self.addCleanup(self.sync.stop)
 
     def start_session(self):
         return verify.start(PR, self.candidate, self.exe, self.stable,
@@ -149,6 +152,16 @@ class GameVerificationTests(unittest.TestCase):
                                return_value=dict(AUDIT, head_sha="d"*40)):
             with self.assertRaisesRegex(verify.EvidenceError, "changed"):
                 self.attest()
+
+    def test_remote_error_log_sync_failure_blocks_verdict(self):
+        self.start_session()
+        with mock.patch.object(verify, "sync_log_root",
+                               side_effect=verify.EvidenceError("Git sync failed")):
+            with self.assertRaisesRegex(verify.EvidenceError, "Git sync failed"):
+                verify.inspect(self.session)
+            with self.assertRaisesRegex(verify.EvidenceError, "Git sync failed"):
+                self.attest()
+        self.assertFalse(self.report.exists())
 
     def test_preexisting_error_is_baseline_not_new_failure(self):
         file = self.logs / "runtime-errors/2026-10-24/old/summary.json"
