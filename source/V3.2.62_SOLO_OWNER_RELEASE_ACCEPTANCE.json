@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.62",
+  "rolloutMode": "user_requested_unverified_release",
+  "releasePurpose": "retire_legacy_ai_autofix",
+  "acceptedOnLocalDate": "2026-10-24",
+  "acceptanceSource": "user_direct_request_in_chat",
+  "scope": "personal_use_only",
+  "publicUpdaterReleaseApproved": true,
+  "allowFabricatedGameTestAttestation": false,
+  "macroModesRealGame": "not_tested",
+  "rollbackExecution": "not_tested",
+  "pcOfflineSmoke": "not_tested_for_v3262",
+  "disclosures": [
+    "User requested latest-release check and removal of the old AutoFix tool while retaining macro and GitHub runtime logs.",
+    "User PC macro operation, real update installation and rollback execution not verified.",
+    "Release requires successful main CI, Windows executable smoke, package SHA256 and rollback files."
+  ]
+}
