@@ -223,6 +223,18 @@ try
             !CallBoolean(travelPolicy, "IsManagedTravelWithinLimit", TimeSpan.FromMinutes(5));
     }
 
+    int Ready(int previous, bool valid) => (int)Method(screen,
+        "AdvanceFacilityReadyFrames", 2).Invoke(null, new object[] { previous, valid })!;
+    int ready = 0;
+    foreach (bool frameReady in new[] { false, true, false, true })
+        ready = Ready(ready, frameReady);
+    Check(ready == 1 && Ready(ready, true) == 2 && Ready(2, false) == 0,
+        "facility transition needs two consecutive full-panel frames; partial/field frame resets proof");
+    Check(Has(ScreenCalls("WaitForStableFacilityMoveScreenAsync", 1), "HasVerifiedFacilityMoveClickScreen") &&
+          Has(ScreenCalls("WaitForStableFacilityMoveScreenAsync", 1), "AdvanceFacilityReadyFrames") &&
+          Has(ScreenCalls("TravelToFacilityAsync", 5), "WaitForStableFacilityMoveScreenAsync"),
+        "real travel waits for stable full facility UI before its fresh click guard");
+
     var travel = ScreenCalls("TravelToFacilityAsync", 5);
     Check(Has(travel, "IsManagedTravelWithinLimit") &&
           Has(travel, "StartNew") &&
@@ -1082,7 +1094,8 @@ try
     foreach (var (file, expectedMove, recordedChange) in new[] {
         ("onsite-leather-20261023-150720.png", false, .629),
         ("onsite-metal-20261023-153131.png", false, .681),
-        ("remote-wood-20261007-172137.png", true, 0.0) })
+        ("remote-wood-20261007-172137.png", true, 0.0),
+        ("remote-wood-20261024-153253.png", true, 0.0) })
     {
         using var actual = new Bitmap(Path.Combine(moveFixtures, file));
         bool actualMove = PixelGate("HasFacilityMoveButtonVisual", actual);

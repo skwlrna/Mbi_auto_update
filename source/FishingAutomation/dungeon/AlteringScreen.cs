@@ -185,6 +185,31 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             HasOnsiteCloseButtonVisual(frame) ||
             HasFacilityQueueSlotStructureVisual(frame));
 
+    // A header can render before the rest of the facility panel. Observe only;
+    // never send K/Esc/card/move input while waiting for this transition.
+    private static int AdvanceFacilityReadyFrames(int previous, bool verified)
+        => verified ? Math.Min(previous + 1, 2) : 0;
+
+    private async Task<bool> WaitForStableFacilityMoveScreenAsync(CancellationToken ct)
+    {
+        var elapsed = Stopwatch.StartNew();
+        int consecutive = 0;
+        while (elapsed.ElapsedMilliseconds < 2000)
+        {
+            ct.ThrowIfCancellationRequested();
+            using (var frame = Capture(ct))
+                consecutive = AdvanceFacilityReadyFrames(consecutive,
+                    HasVerifiedFacilityMoveClickScreen(frame));
+            if (consecutive >= 2)
+            {
+                Log?.Invoke("[자동 가공] 시설 전체 UI 연속 2프레임 확인 · 이동 전 화면 전환 대기 완료");
+                return true;
+            }
+            await Task.Delay(150, ct);
+        }
+        return false;
+    }
+
     // The actual 800x1000 facility capture has the large fixed title at
     // x=20,y=50 and a separate fixed 'facility Lv.' subtitle at x=20,y=155.
     // Neither is a dynamic OCR coordinate. Require BOTH independent anchors:
@@ -903,7 +928,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     await WaitForManagedProcessingNavigationReadyAsync(1000, ct);
                     continue;
                 }
-                if (await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
+                if (HasVerifiedFacilityMoveClickScreen(frame) &&
+                    await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면={plan.ScreenTitle} · 시설 진입 확인");
                     return;
@@ -969,8 +995,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     // the fixed hub. A fixed facility screen (title + level)
                     // is sufficient; do not require another title OCR pass.
                     if (await WaitForScreenStateAsync(async image =>
-                            HasFixedFacilityHeaderVisual(image) ||
-                            await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null,
+                            HasVerifiedFacilityMoveClickScreen(image) &&
+                            (HasFixedFacilityHeaderVisual(image) ||
+                             await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null),
                             1200, ct))
                     {
                         Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
@@ -2459,10 +2486,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // but a false-negative move-button detector allowed "onsite" proof and
             // selected 상급 목재 before 설비로 이동. On a fresh facility entry
             // QueueAsync now owns the order: facility -> move once -> recipe.
+            bool stableFacility = await WaitForStableFacilityMoveScreenAsync(ct);
             using var confirmed = Capture(ct);
             // Fixed title/subtitle pixels are primary; first-entry OCR is
             // secondary and never by itself blocks a valid fixed facility UI.
-            if (!HasVerifiedFacilityMoveClickScreen(confirmed))
+            if (!stableFacility || !HasVerifiedFacilityMoveClickScreen(confirmed))
                 Fail(confirmed, "설비 이동 전 실제 시설창의 제목/독립 UI 구조를 확인하지 못했습니다 · 일반 필드 좌표 클릭 차단");
 
             // V3.1.65: K/facility always has a move control. Its OCR/teal
