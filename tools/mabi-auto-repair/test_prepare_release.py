@@ -42,7 +42,8 @@ class ReleasePrepTests(unittest.TestCase):
             "        shell: pwsh\n        run: |\n          Write-Host 'Game requirement'\n"
             "      - name: Require CI-approved current main and exact V3.2.62 version\n"
             '''          if ($u -notmatch 'CurrentVersion = "V3\\.2\\.62"') { throw 'bad' }\n'''
-            "          Write-Host 'MabiAuto_V3.2.62_Windows_Lite.zip'\n")
+            "          Write-Host 'MabiAuto_V3.2.62_Windows_Lite.zip'\n"
+            "          Write-Host '<Version>3.2.62</Version>'\n")
 
     def test_ci_only_version_stage_uses_next_patch_and_does_not_claim_game_verified(self):
         staged = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
@@ -55,8 +56,7 @@ class ReleasePrepTests(unittest.TestCase):
         self.assertIn("  workflow_dispatch:", ci)
         self.assertIn("release-v3263-auto-update.yml", ci)
         self.assertIn("V3\\.2\\.63", ci)
-        workflow = (self.root / staged["files"][3] if False else
-                    self.root / ".github/workflows/release-v3263-auto-update.yml").read_text()
+        workflow = (self.root / ".github/workflows/release-v3263-auto-update.yml").read_text()
         self.assertIn("V3.2.63", workflow)
         self.assertIn("MabiAuto_V3.2.63_Windows_Lite.zip", workflow)
         self.assertIn("ci_only_unverified", workflow)
