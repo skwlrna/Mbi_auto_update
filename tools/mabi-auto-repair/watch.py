@@ -25,6 +25,10 @@ import repair
 import pipeline
 
 TASK_SQL = """
+CREATE TABLE IF NOT EXISTS watch_meta(
+ name TEXT PRIMARY KEY,
+ value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS watch_events(
  source TEXT PRIMARY KEY,
  fingerprint TEXT NOT NULL DEFAULT '',
@@ -71,7 +75,7 @@ def pull_logs(root: Path) -> None:
 
 def initialize(state: repair.State, root: Path) -> dict:
     prepare(state)
-    if state.conn.execute("SELECT EXISTS(SELECT 1 FROM watch_events)").fetchone()[0]:
+    if state.conn.execute("SELECT 1 FROM watch_meta WHERE name='initialized'").fetchone():
         return {"status": "already_initialized", "baseline_count": state.conn.execute(
             "SELECT COUNT(*) FROM watch_events").fetchone()[0],
             "note": "Existing event baseline retained; new incidents were not discarded"}
@@ -84,6 +88,8 @@ def initialize(state: repair.State, root: Path) -> dict:
             "VALUES (?, '', 'baseline', ?)",
             [(origin, now) for origin, _ in entries],
         )
+        state.conn.execute(
+            "INSERT INTO watch_meta(name,value) VALUES ('initialized',?)", (now,))
         state.conn.execute("COMMIT")
     except BaseException:
         state.conn.execute("ROLLBACK")
@@ -137,7 +143,7 @@ def poll(state: repair.State, root: Path, repo: Path, execute: bool,
     if execute and not cost_ack:
         raise ValueError("--acknowledge-cost required for recurring Codex analysis")
     prepare(state)
-    if not state.conn.execute("SELECT EXISTS(SELECT 1 FROM watch_events)").fetchone()[0]:
+    if not state.conn.execute("SELECT 1 FROM watch_meta WHERE name='initialized'").fetchone():
         raise ValueError("Watcher has no baseline; run 'watch.py init' first")
     version = repair.current_source_version(repo)
     # Scan the local log snapshot after git pull. Empty/new/invalid reports
