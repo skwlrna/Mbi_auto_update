@@ -375,7 +375,7 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
         # Keep Codex outputs in memory. Writing outside the sandbox workspace
         # can fail on Windows, and a report inside the worktree would taint diffs.
         # An operator may explicitly opt in to one additional paid correction
-        # after a real registered regression fails. Never retry a failed tool,
+        # for no C# change or a failed registered regression. Never retry a failed tool,
         # missing test/source, invalid paths, or a crashed/scheduled job.
         next_prompt = prompt
         max_attempts = 2 if retry_regression_once else 1
