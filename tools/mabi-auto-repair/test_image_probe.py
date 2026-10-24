@@ -117,7 +117,7 @@ class ImageProbeTests(unittest.TestCase):
                 src = dict(schema=1, source="runtime", version="V3.2.62", mode="가공",
                            title="new error", detail="plain logic case")
                 for idx in range(5):
-                    key = state.add(f"fixture-{idx}", dict(src, detail=f"different problem {idx}"))
+                    key = state.add(f"fixture-{idx}", dict(src, detail=f"different problem {chr(97 + idx)}"))
                     state.reserve(key, None)
                 self.assertEqual(sum(j["calls"] for j in state.jobs()), 5)
                 self.assertEqual(len(state.jobs()), 5)
