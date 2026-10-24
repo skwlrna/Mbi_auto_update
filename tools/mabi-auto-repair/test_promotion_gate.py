@@ -163,7 +163,7 @@ class PromoteGateTests(unittest.TestCase):
             self.assertIn("--match-head-commit", commands[1])
             self.assertNotIn("--admin", commands[1])
             self.assertNotIn("--auto", commands[1])
-            self.assertNotIn("release", " ".join(commands))
+            self.assertNotIn("release", " ".join(" ".join(args) for args in commands))
 
     def test_pr_changed_after_ready_blocks_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
