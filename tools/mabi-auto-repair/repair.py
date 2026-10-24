@@ -204,7 +204,14 @@ def candidate_files(workspace: Path) -> list[str]:
 
 
 VERSION_PATTERN = re.compile(r'public const string CurrentVersion\s*=\s*"(V\d+\.\d+\.\d+)"')
-VISUAL_EVIDENCE_TERMS = ("시설창", "독립 UI", "픽셀", "OCR", "스크린샷", "템플릿", "화면 인식")
+# Visual error summaries are untrusted descriptions, not a substitute for image evidence.
+# The public log repository may contain screen.png; this CLI deliberately reads only
+# summary.json, so the image is NOT AVAILABLE to its candidate repair agent.
+VISUAL_EVIDENCE_TERMS = (
+    "시설창", "독립 UI", "픽셀", "OCR", "스크린샷", "템플릿",
+    "화면 인식", "화면 인증", "HUD", "미니맵", "생활스킬",
+    "필드 인증", "K/I", "Home/End", "F9 K",
+)
 
 
 def current_source_version(repo: Path) -> str:
