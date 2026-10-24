@@ -11,7 +11,8 @@ param(
     [string]$RepoRoot = "",
     [string]$LogRoot = "",
     [string]$TaskName = "MabiAutoRepair-Watch",
-    [switch]$EnablePaidAnalysis
+    [switch]$EnablePaidAnalysis,
+    [switch]$EnableAutoPR
 )
 $ErrorActionPreference = "Stop"
 if (-not $RepoRoot) {
@@ -32,6 +33,16 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw ".NET 8 SDK
 if ($EnablePaidAnalysis -and -not (Get-Command codex -ErrorAction SilentlyContinue)) {
     throw "Codex CLI is not available in PATH"
 }
+if ($EnableAutoPR) {
+    if (-not $EnablePaidAnalysis) { throw "-EnableAutoPR requires -EnablePaidAnalysis" }
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        throw "GitHub CLI gh is required for draft PR creation"
+    }
+    & gh auth status
+    if ($LASTEXITCODE -ne 0) {
+        throw "GitHub CLI gh is not logged in; run gh auth login first"
+    }
+}
 # The baseline ensures historical incidents are NOT billed for.
 & $python $watcher init --log-root $LogRoot
 if ($LASTEXITCODE -ne 0) {
@@ -42,6 +53,9 @@ if ($EnablePaidAnalysis) {
     # Explicit install-time consent, not an implicit background paid call.
     $parameters += " --execute --acknowledge-cost"
 }
+if ($EnableAutoPR) {
+    $parameters += " --auto-pr"
+}
 $action = New-ScheduledTaskAction -Execute $python -Argument $parameters -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
@@ -49,5 +63,6 @@ $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -Execution
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host ("Installed Windows task: {0} (every 5 minutes while logged on)" -f $TaskName)
 Write-Host ("Paid recurring Codex analysis: {0}" -f [bool]$EnablePaidAnalysis)
+Write-Host ("Automatic DRAFT PRs: {0}" -f [bool]$EnableAutoPR)
 Write-Host ("See results: python .\tools\mabi-auto-repair\watch.py status")
 Write-Host ('Stop: Unregister-ScheduledTask -TaskName "{0}" -Confirm:$false' -f $TaskName)
