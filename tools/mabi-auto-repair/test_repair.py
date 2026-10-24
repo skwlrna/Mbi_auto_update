@@ -249,6 +249,10 @@ class OfflineTests(TestCase):
     def test_latest_real_github_log_cli_sync_status_and_dry_run(self):
         import subprocess
         import sys
+        import os
+        # Reproduce Windows systems where redirected stdout is cp1252, which
+        # cannot directly encode Korean error descriptions.
+        process_env = dict(os.environ, PYTHONIOENCODING="cp1252")
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             script = Path(repair.__file__).resolve()
@@ -256,7 +260,7 @@ class OfflineTests(TestCase):
             state_dir = root / "state"
             command = [sys.executable, str(script), "--state", str(state_dir)]
             sync = subprocess.run(command + ["sync", "--dir", str(fixtures), "--limit", "10"],
-                                  text=True, capture_output=True, timeout=30)
+                                  text=True, capture_output=True, timeout=30, env=process_env)
             self.assertEqual(sync.returncode, 0, sync.stderr)
             payload = repair.json.loads(sync.stdout)
             self.assertEqual(payload["read"], 2)
@@ -264,17 +268,17 @@ class OfflineTests(TestCase):
             self.assertEqual(payload["unique"], 2)
             self.assertEqual(payload["codex_calls"], 0)
             again = subprocess.run(command + ["sync", "--dir", str(fixtures), "--limit", "10"],
-                                   text=True, capture_output=True, timeout=30)
+                                   text=True, capture_output=True, timeout=30, env=process_env)
             self.assertEqual(again.returncode, 0)
             status = subprocess.run(command + ["status"], text=True,
-                                    capture_output=True, timeout=30)
+                                    capture_output=True, timeout=30, env=process_env)
             self.assertEqual(status.returncode, 0, status.stderr)
             jobs = repair.json.loads(status.stdout)["jobs"]
             self.assertEqual(len(jobs), 2)
             self.assertTrue(all(j["hits"] == 1 and j["calls"] == 0 for j in jobs))
             for job in jobs:
                 preview = subprocess.run(command + ["run", job["id"]], text=True,
-                                         capture_output=True, timeout=30)
+                                         capture_output=True, timeout=30, env=process_env)
                 self.assertEqual(preview.returncode, 0, preview.stderr)
                 output = repair.json.loads(preview.stdout)
                 self.assertFalse(output["ready_for_ai"])
