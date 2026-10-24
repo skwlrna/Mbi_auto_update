@@ -68,10 +68,11 @@ def recent_log(job: dict, log_root: Path | None = None) -> dict:
     if not data.strip():
         raise ValueError("recent.log empty: no log evidence")
     # Tail events are usually closest to the actual abort. Keep no raw log on disk.
-    from repair import sanitized
+    from repair import sanitized_log
     tail = "\n".join(data.decode("utf-8-sig", errors="replace").splitlines()[-100:])
-    # Sanitization removes absolute PC paths, URLs and typical secrets.
-    excerpt = sanitized(tail[-MAX_EXCERPT_CHARS:])
+    # Sanitize individual timeline entries WITHOUT discarding line boundaries
+    # or accidentally imposing the 2,000-character database field limit.
+    excerpt = sanitized_log(tail, MAX_EXCERPT_CHARS)
     if not excerpt:
         raise ValueError("No usable recent.log details")
     return {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
