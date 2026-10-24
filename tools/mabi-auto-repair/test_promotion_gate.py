@@ -61,6 +61,14 @@ def report(root: Path, *, head=HEAD, rollback="passed", game="passed"):
         "schema": 1, "pr": PR, "tested_head_sha": head,
         "tested_by": "test_operator", "game_result": game,
         "rollback_result": rollback,
+        "game_evidence": {
+            "session_id": "1" * 24, "candidate_source_sha": head,
+            "candidate_executable_sha256": "2" * 64,
+            "stable_executable_sha256": "3" * 64,
+            "candidate_proof_sha256": "4" * 64,
+            "rollback_proof_sha256": "5" * 64,
+            "new_runtime_errors": 0, "verification": "operator_attested",
+        },
         "test_details": "Manual field recovery completed after entering processing menu.",
         "tested_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
     }), encoding="utf8")
@@ -144,6 +152,29 @@ class PromoteGateTests(unittest.TestCase):
             p.write_text(json.dumps(data))
             with self.assertRaisesRegex(gate.GateError, "too old"):
                 gate.check_attestation(p, checked)
+
+    def test_game_evidence_required_and_bound_to_pr_head(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            checked = {"pr": PR, "head_sha": HEAD}
+            path = report(Path(tmp))
+            data = json.loads(path.read_text())
+            for mutated in (
+                dict(data, game_evidence=None),
+                dict(data, game_evidence=dict(data["game_evidence"],
+                                              candidate_source_sha="d"*40)),
+                dict(data, game_evidence=dict(data["game_evidence"],
+                                              new_runtime_errors=1)),
+                dict(data, game_evidence=dict(data["game_evidence"],
+                                              candidate_proof_sha256="5"*64)),
+                dict(data, game_evidence=dict(data["game_evidence"],
+                                              stable_executable_sha256="2"*64)),
+                dict(data, game_evidence=dict(data["game_evidence"],
+                                              rollback_proof_sha256="invalid")),
+            ):
+                with self.subTest(evidence=mutated.get("game_evidence")):
+                    path.write_text(json.dumps(mutated))
+                    with self.assertRaises(gate.GateError):
+                        gate.check_attestation(path, checked)
 
     def test_valid_explicit_operator_signoff_ready_merge_only_no_release(self):
         with tempfile.TemporaryDirectory() as tmp:
