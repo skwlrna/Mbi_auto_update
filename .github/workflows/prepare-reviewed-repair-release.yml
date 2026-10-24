@@ -98,11 +98,12 @@ jobs:
       - name: Create version-only release commit
         shell: pwsh
         env:
+          PYTHONDONTWRITEBYTECODE: '1'
           PR_NUMBER: ${{ inputs.repair_pr }}
           APPROVED_HEAD: ${{ inputs.reviewed_head_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          python -m unittest discover -s tools/mabi-auto-repair -p "test_*.py" -q
+          python -B -m unittest discover -s tools/mabi-auto-repair -p "test_*.py" -q
           if ($LASTEXITCODE -ne 0) { throw 'Offline repair regressions failed' }
           python tools/mabi-auto-repair/prepare_release.py --repo . --latest-release "$env:PUBLISHED_VERSION" --repair-pr "$env:PR_NUMBER" --approved-head-sha "$env:APPROVED_HEAD" --reviewed-merge-sha "$env:REVIEWED_MERGE_SHA"
           if ($LASTEXITCODE -ne 0) { throw 'Version-only preparation rejected' }
