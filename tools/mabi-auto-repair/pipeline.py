@@ -93,7 +93,8 @@ def _local_png(job: dict, log_root: Path) -> Path:
 
 def investigate(state, key: str, repo: Path, log_root: Path | None,
                 execute: bool, acknowledge_cost: bool,
-                max_daily: int | None = None) -> dict:
+                max_daily: int | None = None,
+                retry_regression_once: bool = False) -> dict:
     # Import is delayed to avoid a cycle: repair.py owns the CLI and calls us.
     from repair import current_source_version, incident_preflight, run_one, suite_for
 
@@ -149,7 +150,8 @@ def investigate(state, key: str, repo: Path, log_root: Path | None,
     patch_before = state.job(key)["calls"]
     try:
         candidate = run_one(state, key, repo, True, acknowledge_cost,
-                            max_daily, evidence=evidence)
+                            max_daily, evidence=evidence,
+                            retry_regression_once=retry_regression_once)
     except ValueError as exc:
         # The image analysis is already completed. Never silently retry a
         # rejected Codex patch or escalate without an explicit new command.
