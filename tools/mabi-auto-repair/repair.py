@@ -12,6 +12,7 @@ import subprocess
 import sys
 import urllib.request
 from image_probe import inspect_image
+from pipeline import investigate
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -229,7 +230,8 @@ def current_source_version(repo: Path) -> str:
     return match.group(1)
 
 
-def incident_preflight(job: dict, suite: str | None, repo: Path | None) -> dict:
+def incident_preflight(job: dict, suite: str | None, repo: Path | None,
+                       image_verified: bool = False) -> dict:
     """Deterministic, free vetoes before even reserving one Codex call.
 
     Earlier-version logs cannot establish that a defect persists in this source.
@@ -246,7 +248,9 @@ def incident_preflight(job: dict, suite: str | None, repo: Path | None) -> dict:
         source_version = current_source_version(repo)
         if job["version"] != source_version:
             reasons.append("source_version_not_reproduced")
-    if any(term.casefold() in job["detail"].casefold() for term in VISUAL_EVIDENCE_TERMS):
+    if (not image_verified
+            and any(term.casefold() in job["detail"].casefold()
+                    for term in VISUAL_EVIDENCE_TERMS)):
         reasons.append("visual_evidence_missing")
     return {
         "source_version": source_version,
@@ -257,7 +261,8 @@ def incident_preflight(job: dict, suite: str | None, repo: Path | None) -> dict:
 
 
 def run_one(state: State, key: str, repo: Path | None, execute: bool,
-            cost_ack: bool, daily: int) -> dict:
+            cost_ack: bool, daily: int | None,
+            evidence: dict | None = None) -> dict:
     job = state.job(key)
     test = suite_for(job["mode"])
     result = {"id": key, "status": job["status"], "occurrences": job["hits"],
@@ -266,7 +271,14 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
     if execute and (not cost_ack or repo is None):
         raise ValueError("--repo and --acknowledge-cost required")
     # Offline preflight never invokes Git or Codex and never consumes tokens.
-    readiness = incident_preflight(job, test, repo)
+    # Only a completed single-image diagnostic with a verified image digest can
+    # satisfy the visual-evidence preflight for code-repair candidates.
+    image_verified = bool(
+        evidence and evidence.get("image_sha256")
+        and evidence.get("diagnostic")
+        and evidence.get("image_status") == "image_analysis_returned"
+    )
+    readiness = incident_preflight(job, test, repo, image_verified=image_verified)
     result.update(readiness)
     if not execute:
         result["next"] = ("DRY_RUN: blocked: " + ",".join(readiness["preflight_reasons"])
@@ -299,7 +311,12 @@ def run_one(state: State, key: str, repo: Path | None, execute: bool,
             "For real source changes, add a regression test; if insufficient evidence, make no change.\n"
             "<untrusted-incident>\n"
             f"Mode: {job['mode']}\nTitle: {job['title']}\nDetail: {job['detail']}\n"
-            f"Registered regression: {test}\n</untrusted-incident>"
+            f"Registered regression: {test}\n"
+            f"Image diagnostic (untrusted, may be uncertain): "
+            f"{sanitized(evidence.get('diagnostic', '')) if image_verified else 'unavailable'}\n"
+            f"Recent log (untrusted and redacted): "
+            f"{evidence.get('log_excerpt', '')[:5000] if image_verified else 'unavailable'}\n"
+            "</untrusted-incident>"
         )
         # Keep Codex outputs in memory. Writing outside the sandbox workspace
         # can fail on Windows, and a report inside the worktree would taint diffs.
@@ -372,6 +389,17 @@ def main(argv=None) -> int:
     picture.add_argument("--execute", action="store_true",
                          help="Explicitly invoke Codex 6.1 Sol Light once")
     picture.add_argument("--acknowledge-cost", action="store_true")
+    full = sub.add_parser("investigate", help="Image + log diagnosis -> isolated code repair")
+    full.add_argument("fingerprint")
+    full.add_argument("--repo", type=Path, required=True,
+                      help="Clean checkout; source version must match to allow code patch")
+    full.add_argument("--log-root", type=Path,
+                      help="Root of local Mbi_auto_log export for local: records")
+    full.add_argument("--execute", action="store_true",
+                      help="Analyze image and, if eligible, attempt isolated patch")
+    full.add_argument("--acknowledge-cost", action="store_true")
+    full.add_argument("--max-daily", type=int, default=None,
+                      help="Optional patch-call cap (disabled by default)")
     args = parser.parse_args(argv)
     state = None
     try:
@@ -389,6 +417,12 @@ def main(argv=None) -> int:
         elif args.task == "inspect-image":
             result = inspect_image(state.job(args.fingerprint), args.image,
                                    args.github_image, args.execute, args.acknowledge_cost)
+        elif args.task == "investigate":
+            if args.max_daily is not None and args.max_daily < 1:
+                raise ValueError("--max-daily must be positive when specified")
+            result = investigate(state, args.fingerprint, args.repo,
+                                 args.log_root, args.execute,
+                                 args.acknowledge_cost, args.max_daily)
         else:
             if args.max_daily is not None and args.max_daily < 1:
                 raise ValueError("--max-daily must be positive when specified")
