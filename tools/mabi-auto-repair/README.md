@@ -1,6 +1,18 @@
-# MabiAutoRepair v0.1 — 독립형 자동수정 후보 프로그램
+# MabiAutoRepair v0.2 — 실제 오토로그 사전 검증
 
 기존 MabiAuto V3.2.62의 매크로 본체와 분리한 Python CLI입니다. 기존 자동수정기나 매크로 실행 경로에 다시 연결하지 않습니다.
+
+## v0.2: 실제 오토로그 기반 사전 차단
+
+2026-10-24 15:32:53(KST) 오토로그의 '다중가공 오류' (V3.2.60)를 개인정보 경로를 제거한 회귀 테스트 자료로 추가했습니다.
+
+- **현재 소스의 버전** (source/FishingAutomation/UpdateManager.cs)과 오류가 발생한 버전이 다르면 `source_version_not_reproduced`로 차단합니다. 구버전에서 난 오류가 최신 코드에서 재현됐다는 증거가 없기 때문입니다.
+- 화면/시설창/독립 UI/OCR/픽셀/템플릿 확인 실패처럼 이미지가 핵심인 오류인데 요약 텍스트만 있는 경우에는 `visual_evidence_missing`으로 차단합니다. 현재 이 독립 프로그램은 스크린샷을 전송하지 않습니다.
+- `run 오류지문 --repo 깨끗한_소스폴더`로 **AI 사용량 0회**인 사전 판정을 출력할 수 있습니다. `--execute`를 줘도 차단 사유가 있으면 Codex를 전혀 실행하지 않습니다.
+- 날짜별 한도는 그대로이며, 과거 동일 source 경로를 다시 수집해도 중복으로 적립하지 않습니다.
+- 원본 로그의 로컬 PC 경로, 스크린샷, 시각 증거 파일은 테스트 자료에 복사하지 않았습니다.
+
+검증 결과와 차단 사유가 확실해진 오류만 이후 별도 단계에서 수동 Codex 후보 실행을 허용합니다. 이는 자동 수정 성공을 의미하지 않습니다.
 
 ## 이번 버전에서 구현한 기능
 
@@ -22,7 +34,7 @@ Python 3.11 이상에서 저장소 루트를 기준으로 실행합니다.
 - GitHub 오류 가져오기: python tools/mabi-auto-repair/repair.py sync --github --limit 10
 - 이미 내려받은 오류: python tools/mabi-auto-repair/repair.py sync --dir Mbi_auto_log폴더 --limit 10
 - 전체 오류 및 지문 확인: python tools/mabi-auto-repair/repair.py status
-- **AI 호출 없이 선택 오류 검사:** python tools/mabi-auto-repair/repair.py run 오류지문
+- **AI 호출 없이 선택 오류 검사:** python tools/mabi-auto-repair/repair.py run 오류지문 --repo 깨끗한_MabiAuto_소스폴더
 - **명시적 1회 실행:** python tools/mabi-auto-repair/repair.py run 오류지문 --repo 깨끗한_MabiAuto_소스폴더 --execute --acknowledge-cost
 
 로컬 정보는 기본적으로 사용자 홈 폴더의 .MabiAutoRepair에 남습니다. 전체 명령에 --state 경로를 추가해 별도 상태 폴더를 지정할 수 있습니다.
