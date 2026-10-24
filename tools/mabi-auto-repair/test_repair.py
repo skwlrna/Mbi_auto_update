@@ -145,6 +145,81 @@ class OfflineTests(TestCase):
                 self.assertTrue((root / "state" / "workspaces" / key / "result.json").exists())
 
 
+    def test_explicit_bounded_paid_retry_repairs_failed_registered_regression(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "app"
+            version = src / "source/FishingAutomation/UpdateManager.cs"
+            version.parent.mkdir(parents=True)
+            (version.parent / "FishingAutomation.csproj").write_text("<Project/>")
+            version.write_text('public const string CurrentVersion = "V3.2.60";')
+            with repair.State(root / "state") as state:
+                key = state.add("fixture-retry", incident())
+                counts = {"codex": 0, "dotnet": 0}
+                def fake(args, cwd, timeout=30, prompt=None):
+                    if args[:2] == ["git", "rev-parse"]:
+                        return subprocess.CompletedProcess(args, 0, "a" * 40, "")
+                    if args[:2] == ["git", "status"]:
+                        diff = "" if "workspaces" not in str(cwd) else (
+                            " M source/FishingAutomation/AlteringPlan.cs\n"
+                            " M tests/altering/Program.cs\n")
+                        return subprocess.CompletedProcess(args, 0, diff, "")
+                    if args[:3] == ["git", "worktree", "add"]:
+                        Path(args[4]).mkdir(parents=True)
+                    if args[0] == "codex":
+                        counts["codex"] += 1
+                        if counts["codex"] == 2:
+                            self.assertIn("untrusted-regression-output", prompt)
+                    if args[0] == "dotnet":
+                        counts["dotnet"] += 1
+                        if counts["dotnet"] == 1:
+                            return subprocess.CompletedProcess(args, 1, "test mismatch", "")
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                with mock.patch.object(repair.shutil, "which", return_value="/installed"), \
+                     mock.patch.object(repair, "shell", side_effect=fake):
+                    outcome = repair.run_one(state, key, src, True, True, 1,
+                                             retry_regression_once=True)
+                self.assertEqual(outcome["status"], "candidate_passed")
+                self.assertEqual(outcome["patch_attempts"], 2)
+                self.assertEqual(counts, {"codex": 2, "dotnet": 2})
+                self.assertEqual(state.job(key)["calls"], 1,
+                                 "One reserved incident must never trigger a new scheduled retry")
+                self.assertEqual(state.job(key)["status"], "candidate_passed")
+
+    def test_opt_out_regression_failure_does_not_retry_paid_model(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "app"
+            version = src / "source/FishingAutomation/UpdateManager.cs"
+            version.parent.mkdir(parents=True)
+            (version.parent / "FishingAutomation.csproj").write_text("<Project/>")
+            version.write_text('public const string CurrentVersion = "V3.2.60";')
+            with repair.State(root / "state") as state:
+                key = state.add("fixture-no-retry", incident())
+                called = []
+                def fake(args, cwd, timeout=30, prompt=None):
+                    if args[:2] == ["git", "rev-parse"]:
+                        return subprocess.CompletedProcess(args, 0, "a"*40, "")
+                    if args[:2] == ["git", "status"]:
+                        diff = "" if "workspaces" not in str(cwd) else (
+                            " M source/FishingAutomation/AlteringPlan.cs\n"
+                            " M tests/altering/Program.cs\n")
+                        return subprocess.CompletedProcess(args, 0, diff, "")
+                    if args[:3] == ["git", "worktree", "add"]:
+                        Path(args[4]).mkdir(parents=True)
+                    if args[0] == "codex":
+                        called.append("model")
+                    if args[0] == "dotnet":
+                        return subprocess.CompletedProcess(args, 1, "fail", "")
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                with mock.patch.object(repair.shutil, "which", return_value="/installed"), \
+                     mock.patch.object(repair, "shell", side_effect=fake):
+                    outcome = repair.run_one(state, key, src, True, True, 1)
+                self.assertEqual(outcome["status"], "needs_review")
+                self.assertEqual(outcome["reason"], "Regression failed")
+                self.assertEqual(outcome["patch_attempts"], 1)
+                self.assertEqual(called, ["model"])
+
     def test_latest_github_incident_replay_blocks_paid_codex(self):
         # Real Mbi_auto_log runtime summary, with private absolute paths removed.
         fixtures = Path(__file__).resolve().parent / "fixtures"

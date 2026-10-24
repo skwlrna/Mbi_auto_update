@@ -309,6 +309,109 @@ class WatchTests(unittest.TestCase):
                     "SELECT status FROM watch_pr_ci WHERE source=?",
                     (source,)).fetchone()["status"], "pr_ci_needs_review")
 
+    def test_preflight_missing_tools_recovers_once_without_duplicate_charge(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "logs"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                source = write_incident(logs, "2026-10-24", "missing-then-fixed")
+                with mock.patch.object(watch.shutil, "which", return_value=None):
+                    first = watch.poll(state, logs, checkout, True, True)
+                self.assertEqual(first["outcomes"], {"missing_runtime": 1})
+                calls = []
+                with mock.patch.object(watch.shutil, "which", return_value="/installed"), \
+                     mock.patch.object(watch.repair, "clean_git_repo", return_value="a" * 40), \
+                     mock.patch.object(watch.pipeline, "investigate",
+                                       side_effect=lambda *a, **k: (calls.append(a[1]) or {
+                                           "status": "candidate_passed"})):
+                    second = watch.poll(state, logs, checkout, True, True)
+                    third = watch.poll(state, logs, checkout, True, True)
+                self.assertEqual(second["outcomes"], {"candidate_passed": 1})
+                self.assertEqual(third["new_count"], 0)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(watch.report_status(state)["recent_events"][0]["preflight_retries"], 1)
+                self.assertEqual(state.conn.execute(
+                    "SELECT status FROM watch_events WHERE source=?", (source,)
+                ).fetchone()["status"], "candidate_passed")
+
+    def test_preflight_retry_budget_exhausted_and_never_spends(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "logs"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                write_incident(logs, "2026-10-24", "unavailable-forever")
+                with mock.patch.object(watch.shutil, "which", return_value=None), \
+                     mock.patch.object(watch.pipeline, "investigate",
+                                       side_effect=AssertionError("No paid call")):
+                    for _ in range(4):
+                        watch.poll(state, logs, checkout, True, True)
+                report = watch.report_status(state)
+                self.assertEqual(report["counts"], {"retry_exhausted": 1})
+                self.assertEqual(report["recent_events"][0]["preflight_retries"], 2)
+                self.assertIn("manual review", report["recent_events"][0]["next_action"])
+
+    def test_reserved_job_cannot_be_reclaimed_for_preflight_retry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "logs"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                source = write_incident(logs, "2026-10-24", "blocked-reclaim")
+                with mock.patch.object(watch.shutil, "which", return_value=None):
+                    watch.poll(state, logs, checkout, True, True)
+                key = state.conn.execute(
+                    "SELECT job_id FROM seen WHERE source=?", (source,)).fetchone()["job_id"]
+                state.reserve(key)
+                with mock.patch.object(watch.shutil, "which", return_value="/installed"), \
+                     mock.patch.object(watch.pipeline, "investigate",
+                                       side_effect=AssertionError("No repeated Codex")):
+                    next_poll = watch.poll(state, logs, checkout, True, True)
+                self.assertEqual(next_poll["new_count"], 0)
+                self.assertEqual(watch.report_status(state)["counts"]["missing_runtime"], 1)
+
+    def test_failed_reason_and_duplicate_reference_are_visible_without_ai_replay(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "logs"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                original = write_incident(logs, "2026-10-24", "original")
+                with mock.patch.object(watch.shutil, "which", return_value="/installed"), \
+                     mock.patch.object(watch.repair, "clean_git_repo", return_value="a"*40), \
+                     mock.patch.object(watch.pipeline, "investigate",
+                                       return_value={"status": "needs_review",
+                                                     "reason": "Regression failed"}) as worker:
+                    first = watch.poll(state, logs, checkout, True, True)
+                    self.assertEqual(first["new_events"][0]["reason"], "Regression failed")
+                    write_incident(logs, "2026-10-24", "same-fingerprint")
+                    second = watch.poll(state, logs, checkout, True, True)
+                    self.assertEqual(second["outcomes"], {"duplicate_fingerprint": 1})
+                    self.assertEqual(second["new_events"][0]["first_report"], original)
+                    self.assertEqual(second["new_events"][0]["first_status"], "needs_review")
+                    worker.assert_called_once()
+
+    def test_paid_patch_retry_requires_explicit_cost_ack(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            logs = root / "logs"
+            logs.mkdir()
+            checkout = version_checkout(root / "app")
+            with repair.State(root / "state") as state:
+                watch.initialize(state, logs)
+                with self.assertRaisesRegex(ValueError, "acknowledge-cost"):
+                    watch.poll(state, logs, checkout, False, False, retry_patch_once=True)
+                self.assertEqual(watch.report_status(state)["counts"], {})
+
 
 if __name__ == "__main__":
     unittest.main()
