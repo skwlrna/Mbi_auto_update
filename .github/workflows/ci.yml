@@ -45,6 +45,16 @@ jobs:
           python -m unittest discover -s tests/ai-removal -p 'test_*.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Legacy autofix removal checks failed' }
 
+      - name: Validate retirement PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $syntaxErrors = $null
+          $path = (Resolve-Path 'source/tools/RetireAutoRepair.ps1').Path
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            $path, [ref]$tokens, [ref]$syntaxErrors)
+          if ($syntaxErrors.Count -gt 0) { throw "Retirement helper PowerShell syntax failed" }
+
       - name: Stability regression tests
         shell: pwsh
         run: dotnet run --project changes/tests/stability/Regression.csproj -c Release --no-restore

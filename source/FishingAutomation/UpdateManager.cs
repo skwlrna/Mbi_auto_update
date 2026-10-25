@@ -16,7 +16,7 @@ internal sealed record ReleaseUpdateInfo(
 
 internal static class UpdateManager
 {
-    public const string CurrentVersion = "V3.2.63";
+    public const string CurrentVersion = "V3.2.64";
     public const string RepositoryOwner = "skwlrna";
     public const string RepositoryName = "Mbi_auto_update";
 
@@ -210,6 +210,36 @@ internal static class UpdateManager
         var updaterProcess = Process.Start(psi);
         if (updaterProcess is null)
             throw new InvalidOperationException("업데이트 도우미를 실행하지 못했습니다.");
+    }
+
+
+    // Runs from the signed-in user's updated app; no manual PowerShell step.
+    // The helper can only retire the named AI watcher and its two owned data directories.
+    public static void LaunchAutoRepairRetirement()
+    {
+        try
+        {
+            string script = Path.Combine(FindPackageRoot(), "tools", "RetireAutoRepair.ps1");
+            if (!File.Exists(script)) return;
+            var process = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = FindPackageRoot()
+            };
+            process.ArgumentList.Add("-NoProfile");
+            process.ArgumentList.Add("-NonInteractive");
+            process.ArgumentList.Add("-ExecutionPolicy");
+            process.ArgumentList.Add("Bypass");
+            process.ArgumentList.Add("-File");
+            process.ArgumentList.Add(script);
+            Process.Start(process);
+        }
+        catch
+        {
+            // Cleanup cannot disable the macro or block its startup.
+        }
     }
 
     public static bool IsUpdatePending()

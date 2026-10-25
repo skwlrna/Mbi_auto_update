@@ -121,7 +121,8 @@ public sealed partial class MainForm : Form
             await Task.Delay(1200);
             if (IsDisposed) return;
 
-            if (UpdateManager.IsUpdatePending())
+            bool approvedUpdateStartup = !UpdateManager.IsUpdatePending();
+            if (!approvedUpdateStartup)
             {
                 bool criticalHealthy = await WaitForCriticalUpdateHealthAsync();
                 if (criticalHealthy)
@@ -130,6 +131,7 @@ public sealed partial class MainForm : Form
                     if (backupPreserved)
                     {
                         UpdateManager.MarkStartupHealthy();
+                        approvedUpdateStartup = true;
                         _log.Write("[업데이트] 필수 점검 통과 + 직전 버전 백업 보존 완료 -> 업데이트 확정");
                     }
                     else
@@ -138,6 +140,9 @@ public sealed partial class MainForm : Form
                     }
                 }
             }
+
+            if (approvedUpdateStartup)
+                UpdateManager.LaunchAutoRepairRetirement();
 
             _notifier.StartRemoteControl(HandleTelegramCommandAsync);
             await RunStartupDiagnosticsAsync();
