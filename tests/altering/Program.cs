@@ -1586,6 +1586,46 @@ Check(AlteringTravelActivityPolicy.Describe(
       AlteringTravelActivityPolicy.Describe(travelIdle).Contains("Dungeon=NotInDungeon"),
     "F9 travel: errors expose exact safety bits instead of misleading generic messages");
 
+// 2026-10-25 07:16 F9 incident: a NEW manager run began while the prior
+// confirmed auto-travel was still running. Only bounded, input-free polling
+// may bridge that state. The previous trip never proves the current facility.
+var v3263PriorTravel = travelIdle with { IsAutoTraveling = true };
+Check(AlteringTravelActivityPolicy.IsManagedSafeIdle(travelIdle) &&
+      !AlteringTravelActivityPolicy.IsManagedSafeIdle(v3263PriorTravel) &&
+      AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+          v3263PriorTravel),
+    "F9 old auto-travel: cannot input while moving; may only observe CLI");
+Check(!AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+          v3263PriorTravel with { IsDead = true }) &&
+      !AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+          v3263PriorTravel with { IsInCombat = true }) &&
+      !AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+          v3263PriorTravel with { DungeonState = "InDungeon" }) &&
+      !AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+          v3263PriorTravel with { IsDialoguePlaying = true }) &&
+      !AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+          v3263PriorTravel with { IsWaitingForSelection = true }) &&
+      !AlteringTravelActivityPolicy.IsManagedSafeIdle(
+          travelIdle with { IsDialoguePlaying = true }),
+    "F9 old auto-travel: combat, dungeon, dialogue and selection fail closed");
+Check(AlteringTravelActivityPolicy.RequiredFreshManagedIdleReads == 2 &&
+      AlteringTravelActivityPolicy.ManagedPreInputTravelWaitLimit ==
+          TimeSpan.FromSeconds(30) &&
+      AlteringTravelActivityPolicy.IsWithinManagedPreInputTravelWait(TimeSpan.Zero) &&
+      AlteringTravelActivityPolicy.IsWithinManagedPreInputTravelWait(
+          TimeSpan.FromMilliseconds(29999)) &&
+      !AlteringTravelActivityPolicy.IsWithinManagedPreInputTravelWait(
+          TimeSpan.FromSeconds(30)) &&
+      !AlteringTravelActivityPolicy.IsWithinManagedPreInputTravelWait(
+          TimeSpan.FromSeconds(-1)),
+    "F9 old auto-travel: max 30 seconds, two independent idle reads, no endless polling");
+Check(!AlteringTravelActivityPolicy.IsManagedSafeIdle(
+          travelIdle with { MainButtonState = "Fishing" }) &&
+      !AlteringTravelActivityPolicy.IsManagedSafeIdle(
+          travelIdle with { MainButtonState = "Stop",
+                            LastRunningInteractionType = "Gathering" }),
+    "F9 old auto-travel: gathering or fishing never authorizes facility inputs");
+
 // Existing F9 travel and receipt safety regressions follow unchanged.
 // V3.1.76: F9 long-distance facility travel expires by elapsed time,
  // not 120 UI/CLI poll iterations. No extension on loading or confirmation.
