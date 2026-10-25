@@ -76,10 +76,14 @@ jobs:
               }).Count -lt 1) { throw 'Repair PR CI missing' }
           $passed = $false
           for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            $mainCI = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=30" | ConvertFrom-Json
+            # GITHUB_TOKEN merges do not emit a new push-triggered CI run.
+            # A trusted workflow explicitly dispatches ci.yml on main instead.
+            # Both are valid ONLY for the exact immutable reviewed merge SHA.
+            $mainCI = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&per_page=100" | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0) { throw 'Main CI API unavailable' }
             $ours = @($mainCI.workflow_runs | Where-Object {
-              $_.head_sha -eq $sha -and $_.event -eq 'push' -and $_.head_branch -eq 'main'
+              $_.head_sha -eq $sha -and $_.event -in @('push','workflow_dispatch') -and
+              $_.head_branch -eq 'main' -and $_.name -eq 'Check V3 Production Engine'
             })
             if (@($ours | Where-Object { $_.status -eq 'completed' -and $_.conclusion -eq 'success' }).Count -gt 0) {
               $passed = $true; break
