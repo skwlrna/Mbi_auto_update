@@ -1772,12 +1772,55 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
 
         if (activity is not null &&
-            GatheringSafetyPolicy.IsSafeField(activity) &&
-            !activity.IsAutoTraveling &&
-            !activity.IsGathering &&
-            !activity.IsFishing &&
-            !activity.IsInCombat)
+            AlteringTravelActivityPolicy.IsManagedSafeIdle(activity))
             return;
+
+        // 2026-10-25 07:16 F9: the preceding trip was still in progress when
+        // a fresh manager-directed batch began. Watching a positively
+        // reported auto-travel is read-only: NEVER send K/Esc/click/Space,
+        // never trust a previous facility cache, and never infer arrival.
+        // A dangerous/unknown CLI state fails immediately. Two independent
+        // fresh safe-idle responses are needed before any existing visual
+        // and coordinator authorization checks may run.
+        if (activity is not null && _cli is not null &&
+            AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(activity))
+        {
+            Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {phase} · 이전 자동이동 종료 관찰 시작" +
+                $" · 최대 {AlteringTravelActivityPolicy.ManagedPreInputTravelWaitLimit.TotalSeconds:0}초" +
+                " · 입력 없이 CLI만 재확인");
+            var travelWait = Stopwatch.StartNew();
+            int consecutiveIdleReads = 0;
+            while (AlteringTravelActivityPolicy.IsWithinManagedPreInputTravelWait(
+                       travelWait.Elapsed))
+            {
+                await Task.Delay(600, ct);
+                ct.ThrowIfCancellationRequested();
+                var fresh = await _cli.GetActivityAsync(ct);
+                activity = fresh.Success ? GatheringQueries.ParseActivity(fresh) : null;
+                if (activity is null)
+                    break;
+                if (AlteringTravelActivityPolicy.IsManagedSafeIdle(activity))
+                {
+                    consecutiveIdleReads++;
+                    if (consecutiveIdleReads >=
+                        AlteringTravelActivityPolicy.RequiredFreshManagedIdleReads)
+                    {
+                        Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · {phase}" +
+                            " · 이전 이동 종료 CLI 2회 확인 · 기존 화면 검증 계속");
+                        return;
+                    }
+                }
+                else if (AlteringTravelActivityPolicy.CanObserveExistingTravelBeforeManagedInput(
+                             activity))
+                {
+                    consecutiveIdleReads = 0;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
 
         string reason = $"관리 가공 입력 차단 · {phase} · " +
             $"CLI activity={(activity is null ? "불명확" : activity.IsAutoTraveling ? "이동 중" : "안전한 대기 아님")}";
