@@ -1546,8 +1546,8 @@ Check(AlteringTravelActivityPolicy.AssessAfterMove(
       AlteringTravelActivityPolicy.AssessAfterMove(
         travelIdle with { IsWaitingForSelection = true }) ==
       AlteringTravelActivityVerdict.AwaitPossibleTravelDialog &&
-      AlteringTravelActivityPolicy.MaxAmbiguousFrames == 3,
-    "F9 travel: ambiguous CLI dialogue/selection only waits three no-input frames");
+      AlteringTravelActivityPolicy.MaxAmbiguousFrames == 8,
+    "F9 travel: transient CLI dialogue/selection observes at most eight no-input frames");
 Check(AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
         travelIdle with { IsDialoguePlaying = true, IsWaitingForSelection = true }) &&
       !GatheringSafetyPolicy.IsSafeField(
