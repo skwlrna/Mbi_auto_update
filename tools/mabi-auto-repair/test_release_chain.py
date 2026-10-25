@@ -20,7 +20,7 @@ class ApprovalReleaseChainTests(unittest.TestCase):
             "real_game_verified -ne $false",
             "operator_reviewed -ne $true",
             "pr.merge_commit_sha -ne $record.reviewed_merge_sha",
-            "git diff --name-only $record.reviewed_merge_sha HEAD",
+            "$diff = @(git diff --name-only $releaseDiffBase HEAD)",
             "Not the immediately next semantic version",
             "No reviewed repair approval on this commit: release skipped",
             "No successful production CI for current main SHA",
@@ -42,6 +42,27 @@ class ApprovalReleaseChainTests(unittest.TestCase):
                if line.startswith("        id: ")]
         self.assertEqual(len(ids), len(set(ids)), "Duplicate workflow step IDs")
         self.assertEqual(ids, ["approval", "eligibility"])
+
+    def test_one_off_ci_only_f9_release_is_bound_to_both_merged_fixes(self):
+        pub = self.read(".github/workflows/publish-reviewed-repair-auto-update.yml")
+        for marker in (
+            "$manualF9 = $record.version -eq 'V3.2.63'",
+            "[string]$record.pr -eq '315'",
+            "a7d3ab33f4b23893f1087e3c9b95409819d6200d",
+            "0c880a865513db0a04b5206154a695018fd05814",
+            "3f15bb97818e878c3d5424c85fb1f8f04bc4cf6e",
+            "f1e61bcbd33284c0c96cd6c347d7e7d308c42ec8",
+            "reviewed_manual_f9_20261025",
+            "$record.release_baseline_sha -notmatch '^[0-9a-f]{40}$'",
+            "git merge-base --is-ancestor $prior.merge_commit_sha $record.reviewed_merge_sha",
+            "git merge-base --is-ancestor $record.reviewed_merge_sha $record.release_baseline_sha",
+            "$releaseDiffBase = $record.release_baseline_sha",
+            "$diff.Count -ne 4",
+            "($pr.head.ref -notmatch '^auto-repair/",
+            "-and -not $manualF9) -or",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, pub)
 
     def test_release_prep_is_workflow_token_safe(self):
         wf = self.read(".github/workflows/prepare-reviewed-repair-release.yml")

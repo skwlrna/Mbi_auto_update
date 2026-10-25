@@ -70,10 +70,16 @@ jobs:
               $record.reviewed_merge_sha -notmatch '^[0-9a-f]{40}$') {
             throw 'Invalid reviewed repair release approval'
           }
+          # This one-off CI-only rollout cannot approve other manual PRs.
+          $manualF9 = $record.version -eq 'V3.2.63' -and
+              [string]$record.pr -eq '315' -and
+              $record.approved_head_sha -eq 'a7d3ab33f4b23893f1087e3c9b95409819d6200d' -and
+              $record.reviewed_merge_sha -eq '0c880a865513db0a04b5206154a695018fd05814' -and
+              $record.release_source -eq 'reviewed_manual_f9_20261025'
           $pr = gh api "repos/$env:GITHUB_REPOSITORY/pulls/$($record.pr)" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $pr -or $pr.merged_at -eq $null -or
               $pr.base.ref -ne 'main' -or $pr.head.repo.full_name -ne $env:GITHUB_REPOSITORY -or
-              $pr.head.ref -notmatch '^auto-repair/[a-f0-9]{24}-[a-f0-9]{8}$' -or
+              ($pr.head.ref -notmatch '^auto-repair/[a-f0-9]{24}-[a-f0-9]{8}$' -and -not $manualF9) -or
               $pr.head.sha -ne $record.approved_head_sha -or
               $pr.merge_commit_sha -ne $record.reviewed_merge_sha) {
             throw 'Reviewed PR provenance mismatch'
@@ -82,10 +88,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Reviewed merge commit missing' }
           git merge-base --is-ancestor $record.reviewed_merge_sha HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Reviewed repair is not an ancestor' }
+          $releaseDiffBase = $record.reviewed_merge_sha
+          if ($manualF9) {
+            if ($pr.head.ref -ne 'fix/managed-travel-ambiguous-dialog-observation-20261025' -or
+                [string]$record.prior_pr -ne '314' -or
+                $record.release_baseline_sha -notmatch '^[0-9a-f]{40}$') {
+              throw 'Manual F9 review metadata mismatch'
+            }
+            $prior = gh api "repos/$env:GITHUB_REPOSITORY/pulls/314" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not $prior -or $prior.merged_at -eq $null -or
+                $prior.head.sha -ne '3f15bb97818e878c3d5424c85fb1f8f04bc4cf6e' -or
+                $prior.merge_commit_sha -ne 'f1e61bcbd33284c0c96cd6c347d7e7d308c42ec8') {
+              throw 'Prior reviewed F9 safety PR mismatch'
+            }
+            git merge-base --is-ancestor $prior.merge_commit_sha $record.reviewed_merge_sha
+            if ($LASTEXITCODE -ne 0) { throw 'First F9 fix not included in second reviewed merge' }
+            git cat-file -e "$($record.release_baseline_sha)^{commit}"
+            if ($LASTEXITCODE -ne 0) { throw 'Manual release baseline missing' }
+            git merge-base --is-ancestor $record.reviewed_merge_sha $record.release_baseline_sha
+            if ($LASTEXITCODE -ne 0) { throw 'Release baseline missing approved F9 fixes' }
+            $releaseDiffBase = $record.release_baseline_sha
+          }
           $allowed = @('source/FishingAutomation/UpdateManager.cs',
                        'source/FishingAutomation/FishingAutomation.csproj',
                        $path, "source/RELEASE_NOTES_$($version).md")
-          $diff = @(git diff --name-only $record.reviewed_merge_sha HEAD)
+          $diff = @(git diff --name-only $releaseDiffBase HEAD)
           if ($LASTEXITCODE -ne 0 -or $diff.Count -ne 4) {
             throw 'Reviewed merge must be followed by exactly four version files'
           }
