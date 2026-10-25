@@ -111,6 +111,43 @@ def pull_logs(root: Path) -> None:
         raise ValueError("Git log pull failed; check GitHub authentication and conflicts")
 
 
+def sync_source_repo(repo: Path) -> bool:
+    """Fast-forward a clean, trusted local main before processing new incidents.
+
+    A new public release increments the source version. Without this step,
+    the existing 5-minute watcher would permanently skip newer reports as
+    skipped_version even though the installed executable auto-updated.
+    Never reset, force-pull, switch branches, or overwrite operator edits.
+    """
+    before = repair.clean_git_repo(repo)
+
+    def git(*args):
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                capture_output=True, text=True, timeout=90, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError("Cannot safely synchronize MabiAuto source") from exc
+        if done.returncode:
+            raise ValueError("Source fast-forward blocked: inspect GitHub connection or checkout")
+        return done.stdout.strip()
+
+    if git("branch", "--show-current") != "main":
+        raise ValueError("Automatic source update requires the main branch")
+    origin = git("remote", "get-url", "origin")
+    trusted = frozenset({
+        "https://github.com/skwlrna/Mbi_auto_update",
+        "https://github.com/skwlrna/Mbi_auto_update.git",
+        "git@github.com:skwlrna/Mbi_auto_update.git",
+        "git@github.com:skwlrna/Mbi_auto_update",
+    })
+    if origin not in trusted:
+        raise ValueError("Automatic source update requires the expected origin")
+    git("pull", "--ff-only", "origin", "main")
+    after = repair.clean_git_repo(repo)
+    return after != before
+
+
 def initialize(state: repair.State, root: Path) -> dict:
     prepare(state)
     if state.conn.execute("SELECT 1 FROM watch_meta WHERE name='initialized'").fetchone():
@@ -444,6 +481,18 @@ def main(argv=None) -> int:
         state = repair.State(args.state)
         if args.mode in ("init", "poll") and not args.no_pull:
             pull_logs(args.log_root)
+        if (args.mode == "poll" and args.auto_pr and not args.no_pull):
+            # Same scheduled watcher flags already include --auto-pr.
+            # If source advanced, re-execute the new watcher code on the NEXT
+            # scheduled tick, before claiming any event or using paid Codex.
+            if sync_source_repo(args.repo):
+                print(json.dumps({
+                    "status": "source_fast_forwarded",
+                    "next": "Next scheduled poll uses the new source and watcher code",
+                    "codex_calls": 0,
+                    "incidents_claimed": 0,
+                }, ensure_ascii=True))
+                return 0
         if args.mode == "init":
             result = initialize(state, args.log_root)
         elif args.mode == "poll":

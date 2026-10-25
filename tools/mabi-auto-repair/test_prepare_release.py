@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -110,8 +111,16 @@ class ReleasePrepTests(unittest.TestCase):
         ci_before = (self.root / ".github/workflows/ci.yml").read_bytes()
         publisher_before = (self.root /
             ".github/workflows/publish-reviewed-repair-auto-update.yml").read_bytes()
-        result = stage.prepare(self.root, "V3.2.62", 4321, HEAD, MERGE)
-        self.assertEqual(result["new_version"], "V3.2.63")
+        # Read the ACTUAL checkout version instead of assuming a stale
+        # public V3.2.62. This contract must keep passing after every
+        # successful automatically published patch release.
+        update_source = (self.root / "source/FishingAutomation/UpdateManager.cs").read_text(
+            encoding="utf-8-sig")
+        match = re.search(r'CurrentVersion = "(V\d+\.\d+\.\d+)"', update_source)
+        self.assertIsNotNone(match)
+        published = match.group(1)
+        result = stage.prepare(self.root, published, 4321, HEAD, MERGE)
+        self.assertEqual(result["new_version"], stage.next_tag(published, published))
         self.assertEqual(ci_before, (self.root / ".github/workflows/ci.yml").read_bytes())
         self.assertEqual(publisher_before, (self.root /
             ".github/workflows/publish-reviewed-repair-auto-update.yml").read_bytes())

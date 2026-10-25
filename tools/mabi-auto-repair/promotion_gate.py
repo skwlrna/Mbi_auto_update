@@ -255,10 +255,16 @@ def promote_ci_only(number: int, acknowledge_unverified: bool,
         raise GateError("Candidate changed after approval; CI-only merge cancelled")
     gh(["pr", "merge", str(number), "--repo", REPO,
         "--squash", "--match-head-commit", details["head_sha"]], 120)
-    # The approval is the single user confirmation point. Dispatch the
-    # next-version workflow *after* merge, not from scheduled watch. That job
-    # waits for successful exact-main CI, checks approval provenance, prepares
-    # version metadata, and triggers a fresh CI-gated Windows release.
+    # A GitHub Actions GITHUB_TOKEN merge does NOT automatically trigger
+    # push workflows. Explicitly start production main CI after merge, then
+    # enqueue release preparation. That job waits for exact-main CI success
+    # (push OR workflow_dispatch) before writing any version metadata.
+    try:
+        gh(["workflow", "run", "ci.yml",
+            "--repo", REPO, "--ref", "main"], 45)
+    except GateError as exc:
+        raise GateError("Repair merged but main production CI dispatch failed. "
+                        "Release preparation was not requested.") from exc
     try:
         gh(["workflow", "run", "prepare-reviewed-repair-release.yml",
             "--repo", REPO, "--ref", "main",

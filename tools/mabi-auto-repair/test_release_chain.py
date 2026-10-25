@@ -64,6 +64,50 @@ class ApprovalReleaseChainTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, pub)
 
+    def test_ci_passed_auto_repair_is_promoted_only_through_trusted_gate(self):
+        flow = self.read(".github/workflows/auto-promote-ci-repair.yml")
+        for marker in (
+            'workflow_run:',
+            'workflows: ["Check V3 Production Engine"]',
+            "github.event.workflow_run.event == 'pull_request'",
+            "github.event.workflow_run.conclusion == 'success'",
+            "github.event.workflow_run.repository.full_name == github.repository",
+            "github.event.workflow_run.head_repository.full_name == github.repository",
+            "startsWith(github.event.workflow_run.head_branch, 'auto-repair/')",
+            'permissions:',
+            'pull-requests: write',
+            'actions: write',
+            'cancel-in-progress: false',
+            'ref: main',
+            'persist-credentials: false',
+            '^auto-repair/[0-9a-f]{24}-[0-9a-f]{8}$',
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, flow)
+        for marker in (
+            'if not isinstance(prs, list) or len(prs) == 100:',
+            'and pr.get("head", {}).get("sha") == sha',
+            'and pr.get("head", {}).get("ref") == branch',
+            'and pr.get("base", {}).get("ref") == "main"',
+            'if len(matches) == 0:',
+            'elif len(matches) == 1:',
+            'raise SystemExit("Multiple matching repair PRs: blocked")',
+            "promote-ci-only",
+            "--acknowledge-unverified --acknowledge-merge",
+            "if: steps.candidate.outputs.eligible == 'true'",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, flow)
+        self.assertNotIn("--admin", flow)
+        self.assertNotIn("gh release create", flow)
+        self.assertNotIn("git push origin", flow)
+        # CI-only promotion always goes through the existing strict audit,
+        # not through a second permissive path.
+        gate = self.read("tools/mabi-auto-repair/promotion_gate.py")
+        self.assertIn("def promote_ci_only(", gate)
+        self.assertIn("--match-head-commit", gate)
+        self.assertIn('"prepare-reviewed-repair-release.yml"', gate)
+
     def test_release_prep_is_workflow_token_safe(self):
         wf = self.read(".github/workflows/prepare-reviewed-repair-release.yml")
         script = self.read("tools/mabi-auto-repair/prepare_release.py")
