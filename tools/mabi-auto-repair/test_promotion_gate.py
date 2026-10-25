@@ -216,28 +216,46 @@ class PromoteGateTests(unittest.TestCase):
         self.assertFalse(result["real_game_verified"])
         self.assertFalse(result["rollback_game_verified"])
         self.assertEqual(result["release"], "workflow_queued_not_published")
-        self.assertEqual(len(commands), 3)
+        self.assertEqual(len(commands), 4)
         self.assertEqual(commands[0][:3], ["pr", "ready", str(PR)])
         self.assertEqual(commands[1][:3], ["pr", "merge", str(PR)])
         self.assertIn("--match-head-commit", commands[1])
-        self.assertEqual(commands[2][:3], ["workflow", "run", "prepare-reviewed-repair-release.yml"])
-        self.assertIn(f"repair_pr={PR}", commands[2])
-        self.assertIn(f"reviewed_head_sha={HEAD}", commands[2])
-        self.assertIn("acknowledge_unverified=true", commands[2])
+        self.assertEqual(commands[2][:3], ["workflow", "run", "ci.yml"])
+        self.assertIn("--ref", commands[2])
+        self.assertIn("main", commands[2])
+        self.assertEqual(commands[3][:3], ["workflow", "run", "prepare-reviewed-repair-release.yml"])
+        self.assertIn(f"repair_pr={PR}", commands[3])
+        self.assertIn(f"reviewed_head_sha={HEAD}", commands[3])
+        self.assertIn("acknowledge_unverified=true", commands[3])
         self.assertNotIn("release create", " ".join(" ".join(cmd) for cmd in commands))
 
     def test_ci_only_dispatch_failure_is_reported_after_merge(self):
         commands = []
         def fake(args, timeout=30):
             commands.append(args)
-            if args[:2] == ["workflow", "run"]:
+            if args[:3] == ["workflow", "run", "prepare-reviewed-repair-release.yml"]:
                 raise gate.GateError("dispatch blocked")
             return ""
         with self.audit_with(responses()), mock.patch.object(gate, "gh", side_effect=fake):
             with self.assertRaisesRegex(gate.GateError, "merged, but release preparation"):
                 gate.promote_ci_only(PR, True, True)
+        self.assertEqual(len(commands), 4)
+        self.assertEqual(commands[1][:3], ["pr", "merge", str(PR)])
+        self.assertEqual(commands[2][:3], ["workflow", "run", "ci.yml"])
+
+    def test_main_ci_dispatch_failure_stops_release_preparation(self):
+        commands = []
+        def fake(args, timeout=30):
+            commands.append(args)
+            if args[:3] == ["workflow", "run", "ci.yml"]:
+                raise gate.GateError("main CI dispatch blocked")
+            return ""
+        with self.audit_with(responses()), mock.patch.object(gate, "gh", side_effect=fake):
+            with self.assertRaisesRegex(gate.GateError, "main production CI dispatch failed"):
+                gate.promote_ci_only(PR, True, True)
         self.assertEqual(len(commands), 3)
         self.assertEqual(commands[1][:3], ["pr", "merge", str(PR)])
+        self.assertEqual(commands[2][:3], ["workflow", "run", "ci.yml"])
 
     def test_ci_only_fails_for_stale_ci_and_head_changes(self):
         for conclusion in ("pending", "failure"):
