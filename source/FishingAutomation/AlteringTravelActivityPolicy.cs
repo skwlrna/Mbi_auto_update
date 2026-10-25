@@ -13,7 +13,12 @@ internal enum AlteringTravelActivityVerdict
 // A genuine combat/death/dungeon is never treated as a transient popup.
 internal static class AlteringTravelActivityPolicy
 {
-    internal const int MaxAmbiguousFrames = 3;
+    // Runtime 2026-10-25 07:14:59: the post-travel dialogue bit persisted
+    // across three quick reads after movement. Permit a few MORE read-only
+    // observations before failing closed. This is not popup authorization:
+    // only the separate two-frame visual confirmation may permit Space.
+    // Genuine hazards still fail immediately, and repeats remain bounded.
+    internal const int MaxAmbiguousFrames = 8;
 
     // An F9 session can be started while a PREVIOUS, positively reported
     // auto-travel is still running. Only observe it without inputs, for a
