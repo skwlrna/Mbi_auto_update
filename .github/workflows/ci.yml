@@ -91,11 +91,16 @@ jobs:
                                    "<FileVersion>$version.0</FileVersion>")) {
             if (-not $p.Contains($required)) { throw 'project version mismatch' }
           }
-          $publisher = Get-Content .github/workflows/publish-reviewed-repair-auto-update.yml -Raw
-          if ($publisher -notmatch 'CI-only reviewed release:' -or
-              $publisher -notmatch 'MabiAuto_.*Windows_Lite.zip.sha256' -or
-              $publisher -notmatch 'RollbackPrevious.ps1') {
-            throw 'Generic reviewed-repair release safety gates missing'
+          # Auto-repair was intentionally retired; keep it absent.
+          foreach ($obsolete in @(
+            'tools/mabi-auto-repair',
+            '.github/workflows/auto-promote-ci-repair.yml',
+            '.github/workflows/mabi-auto-repair-ci.yml',
+            '.github/workflows/prepare-reviewed-repair-release.yml',
+            '.github/workflows/publish-reviewed-repair-auto-update.yml')) {
+            if (Test-Path -LiteralPath $obsolete) {
+              throw "Retired automatic repair artifact still present: $obsolete"
+            }
           }
 
       - name: V3.2.49 auto-update source policy
