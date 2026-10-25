@@ -15,6 +15,27 @@ internal static class AlteringTravelActivityPolicy
 {
     internal const int MaxAmbiguousFrames = 3;
 
+    // An F9 session can be started while a PREVIOUS, positively reported
+    // auto-travel is still running. Only observe it without inputs, for a
+    // bounded interval; a safe idle is freshly confirmed twice afterwards.
+    internal static readonly TimeSpan ManagedPreInputTravelWaitLimit = TimeSpan.FromSeconds(30);
+    internal const int RequiredFreshManagedIdleReads = 2;
+
+    internal static bool IsManagedSafeIdle(GatheringActivity activity)
+        => GatheringSafetyPolicy.IsSafeField(activity) &&
+           !activity.IsAutoTraveling &&
+           !activity.IsGathering && !activity.IsFishing &&
+           !activity.IsInCombat;
+
+    internal static bool CanObserveExistingTravelBeforeManagedInput(GatheringActivity activity)
+        => activity.IsAutoTraveling &&
+           GatheringSafetyPolicy.IsSafeField(activity) &&
+           !activity.IsGathering && !activity.IsFishing &&
+           !activity.IsInCombat;
+
+    internal static bool IsWithinManagedPreInputTravelWait(TimeSpan elapsed)
+        => elapsed >= TimeSpan.Zero && elapsed < ManagedPreInputTravelWaitLimit;
+
     internal static AlteringTravelActivityVerdict AssessAfterMove(GatheringActivity activity)
     {
         if (GatheringSafetyPolicy.IsSafeField(activity) && !activity.IsInCombat)
