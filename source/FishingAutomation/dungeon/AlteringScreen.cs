@@ -2546,7 +2546,49 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 p.G >= p.B + 8)
                 kButtonTeal++;
         }
-        return minimapGold >= 20 && kButtonTeal >= 10;
+        // Gold rim is missing in the 2026-10-26 17:45 cave field,
+        // although the K/I templates and Home/End/ESC glyphs are stable.
+        // Retain the original gold route; this independent non-gold route
+        // needs the actual K disc, central Space compass ring AND the
+        // minimap's small orange direction marker, not just world color.
+        return (minimapGold >= 20 && kButtonTeal >= 10) ||
+               HasManagedKEntryNonGoldFieldHudVisual(frame, kButtonTeal);
+    }
+
+    // Cave and gray-map world layouts do not have the gold minimap rim.
+    // This is ONLY independent world evidence used with consecutive
+    // K/I templates or exact Home/End/ESC glyphs; never permission by itself.
+    // Modal/menu veto, last-frame check and CLI-idle verification stay mandatory.
+    private static bool HasManagedKEntryNonGoldFieldHudVisual(
+        Bitmap frame, int kButtonTeal)
+    {
+        if (frame.Width != 800 || frame.Height != 1000 || kButtonTeal < 10)
+            return false;
+
+        int compassGreenRing = 0;
+        for (int y = 810; y <= 928; y += 3)
+        for (int x = 344; x <= 457; x += 3)
+        {
+            int dx = x - 400, dy = y - 869;
+            int radiusSquared = dx * dx + dy * dy;
+            if (radiusSquared < 38 * 38 || radiusSquared > 56 * 56)
+                continue;
+            Color p = frame.GetPixel(x, y);
+            if (p.G >= 105 && p.G >= p.R + 18 && p.G >= p.B + 9)
+                compassGreenRing++;
+        }
+
+        int minimapOrangeMarker = 0;
+        for (int y = 148; y <= 182; y += 2)
+        for (int x = 770; x <= 795; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            if (p.R >= 160 && p.G >= 115 &&
+                p.R >= p.B + 50 && p.G >= p.B + 18)
+                minimapOrangeMarker++;
+        }
+
+        return compassGreenRing >= 22 && minimapOrangeMarker >= 6;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
