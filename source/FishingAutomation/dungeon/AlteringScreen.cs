@@ -1129,6 +1129,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     var started = Stopwatch.StartNew();
                     var previousHud = DetectManagedWorldHudTemplates(frame);
                     bool previousField = HasManagedKEntryFieldHudVisual(frame);
+                    bool previousBlueField = HasManagedKEntryBlueRimFieldVisual(frame);
                     bool NeedsKeyOcr((int Matched, string Scores, bool KFound, bool IFound, bool HomeFound, bool EndFound) hud, bool field)
                         => hud.Matched < 3 && !(field && (hud.KFound && hud.IFound || hud.HomeFound && hud.EndFound));
                     var previousKeys = await FindManagedWorldHudKeysAsync(frame, NeedsKeyOcr(previousHud, previousField), ct);
@@ -1140,6 +1141,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         using var freshField = Capture(ct);
                         var currentHud = DetectManagedWorldHudTemplates(freshField);
                         bool currentField = HasManagedKEntryFieldHudVisual(freshField);
+                        bool currentBlueField = HasManagedKEntryBlueRimFieldVisual(freshField);
                         var currentKeys = await FindManagedWorldHudKeysAsync(freshField, NeedsKeyOcr(currentHud, currentField), ct);
                         samples++;
                         bool actualModal = HasManagedKEntryBlockingModal(freshField);
@@ -1151,7 +1153,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"경로={(firstEntry ? "최초 필드 시작" : "중간 재진입")} · " +
                             $"HUD={previousHud.Matched}/4 → {currentHud.Matched}/4 · " +
                             $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
-                            $"필드독립증거={previousField}→{currentField} · " +
+                            $"필드독립증거={previousField}→{currentField} · 동굴푸른테두리={previousBlueField}→{currentBlueField} · " +
                             $"K/I={previousHud.KFound}/{previousHud.IFound}→{currentHud.KFound}/{currentHud.IFound} · " +
                             $"단축키={previousKeys.Scores}→{currentKeys.Scores} · " +
                             $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
@@ -1188,13 +1190,26 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 previousHud.HomeFound, previousHud.EndFound,
                                 currentHud.HomeFound, currentHud.EndFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
+                        // 2026-10-26 17:45 cave: gold minimap is absent, so
+                        // require BOTH K/I templates, blue-rim+teal-skill proof
+                        // and 3 correctly positioned Home/End/ESC glyphs on
+                        // TWO frames. Neither blue background nor K/I alone
+                        // can authorize a key, and existing modal/menu vetoes
+                        // and fresh CLI idle verification remain mandatory.
+                        bool blueCaveAuthorized = CanAuthorizeManagedKBlueCaveFallback(
+                            previousHud.KFound, previousHud.IFound,
+                            currentHud.KFound, currentHud.IFound,
+                            previousBlueField, currentBlueField,
+                            previousKeys.IsConsecutiveWith(currentKeys),
+                            actualModal, unexpectedMenu);
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
                         bool keysAuthorized = previousKeys.IsConsecutiveWith(currentKeys) &&
                             previousField && currentField && !actualModal && !unexpectedMenu;
-                        if ((templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
+                        if ((templateAuthorized || fieldAuthorized || homeEndAuthorized ||
+                             keysAuthorized || blueCaveAuthorized) && withinLimit)
                         {
                             string route = templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
-                                homeEndAuthorized ? "Home/End" : "key-labels";
+                                homeEndAuthorized ? "Home/End" : blueCaveAuthorized ? "blue-cave" : "key-labels";
                             verifyManagedK = last => VerifyManagedKFrameAsync(last, route, currentKeys, ct);
                             Log?.Invoke($"[자동 가공] K 화면 인증 · {route} · 실제 연속 2프레임 · CLI 후 입력 프레임 재검증");
                             break;
@@ -1206,6 +1221,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 "K/I 또는 Home/End 또는 가변배치 단축키 + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
                         previousHud = currentHud;
                         previousField = currentField;
+                        previousBlueField = currentBlueField;
                         previousKeys = currentKeys;
                     }
                     if (menuAppeared)
@@ -2394,6 +2410,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             "templates" => hud.Matched >= 3,
             "K/I" => hud.KFound && hud.IFound && HasManagedKEntryFieldHudVisual(frame),
             "Home/End" => hud.HomeFound && hud.EndFound && HasManagedKEntryFieldHudVisual(frame),
+            "blue-cave" => hud.KFound && hud.IFound &&
+                HasManagedKEntryBlueRimFieldVisual(frame) &&
+                expectedKeys.IsConsecutiveWith(DetectManagedWorldHudKeys(frame)),
             _ => false
         };
     }
@@ -2485,6 +2504,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
            previousHome && previousEnd && currentHome && currentEnd &&
            previousField && currentField;
 
+    // Blue cave world scenes are NOT covered by the older gold-only rim.
+    // This is an additional strict route, not a weaker version of 3/4:
+    // K AND I templates, true blue ring + teal K, and the full
+    // Home/End/ESC triple must remain corroborated across two frames.
+    internal static bool CanAuthorizeManagedKBlueCaveFallback(
+        bool prevK, bool prevI, bool currentK, bool currentI,
+        bool previousBlueField, bool currentBlueField, bool stableThreeKeys,
+        bool popup, bool menu)
+        => prevK && prevI && currentK && currentI &&
+           previousBlueField && currentBlueField && stableThreeKeys &&
+           !popup && !menu;
+
     // Bounded visual stabilization after Esc; clock runs continuously from
     // the first unknown-field frame and is never reset on weak HUD matches.
     internal static readonly TimeSpan ManagedKReentryHudTimeout = TimeSpan.FromSeconds(2);
@@ -2547,6 +2578,39 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 kButtonTeal++;
         }
         return minimapGold >= 20 && kButtonTeal >= 10;
+    }
+
+    // The 2026-10-26 17:45 screenshot has a turquoise/blue minimap border
+    // rather than the old gold one. Check that a blue ring is present in
+    // MULTIPLE sectors at its fixed circular perimeter, AND require the
+    // separate teal K-skill disc. The blue tint of the cave/background
+    // is not sufficient; the caller additionally checks K/I templates,
+    // all 3 stable top HUD key glyphs, no menu/modal and CLI idle.
+    private static bool HasManagedKEntryBlueRimFieldVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        int[] sectors = new int[4];
+        for (int y = 93; y <= 233; y += 3)
+        for (int x = 650; x <= 790; x += 3)
+        {
+            int dx = x - 720, dy = y - 164;
+            int r2 = dx * dx + dy * dy;
+            if (r2 < 54 * 54 || r2 > 73 * 73) continue;
+            Color c = frame.GetPixel(x, y);
+            if (c.B >= 99 && c.B >= c.R + 16 && c.B >= c.G + 3)
+                sectors[(x >= 720 ? 1 : 0) + (y >= 164 ? 2 : 0)]++;
+        }
+        int teal = 0;
+        for (int y = 874; y <= 934; y += 3)
+        for (int x = 18; x <= 70; x += 3)
+        {
+            Color c = frame.GetPixel(x, y);
+            if (c.G >= 105 && c.G >= c.R + 20 && c.G >= c.B + 8)
+                teal++;
+        }
+        return sectors.Count(n => n >= 3) >= 2 &&
+               sectors.Sum() >= 12 && teal >= 10;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
