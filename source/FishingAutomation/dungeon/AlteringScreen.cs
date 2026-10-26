@@ -1654,6 +1654,22 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return changed >= 9;
     }
 
+    // The real 2026-10-26 incident OCR reads the title as
+    // "재료를 전송하kl겠습LI까?" rather than exact Hangul. Accept that
+    // bounded title-only confusion, never a generic green confirmation.
+    // The independent weekly-option and confirm-label OCR remain mandatory.
+    internal static bool MaterialTransferTitleMatchesStableAnchors(string? readText)
+    {
+        string text = FuzzyText.Normalize(readText ?? "");
+        const string prefix = "재료를전송하";
+        if (!text.StartsWith(prefix, StringComparison.Ordinal) ||
+            !text.EndsWith("까", StringComparison.Ordinal) || text.Length > 23)
+            return false;
+        int suffix = text.IndexOf("겠습", prefix.Length, StringComparison.Ordinal);
+        return suffix >= prefix.Length && suffix - prefix.Length <= 4 &&
+               text.Length - (suffix + 2) <= 5;
+    }
+
     private async Task<bool> IsExactMaterialTransferPromptAsync(Bitmap frame, CancellationToken ct)
     {
         if (!HasMaterialTransferModalVisual(frame)) return false;
@@ -1670,6 +1686,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             titleMatched = (await _ui.Ocr.FindTextAsync(
                 frame, MaterialTransferTitle, "재료를 전송하시겠습니까",
                 maxEditDistance: 2, retry2x: true, ct: ct)).Found;
+        if (!titleMatched)
+        {
+            // The actual incident mixes Latin "kl"/"LI" into one Hangul
+            // title. Evaluate only the title ROI's own OCR line and require
+            // three ordered, close Korean anchors, not broad fuzzy fragments.
+            var titleLines = await _ui.Ocr.ReadLinesAsync(
+                frame, MaterialTransferTitle, scale: 2, ct: ct);
+            titleMatched = titleLines.Any(line =>
+                MaterialTransferTitleMatchesStableAnchors(line.ReadText));
+        }
 
         bool weeklyMatched = await FindAsync(frame, MaterialTransferWeeklyLabel,
             "일주일 동안 보지 않기", ct) is not null;
