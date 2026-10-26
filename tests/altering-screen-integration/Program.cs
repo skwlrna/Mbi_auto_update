@@ -381,7 +381,7 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
             true, true, true, true, true, true, false, true),
         "V3.2.50 Home+End world fallback needs both icons and independent field on 2 frames; popup/menu veto");
-    var enter = ScreenCalls("EnterFacilityAsync", 3);
+    var enter = ScreenCalls("EnterFacilityCoreAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
           Has(enter, "CanAuthorizeManagedKEntry") &&
@@ -1019,8 +1019,8 @@ try
             "17:45 cave screenshot becomes independent field proof, not a processing hub or confirmation popup");
         Check(Has(ScreenCalls("HasManagedKEntryFieldHudVisual", 1),
                 "HasManagedKEntryNonGoldFieldHudVisual") &&
-              Has(ScreenCalls("EnterFacilityAsync", 3), "HasManagedKEntryBlockingModal") &&
-              Has(ScreenCalls("EnterFacilityAsync", 3), "RequireManagedIdleAsync") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "HasManagedKEntryBlockingModal") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "RequireManagedIdleAsync") &&
               Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryFieldHudVisual"),
             "new non-gold pixel proof is used only with compiled last-frame/modal and manager CLI guards");
         // Both immutable cave screenshots MUST prove the same independent
@@ -1410,7 +1410,7 @@ try
             .Invoke(hubProbe, new object[] { hub, CancellationToken.None })!;
         Check(await hubTask,
             "V3.1.63 real hub screen state resolves visually without OCR runtime");
-        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "IsProcessingHubAsync"),
+        Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3), "IsProcessingHubAsync"),
             "V3.1.63 real facility entry checks hub before K-menu selection");
         // The navigation predicate is compiled as a nested async lambda;
         // its IsProcessingHubAsync call does NOT live in the outer method IL.
@@ -1463,10 +1463,18 @@ try
                   !Safe(new Point(original.X, original.Y + 4)),
                 "facility retry uses a distinct bounded body point, never original title or off-card click: " + facility);
         }
-        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "CanRecoverFinalHubSelection") &&
-              Has(ScreenCalls("EnterFacilityAsync", 3), "AlternateCardClickPoint") &&
-              Has(ScreenCalls("EnterFacilityAsync", 3), "IsSafeAlternateCardClick"),
-            "compiled production navigation enforces gated final hub recovery and distinct second click");
+        var retryMethod = Method(layout, "CanRetryFixedHubSelection", 4);
+        for (int clicks = 0; clicks <= 3; clicks++)
+        foreach (bool previous in new[] { false, true })
+        foreach (bool retryFreshHub in new[] { false, true })
+        foreach (bool modal in new[] { false, true })
+            Check((bool)retryMethod.Invoke(null, new object[] { clicks, previous, retryFreshHub, modal })! ==
+                  (clicks == 1 && previous && retryFreshHub && !modal),
+                $"fixed retry requires one prior click, two positive hub frames, no modal: {clicks}/{previous}/{retryFreshHub}/{modal}");
+        Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3), "CanRecoverFinalHubSelection") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "CanRetryFixedHubSelection") &&
+              !Has(ScreenCalls("EnterFacilityCoreAsync", 3), "AlternateCardClickPoint"),
+            "compiled production navigation retries the unchanged fixed point only on a fresh verified hub");
     }
 
     // V3.1.62: metal -> wood must discard the old OCR-free title/arrival
@@ -1498,7 +1506,7 @@ try
               travelTitle.GetValue(cacheProbe) is null,
             "V3.1.62 wood -> metal also drops stale visual proof");
 
-        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "InvalidateForeignFacilityProof"),
+        Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3), "InvalidateForeignFacilityProof"),
             "real compiled facility entry clears foreign cache BEFORE title recognition");
     }
 

@@ -4,6 +4,21 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// 2026-10-27: retry is a navigation action, never batch-registration proof.
+for (int clicks = 0; clicks <= 3; clicks++)
+foreach (bool oldHub in new[] { false, true })
+foreach (bool newHub in new[] { false, true })
+foreach (bool modal in new[] { false, true })
+    Check(AlteringFacilityLayout.CanRetryFixedHubSelection(clicks, oldHub, newHub, modal) ==
+          (clicks == 1 && oldHub && newHub && !modal),
+        $"fixed hub retry bounded and modal veto: {clicks}/{oldHub}/{newHub}/{modal}");
+var navigationCause = new InvalidOperationException("facility card not entered");
+var navigationFailure = new AlteringFacilityNavigationException(navigationCause.Message, navigationCause);
+Check(navigationFailure.InnerException == navigationCause,
+    "navigation failure preserves diagnostic cause");
+Check(new InvalidOperationException("registration uncertain") is not AlteringFacilityNavigationException,
+    "ordinary registration uncertainty is never classified as navigation");
+
 // V3.2.44: safe pre-input transient reads isolate only the empty lane.
 var v3244Food = new AlteringPlan("식재료 가공 시설", "밥", 1, 1, false);
 var v3244Metal = new AlteringPlan("금속 가공 시설", "철괴", 1, 1, false);

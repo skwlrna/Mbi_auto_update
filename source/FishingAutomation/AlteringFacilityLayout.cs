@@ -54,6 +54,10 @@ internal static class AlteringFacilityLayout
         => managedKIssuedAfterCard && previousCardClicks == 1 &&
            exactSixCardHub && !blockingModal;
 
+    internal static bool CanRetryFixedHubSelection(
+        int previousCardClicks, bool previousHub, bool freshHub, bool blockingModal)
+        => previousCardClicks == 1 && previousHub && freshHub && !blockingModal;
+
     // Never click the same title-coordinate twice. The body/image is an
     // independently located point within the selected 800x1000 card.
     // This still requires a fresh exact OCR match of the *same* card title.
