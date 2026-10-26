@@ -336,6 +336,68 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, true),
         "V3.1.77 F9 K re-entry 2/4->3/4 waits, 3/4->3/4 passes within 2s only without modal/menu");
 
+    // 2026-10-26 17:45 underground coal cave. K/I=0.993/0.902 and
+    // Home/End/ESC glyphs=0.958/0.960/1.000, but the GOLD-only world
+    // minimap proof was false, so the macro stopped without K. Compare
+    // actual unaltered Oct 20 city and Oct 23 workshop K-entry incidents.
+    {
+        string dir = Path.Combine(AppContext.BaseDirectory, "world-hud-fixtures");
+        bool Blue(Bitmap frame) =>
+            PixelGate("HasManagedKEntryBlueRimFieldVisual", frame);
+        bool Gold(Bitmap frame) =>
+            PixelGate("HasManagedKEntryFieldHudVisual", frame);
+        using var cave = new Bitmap(Path.Combine(dir, "cave-blue-20261026-174515.png"));
+        using var city = new Bitmap(Path.Combine(dir, "city-20261020-234501.png"));
+        using var workshop = new Bitmap(Path.Combine(dir, "workshop-20261023-060800.png"));
+        Console.WriteLine($"HUD ACTUAL 17:45 cave blue={Blue(cave)} gold={Gold(cave)}; " +
+            $"10/20 city blue={Blue(city)} gold={Gold(city)}; " +
+            $"10/23 workshop blue={Blue(workshop)} gold={Gold(workshop)}");
+        Check(Blue(cave) && !Gold(cave),
+            "2026-10-26 17:45 real cave gets blue/teal world evidence without falsely requiring gold");
+        Check(Gold(city) || Blue(city),
+            "2026-10-20 23:45 historical city has a validated visual HUD route");
+        Check(Gold(workshop) || Blue(workshop),
+            "2026-10-23 06:08 historical workshop has a validated visual HUD route");
+
+        bool Permit(bool pk, bool pi, bool ck, bool ci, bool first, bool second,
+            bool threeGlyphs, bool popup = false, bool menu = false) =>
+            CallBoolean(screen, "CanAuthorizeManagedKBlueCaveFallback",
+                pk, pi, ck, ci, first, second, threeGlyphs, popup, menu);
+        Check(Permit(true, true, true, true, true, true, true) &&
+              !Permit(false, true, true, true, true, true, true) &&
+              !Permit(true, false, true, true, true, true, true) &&
+              !Permit(true, true, false, true, true, true, true) &&
+              !Permit(true, true, true, false, true, true, true) &&
+              !Permit(true, true, true, true, false, true, true) &&
+              !Permit(true, true, true, true, true, false, true) &&
+              !Permit(true, true, true, true, true, true, false) &&
+              !Permit(true, true, true, true, true, true, true, popup: true) &&
+              !Permit(true, true, true, true, true, true, true, menu: true),
+            "cave field authorization requires both K/I images, blue proof, full triple glyphs and no popup/menu");
+
+        using var blank = new Bitmap(800, 1000);
+        using var tealOnly = new Bitmap(800, 1000);
+        Paint(tealOnly, new Rectangle(21, 880, 48, 46),
+            Color.FromArgb(0, 190, 145));
+        using var blueRectangle = (Bitmap)tealOnly.Clone();
+        Paint(blueRectangle, new Rectangle(650, 94, 140, 140),
+            Color.FromArgb(22, 64, 191));
+        Check(!Blue(blank) && !Blue(tealOnly),
+            "blank screen or a lone teal K disc never validates a blue cave");
+        // A blue rectangular overlay must still be blocked by the independent
+        // THREE actual HUD key glyphs and K/I templates; no visual gate alone
+        // ever invokes K.
+        Check(!Permit(true, true, true, true, Blue(blueRectangle),
+                Blue(blueRectangle), false),
+            "blue overlay plus K disc cannot authorize K without genuine triple key-layout evidence");
+
+        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "HasManagedKEntryBlueRimFieldVisual") &&
+              Has(ScreenCalls("EnterFacilityAsync", 3), "CanAuthorizeManagedKBlueCaveFallback") &&
+              Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryBlueRimFieldVisual") &&
+              Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "IsConsecutiveWith"),
+            "compiled production F9 K entry and last-moment verification use the same strict cave route");
+    }
+
     // V3.2.0 14:16:48 production capture: Home/End fail while K/I are
     // stable. 2/4 alone remains vetoed; two frames of K+I PLUS separately
     // verified gold minimap and teal skill disc may authorize the field path.
