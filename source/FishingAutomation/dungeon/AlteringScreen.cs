@@ -913,6 +913,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // hub is positively verified; never grant a fourth blind K/Esc.
         const int maxAttempts = 4;
         int hubCardClicks = 0; // Never repeat an unverified fixed-coordinate click.
+        bool recoveredHubAfterK = false; // Only K issued after THIS target-card click.
         bool foodNavigationIssued = false;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -933,7 +934,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         return;
                     }
                     if (!AlteringFacilityLayout.CanRecoverFinalHubSelection(
-                            _managedKInputIssued, hubCardClicks,
+                            recoveredHubAfterK, hubCardClicks,
                             HasFixedProcessingHubVisual(frame),
                             HasBottomConfirmationModal(frame) ||
                             await IsFacilityTravelDialogAsync(frame, ct)))
@@ -1219,6 +1220,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(frame, "관리 가공 K 화면 인증 근거 없음 · 입력 없이 정지");
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                     _managedKInputIssued = true;
+                if (directive != AlteringFacilityEntryDirective.Automatic &&
+                    attempt == maxAttempts - 1 && hubCardClicks == 1)
+                    recoveredHubAfterK = true;
                 Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
             }
 
