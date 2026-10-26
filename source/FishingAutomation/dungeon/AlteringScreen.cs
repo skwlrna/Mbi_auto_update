@@ -1657,18 +1657,36 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private async Task<bool> IsExactMaterialTransferPromptAsync(Bitmap frame, CancellationToken ct)
     {
         if (!HasMaterialTransferModalVisual(frame)) return false;
-        // Korean Windows OCR sometimes drops a trailing question mark.
-        // Both accepted variants preserve the full exact heading; never
-        // authorize a transfer from isolated words like "확인" alone.
-        bool exactTitle = await FindAsync(frame, MaterialTransferTitle,
+        // Three separate ROIs must match the known transfer prompt. Exact OCR
+        // occasionally drops a Korean syllable on scaled/dim game frames;
+        // only within these narrow ROIs, allow a bounded two-edit fallback.
+        // The independent slate panel, green confirm and two-frame checks
+        // still veto unrelated dialogs. "확인" by itself never authorizes input.
+        bool titleMatched = await FindAsync(frame, MaterialTransferTitle,
             "재료를 전송하시겠습니까?", ct) is not null ||
             await FindAsync(frame, MaterialTransferTitle,
                 "재료를 전송하시겠습니까", ct) is not null;
-        return exactTitle &&
-               await FindAsync(frame, MaterialTransferWeeklyLabel,
-                   "일주일 동안 보지 않기", ct) is not null &&
-               await FindAsync(frame, MaterialTransferConfirmLabel,
-                   "확인", ct) is not null;
+        if (!titleMatched)
+            titleMatched = (await _ui.Ocr.FindTextAsync(
+                frame, MaterialTransferTitle, "재료를 전송하시겠습니까",
+                maxEditDistance: 2, retry2x: true, ct: ct)).Found;
+
+        bool weeklyMatched = await FindAsync(frame, MaterialTransferWeeklyLabel,
+            "일주일 동안 보지 않기", ct) is not null;
+        if (!weeklyMatched)
+            weeklyMatched = (await _ui.Ocr.FindTextAsync(
+                frame, MaterialTransferWeeklyLabel, "일주일 동안 보지 않기",
+                maxEditDistance: 2, retry2x: true, ct: ct)).Found;
+
+        bool confirmMatched = await FindAsync(frame, MaterialTransferConfirmLabel,
+            "확인", ct) is not null;
+        if (!confirmMatched)
+            confirmMatched = (await _ui.Ocr.FindTextAsync(
+                frame, MaterialTransferConfirmLabel, "확인",
+                maxEditDistance: 0, retry2x: true, ct: ct)).Found;
+
+        Log?.Invoke($"[자동 가공] 재료 전송 문구 검증 · 제목={titleMatched} · 주간체크={weeklyMatched} · 확인={confirmMatched}");
+        return titleMatched && weeklyMatched && confirmMatched;
     }
 
     private async Task HandleOptionalMaterialTransferPromptAsync(CancellationToken ct)
@@ -1694,25 +1712,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (!await IsExactMaterialTransferPromptAsync(first, ct))
             Fail(first, "재료 전송 모달 형태는 보이지만 제목/주간 체크/확인 문구가 불명확합니다.");
 
+        // A checked checkbox is green. Two frames must agree before deciding
+        // whether a click would turn it ON or accidentally turn it OFF.
+        bool checkboxAlreadySelected = MaterialTransferCheckboxLooksSelected(first);
         await Task.Delay(180, ct);
         using (var second = Capture(ct))
         {
             if (!await IsExactMaterialTransferPromptAsync(second, ct))
                 Fail(second, "재료 전송 모달이 새 프레임에서 동일하게 확인되지 않았습니다.");
+            if (MaterialTransferCheckboxLooksSelected(second) != checkboxAlreadySelected)
+                Fail(second, "일주일 동안 보지 않기 체크 상태가 두 프레임에서 다릅니다. 입력 차단");
         }
 
-        // The 2026-10-17 screenshot has the weekly suppression option OFF.
-        // Click the checkbox ONCE only if it is still visually unchecked.
+        // Click the unchecked weekly checkbox once only. Already green means
+        // it is selected and must never be toggled off by this automation.
         // The click is not a new production registration or a wing purchase.
-        bool checkboxAlreadySelected = MaterialTransferCheckboxLooksSelected(first);
         if (!checkboxAlreadySelected)
         {
             _ui.ClickFresh(MaterialTransferCheckboxPoint, ct);
             await Task.Delay(240, ct);
             using var checkedFrame = Capture(ct);
             if (!await IsExactMaterialTransferPromptAsync(checkedFrame, ct) ||
-                !MaterialTransferCheckboxChanged(first, checkedFrame))
-                Fail(checkedFrame, "일주일 동안 보지 않기 체크 전환을 확인하지 못했습니다. 확인 버튼 입력 차단");
+                !MaterialTransferCheckboxChanged(first, checkedFrame) ||
+                !MaterialTransferCheckboxLooksSelected(checkedFrame))
+                Fail(checkedFrame, "일주일 동안 보지 않기 체크가 초록색으로 바뀌지 않았습니다. 확인 버튼 입력 차단");
             Log?.Invoke("[자동 가공] 보관함 재료 전송 팝업 · 일주일 동안 보지 않기 1회 선택 · 시각적 변화 확인");
         }
         else
@@ -1722,8 +1745,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         using (var final = Capture(ct))
         {
-            if (!await IsExactMaterialTransferPromptAsync(final, ct))
-                Fail(final, "재료 전송 확인 버튼 직전 팝업 동일성 재검증 실패");
+            if (!await IsExactMaterialTransferPromptAsync(final, ct) ||
+                !MaterialTransferCheckboxLooksSelected(final))
+                Fail(final, "재료 전송 확인 버튼 직전 팝업/초록 체크 재검증 실패");
         }
         // Exactly one modal confirmation is authorized by its unique wording.
         // Actual registration must still pass the caller's independent CLI
