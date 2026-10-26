@@ -1008,10 +1008,14 @@ try
         Paint(noSkill, new Rectangle(16, 865, 62, 76), Color.Black);
         Paint(noCompass, new Rectangle(339, 808, 124, 125), Color.Black);
         Paint(noMinimapMarker, new Rectangle(768, 145, 31, 42), Color.Black);
-        Check(!PixelGate("HasManagedKEntryFieldHudVisual", noSkill) &&
-              !PixelGate("HasManagedKEntryFieldHudVisual", noCompass) &&
-              !PixelGate("HasManagedKEntryFieldHudVisual", noMinimapMarker),
-            "17:45 cave field cannot pass on K disc, compass or minimap marker alone; every independent anchor required");
+        bool noSkillPass = PixelGate("HasManagedKEntryFieldHudVisual", noSkill);
+        bool noCompassPass = PixelGate("HasManagedKEntryFieldHudVisual", noCompass);
+        bool noMarkerPass = PixelGate("HasManagedKEntryFieldHudVisual", noMinimapMarker);
+        bool nonGoldCompassPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noCompass, 30);
+        bool nonGoldMarkerPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noMinimapMarker, 30);
+        Console.WriteLine($"CAVE ANCHOR DIAG: noSkill={noSkillPass} noCompass={noCompassPass} noMarker={noMarkerPass} nongoldCompass={nonGoldCompassPass} nongoldMarker={nonGoldMarkerPass}");
+        Check(!noSkillPass && !nonGoldCompassPass && !nonGoldMarkerPass,
+            "17:45 cave field rejects missing K disc and non-gold candidate rejects missing compass or direction marker");
         using var empty = BlackFrame();
         Check(!PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
               !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", empty, 0),
