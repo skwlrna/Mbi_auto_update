@@ -2546,19 +2546,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 p.G >= p.B + 8)
                 kButtonTeal++;
         }
-        // Gold rim is missing in the 2026-10-26 17:45 cave field,
-        // although the K/I templates and Home/End/ESC glyphs are stable.
-        // Retain the original gold route; this independent non-gold route
-        // needs the actual K disc, central Space compass ring AND the
-        // minimap's small orange direction marker, not just world color.
+        // Keep the original gold route. The 17:45 and 19:09 cave frames
+        // show that the orange minimap clock marker varies by game time;
+        // it must not be a requirement for field K authorization.
+        // Non-gold proof instead requires a K disc, Space compass ring
+        // and physically circular blue minimap rim (not arbitrary scenery).
         return (minimapGold >= 20 && kButtonTeal >= 10) ||
                HasManagedKEntryNonGoldFieldHudVisual(frame, kButtonTeal);
     }
 
-    // Cave and gray-map world layouts do not have the gold minimap rim.
-    // This is ONLY independent world evidence used with consecutive
-    // K/I templates or exact Home/End/ESC glyphs; never permission by itself.
-    // Modal/menu veto, last-frame check and CLI-idle verification stay mandatory.
+    // Time-of-day neutral cave/gray-minimap field proof.
+    // The 17:45 real screenshot has an orange day/night clock badge at the
+    // minimap's right edge; the 19:09 V3.2.67 screenshot does not. That
+    // *clock UI* is never evidence for or against a K-safe world.
+    //
+    // Require three distinct physical anchors: bottom-left teal K skill disc,
+    // lower-center green Space compass ring, and a blue circular arc around
+    // the actual fixed upper-right minimap (not blue-colored terrain).
+    // K/I templates on TWO real frames + menu/modal veto + CLI idle and
+    // last-moment frame validation remain mandatory in the caller.
     private static bool HasManagedKEntryNonGoldFieldHudVisual(
         Bitmap frame, int kButtonTeal)
     {
@@ -2578,17 +2584,35 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 compassGreenRing++;
         }
 
-        int minimapOrangeMarker = 0;
-        for (int y = 148; y <= 182; y += 2)
-        for (int x = 770; x <= 795; x += 2)
+        // Only sample the outer CIRCUMFERENCE of the fixed minimap.
+        // The upper-left portion is away from the right-side orange
+        // clock badge and stable across both cave captures.
+        int rimBlue = 0, upperLeftArc = 0;
+        int minX = 800, minY = 1000, maxX = 0, maxY = 0;
+        for (int y = 94; y <= 228; y += 3)
+        for (int x = 649; x <= 791; x += 3)
         {
+            int dx = x - 720, dy = y - 161;
+            int radiusSquared = dx * dx + dy * dy;
+            if (radiusSquared < 52 * 52 || radiusSquared > 74 * 74)
+                continue;
             Color p = frame.GetPixel(x, y);
-            if (p.R >= 160 && p.G >= 115 &&
-                p.R >= p.B + 50 && p.G >= p.B + 18)
-                minimapOrangeMarker++;
-        }
+            if (p.B < 100 || p.B < p.R + 22 || p.B < p.G + 7)
+                continue;
 
-        return compassGreenRing >= 22 && minimapOrangeMarker >= 6;
+            rimBlue++;
+            if (x < 720 && y < 161)
+            {
+                upperLeftArc++;
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y);
+                maxY = Math.Max(maxY, y);
+            }
+        }
+        return compassGreenRing >= 22 &&
+               rimBlue >= 10 && upperLeftArc >= 4 &&
+               maxX - minX >= 9 && maxY - minY >= 9;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)

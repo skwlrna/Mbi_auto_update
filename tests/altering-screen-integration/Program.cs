@@ -1023,20 +1023,52 @@ try
               Has(ScreenCalls("EnterFacilityAsync", 3), "RequireManagedIdleAsync") &&
               Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryFieldHudVisual"),
             "new non-gold pixel proof is used only with compiled last-frame/modal and manager CLI guards");
+        // The two ORIGINAL runtime failure captures must be recognized as
+        // world HUDs without relying on the clock badge that changes by day/night.
+        using var nightCave = new Bitmap(Path.Combine(corpus, "cave-20261026-190933.png"));
+        bool dayWorld = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", cave, 30);
+        bool nightWorld = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", nightCave, 30);
+        Console.WriteLine($"DAY/NIGHT FIELD PROOF: 17:45={dayWorld}, 19:09={nightWorld}");
+        Check(dayWorld && nightWorld &&
+              PixelGate("HasManagedKEntryFieldHudVisual", nightCave) &&
+              !PixelGate("HasManagedKEntryBlockingModal", nightCave) &&
+              !PixelGate("HasFixedProcessingHubVisual", nightCave),
+            "17:45 V3.2.66 and 19:09 V3.2.67 original cave errors both admit genuine K-safe field evidence");
+        // The 19:09 live K/I confidence was 0.996/0.900 on nine frames.
+        // Positive pixel proof is supplemental: no K without 2-frame K/I,
+        // no modal/menu, and final verified frame + fresh CLI idle.
+        Check(CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, dayWorld, dayWorld, false, false) &&
+              CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, nightWorld, nightWorld, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, nightWorld, nightWorld, true, false),
+            "two cave incidents: K/I two-frame policy permits only clean real field HUD");
+
         using var noSkill = new Bitmap(cave);
         using var noCompass = new Bitmap(cave);
-        using var noMinimapMarker = new Bitmap(cave);
+        using var noClockBadge = new Bitmap(cave);
+        using var noBlueArc = new Bitmap(cave);
         Paint(noSkill, new Rectangle(16, 865, 62, 76), Color.Black);
         Paint(noCompass, new Rectangle(339, 808, 124, 125), Color.Black);
-        Paint(noMinimapMarker, new Rectangle(768, 145, 31, 42), Color.Black);
+        Paint(noClockBadge, new Rectangle(768, 145, 31, 42), Color.Black);
+        Paint(noBlueArc, new Rectangle(641, 89, 80, 75), Color.Black);
         bool noSkillPass = PixelGate("HasManagedKEntryFieldHudVisual", noSkill);
-        bool noCompassPass = PixelGate("HasManagedKEntryFieldHudVisual", noCompass);
-        bool noMarkerPass = PixelGate("HasManagedKEntryFieldHudVisual", noMinimapMarker);
         bool nonGoldCompassPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noCompass, 30);
-        bool nonGoldMarkerPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noMinimapMarker, 30);
-        Console.WriteLine($"CAVE ANCHOR DIAG: noSkill={noSkillPass} noCompass={noCompassPass} noMarker={noMarkerPass} nongoldCompass={nonGoldCompassPass} nongoldMarker={nonGoldMarkerPass}");
-        Check(!noSkillPass && !nonGoldCompassPass && !nonGoldMarkerPass,
-            "17:45 cave field rejects missing K disc and non-gold candidate rejects missing compass or direction marker");
+        bool nonGoldClockPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noClockBadge, 30);
+        bool nonGoldBlueRimPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noBlueArc, 30);
+        Console.WriteLine($"CAVE ANCHOR DIAG: noSkill={noSkillPass} noCompass={nonGoldCompassPass} noClock={nonGoldClockPass} noRim={nonGoldBlueRimPass}");
+        Check(!noSkillPass && !nonGoldCompassPass && nonGoldClockPass && !nonGoldBlueRimPass,
+            "day/night clock badge optional; K disc, Space ring and blue circular rim remain mandatory");
+        using var hubImage = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+            "facility-hub-fixtures", "hub-wood-20261026-161326.png"));
+        Check(!PixelGate("HasManagedKEntryFieldHudVisual", hubImage) &&
+              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", hubImage, 30),
+            "prior actual wood processing hub cannot masquerade as day/night cave world");
+        using var nightWithModal = (Bitmap)nightCave.Clone();
+        Paint(nightWithModal, new Rectangle(405, 875, 189, 72), Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasManagedKEntryBlockingModal", nightWithModal),
+            "blocking confirmation button remains detectable over real night cave field");
         using var empty = BlackFrame();
         Check(!PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
               !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", empty, 0),
