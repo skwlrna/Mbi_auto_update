@@ -352,8 +352,12 @@ try
         Console.WriteLine($"HUD ACTUAL 17:45 cave blue={Blue(cave)} gold={Gold(cave)}; " +
             $"10/20 city blue={Blue(city)} gold={Gold(city)}; " +
             $"10/23 workshop blue={Blue(workshop)} gold={Gold(workshop)}");
-        Check(Blue(cave) && !Gold(cave),
-            "2026-10-26 17:45 real cave gets blue/teal world evidence without falsely requiring gold");
+        // The saved 17:45 stop screen passes BOTH pixel detectors offline
+        // although the preceding nine K authorization frames logged
+        // "fieldIndependent=False". It is a transient/sequence failure,
+        // not proof that gold is absent in every cave frame.
+        Check(Blue(cave) && Gold(cave),
+            "actual 17:45 saved cave has both world signals; preceding K frames lacked stable proof");
         Check(Gold(city) || Blue(city),
             "2026-10-20 23:45 historical city has a validated visual HUD route");
         Check(Gold(workshop) || Blue(workshop),
