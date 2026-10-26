@@ -1300,6 +1300,52 @@ try
             "V3.1.63 fixed hub shortcut rejects unknown client dimensions");
     }
 
+    // Real 2026-10-26 16:13:26 incident: after K recovery the application
+    // was back on the six-card hub, but the ordinary three navigation passes
+    // were exhausted. The fourth pass is only authorized for THIS proven hub;
+    // it may click the same verified facility card at a distinct body point.
+    {
+        Type layout = production.GetType("FishingAutomation.AlteringFacilityLayout", true)!;
+        var titleMethod = Method(layout, "TitleArea", 1);
+        var alternateMethod = Method(layout, "AlternateCardClickPoint", 1);
+        var safeMethod = Method(layout, "IsSafeAlternateCardClick", 3);
+        var policyMethod = Method(layout, "CanRecoverFinalHubSelection", 4);
+        string fixture = Path.Combine(AppContext.BaseDirectory,
+            "facility-hub-fixtures", "hub-wood-20261026-161326.png");
+        using var recordedHub = new Bitmap(fixture);
+        Check(PixelGate("HasFixedProcessingHubVisual", recordedHub) &&
+              !PixelGate("HasFixedFacilityHeaderVisual", recordedHub),
+            "16:13 real incident ends on a positive six-card processing hub, not the target facility");
+        bool CanRecover(bool kIssued, int priorClicks, bool fixedHub, bool modal) =>
+            (bool)policyMethod.Invoke(null, new object[] { kIssued, priorClicks, fixedHub, modal })!;
+        Check(CanRecover(true, 1, true, false) &&
+              !CanRecover(false, 1, true, false) &&
+              !CanRecover(true, 0, true, false) &&
+              !CanRecover(true, 2, true, false) &&
+              !CanRecover(true, 1, false, false) &&
+              !CanRecover(true, 1, true, true),
+            "last navigation pass is allowed only for one previous card click, issued K and verified popup-free hub");
+        foreach (string facility in new[]
+                 { "금속 가공", "목재 가공", "가죽 가공", "옷감 가공", "약품 가공", "식재료 가공" })
+        {
+            var title = (Rectangle)titleMethod.Invoke(null, new object[] { facility })!;
+            Point original = new(title.Left + title.Width / 2,
+                title.Top + title.Height / 2);
+            Point alternate = (Point)alternateMethod.Invoke(null,
+                new object[] { facility })!;
+            bool Safe(Point next) => (bool)safeMethod.Invoke(null,
+                new object[] { facility, original, next })!;
+            Check(Safe(alternate) && !title.Contains(alternate) &&
+                  !Safe(original) && !Safe(new Point(30, 950)) &&
+                  !Safe(new Point(original.X, original.Y + 4)),
+                "facility retry uses a distinct bounded body point, never original title or off-card click: " + facility);
+        }
+        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "CanRecoverFinalHubSelection") &&
+              Has(ScreenCalls("EnterFacilityAsync", 3), "AlternateCardClickPoint") &&
+              Has(ScreenCalls("EnterFacilityAsync", 3), "IsSafeAlternateCardClick"),
+            "compiled production navigation enforces gated final hub recovery and distinct second click");
+    }
+
     // V3.1.62: metal -> wood must discard the old OCR-free title/arrival
     // authority; otherwise a generic fixed title/level shape could be
     // mistaken for the old facility and trigger a second Esc after K.
