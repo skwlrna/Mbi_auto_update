@@ -2619,7 +2619,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             if (p.G >= 105 && p.G >= p.R + 20 && p.G >= p.B + 8)
                 tealSkill++;
         }
-        return blueRing >= 12 && ringSectors >= 2 && tealSkill >= 10;
+        return blueRing >= 45 && ringSectors >= 2 && tealSkill >= 10;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
