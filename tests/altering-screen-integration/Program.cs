@@ -336,6 +336,42 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, true),
         "V3.1.77 F9 K re-entry 2/4->3/4 waits, 3/4->3/4 passes within 2s only without modal/menu");
 
+    // V3.2.66 17:45 original cave screenshot: K/I templates 0.993/0.902
+    // and exact Home/End/ESC glyphs 0.958/0.960/1.000, but ordinary
+    // gold-minimap+teal-K field evidence was false. Compare the original
+    // V3.2.55 10-23 blue workshop failure and V3.2.48 10-20 GOLD world
+    // failure; do not change the historic gold-route authorization.
+    {
+        string folder = Path.Combine(AppContext.BaseDirectory, "field-hud-fixtures");
+        using var cave = new Bitmap(Path.Combine(folder, "cave-20261026-174515.png"));
+        using var workshop = new Bitmap(Path.Combine(folder, "workshop-20261023-060800.png"));
+        using var goldTown = new Bitmap(Path.Combine(folder, "gold-world-20261020-234501.png"));
+        bool Blue(Bitmap b) => PixelGate("HasManagedBlueMinimapFieldHudVisual", b);
+        Check(Blue(cave) && !PixelGate("HasManagedKEntryFieldHudVisual", cave),
+            "17:45 original cave screenshot has independent blue-map+teal-K, NOT legacy gold map");
+        Check(Blue(workshop),
+            "10-23 06:08 historical K reentry failure shares alternate blue-map field evidence");
+        Check(PixelGate("HasManagedKEntryFieldHudVisual", goldTown),
+            "10-20 23:45 original gold-map field remains supported by unchanged legacy route");
+        Check(CallBoolean(screen, "CanAuthorizeManagedBlueWorldKEntry",
+                true, true, true, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedBlueWorldKEntry",
+                false, true, true, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedBlueWorldKEntry",
+                true, false, true, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedBlueWorldKEntry",
+                true, true, false, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedBlueWorldKEntry",
+                true, true, true, true, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedBlueWorldKEntry",
+                true, true, true, false, true),
+            "blue-world K fallback requires 2 field frames and 3 stable shortcut glyphs; modal/menu veto");
+        Check(Has(ScreenCalls("EnterFacilityAsync", 3), "CanAuthorizeManagedBlueWorldKEntry") &&
+              Has(ScreenCalls("EnterFacilityAsync", 3), "HasManagedBlueMinimapFieldHudVisual") &&
+              Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedBlueMinimapFieldHudVisual"),
+            "compiled production K request and fresh pre-input verifier both enforce new blue-world route");
+    }
+
     // V3.2.0 14:16:48 production capture: Home/End fail while K/I are
     // stable. 2/4 alone remains vetoed; two frames of K+I PLUS separately
     // verified gold minimap and teal skill disc may authorize the field path.
