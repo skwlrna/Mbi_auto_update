@@ -12,6 +12,7 @@
     <!-- Test the SAME compiled production screen, not a FakeWorld or a linked copy. -->
     <ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj" />
     <None Update="material-transfer-fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="facility-hub-fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
 
