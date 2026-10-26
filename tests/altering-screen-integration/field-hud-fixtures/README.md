@@ -10,8 +10,9 @@ from `skwlrna/Mbi_auto_log`:
 | `gold-world-20261020-234501.png` | 2026-10-20 23:45:01 | V3.2.48 | `6eeed03e6542a626590186ed342ba93b05bae4c6` |
 
 The October 26 cave image has strong K/I templates and stable shortcut
-glyph scores but *no gold minimap*; the older pixel-only world proof was
-false. The October 23 workshop screenshot also has a blue/cyan minimap
+glyph scores while the live pre-error frames logged legacy gold field proof FALSE.
+The later diagnostic screenshot itself contains some GOLD-classified pixels,
+so the test also simulates their disappearance while retaining blue rim. The October 23 workshop screenshot also has a blue/cyan minimap
 border, but its K template score was weaker, so it is included as a
 historical **visual** regression, not evidence of fully successful
 authorization. The October 20 screenshot has a gold-rim minimap and
