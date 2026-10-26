@@ -1398,11 +1398,12 @@ try
     // is sent by this synthetic test. The weekly checkbox is initially OFF.
     Check(Has(queue, "HandleOptionalMaterialTransferPromptAsync"),
         "real QueueAsync handles optional material transfer only after registration click");
-    var transferCalls = ScreenCalls("HandleOptionalMaterialTransferPromptAsync", 1);
-    Check(Has(transferCalls, "IsExactMaterialTransferPromptAsync") &&
-          Has(transferCalls, "MaterialTransferCheckboxChanged") &&
+    Check(Has(ScreenCalls("HandleOptionalMaterialTransferPromptAsync", 1),
+              "RunMaterialTransferPromptAsync"),
+        "production transfer adapter runs the behavior-tested control flow");
+    var transferCalls = ScreenCalls("RunMaterialTransferPromptAsync", 7);
+    Check(Has(transferCalls, "MaterialTransferCheckboxChanged") &&
           Count(transferCalls, "MaterialTransferCheckboxLooksSelected") >= 4 &&
-          Count(transferCalls, "ClickFresh") == 2 &&
           Has(transferCalls, "HasMaterialTransferModalVisual"),
         "transfer prompt uses two stable green checkbox frames and verifies green after any click and before confirm");
     var transferOcrCalls = ScreenCalls("IsExactMaterialTransferPromptAsync", 2);
@@ -1460,6 +1461,7 @@ try
             "transfer popup input blocked on unknown capture dimensions");
     }
 
+    checks += await MaterialTransferRegression.RunAsync(production);
     Console.WriteLine($"PASS L2: {checks} real-screen integration checks (no injected input)");
 }
 catch (Exception error)
@@ -1467,3 +1469,4 @@ catch (Exception error)
     Console.Error.WriteLine(error);
     Environment.ExitCode = 1;
 }
+

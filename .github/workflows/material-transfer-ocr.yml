@@ -1,0 +1,44 @@
+name: Material transfer incident OCR and behavior
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'source/FishingAutomation/dungeon/AlteringScreen.cs'
+      - 'source/FishingAutomation/dungeon/OcrRecognizer.cs'
+      - 'source/FishingAutomation/dungeon/FuzzyText.cs'
+      - 'tests/altering-screen-integration/**'
+      - '.github/workflows/material-transfer-ocr.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  korean-ocr-and-behavior:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install Korean Windows OCR capability
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = 'Language.OCR~~~ko-KR~0.0.1.0'
+          $capability = Get-WindowsCapability -Online -Name $name
+          if ($capability.State -ne 'Installed') {
+            Add-WindowsCapability -Online -Name $name
+          }
+          if ((Get-WindowsCapability -Online -Name $name).State -ne 'Installed') {
+            throw 'Korean OCR capability is required; this test must not silently skip or fall back to English.'
+          }
+      - name: Replay incident OCR and actual transfer control flow without game input
+        shell: pwsh
+        env:
+          MBI_REQUIRE_MATERIAL_TRANSFER_OCR: '1'
+        run: |
+          dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Material transfer incident/behavior regressions failed' }

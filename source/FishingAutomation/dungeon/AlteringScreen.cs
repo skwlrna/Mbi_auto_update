@@ -1689,7 +1689,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return titleMatched && weeklyMatched && confirmMatched;
     }
 
-    private async Task HandleOptionalMaterialTransferPromptAsync(CancellationToken ct)
+    private Task HandleOptionalMaterialTransferPromptAsync(CancellationToken ct)
+        => RunMaterialTransferPromptAsync(
+            Capture, IsExactMaterialTransferPromptAsync, _ui.ClickFresh,
+            (milliseconds, token) => Task.Delay(milliseconds, token),
+            (frame, message) => _ui.Failure(frame, message + " 추가 입력 없이 정지합니다."),
+            message => Log?.Invoke(message), ct);
+
+    // Execute the same control flow in regression tests without constructing
+    // a window/input driver. Production always supplies the guarded runtime.
+    internal static async Task RunMaterialTransferPromptAsync(
+        Func<CancellationToken, Bitmap> capture,
+        Func<Bitmap, CancellationToken, Task<bool>> verifyPrompt,
+        Action<Point, CancellationToken> click,
+        Func<int, CancellationToken, Task> delay,
+        Func<Bitmap, string, Exception> failure,
+        Action<string> log,
+        CancellationToken ct)
     {
         // Run ONLY after exactly one verified free process click; never retry
         // that click here. A normal registration has no transfer popup.
@@ -1699,8 +1715,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         for (int attempt = 0; attempt < 6; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            await Task.Delay(200, ct);
-            using var observed = Capture(ct);
+            await delay(200, ct);
+            using var observed = capture(ct);
             if (!HasMaterialTransferModalVisual(observed)) continue;
             using (var g = Graphics.FromImage(first))
                 g.DrawImageUnscaled(observed, 0, 0);
@@ -1709,19 +1725,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
         if (!present) return;
 
-        if (!await IsExactMaterialTransferPromptAsync(first, ct))
-            Fail(first, "재료 전송 모달 형태는 보이지만 제목/주간 체크/확인 문구가 불명확합니다.");
+        if (!await verifyPrompt(first, ct))
+            throw failure(first, "재료 전송 모달 형태는 보이지만 제목/주간 체크/확인 문구가 불명확합니다.");
 
         // A checked checkbox is green. Two frames must agree before deciding
         // whether a click would turn it ON or accidentally turn it OFF.
         bool checkboxAlreadySelected = MaterialTransferCheckboxLooksSelected(first);
-        await Task.Delay(180, ct);
-        using (var second = Capture(ct))
+        await delay(180, ct);
+        using (var second = capture(ct))
         {
-            if (!await IsExactMaterialTransferPromptAsync(second, ct))
-                Fail(second, "재료 전송 모달이 새 프레임에서 동일하게 확인되지 않았습니다.");
+            if (!await verifyPrompt(second, ct))
+                throw failure(second, "재료 전송 모달이 새 프레임에서 동일하게 확인되지 않았습니다.");
             if (MaterialTransferCheckboxLooksSelected(second) != checkboxAlreadySelected)
-                Fail(second, "일주일 동안 보지 않기 체크 상태가 두 프레임에서 다릅니다. 입력 차단");
+                throw failure(second, "일주일 동안 보지 않기 체크 상태가 두 프레임에서 다릅니다. 입력 차단");
         }
 
         // Click the unchecked weekly checkbox once only. Already green means
@@ -1729,41 +1745,43 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // The click is not a new production registration or a wing purchase.
         if (!checkboxAlreadySelected)
         {
-            _ui.ClickFresh(MaterialTransferCheckboxPoint, ct);
-            await Task.Delay(240, ct);
-            using var checkedFrame = Capture(ct);
-            if (!await IsExactMaterialTransferPromptAsync(checkedFrame, ct) ||
+            ct.ThrowIfCancellationRequested();
+            click(MaterialTransferCheckboxPoint, ct);
+            await delay(240, ct);
+            using var checkedFrame = capture(ct);
+            if (!await verifyPrompt(checkedFrame, ct) ||
                 !MaterialTransferCheckboxChanged(first, checkedFrame) ||
                 !MaterialTransferCheckboxLooksSelected(checkedFrame))
-                Fail(checkedFrame, "일주일 동안 보지 않기 체크가 초록색으로 바뀌지 않았습니다. 확인 버튼 입력 차단");
-            Log?.Invoke("[자동 가공] 보관함 재료 전송 팝업 · 일주일 동안 보지 않기 1회 선택 · 시각적 변화 확인");
+                throw failure(checkedFrame, "일주일 동안 보지 않기 체크가 초록색으로 바뀌지 않았습니다. 확인 버튼 입력 차단");
+            log("[자동 가공] 보관함 재료 전송 팝업 · 일주일 동안 보지 않기 1회 선택 · 시각적 변화 확인");
         }
         else
         {
-            Log?.Invoke("[자동 가공] 보관함 재료 전송 팝업 · 일주일 동안 보지 않기 이미 선택됨 · 체크 재클릭 없음");
+            log("[자동 가공] 보관함 재료 전송 팝업 · 일주일 동안 보지 않기 이미 선택됨 · 체크 재클릭 없음");
         }
 
-        using (var final = Capture(ct))
+        using (var final = capture(ct))
         {
-            if (!await IsExactMaterialTransferPromptAsync(final, ct) ||
+            if (!await verifyPrompt(final, ct) ||
                 !MaterialTransferCheckboxLooksSelected(final))
-                Fail(final, "재료 전송 확인 버튼 직전 팝업/초록 체크 재검증 실패");
+                throw failure(final, "재료 전송 확인 버튼 직전 팝업/초록 체크 재검증 실패");
         }
         // Exactly one modal confirmation is authorized by its unique wording.
         // Actual registration must still pass the caller's independent CLI
         // +1-work proof. Never replay the free-process click on failure.
-        _ui.ClickFresh(MaterialTransferConfirmPoint, ct);
-        Log?.Invoke("[자동 가공] 보관함 재료 전송 팝업 확인 1회 · 작업 등록 CLI 검증 대기");
+        ct.ThrowIfCancellationRequested();
+        click(MaterialTransferConfirmPoint, ct);
+        log("[자동 가공] 보관함 재료 전송 팝업 확인 1회 · 작업 등록 CLI 검증 대기");
         for (int attempt = 0; attempt < 15; attempt++)
         {
             ct.ThrowIfCancellationRequested();
-            await Task.Delay(250, ct);
-            using var after = Capture(ct);
+            await delay(250, ct);
+            using var after = capture(ct);
             if (!HasMaterialTransferModalVisual(after))
                 return;
         }
-        using var stalled = Capture(ct);
-        Fail(stalled, "재료 전송 확인 이후에도 같은 팝업이 남아 있습니다. 반복 클릭 금지");
+        using var stalled = capture(ct);
+        throw failure(stalled, "재료 전송 확인 이후에도 같은 팝업이 남아 있습니다. 반복 클릭 금지");
     }
 
     public Task QueueAsync(AlteringPlan plan, Action reserveFiveWings, CancellationToken ct)
@@ -4255,3 +4273,4 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     public void Dispose() => _ui.Dispose();
 }
+
