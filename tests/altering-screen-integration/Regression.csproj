@@ -13,6 +13,7 @@
     <ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj" />
     <None Update="material-transfer-fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
     <None Update="facility-hub-fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="field-hud-fixtures/*.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
 
