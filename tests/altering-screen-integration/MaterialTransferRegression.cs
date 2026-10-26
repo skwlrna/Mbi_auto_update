@@ -151,13 +151,25 @@ internal static class MaterialTransferRegression
             {
                 var readLines = ocrType.GetMethod("ReadLinesAsync", All)!;
                 var dimLines = ocrType.GetMethod("ReadDimLinesAsync", All)!;
-                var regular = await (Task<IReadOnlyList<DungeonVisionBot.DetectionResult>>)readLines.Invoke(
-                    ocr, new object[] { uncheckedFrame, region, 2, CancellationToken.None })!;
-                var dimmed = await (Task<IReadOnlyList<DungeonVisionBot.DetectionResult>>)dimLines.Invoke(
-                    ocr, new object[] { uncheckedFrame, region, CancellationToken.None })!;
+                async Task<string> ShowOcr(Task task)
+                {
+                    await task;
+                    var results = (System.Collections.IEnumerable)
+                        task.GetType().GetProperty("Result")!.GetValue(task)!;
+                    var texts = new List<string>();
+                    foreach (object line in results)
+                    {
+                        texts.Add(line.GetType().GetProperty("Text")?.GetValue(line)?.ToString() ?? "?");
+                        if (texts.Count >= 20) break;
+                    }
+                    return string.Join(" | ", texts);
+                }
+                string regular = await ShowOcr((Task)readLines.Invoke(
+                    ocr, new object[] { uncheckedFrame, region, 2, CancellationToken.None })!);
+                string dimmed = await ShowOcr((Task)dimLines.Invoke(
+                    ocr, new object[] { uncheckedFrame, region, CancellationToken.None })!);
                 Console.WriteLine("OCR INCIDENT DIAGNOSTIC " + label + " raw=" +
-                    string.Join(" | ", regular.Select(x => x.Text)) + " dim=" +
-                    string.Join(" | ", dimmed.Take(20).Select(x => x.Text)));
+                    regular + " dim=" + dimmed);
             }
         }
         Check(incidentAccepted, "actual incident capture passes the production OCR predicate");
