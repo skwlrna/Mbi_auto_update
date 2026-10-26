@@ -37,7 +37,7 @@ class RetirementReleaseContract(unittest.TestCase):
         import re
         mgr = (ROOT/"source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
         csproj = (ROOT/"source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        match = re.search(r'CurrentVersion = "V(\d+\.\d+\.\d+)"', updater)
+        match = re.search(r'CurrentVersion = "V(\d+)\.(\d+)\.(\d+)"', mgr)
         self.assertIsNotNone(match)
         version = tuple(int(part) for part in match.groups())
         self.assertGreaterEqual(version, (3, 2, 64))
@@ -50,7 +50,7 @@ class RetirementReleaseContract(unittest.TestCase):
         import re
         updater = (ROOT/"source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
         project = (ROOT/"source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        match = re.search(r'CurrentVersion = "V(\\d+\\.\\d+\\.\\d+)"', updater)
+        match = re.search(r'CurrentVersion = "V(\d+\.\d+\.\d+)"', updater)
         self.assertIsNotNone(match)
         version = match.group(1)
         self.assertGreaterEqual(tuple(int(x) for x in version.split(".")), (3, 2, 66))
