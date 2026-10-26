@@ -2586,7 +2586,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // Distinct cave/indoor cyan-blue minimap rim, not arbitrary blue scenery:
     // sample the expected upper-right circular ring and a separate teal K disc.
     // The whole-HUD glyph trio + two frames is required in the CALLER;
-    // this pixel predicate alone NEVER permits input.
+    // this pixel predicate alone NEVER permits input. Threshold of 45 blue
+    // rim samples distinguishes real cave (131) and workshop (63) from the
+    // old gold-town screenshot (23) in the immutable regression corpus.
     internal static bool HasManagedBlueMinimapFieldHudVisual(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000) return false;
