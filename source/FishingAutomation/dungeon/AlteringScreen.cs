@@ -1129,6 +1129,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     var started = Stopwatch.StartNew();
                     var previousHud = DetectManagedWorldHudTemplates(frame);
                     bool previousField = HasManagedKEntryFieldHudVisual(frame);
+                    bool previousBlueWorld = HasManagedBlueMinimapFieldHudVisual(frame);
                     bool NeedsKeyOcr((int Matched, string Scores, bool KFound, bool IFound, bool HomeFound, bool EndFound) hud, bool field)
                         => hud.Matched < 3 && !(field && (hud.KFound && hud.IFound || hud.HomeFound && hud.EndFound));
                     var previousKeys = await FindManagedWorldHudKeysAsync(frame, NeedsKeyOcr(previousHud, previousField), ct);
@@ -1140,6 +1141,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         using var freshField = Capture(ct);
                         var currentHud = DetectManagedWorldHudTemplates(freshField);
                         bool currentField = HasManagedKEntryFieldHudVisual(freshField);
+                        bool currentBlueWorld = HasManagedBlueMinimapFieldHudVisual(freshField);
                         var currentKeys = await FindManagedWorldHudKeysAsync(freshField, NeedsKeyOcr(currentHud, currentField), ct);
                         samples++;
                         bool actualModal = HasManagedKEntryBlockingModal(freshField);
@@ -1152,6 +1154,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"HUD={previousHud.Matched}/4 → {currentHud.Matched}/4 · " +
                             $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
                             $"필드독립증거={previousField}→{currentField} · " +
+                            $"푸른미니맵+K={previousBlueWorld}→{currentBlueWorld} · " +
                             $"K/I={previousHud.KFound}/{previousHud.IFound}→{currentHud.KFound}/{currentHud.IFound} · " +
                             $"단축키={previousKeys.Scores}→{currentKeys.Scores} · " +
                             $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
@@ -1188,13 +1191,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 previousHud.HomeFound, previousHud.EndFound,
                                 currentHud.HomeFound, currentHud.EndFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
+                        // 2026-10-26 17:45 cave and 10-23 workshop field:
+                        // blue/cyan minimap rim is NOT the legacy gold rim.
+                        // Require independent physical blue rim + teal skill
+                        // and all THREE position-bound Home/End/ESC glyphs
+                        // stable in two frames. No HUD-score-only permission.
+                        bool blueWorldAuthorized = CanAuthorizeManagedBlueWorldKEntry(
+                            previousBlueWorld, currentBlueWorld,
+                            previousKeys.IsConsecutiveWith(currentKeys),
+                            actualModal, unexpectedMenu);
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
                         bool keysAuthorized = previousKeys.IsConsecutiveWith(currentKeys) &&
                             previousField && currentField && !actualModal && !unexpectedMenu;
-                        if ((templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
+                        if ((templateAuthorized || fieldAuthorized || homeEndAuthorized ||
+                             keysAuthorized || blueWorldAuthorized) && withinLimit)
                         {
                             string route = templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
-                                homeEndAuthorized ? "Home/End" : "key-labels";
+                                homeEndAuthorized ? "Home/End" : keysAuthorized ? "key-labels" :
+                                "blue-minimap-keys";
                             verifyManagedK = last => VerifyManagedKFrameAsync(last, route, currentKeys, ct);
                             Log?.Invoke($"[자동 가공] K 화면 인증 · {route} · 실제 연속 2프레임 · CLI 후 입력 프레임 재검증");
                             break;
@@ -1206,6 +1220,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 "K/I 또는 Home/End 또는 가변배치 단축키 + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
                         previousHud = currentHud;
                         previousField = currentField;
+                        previousBlueWorld = currentBlueWorld;
                         previousKeys = currentKeys;
                     }
                     if (menuAppeared)
@@ -2382,6 +2397,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (HasManagedKEntryBlockingModal(frame) || HasFixedProcessingHubVisual(frame) ||
             HasManagedProcessingBottomTabVisual(frame) || HasManagedFoodCraftingNavigationVisual(frame))
             return false;
+        if (route == "blue-minimap-keys")
+        {
+            // Recheck on the fresh pre-input frame, not on an aged image.
+            // Modal/menu veto above still applies to this new field route.
+            return HasManagedBlueMinimapFieldHudVisual(frame) &&
+                   expectedKeys.IsConsecutiveWith(DetectManagedWorldHudKeys(frame));
+        }
         if (route == "key-labels")
         {
             var keys = expectedKeys.Method == "glyph" ? DetectManagedWorldHudKeys(frame) :
@@ -2473,6 +2495,18 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
            previousK && previousI && currentK && currentI &&
            previousField && currentField;
 
+    // 2026-10-26 17:45: blue-rim cave/indoor minimaps cannot satisfy the
+    // older GOLD rim predicate. They need a different, stricter world path:
+    // two actual independent blue-rim/K-disc frames PLUS the complete,
+    // correctly positioned Home+End+ESC glyph trio on BOTH frames.
+    // The caller still checks CLI idle after this and the last-moment
+    // input frame, modal and processing-menu vetoes, and the 2-second limit.
+    internal static bool CanAuthorizeManagedBlueWorldKEntry(
+        bool previousBlueWorld, bool currentBlueWorld,
+        bool stableExactHomeEndEsc, bool popupVisible, bool processingMenuVisible)
+        => previousBlueWorld && currentBlueWorld && stableExactHomeEndEsc &&
+           !popupVisible && !processingMenuVisible;
+
     // Independent visual fallback for the 2026-10-20 production failure:
     // matching just two HUD icons never suffices; both Home and End and the
     // minimap+skill world evidence must persist across two actual frames.
@@ -2547,6 +2581,45 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 kButtonTeal++;
         }
         return minimapGold >= 20 && kButtonTeal >= 10;
+    }
+
+    // Distinct cave/indoor cyan-blue minimap rim, not arbitrary blue scenery:
+    // sample the expected upper-right circular ring and a separate teal K disc.
+    // The whole-HUD glyph trio + two frames is required in the CALLER;
+    // this pixel predicate alone NEVER permits input.
+    internal static bool HasManagedBlueMinimapFieldHudVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        int blueRing = 0;
+        int ringSectors = 0;
+        for (int sector = 0; sector < 4; sector++)
+        {
+            int sectorBlue = 0;
+            for (int y = 94; y <= 228; y += 3)
+            for (int x = 649; x <= 791; x += 3)
+            {
+                int dx = x - 720, dy = y - 161;
+                int radiusSquared = dx * dx + dy * dy;
+                if (radiusSquared < 50 * 50 || radiusSquared > 74 * 74)
+                    continue;
+                int side = (x < 720 ? 0 : 1) + (y < 161 ? 0 : 2);
+                if (side != sector) continue;
+                Color p = frame.GetPixel(x, y);
+                if (p.B >= 130 && p.B >= p.R + 38 && p.B >= p.G + 17)
+                    sectorBlue++;
+            }
+            blueRing += sectorBlue;
+            if (sectorBlue >= 3) ringSectors++;
+        }
+        int tealSkill = 0;
+        for (int y = 874; y <= 934; y += 3)
+        for (int x = 18; x <= 70; x += 3)
+        {
+            Color p = frame.GetPixel(x, y);
+            if (p.G >= 105 && p.G >= p.R + 20 && p.G >= p.B + 8)
+                tealSkill++;
+        }
+        return blueRing >= 12 && ringSectors >= 2 && tealSkill >= 10;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
