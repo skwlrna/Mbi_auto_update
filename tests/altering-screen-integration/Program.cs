@@ -394,6 +394,31 @@ try
         Check(Blue(cave) && Blue(caveWithoutGold) &&
               !PixelGate("HasManagedKEntryFieldHudVisual", caveWithoutGold),
             "17:45 cave screenshot still proves blue-rim field when dynamic gold pixels disappear");
+        // Verify the physical glyph trio on the very same original pixels.
+        // The policy must never authorize a K press from blue colour alone.
+        object caveGlyphs = Method(screen, "DetectManagedWorldHudKeys", 1)
+            .Invoke(null, new object[] { cave })!;
+        bool caveGlyphTrio = (bool)caveGlyphs.GetType().GetProperty("Found", all)!
+            .GetValue(caveGlyphs)!;
+        Check(caveGlyphTrio,
+            "17:45 real cave screenshot has the complete position-bound Home/End/ESC glyph trio");
+        object workshopGlyphs = Method(screen, "DetectManagedWorldHudKeys", 1)
+            .Invoke(null, new object[] { workshop })!;
+        bool workshopGlyphTrio = (bool)workshopGlyphs.GetType().GetProperty("Found", all)!
+            .GetValue(workshopGlyphs)!;
+        Console.WriteLine("HISTORICAL WORKSHOP glyph trio=" + workshopGlyphTrio +
+            " (the 10-23 incident used an older detector; blue pixels alone do not prove authorization)");
+        using var hubNotWorld = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+            "facility-hub-fixtures", "hub-wood-20261026-161326.png"));
+        Check(!Blue(hubNotWorld),
+            "17:45 blue minimap predicate never treats the prior six-card crafting hub as a world");
+        using var bluePopup = (Bitmap)cave.Clone();
+        Paint(bluePopup, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Paint(bluePopup, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(Blue(bluePopup) && PixelGate("HasManagedKEntryBlockingModal", bluePopup),
+            "real blue world with visible confirmation modal is still blocked before K");
         Check(Blue(workshop),
             "10-23 06:08 historical K reentry failure shares alternate blue-map field evidence");
         Check(PixelGate("HasManagedKEntryFieldHudVisual", goldTown) && !Blue(goldTown),
