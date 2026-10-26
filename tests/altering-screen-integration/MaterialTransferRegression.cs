@@ -159,7 +159,7 @@ internal static class MaterialTransferRegression
                     var texts = new List<string>();
                     foreach (object line in results)
                     {
-                        texts.Add(line.GetType().GetProperty("Text")?.GetValue(line)?.ToString() ?? "?");
+                        texts.Add(line.GetType().GetProperty("ReadText")?.GetValue(line)?.ToString() ?? "?");
                         if (texts.Count >= 20) break;
                     }
                     return string.Join(" | ", texts);
