@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.2.68",
+  "purpose": "verified_daynight_cave_field_hud",
+  "approvedBy": "user_direct_request_in_chat",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "realIncidentFrameRequired": true,
+  "sourcePr": 330,
+  "requestedAtKst": "2026-10-26"
+}
