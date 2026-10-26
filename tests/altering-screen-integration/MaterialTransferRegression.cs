@@ -139,7 +139,28 @@ internal static class MaterialTransferRegression
         MethodInfo prompt = screen.GetMethod("IsExactMaterialTransferPromptAsync", All)!;
         async Task<bool> Verify(Bitmap frame) => await (Task<bool>)prompt.Invoke(probe,
             new object[] { frame, CancellationToken.None })!;
-        Check(await Verify(uncheckedFrame), "actual incident capture passes the production OCR predicate");
+        bool incidentAccepted = await Verify(uncheckedFrame);
+        if (!incidentAccepted)
+        {
+            foreach (var (label, region) in new[]
+            {
+                ("title", new Rectangle(258, 665, 350, 62)),
+                ("weekly", new Rectangle(334, 827, 250, 51)),
+                ("confirm", new Rectangle(420, 885, 160, 64))
+            })
+            {
+                var readLines = ocrType.GetMethod("ReadLinesAsync", All)!;
+                var dimLines = ocrType.GetMethod("ReadDimLinesAsync", All)!;
+                var regular = await (Task<IReadOnlyList<DungeonVisionBot.DetectionResult>>)readLines.Invoke(
+                    ocr, new object[] { uncheckedFrame, region, 2, CancellationToken.None })!;
+                var dimmed = await (Task<IReadOnlyList<DungeonVisionBot.DetectionResult>>)dimLines.Invoke(
+                    ocr, new object[] { uncheckedFrame, region, CancellationToken.None })!;
+                Console.WriteLine("OCR INCIDENT DIAGNOSTIC " + label + " raw=" +
+                    string.Join(" | ", regular.Select(x => x.Text)) + " dim=" +
+                    string.Join(" | ", dimmed.Take(20).Select(x => x.Text)));
+            }
+        }
+        Check(incidentAccepted, "actual incident capture passes the production OCR predicate");
         Check(await Verify(checkedFrame), "checkbox state change preserves production OCR identity");
 
         // Each text ROI is independently required. Preserve the shell and enough
