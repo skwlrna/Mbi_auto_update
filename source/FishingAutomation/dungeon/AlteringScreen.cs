@@ -2546,19 +2546,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 p.G >= p.B + 8)
                 kButtonTeal++;
         }
-        // Gold rim is missing in the 2026-10-26 17:45 cave field,
-        // although the K/I templates and Home/End/ESC glyphs are stable.
-        // Retain the original gold route; this independent non-gold route
-        // needs the actual K disc, central Space compass ring AND the
-        // minimap's small orange direction marker, not just world color.
+        // The minimap's small orange clock icon is a DAY indicator; it is
+        // absent at night and can appear on ordinary fields and in caves.
+        // Never use the day/night indicator as proof that K is safe.
+        // Preserve the proven gold-world route and separately recognize the
+        // actual cyan/blue circular minimap rim + K disc + Space ring.
         return (minimapGold >= 20 && kButtonTeal >= 10) ||
                HasManagedKEntryNonGoldFieldHudVisual(frame, kButtonTeal);
     }
 
-    // Cave and gray-map world layouts do not have the gold minimap rim.
-    // This is ONLY independent world evidence used with consecutive
-    // K/I templates or exact Home/End/ESC glyphs; never permission by itself.
-    // Modal/menu veto, last-frame check and CLI-idle verification stay mandatory.
+    // 17:45 V3.2.66 and 19:09 V3.2.67 are the same cave WORLD at different
+    // day/night indicator states. The blue circular minimap structure (not
+    // an orange time-of-day icon), the life-skill K disc and the center
+    // green Space compass ring are three independent physical anchors.
+    // The CALLER additionally requires 2 stable K/I or Home/End frames,
+    // no menu/modal, 2s bound, fresh CLI idle and pre-input revalidation.
     private static bool HasManagedKEntryNonGoldFieldHudVisual(
         Bitmap frame, int kButtonTeal)
     {
@@ -2578,17 +2580,37 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 compassGreenRing++;
         }
 
-        int minimapOrangeMarker = 0;
-        for (int y = 148; y <= 182; y += 2)
-        for (int x = 770; x <= 795; x += 2)
-        {
-            Color p = frame.GetPixel(x, y);
-            if (p.R >= 160 && p.G >= 115 &&
-                p.R >= p.B + 50 && p.G >= p.B + 18)
-                minimapOrangeMarker++;
-        }
+        return compassGreenRing >= 22 && HasManagedBlueMinimapRingVisual(frame);
+    }
 
-        return compassGreenRing >= 22 && minimapOrangeMarker >= 6;
+    // Restrict samples to a circular arc around the actual 720,161 minimap
+    // center; arbitrary blue scenery elsewhere never counts as a minimap.
+    // Require pixels in at least two spatial sectors, not a single blue blob.
+    // Independent K and Space geometry is checked by the caller above.
+    internal static bool HasManagedBlueMinimapRingVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        int blueRing = 0;
+        int[] sectors = new int[4];
+        for (int y = 94; y <= 228; y += 3)
+        for (int x = 649; x <= 791; x += 3)
+        {
+            int dx = x - 720, dy = y - 161;
+            int radiusSquared = dx * dx + dy * dy;
+            if (radiusSquared < 50 * 50 || radiusSquared > 74 * 74)
+                continue;
+            Color p = frame.GetPixel(x, y);
+            if (p.B < 130 || p.B < p.R + 38 || p.B < p.G + 17)
+                continue;
+            blueRing++;
+            int sector = (x < 720 ? 0 : 1) + (y < 161 ? 0 : 2);
+            sectors[sector]++;
+        }
+        int populatedSectors = 0;
+        foreach (int pixels in sectors)
+            if (pixels >= 3) populatedSectors++;
+        return blueRing >= 45 && populatedSectors >= 2;
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)

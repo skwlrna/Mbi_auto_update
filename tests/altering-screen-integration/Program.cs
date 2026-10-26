@@ -1023,24 +1023,72 @@ try
               Has(ScreenCalls("EnterFacilityAsync", 3), "RequireManagedIdleAsync") &&
               Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryFieldHudVisual"),
             "new non-gold pixel proof is used only with compiled last-frame/modal and manager CLI guards");
-        using var noSkill = new Bitmap(cave);
-        using var noCompass = new Bitmap(cave);
-        using var noMinimapMarker = new Bitmap(cave);
+        // Both immutable cave screenshots MUST prove the same independent
+        // field even though the orange day/night icon changes or disappears.
+        using var caveNight = new Bitmap(Path.Combine(corpus, "cave-20261026-190933.png"));
+        Check(CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", cave, 30) &&
+              PixelGate("HasManagedBlueMinimapRingVisual", cave) &&
+              PixelGate("HasManagedBlueMinimapRingVisual", caveNight) &&
+              CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", caveNight, 30) &&
+              PixelGate("HasManagedKEntryFieldHudVisual", caveNight) &&
+              !PixelGate("HasManagedKEntryBlockingModal", caveNight) &&
+              !PixelGate("HasFixedProcessingHubVisual", caveNight),
+            "17:45 daytime and 19:09 nighttime cave incident frames both prove blue-ring K+Space field");
+        Check(Has(ScreenCalls("HasManagedKEntryNonGoldFieldHudVisual", 2),
+                  "HasManagedBlueMinimapRingVisual"),
+            "non-gold field condition uses actual circular minimap arc, never clock/day marker");
+        using var noSkill = new Bitmap(caveNight);
+        using var noCompass = new Bitmap(caveNight);
+        using var noMinimap = new Bitmap(caveNight);
         Paint(noSkill, new Rectangle(16, 865, 62, 76), Color.Black);
         Paint(noCompass, new Rectangle(339, 808, 124, 125), Color.Black);
-        Paint(noMinimapMarker, new Rectangle(768, 145, 31, 42), Color.Black);
-        bool noSkillPass = PixelGate("HasManagedKEntryFieldHudVisual", noSkill);
-        bool noCompassPass = PixelGate("HasManagedKEntryFieldHudVisual", noCompass);
-        bool noMarkerPass = PixelGate("HasManagedKEntryFieldHudVisual", noMinimapMarker);
-        bool nonGoldCompassPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noCompass, 30);
-        bool nonGoldMarkerPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noMinimapMarker, 30);
-        Console.WriteLine($"CAVE ANCHOR DIAG: noSkill={noSkillPass} noCompass={noCompassPass} noMarker={noMarkerPass} nongoldCompass={nonGoldCompassPass} nongoldMarker={nonGoldMarkerPass}");
-        Check(!noSkillPass && !nonGoldCompassPass && !nonGoldMarkerPass,
-            "17:45 cave field rejects missing K disc and non-gold candidate rejects missing compass or direction marker");
+        Paint(noMinimap, new Rectangle(645, 94, 153, 140), Color.Black);
+        Check(!PixelGate("HasManagedKEntryFieldHudVisual", noSkill) &&
+              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noCompass, 30) &&
+              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noMinimap, 30) &&
+              !PixelGate("HasManagedBlueMinimapRingVisual", noMinimap),
+            "night cave missing K disc, Space ring, or circular minimap stays blocked");
+        // Change ONLY orange daylight pixels and preserve actual blue arc.
+        // Orange night/day pixels must be irrelevant to field permission.
+        using var noDayIndicator = new Bitmap(cave);
+        for (int y = 148; y <= 182; y++)
+        for (int x = 770; x <= 795; x++)
+        {
+            Color p = noDayIndicator.GetPixel(x, y);
+            if (p.R >= 160 && p.G >= 115 &&
+                p.R >= p.B + 50 && p.G >= p.B + 18)
+                noDayIndicator.SetPixel(x, y, Color.FromArgb(61, 91, 118));
+        }
+        Check(CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noDayIndicator, 30) &&
+              PixelGate("HasManagedBlueMinimapRingVisual", noDayIndicator),
+            "daytime cave remains valid with orange clock/day indicator removed");
+        using var wrongSize = new Bitmap(799, 1000);
         using var empty = BlackFrame();
-        Check(!PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
+        Check(!PixelGate("HasManagedBlueMinimapRingVisual", wrongSize) &&
+              !PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
               !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", empty, 0),
-            "empty/unknown K screen remains rejected");
+            "unknown-size/empty K screen remains rejected");
+        // Old positive world fixtures must remain recognized; blue-only
+        // geometry cannot produce permission on six-card hub or popup.
+        using var hub = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+            "facility-hub-fixtures", "hub-wood-20261026-161326.png"));
+        Check(!PixelGate("HasManagedBlueMinimapRingVisual", hub) &&
+              !PixelGate("HasManagedKEntryFieldHudVisual", hub),
+            "prior real processing hub never passes new field recognition");
+        using var blockedModal = new Bitmap(caveNight);
+        Paint(blockedModal, new Rectangle(175, 754, 450, 218), Color.FromArgb(37, 44, 59));
+        Paint(blockedModal, new Rectangle(405, 889, 189, 55), Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasManagedKEntryBlockingModal", blockedModal),
+            "night cave with a positive travel confirmation is blocked before any K");
+        Check(CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, true, true, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, true, false, false, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, true, true, true, false) &&
+              !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
+                true, true, true, true, true, true, false, true),
+            "night field still needs 2 K/I + field frames and rejects modal/menu");
     }
 
     using (var kBar = BlackFrame())
