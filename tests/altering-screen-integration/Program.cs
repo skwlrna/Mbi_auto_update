@@ -1398,13 +1398,19 @@ try
     // is sent by this synthetic test. The weekly checkbox is initially OFF.
     Check(Has(queue, "HandleOptionalMaterialTransferPromptAsync"),
         "real QueueAsync handles optional material transfer only after registration click");
-    var transferCalls = ScreenCalls("HandleOptionalMaterialTransferPromptAsync", 1);
-    Check(Has(transferCalls, "IsExactMaterialTransferPromptAsync") &&
-          Has(transferCalls, "MaterialTransferCheckboxChanged") &&
-          Has(transferCalls, "MaterialTransferCheckboxLooksSelected") &&
-          Has(transferCalls, "ClickFresh") &&
+    Check(Has(ScreenCalls("HandleOptionalMaterialTransferPromptAsync", 1),
+              "RunMaterialTransferPromptAsync"),
+        "production transfer adapter runs the behavior-tested control flow");
+    var transferCalls = ScreenCalls("RunMaterialTransferPromptAsync", 7);
+    Check(Has(transferCalls, "MaterialTransferCheckboxChanged") &&
+          Count(transferCalls, "MaterialTransferCheckboxLooksSelected") >= 4 &&
           Has(transferCalls, "HasMaterialTransferModalVisual"),
-        "transfer prompt demands exact OCR plus checked-option transition, not a blind Space");
+        "transfer prompt uses two stable green checkbox frames and verifies green after any click and before confirm");
+    var transferOcrCalls = ScreenCalls("IsExactMaterialTransferPromptAsync", 2);
+    Check(Has(transferOcrCalls, "FindAsync") &&
+          Has(transferOcrCalls, "FindTextAsync") &&
+          Has(transferOcrCalls, "HasMaterialTransferModalVisual"),
+        "transfer prompt checks three independent text ROIs with bounded OCR fallback and the modal pixel gate");
 
     using (var modal = BlackFrame())
     using (var afterCheckbox = BlackFrame())
@@ -1440,7 +1446,13 @@ try
         Check(CallBoolean(screen, "MaterialTransferCheckboxChanged", modal, afterCheckbox),
             "one checkbox click must produce observable local pixel state change");
         Check(!CallBoolean(screen, "MaterialTransferCheckboxChanged", modal, modal),
-            "unchanged checkbox never authorizes modal confirmation");
+            "unchanged unchecked checkbox never authorizes modal confirmation");
+        Check(PixelGate("MaterialTransferCheckboxLooksSelected", afterCheckbox) &&
+              !PixelGate("MaterialTransferCheckboxLooksSelected", modal) &&
+              CallBoolean(screen, "MaterialTransferCheckboxChanged", afterCheckbox, modal),
+            "changing green back to grey is a toggle OFF and never enough to authorize confirm");
+        Check(PixelGate("MaterialTransferCheckboxLooksSelected", afterCheckbox),
+            "already green weekly checkbox remains selected; never click it again");
         Paint(otherDialog, new Rectangle(280, 679, 285, 22), Color.White);
         Check(!PixelGate("HasMaterialTransferModalVisual", otherDialog),
             "unrelated confirmation dialog without weekly label must stay untouched");
@@ -1449,6 +1461,7 @@ try
             "transfer popup input blocked on unknown capture dimensions");
     }
 
+    checks += await MaterialTransferRegression.RunAsync(production);
     Console.WriteLine($"PASS L2: {checks} real-screen integration checks (no injected input)");
 }
 catch (Exception error)
@@ -1456,3 +1469,4 @@ catch (Exception error)
     Console.Error.WriteLine(error);
     Environment.ExitCode = 1;
 }
+
