@@ -968,6 +968,81 @@ try
     // six-card processing screenshot contains 3 independent low-saturation
     // caption regions across the bottom K tabs. OCR of the static "가공"
     // caption is avoided ONLY when this nav structure is stable twice.
+    // Historical F9 HUD incidents: compare the actual snapshots, not
+    // synthetic template scores. The cave has NO broad gold minimap rim;
+    // previous green/gold fields still use their unchanged original path.
+    // These detectors alone never issue keys: managed K requires TWO frames,
+    // positive K/I or stable Home/End/ESC, explicit menu/modal veto and fresh CLI idle.
+    {
+        string corpus = Path.Combine(AppContext.BaseDirectory, "managed-field-fixtures");
+        string[] historical =
+        {
+            "field-grass-20261013-141648.png",
+            "field-town-20261020-234501.png",
+            "field-workshop-20261023-060800.png"
+        };
+        foreach (var file in historical)
+        {
+            using var field = new Bitmap(Path.Combine(corpus, file));
+            Check(PixelGate("HasManagedKEntryFieldHudVisual", field) &&
+                  !PixelGate("HasManagedKEntryBlockingModal", field) &&
+                  !PixelGate("HasFixedProcessingHubVisual", field),
+                "older F9 ordinary world remains positively detected: " + file);
+        }
+
+        // Re-run the CURRENT compiled shortcut glyph detector on the old
+        // FULL screenshots, not only their logged 2/4 template scores.
+        // Earlier builds had no flexible Home/End/ESC route. If the glyph
+        // recognizer also fails, these frames remain safe-stop candidates.
+        Type stableKeysType = production.GetType("DungeonVisionBot.ManagedWorldHudKeys", true)!;
+        bool CurrentGlyphRoute(Bitmap image)
+        {
+            object keys = Method(screen, "DetectManagedWorldHudKeys", 1)
+                .Invoke(null, new object[] { image })!;
+            return (bool)stableKeysType.GetProperty("Found", all)!.GetValue(keys)!;
+        }
+        foreach (var filename in historical)
+        {
+            using var image = new Bitmap(Path.Combine(corpus, filename));
+            bool shortcutGlyphs = CurrentGlyphRoute(image);
+            Console.WriteLine("PAST F9 CURRENT GLYPH ROUTE: " +
+                filename + "=" + shortcutGlyphs);
+        }
+
+        using var cave = new Bitmap(Path.Combine(corpus, "cave-20261026-174515.png"));
+        bool caveIsWorld = PixelGate("HasManagedKEntryFieldHudVisual", cave);
+        Check(CurrentGlyphRoute(cave),
+            "17:45 actual cave world also has three stable Home/End/ESC glyph anchors");
+        Check(caveIsWorld &&
+              !PixelGate("HasManagedKEntryBlockingModal", cave) &&
+              !PixelGate("HasFixedProcessingHubVisual", cave),
+            "17:45 cave screenshot becomes independent field proof, not a processing hub or confirmation popup");
+        Check(Has(ScreenCalls("HasManagedKEntryFieldHudVisual", 1),
+                "HasManagedKEntryNonGoldFieldHudVisual") &&
+              Has(ScreenCalls("EnterFacilityAsync", 3), "HasManagedKEntryBlockingModal") &&
+              Has(ScreenCalls("EnterFacilityAsync", 3), "RequireManagedIdleAsync") &&
+              Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryFieldHudVisual"),
+            "new non-gold pixel proof is used only with compiled last-frame/modal and manager CLI guards");
+        using var noSkill = new Bitmap(cave);
+        using var noCompass = new Bitmap(cave);
+        using var noMinimapMarker = new Bitmap(cave);
+        Paint(noSkill, new Rectangle(16, 865, 62, 76), Color.Black);
+        Paint(noCompass, new Rectangle(339, 808, 124, 125), Color.Black);
+        Paint(noMinimapMarker, new Rectangle(768, 145, 31, 42), Color.Black);
+        bool noSkillPass = PixelGate("HasManagedKEntryFieldHudVisual", noSkill);
+        bool noCompassPass = PixelGate("HasManagedKEntryFieldHudVisual", noCompass);
+        bool noMarkerPass = PixelGate("HasManagedKEntryFieldHudVisual", noMinimapMarker);
+        bool nonGoldCompassPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noCompass, 30);
+        bool nonGoldMarkerPass = CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noMinimapMarker, 30);
+        Console.WriteLine($"CAVE ANCHOR DIAG: noSkill={noSkillPass} noCompass={noCompassPass} noMarker={noMarkerPass} nongoldCompass={nonGoldCompassPass} nongoldMarker={nonGoldMarkerPass}");
+        Check(!noSkillPass && !nonGoldCompassPass && !nonGoldMarkerPass,
+            "17:45 cave field rejects missing K disc and non-gold candidate rejects missing compass or direction marker");
+        using var empty = BlackFrame();
+        Check(!PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
+              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", empty, 0),
+            "empty/unknown K screen remains rejected");
+    }
+
     using (var kBar = BlackFrame())
     using (var world = BlackFrame())
     using (var hub = BlackFrame())
