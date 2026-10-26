@@ -1026,7 +1026,7 @@ try
         // Both immutable cave screenshots MUST prove the same independent
         // field even though the orange day/night icon changes or disappears.
         using var caveNight = new Bitmap(Path.Combine(corpus, "cave-20261026-190933.png"));
-        Check(PixelGate("HasManagedKEntryNonGoldFieldHudVisual", cave, 30) &&
+        Check(CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", cave, 30) &&
               PixelGate("HasManagedBlueMinimapRingVisual", cave) &&
               PixelGate("HasManagedBlueMinimapRingVisual", caveNight) &&
               CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", caveNight, 30) &&
