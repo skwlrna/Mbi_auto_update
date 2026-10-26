@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.2.65",
+  "purpose": "material_transfer_weekly_checkbox_fix",
+  "approvedBy": "user_direct_request_in_chat",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "realIncidentOcrRequired": true,
+  "requestedAtKst": "2026-10-26",
+  "sourcePr": 320
+}
