@@ -347,6 +347,37 @@ try
         using var workshop = new Bitmap(Path.Combine(folder, "workshop-20261023-060800.png"));
         using var goldTown = new Bitmap(Path.Combine(folder, "gold-world-20261020-234501.png"));
         bool Blue(Bitmap b) => PixelGate("HasManagedBlueMinimapFieldHudVisual", b);
+        static string BlueDiagnostics(Bitmap frame)
+        {
+            int n = 0, teal = 0;
+            int[] bySector = new int[4];
+            for (int y = 94; y <= 228; y += 3)
+            for (int x = 649; x <= 791; x += 3)
+            {
+                int dx = x - 720, dy = y - 161, radius = dx * dx + dy * dy;
+                if (radius < 2500 || radius > 5476) continue;
+                int sector = (x < 720 ? 0 : 1) + (y < 161 ? 0 : 2);
+                Color p = frame.GetPixel(x, y);
+                if (p.B >= 130 && p.B >= p.R + 38 && p.B >= p.G + 17)
+                {
+                    n++;
+                    bySector[sector]++;
+                }
+            }
+            for (int y = 874; y <= 934; y += 3)
+            for (int x = 18; x <= 70; x += 3)
+            {
+                Color p = frame.GetPixel(x, y);
+                if (p.G >= 105 && p.G >= p.R + 20 && p.G >= p.B + 8)
+                    teal++;
+            }
+            return $"blueRing={n}; sectors={string.Join(",", bySector)}; teal={teal}";
+        }
+        Console.WriteLine("HUD RAW cave: " + BlueDiagnostics(cave) + " blue=" + Blue(cave) +
+            " gold=" + PixelGate("HasManagedKEntryFieldHudVisual", cave));
+        Console.WriteLine("HUD RAW workshop: " + BlueDiagnostics(workshop) + " blue=" + Blue(workshop));
+        Console.WriteLine("HUD RAW goldTown: " + BlueDiagnostics(goldTown) +
+            " gold=" + PixelGate("HasManagedKEntryFieldHudVisual", goldTown));
         Check(Blue(cave) && !PixelGate("HasManagedKEntryFieldHudVisual", cave),
             "17:45 original cave screenshot has independent blue-map+teal-K, NOT legacy gold map");
         Check(Blue(workshop),
