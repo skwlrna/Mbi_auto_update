@@ -908,7 +908,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         InvalidateForeignFacilityProof(plan.ScreenTitle);
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
-        const int maxAttempts = 3;
+        // Three ordinary navigation passes may end just after K has
+        // reopened the six-card hub. Allow ONE extra pass only if that
+        // hub is positively verified; never grant a fourth blind K/Esc.
+        const int maxAttempts = 4;
         int hubCardClicks = 0; // Never repeat an unverified fixed-coordinate click.
         bool foodNavigationIssued = false;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
@@ -947,6 +950,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // A positively identified six-card hub has priority over the
                 // persistent '가공' bottom navigation label. Never send the K
                 // menu click in a hub; use the unchanged fixed facility point.
+                if (attempt == maxAttempts &&
+                    !AlteringFacilityLayout.CanRecoverFinalHubSelection(
+                        _managedKInputIssued, hubCardClicks,
+                        HasFixedProcessingHubVisual(frame),
+                        HasBottomConfirmationModal(frame) ||
+                        await IsFacilityTravelDialogAsync(frame, ct)))
+                    Fail(frame,
+                        "마지막 K 재진입 후 동일 가공 허브/팝업 상태를 확인하지 못했습니다. 추가 K/시설 클릭 없이 정지합니다.");
+
                 if (await IsProcessingHubAsync(frame, ct))
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
@@ -978,17 +990,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         var exactTitle = await FindAsync(freshHub,
                             titleArea, plan.ScreenTitle, ct);
                         if (exactTitle is null ||
-                            !titleArea.Contains(exactTitle.Value.Center) ||
-                            Math.Abs(exactTitle.Value.Center.X - titleCenter.X) +
-                            Math.Abs(exactTitle.Value.Center.Y - titleCenter.Y) < 16)
-                            Fail(freshHub, "시설 카드 원래 좌표 미반응 · 고유 OCR 대체 좌표 미검증 · 재클릭 없이 정지");
-                        click = exactTitle.Value.Center;
+                            !titleArea.Contains(exactTitle.Value.Center))
+                            Fail(freshHub,
+                                "시설 카드 원래 좌표 미반응 · 고유 시설명 OCR 미검증 · 재클릭 없이 정지");
+                        // The original click was on the title (e.g. 400,261).
+                        // A retry may target the distinct image/body area of
+                        // that SAME card only after a fresh exact title match,
+                        // a second six-card-hub frame and a modal veto.
+                        click = AlteringFacilityLayout.AlternateCardClickPoint(plan.ScreenTitle);
+                        if (!AlteringFacilityLayout.IsSafeAlternateCardClick(
+                                plan.ScreenTitle, titleCenter, click))
+                            Fail(freshHub,
+                                "시설 카드 별도 본문 좌표 검증 실패 · 재클릭 없이 정지");
                     }
                     await RequireManagedIdleAsync(plan, directive, "시설 카드 클릭 직전 CLI 재검증", ct);
                     _ui.ClickFresh(click, ct);
                     hubCardClicks++;
                     Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 카드 클릭 {hubCardClicks}/2 · 좌표=({click.X},{click.Y}) · " +
-                        (hubCardClicks == 1 ? "고정 카드 중심" : "별도 OCR 정확 일치 + 허브 재확인"));
+                        (hubCardClicks == 1 ? "고정 카드 중심" : "고유 OCR 정확 일치 + 새 허브 + 별도 카드 본문 좌표"));
                     await Task.Delay(550, ct);
 
                     // The chosen facility card was positively clicked in
@@ -1076,6 +1095,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 // Unknown after collection can be a transient reward/result screen or the
                 // ordinary field. Do one bounded K re-entry only; never spam keys blindly.
+                // A fourth pass is reserved exclusively for the visually
+                // confirmed six-card hub above; no extra K is ever permitted.
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
                 // Never press K over an unknown green/travel modal in a managed run.
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
@@ -1224,7 +1245,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         }
 
         using var failed = Capture(ct);
-        Fail(failed, "선택한 가공 시설 화면을 3회 확인하지 못했습니다.");
+        Fail(failed, "선택한 가공 시설 화면을 3회 확인하지 못했습니다. 마지막 허브 재확인 1회도 성공하지 못했습니다.");
     }
 
     private static string RecipeCacheKey(AlteringPlan plan)
