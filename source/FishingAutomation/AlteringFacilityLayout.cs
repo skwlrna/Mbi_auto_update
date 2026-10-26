@@ -49,9 +49,9 @@ internal static class AlteringFacilityLayout
     // the normal guarded attempts already clicked a single target card.
     // A field, an unknown screen, an overlay, or an extra K is never authority.
     internal static bool CanRecoverFinalHubSelection(
-        bool managedKAlreadyIssued, int previousCardClicks,
+        bool managedKIssuedAfterCard, int previousCardClicks,
         bool exactSixCardHub, bool blockingModal)
-        => managedKAlreadyIssued && previousCardClicks == 1 &&
+        => managedKIssuedAfterCard && previousCardClicks == 1 &&
            exactSixCardHub && !blockingModal;
 
     // Never click the same title-coordinate twice. The body/image is an
