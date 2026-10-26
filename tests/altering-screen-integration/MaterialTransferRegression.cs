@@ -205,6 +205,27 @@ internal static class MaterialTransferRegression
             Check(!await Verify(masked), "missing text ROI blocks production OCR predicate: " + roi);
         }
         Check(!await Verify(absent), "absent modal cannot pass production OCR predicate");
+
+        // This same Korean Windows OCR is required for the 16:13 incident's
+        // alternative card-body retry. A fixed six-card visual is not enough
+        // to authorize that input: the exact WOOD title must be unique and
+        // physically inside the WOOD title ROI of the recorded screenshot.
+        string hubFile = Path.Combine(AppContext.BaseDirectory,
+            "facility-hub-fixtures", "hub-wood-20261026-161326.png");
+        using var hub = new Bitmap(hubFile);
+        MethodInfo titles = ocrType.GetMethod("FindAlteringFacilityTitlesAsync", All)!;
+        var resultTask = (Task)titles.Invoke(ocr,
+            new object[] { hub, "목재 가공", CancellationToken.None })!;
+        await resultTask;
+        var returned = (System.Collections.IEnumerable)resultTask.GetType()
+            .GetProperty("Result")!.GetValue(resultTask)!;
+        var candidates = returned.Cast<object>().ToArray();
+        var titleRoi = new Rectangle(282, 240, 236, 42);
+        bool singleWoodLabel = candidates.Length == 1 &&
+            candidates[0].GetType().GetProperty("Bounds")?.GetValue(candidates[0])
+                is Rectangle bounds && titleRoi.Contains(bounds);
+        Check(singleWoodLabel,
+            "actual 16:13 six-card incident has one exact wood title in its own ROI before any second click");
         return checks;
     }
 }
