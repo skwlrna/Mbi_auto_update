@@ -920,6 +920,27 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             using (var frame = Capture(ct))
             {
+                // Before ANY fourth-pass UI input (including food navigation),
+                // require a verified target facility OR the incident's proven
+                // no-modal six-card hub after one prior card click and managed K.
+                // This prevents a fourth K/Esc/tab click on an unknown screen.
+                if (attempt == maxAttempts)
+                {
+                    if (HasVerifiedFacilityMoveClickScreen(frame) &&
+                        await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
+                    {
+                        Log?.Invoke($"[자동 가공] 마지막 허브 복구 전 시설 진입 확인 · {plan.ScreenTitle}");
+                        return;
+                    }
+                    if (!AlteringFacilityLayout.CanRecoverFinalHubSelection(
+                            _managedKInputIssued, hubCardClicks,
+                            HasFixedProcessingHubVisual(frame),
+                            HasBottomConfirmationModal(frame) ||
+                            await IsFacilityTravelDialogAsync(frame, ct)))
+                        Fail(frame,
+                            "마지막 K 재진입 후 동일 가공 허브/팝업 상태를 확인하지 못했습니다. 추가 K/시설 클릭 없이 정지합니다.");
+                }
+
                 // Food quick-crafting has a cyan left tab, so the neutral-only
                 // K navigation detector cannot identify it. Classify it BEFORE
                 // the unknown-field/first-K path. No guessed Esc/K is needed.
@@ -950,15 +971,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // A positively identified six-card hub has priority over the
                 // persistent '가공' bottom navigation label. Never send the K
                 // menu click in a hub; use the unchanged fixed facility point.
-                if (attempt == maxAttempts &&
-                    !AlteringFacilityLayout.CanRecoverFinalHubSelection(
-                        _managedKInputIssued, hubCardClicks,
-                        HasFixedProcessingHubVisual(frame),
-                        HasBottomConfirmationModal(frame) ||
-                        await IsFacilityTravelDialogAsync(frame, ct)))
-                    Fail(frame,
-                        "마지막 K 재진입 후 동일 가공 허브/팝업 상태를 확인하지 못했습니다. 추가 K/시설 클릭 없이 정지합니다.");
-
                 if (await IsProcessingHubAsync(frame, ct))
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면=가공 허브 · 시설 진입 시도 {attempt}/{maxAttempts}");
