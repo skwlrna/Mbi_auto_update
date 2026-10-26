@@ -990,8 +990,29 @@ try
                 "older F9 ordinary world remains positively detected: " + file);
         }
 
+        // Re-run the CURRENT compiled shortcut glyph detector on the old
+        // FULL screenshots, not only their logged 2/4 template scores.
+        // Earlier builds had no flexible Home/End/ESC route. If the glyph
+        // recognizer also fails, these frames remain safe-stop candidates.
+        Type stableKeysType = production.GetType("DungeonVisionBot.ManagedWorldHudKeys", true)!;
+        bool CurrentGlyphRoute(Bitmap image)
+        {
+            object keys = Method(screen, "DetectManagedWorldHudKeys", 1)
+                .Invoke(null, new object[] { image })!;
+            return (bool)stableKeysType.GetProperty("Found", all)!.GetValue(keys)!;
+        }
+        foreach (var filename in historical)
+        {
+            using var image = new Bitmap(Path.Combine(corpus, filename));
+            bool shortcutGlyphs = CurrentGlyphRoute(image);
+            Console.WriteLine("PAST F9 CURRENT GLYPH ROUTE: " +
+                filename + "=" + shortcutGlyphs);
+        }
+
         using var cave = new Bitmap(Path.Combine(corpus, "cave-20261026-174515.png"));
         bool caveIsWorld = PixelGate("HasManagedKEntryFieldHudVisual", cave);
+        Check(CurrentGlyphRoute(cave),
+            "17:45 actual cave world also has three stable Home/End/ESC glyph anchors");
         Check(caveIsWorld &&
               !PixelGate("HasManagedKEntryBlockingModal", cave) &&
               !PixelGate("HasFixedProcessingHubVisual", cave),
