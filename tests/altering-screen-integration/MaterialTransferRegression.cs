@@ -25,6 +25,19 @@ internal static class MaterialTransferRegression
             Console.WriteLine("PASS material transfer: " + name);
         }
 
+        MethodInfo titleAnchors = screen.GetMethod(
+            "MaterialTransferTitleMatchesStableAnchors", All)!;
+        bool Anchor(string line) => (bool)titleAnchors.Invoke(null, new object[] { line })!;
+        Check(Anchor("재료를 전송하시겠습니까?") &&
+              Anchor("재료를 전송하kl겠습LI까?"),
+            "exact title and actual Hangul/Latin incident OCR preserve guarded title identity");
+        Check(!Anchor("시설로 이동하시겠습니까?") &&
+              !Anchor("재료를 전송하겠습LI") &&
+              !Anchor("재료를 전송하는 중입니다") &&
+              !Anchor("재료를 전송하시겠습니까? 다른 확인창") &&
+              !Anchor("재료를 전송하xxxxxxxx겠습LI까?"),
+            "unrelated, incomplete or excessively corrupted titles never authorize transfer");
+
         string fixture = Path.Combine(AppContext.BaseDirectory, "material-transfer-fixtures",
             "unchecked-20261026-115823.png");
         using var uncheckedFrame = new Bitmap(fixture);
