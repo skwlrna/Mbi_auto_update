@@ -1401,10 +1401,15 @@ try
     var transferCalls = ScreenCalls("HandleOptionalMaterialTransferPromptAsync", 1);
     Check(Has(transferCalls, "IsExactMaterialTransferPromptAsync") &&
           Has(transferCalls, "MaterialTransferCheckboxChanged") &&
-          Has(transferCalls, "MaterialTransferCheckboxLooksSelected") &&
-          Has(transferCalls, "ClickFresh") &&
+          Count(transferCalls, "MaterialTransferCheckboxLooksSelected") >= 4 &&
+          Count(transferCalls, "ClickFresh") == 2 &&
           Has(transferCalls, "HasMaterialTransferModalVisual"),
-        "transfer prompt demands exact OCR plus checked-option transition, not a blind Space");
+        "transfer prompt uses two stable green checkbox frames and verifies green after any click and before confirm");
+    var transferOcrCalls = ScreenCalls("IsExactMaterialTransferPromptAsync", 2);
+    Check(Has(transferOcrCalls, "FindAsync") &&
+          Has(transferOcrCalls, "FindTextAsync") &&
+          Has(transferOcrCalls, "HasMaterialTransferModalVisual"),
+        "transfer prompt checks three independent text ROIs with bounded OCR fallback and the modal pixel gate");
 
     using (var modal = BlackFrame())
     using (var afterCheckbox = BlackFrame())
@@ -1440,7 +1445,13 @@ try
         Check(CallBoolean(screen, "MaterialTransferCheckboxChanged", modal, afterCheckbox),
             "one checkbox click must produce observable local pixel state change");
         Check(!CallBoolean(screen, "MaterialTransferCheckboxChanged", modal, modal),
-            "unchanged checkbox never authorizes modal confirmation");
+            "unchanged unchecked checkbox never authorizes modal confirmation");
+        Check(PixelGate("MaterialTransferCheckboxLooksSelected", afterCheckbox) &&
+              !PixelGate("MaterialTransferCheckboxLooksSelected", modal) &&
+              CallBoolean(screen, "MaterialTransferCheckboxChanged", afterCheckbox, modal),
+            "changing green back to grey is a toggle OFF and never enough to authorize confirm");
+        Check(PixelGate("MaterialTransferCheckboxLooksSelected", afterCheckbox),
+            "already green weekly checkbox remains selected; never click it again");
         Paint(otherDialog, new Rectangle(280, 679, 285, 22), Color.White);
         Check(!PixelGate("HasMaterialTransferModalVisual", otherDialog),
             "unrelated confirmation dialog without weekly label must stay untouched");
