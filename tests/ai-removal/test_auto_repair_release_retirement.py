@@ -44,18 +44,29 @@ class RetirementReleaseContract(unittest.TestCase):
         self.assertIn("<Version>%s</Version>" % ".".join(map(str, version)), csproj)
 
     def test_newer_release_workflow_matches_version_literal(self):
-        # The V3.2.66 workflow once silently skipped publication because
-        # its regex still expected the prior 3.2.65 updater constant.
-        version = "3.2.66"
+        # Every new public release must provide an exact updater/version
+        # workflow. A prior regression silently skipped V3.2.66 because
+        # the updater version check was stale.
+        import re
         updater = (ROOT/"source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
         project = (ROOT/"source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        workflow = (ROOT/".github/workflows/release-v3266-auto-update.yml").read_text(encoding="utf-8")
+        match = re.search(r'CurrentVersion = "V(\d+\.\d+\.\d+)"', updater)
+        self.assertIsNotNone(match)
+        version = match.group(1)
+        self.assertGreaterEqual(tuple(int(x) for x in version.split(".")), (3, 2, 66))
+        release_path = ROOT/(".github/workflows/release-v" + version.replace(".", "") + "-auto-update.yml")
+        self.assertTrue(release_path.exists(), release_path)
+        workflow = release_path.read_text(encoding="utf-8")
         expected = 'CurrentVersion = "V' + version + '"'
         self.assertIn(expected, updater)
         self.assertIn("<Version>" + version + "</Version>", project)
         self.assertIn("if(-not $u.Contains('" + expected + "'))", workflow)
-        self.assertNotIn('CurrentVersion = "V3\\.2\\.65"', workflow)
         self.assertIn("MabiAuto_V" + version + "_Windows_Lite.zip.sha256", workflow)
+        # Retain the historical V3.2.66 guard and assets without pinning
+        # the running updater to that old release forever.
+        prior = (ROOT/".github/workflows/release-v3266-auto-update.yml").read_text(encoding="utf-8")
+        self.assertIn('CurrentVersion = "V3.2.66"', prior)
+        self.assertIn("MabiAuto_V3.2.66_Windows_Lite.zip.sha256", prior)
 
 if __name__ == "__main__":
     unittest.main()
