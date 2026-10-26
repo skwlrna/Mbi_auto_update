@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -16,7 +16,7 @@ internal sealed record ReleaseUpdateInfo(
 
 internal static class UpdateManager
 {
-    public const string CurrentVersion = "V3.2.68";
+    public const string CurrentVersion = "V3.2.69";
     public const string RepositoryOwner = "skwlrna";
     public const string RepositoryName = "Mbi_auto_update";
 

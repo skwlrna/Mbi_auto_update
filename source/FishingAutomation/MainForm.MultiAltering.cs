@@ -1,4 +1,4 @@
-using DungeonVisionBot;
+﻿using DungeonVisionBot;
 
 namespace FishingAutomation;
 
@@ -810,6 +810,18 @@ public sealed partial class MainForm
                         // rechecks the empty lane before persisting its HOLD.
                         // No parent registration or terminal result is claimed.
                         alteringWorkFence.ConfirmBatchReturn(workTicket, 0, false);
+                        throw;
+                    }
+                    catch (AlteringFacilityNavigationException)
+                    {
+                        // Navigation sent no batch registration. Earlier confirmed
+                        // registrations remain counted; this is not a completed plan.
+                        int registered = automation.ConfirmedRegistrationsThisRun - registrationsBefore;
+                        if (registered < 0)
+                            throw;
+                        alteringWorkFence.ConfirmBatchReturn(workTicket, registered, false);
+                        laneState.NoteRegistration(plan, FacilityLaneOwner.Main, registered);
+                        Ui(() => _log.Write("[다중가공] 시설 진입 실패 · 가공 등록 미확정과 분리 · 자동 재실행 없이 정지"));
                         throw;
                     }
                     catch (Exception)

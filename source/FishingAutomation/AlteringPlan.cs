@@ -3,6 +3,14 @@ using System.Text.RegularExpressions;
 
 namespace FishingAutomation;
 
+// Only facility-menu navigation may throw this. Registration/receipt failures
+// retain the existing uncertain-action fence and must never be replayed.
+internal sealed class AlteringFacilityNavigationException : InvalidOperationException
+{
+    internal AlteringFacilityNavigationException(string message, Exception inner)
+        : base(message, inner) { }
+}
+
 internal static class AlteringEtaEstimator
 {
     internal static long? Estimate(

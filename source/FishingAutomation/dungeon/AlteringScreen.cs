@@ -906,13 +906,29 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringPlan plan, CancellationToken ct,
         AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
     {
+        try
+        {
+            await EnterFacilityCoreAsync(plan, ct, directive);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // This method only navigates; no registration or receipt input.
+            // Preserve diagnostics without claiming a possibly applied batch.
+            throw new AlteringFacilityNavigationException(ex.Message, ex);
+        }
+    }
+
+    private async Task EnterFacilityCoreAsync(
+        AlteringPlan plan, CancellationToken ct,
+        AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
+    {
         InvalidateForeignFacilityProof(plan.ScreenTitle);
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         // Three ordinary navigation passes may end just after K has
         // reopened the six-card hub. Allow ONE extra pass only if that
         // hub is positively verified; never grant a fourth blind K/Esc.
         const int maxAttempts = 4;
-        int hubCardClicks = 0; // Never repeat an unverified fixed-coordinate click.
+        int hubCardClicks = 0; // At most one retry, at the unchanged fixed point.
         bool recoveredHubAfterK = false; // Only K issued after THIS target-card click.
         bool foodNavigationIssued = false;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
@@ -980,10 +996,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                          await IsFacilityTravelDialogAsync(frame, ct)))
                         Fail(frame, "가공 허브 시설 선택 전 확인/이동 팝업 감지 · 입력 차단");
                     await RequireManagedIdleAsync(plan, directive, "시설명 메뉴 선택 직전", ct);
-                    // The live 22:55 failure stayed on the six-card hub after
-                    // THREE identical clicks at (400,261). Never send the same
-                    // unverified input repeatedly. On the second attempt require
-                    // a fresh, unambiguous OCR hit confined to the selected card.
+                    // The fixed six-card layout determines the selected point.
+                    // OCR is not a prerequisite for retrying that same point.
                     if (!HasFixedProcessingHubVisual(frame))
                         Fail(frame, "가공 허브 6카드 구조 확인 실패 · 시설 선택 입력 차단");
                     if (hubCardClicks >= 2)
@@ -1000,37 +1014,35 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             HasBottomConfirmationModal(freshHub) ||
                             await IsFacilityTravelDialogAsync(freshHub, ct))
                             Fail(freshHub, "시설 카드 재시도 전 허브/팝업 새 화면 검증 실패 · 추가 클릭 차단");
-                        var exactTitle = await FindAsync(freshHub,
-                            titleArea, plan.ScreenTitle, ct);
-                        if (exactTitle is null ||
-                            !titleArea.Contains(exactTitle.Value.Center))
-                            Fail(freshHub,
-                                "시설 카드 원래 좌표 미반응 · 고유 시설명 OCR 미검증 · 재클릭 없이 정지");
-                        // The original click was on the title (e.g. 400,261).
-                        // A retry may target the distinct image/body area of
-                        // that SAME card only after a fresh exact title match,
-                        // a second six-card-hub frame and a modal veto.
-                        click = AlteringFacilityLayout.AlternateCardClickPoint(plan.ScreenTitle);
-                        if (!AlteringFacilityLayout.IsSafeAlternateCardClick(
-                                plan.ScreenTitle, titleCenter, click))
-                            Fail(freshHub,
-                                "시설 카드 별도 본문 좌표 검증 실패 · 재클릭 없이 정지");
+                        // Both captures must still prove the popup-free hub.
+                        // A transition, facility page or modal cannot authorize retry.
+                        if (!AlteringFacilityLayout.CanRetryFixedHubSelection(
+                                hubCardClicks, HasFixedProcessingHubVisual(frame),
+                                HasFixedProcessingHubVisual(freshHub),
+                                HasManagedKEntryBlockingModal(frame) ||
+                                HasManagedKEntryBlockingModal(freshHub)))
+                            Fail(freshHub, "시설 카드 재시도 조건 미충족 · 추가 클릭 차단");
                     }
                     await RequireManagedIdleAsync(plan, directive, "시설 카드 클릭 직전 CLI 재검증", ct);
                     _ui.ClickFresh(click, ct);
                     hubCardClicks++;
                     Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 카드 클릭 {hubCardClicks}/2 · 좌표=({click.X},{click.Y}) · " +
-                        (hubCardClicks == 1 ? "고정 카드 중심" : "고유 OCR 정확 일치 + 새 허브 + 별도 카드 본문 좌표"));
+                        (hubCardClicks == 1 ? "고정 카드 중심" : "새 허브 2프레임 확인 + 기존 고정 좌표 재시도"));
                     await Task.Delay(550, ct);
 
                     // The chosen facility card was positively clicked in
                     // the fixed hub. A fixed facility screen (title + level)
                     // is sufficient; do not require another title OCR pass.
+                    int stableFacilityFrames = 0;
                     if (await WaitForScreenStateAsync(async image =>
-                            HasVerifiedFacilityMoveClickScreen(image) &&
-                            (HasFixedFacilityHeaderVisual(image) ||
-                             await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null),
-                            1200, ct))
+                        {
+                            bool facility = HasVerifiedFacilityMoveClickScreen(image) &&
+                                !HasManagedKEntryBlockingModal(image) &&
+                                (HasFixedFacilityHeaderVisual(image) ||
+                                 await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null);
+                            stableFacilityFrames = facility ? stableFacilityFrames + 1 : 0;
+                            return stableFacilityFrames >= 2;
+                        }, 3000, ct))
                     {
                         Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
                         return;
