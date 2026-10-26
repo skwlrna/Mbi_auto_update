@@ -32,8 +32,16 @@ class RetirementReleaseContract(unittest.TestCase):
         self.assertIn("tools/RetireAutoRepair.ps1", release)
         self.assertIn("source/V3.2.64_AUTO_REPAIR_RETIREMENT.json", release)
         self.assertIn("MabiAuto_V3.2.64_Windows_Lite.zip.sha256", release)
-        self.assertIn('CurrentVersion = "V3.2.64"', (ROOT/"source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8"))
-        self.assertIn("<Version>3.2.64</Version>", (ROOT/"source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8"))
+        # This is a V3.2.64 historical retirement contract. Later releases
+        # must retain the historical workflow but may advance their version.
+        import re
+        mgr = (ROOT/"source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        csproj = (ROOT/"source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
+        match = re.search(r'CurrentVersion = "V(\\d+)\\.(\\d+)\\.(\\d+)"', mgr)
+        self.assertIsNotNone(match)
+        version = tuple(int(part) for part in match.groups())
+        self.assertGreaterEqual(version, (3, 2, 64))
+        self.assertIn("<Version>%s</Version>" % ".".join(map(str, version)), csproj)
 
 if __name__ == "__main__":
     unittest.main()
