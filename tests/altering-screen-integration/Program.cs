@@ -1014,7 +1014,7 @@ try
             "17:45 cave field cannot pass on K disc, compass or minimap marker alone; every independent anchor required");
         using var empty = BlackFrame();
         Check(!PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
-              !PixelGate("HasManagedKEntryNonGoldFieldHudVisual", empty),
+              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", empty, 0),
             "empty/unknown K screen remains rejected");
     }
 
