@@ -370,6 +370,7 @@ try
         "execute_crafting cannot cross the read-only CLI process boundary");
 
     await CraftingFoodMaterialPolicyTests.RunAsync(Check);
+    await CraftingFoodMaterialIntegrationTests.RunAsync(Check, log);
     await CraftingFlowTests.RunAsync(Check, log);
     await BulkGatheringFlowTests.RunAsync(Check);
     if (args.Length == 1 && args[0] == "--live-readonly") await LiveReadOnlyTests.RunAsync(Check, log);
