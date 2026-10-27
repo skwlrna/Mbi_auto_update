@@ -41,7 +41,16 @@ public sealed partial class MainForm
             {
                 var exact = await craftingData.ExactAsync(
                     selectedPlan.DisplayName, CancellationToken.None);
-                var validated = selectedPlan with { ProducedPerCraft = exact.ProducedPerCraft };
+                var resolvedCategory = CraftingQueries.ResolveUiCategory(exact);
+                if (selectedPlan.Category != resolvedCategory)
+                    _log.Write(
+                        $"[제작][분류 재검증] {selectedPlan.DisplayName} " +
+                        $"{selectedPlan.Category} → {resolvedCategory} · 현재 CLI 제작법 기준");
+                var validated = selectedPlan with
+                {
+                    Category = resolvedCategory,
+                    ProducedPerCraft = exact.ProducedPerCraft
+                };
                 validated.Validate();
                 queue.Add(validated);
             }
