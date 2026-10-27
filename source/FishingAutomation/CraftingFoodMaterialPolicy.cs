@@ -90,6 +90,10 @@ internal static class CraftingFoodMaterialPolicy
 
                 if (!isRoot)
                 {
+                    // Raw harvestables do not need inventory preflight; the
+                    // existing gatherer obtains them when the quest needs them.
+                    if (!IsShopOnly(name) && !Processing.ContainsKey(name))
+                        return null;
                     long available = await AvailableAsync(name);
                     long consumed = Math.Min(available, missing);
                     left[name] = available - consumed;
