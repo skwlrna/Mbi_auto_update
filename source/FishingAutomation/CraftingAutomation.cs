@@ -302,6 +302,13 @@ internal sealed class CraftingAutomation
 
             if (string.IsNullOrWhiteSpace(deficit.DisplayName))
             {
+                // Food recipes must not guess whether an unnamed quest row
+                // is a purchase-only material. Leave other item crafting's
+                // existing OCR-fallback path unchanged.
+                if (plan.Category == CraftingCategory.Food)
+                    throw new CraftingMaterialAcquisitionException(
+                        "재료명 미확인",
+                        "음식 재료명을 확인하지 못해 구매/채집 여부를 판정할 수 없습니다.");
                 Log?.Invoke(
                     $"[제작] 재료명 OCR 미확인 · 부족 행 {deficit.Current}/{deficit.Required} · " +
                     $"행Y={deficit.RowY} · 이름은 보조정보로만 사용하고 해당 부족 행 자체를 처리");
