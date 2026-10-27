@@ -21,6 +21,73 @@ internal sealed record CraftableItem(
 
 internal static class CraftingQueries
 {
+    // Verified cooking recipes (Lv.1-6, sharing and feast). These must take
+    // precedence over absent or generic CLI item-category metadata.
+    // This list deliberately excludes "짜먹는 간식" (item-tab crafting)
+    // and "여행자 간식" (direct crafting, not an ordinary food-station recipe).
+    private static readonly HashSet<string> VerifiedFoodNames = new(StringComparer.Ordinal)
+    {
+        "달걀프라이",
+        "달걀 프라이",
+        "삶은 달걀",
+        "옥수수차",
+        "녹차",
+        "홍차",
+        "바삭한 초코 카나페",
+        "구운 고기",
+        "마요네즈 고기볶음",
+        "포크 인 밀크",
+        "치즈 퐁뒤",
+        "조개찜",
+        "크림소스 스테이크",
+        "샤와르마",
+        "미트 파르미자나",
+        "카레라이스",
+        "미트 포트파이",
+        "매콤 파프리카 스튜",
+        "포레스트 스테이크",
+        "통감자구이",
+        "감자 샐러드",
+        "야채볶음",
+        "리코타 치즈 샐러드",
+        "감자수프",
+        "알리오 올리오",
+        "두부 스테이크",
+        "두부 국수",
+        "토마토 리소토",
+        "토마토 리조토",
+        "호박 수프",
+        "오트밀 영양죽",
+        "가든 샐러드",
+        "사과 주스",
+        "사과 샐러드",
+        "콘치즈",
+        "사과 수플레",
+        "얼음 딸기주스",
+        "사과 생크림케이크",
+        "두유 빙수",
+        "두유 파스닙 케이크",
+        "녹차 크레이프 케이크",
+        "호박 파이",
+        "달콤쌉쌀 푸딩",
+        "넛츠 초코 비스킷",
+        "흰살생선 뫼니에르",
+        "부야베스",
+        "고등어와 연어 스테이크",
+        "메기 피시 앤 칩스",
+        "농어 매운탕",
+        "대만찬: 꺼지지 않는 불의 뵈프 부르기뇽",
+        "금은 매운탕",
+        "송어 파피요트",
+        "대만찬: 거센 바람의 페어리 플로스",
+        "파이크퍼치 필레 리소토",
+        "토마토 크림 생선 커넬",
+        "풍미 가득 스테이크",
+    };
+
+    internal static bool IsVerifiedFoodRecipe(string? displayName)
+        => displayName is not null && VerifiedFoodNames.Contains(displayName.Trim());
+
     internal static IReadOnlyList<CraftableItem> ParseCatalog(MabinogiCliResult response)
     {
         if (!response.Success || response.Data is not JsonElement root || root.ValueKind != JsonValueKind.Object)
@@ -88,16 +155,18 @@ internal static class CraftingQueries
         // fallback. Each row still belongs to exactly one tab, never both.
         bool sparseMetadata = known * 4 < snapshot.Length;
         return snapshot.Where(x =>
-            x.Category == category ||
-            (x.Category == CraftingCategory.Unknown &&
-             sparseMetadata &&
-             FallbackCategory(x) == category));
+            ResolveUiCategory(x) == category &&
+            (x.Category != CraftingCategory.Unknown ||
+             IsVerifiedFoodRecipe(x.DisplayName) ||
+             sparseMetadata));
     }
 
     internal static CraftingCategory ResolveUiCategory(CraftableItem item)
-        => item.Category != CraftingCategory.Unknown
-            ? item.Category
-            : FallbackCategory(item);
+        => IsVerifiedFoodRecipe(item.DisplayName)
+            ? CraftingCategory.Food
+            : item.Category != CraftingCategory.Unknown
+                ? item.Category
+                : FallbackCategory(item);
 
     internal static (int Food, int Item, int Unknown, bool UsesFallback) CategoryCoverage(
         IEnumerable<CraftableItem> items)
@@ -111,6 +180,8 @@ internal static class CraftingQueries
 
     private static CraftingCategory FallbackCategory(CraftableItem item)
     {
+        if (IsVerifiedFoodRecipe(item.DisplayName))
+            return CraftingCategory.Food;
         string name = item.DisplayName.Replace(" ", "", StringComparison.Ordinal);
         string[] foodTokens =
         {
@@ -118,7 +189,8 @@ internal static class CraftingQueries
             "밥", "죽", "덮밥", "김밥", "초밥", "국수", "라면", "파스타", "면요리",
             "스테이크", "꼬치", "오믈렛", "샌드위치", "버거", "빵", "케이크", "쿠키",
             "파이", "푸딩", "아이스크림", "초콜릿", "사탕", "캔디", "젤리", "잼",
-            "주스", "음료", "차", "커피", "요리"
+            "주스", "음료", "차", "커피", "요리", "라이스", "리소토",
+            "리조토", "비스킷", "스튜", "카나페", "파피요트", "포트파이"
         };
         if (foodTokens.Any(token => name.Contains(token, StringComparison.OrdinalIgnoreCase)))
             return CraftingCategory.Food;

@@ -8,11 +8,19 @@ internal static class CraftingFoodMaterialIntegrationTests
     {
         await VerifyBlockedMaterialAsync("소금", 2, 0, check, log);
         await VerifyBlockedMaterialAsync("치즈", 3, 0, check, log);
+        await VerifyBlockedMaterialAsync("셀러리", 2, 0, check, log, "셀러리");
+        await VerifyBlockedMaterialAsync("생강", 2, 0, check, log, "생강");
+        await VerifyBlockedMaterialAsync("조각 초콜릿", 5, 0, check, log, "조각 초콜릿");
+        await VerifyBlockedMaterialAsync("카레 가루", 2, 0, check, log, "카레 가루");
+        await VerifyBlockedMaterialAsync("파이크퍼치", 4, 0, check, log, "파이크퍼치");
+        await VerifyBlockedMaterialAsync("숙성된 커다란 고기", 1, 0, check, log, "커다란 고기");
+        await VerifyBlockedMaterialAsync("정체불명 특수 식재료", 1, 0, check, log,
+            "정체불명 특수 식재료");
     }
 
     private static async Task VerifyBlockedMaterialAsync(
         string questMaterial, int required, long ownedSalt,
-        Action<bool, string> check, AppLog log)
+        Action<bool, string> check, AppLog log, string expectedName = "소금")
     {
         var screen = new ShopShortageScreen(questMaterial, required);
         string ReadResponse(string command) => command switch
@@ -22,6 +30,7 @@ internal static class CraftingFoodMaterialIntegrationTests
                 new { DisplayName = "야채볶음", Location = "inventory", Count = 10L },
                 new { DisplayName = "소금", Location = "inventory", Count = ownedSalt }
             }),
+            "get_gatherable_items" => "{\"items\":[]}",
             "get_craftable_items" => JsonSerializer.Serialize(new
             {
                 items = new[] { new { DisplayName = "야채볶음", ProducedPerCraft = 1, Craftable = false } }
@@ -66,9 +75,9 @@ internal static class CraftingFoodMaterialIntegrationTests
         }
         catch (CraftingMaterialAcquisitionException ex)
         {
-            check(ex.MaterialName == "소금" && screen.RecoveryCount == 1 &&
+            check(ex.MaterialName == expectedName && screen.RecoveryCount == 1 &&
                   screen.GatherCount == 0 && screen.CraftCount == 0,
-                "real food engine stops before gathering " + questMaterial +
+                "real food engine skips without gathering " + questMaterial +
                 ", safely recovers once, and surfaces material-only skip");
         }
     }

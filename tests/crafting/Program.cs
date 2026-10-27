@@ -333,6 +333,39 @@ try
           !CraftingQueries.ForUiCategory(items, CraftingCategory.Item).Any(x => x.Category != CraftingCategory.Item),
         "food and item UI categories are strictly separated and unknown entries stay hidden");
 
+    // Live CLI can omit category or label every recipe generically as Item.
+    // User-reported 카레라이스 and other reviewed food names must still
+    // navigate 제작 → 음식, while ordinary item-table recipes remain Item.
+    string[] reviewedFoodNames =
+    {
+        "카레라이스", "토마토 리소토", "알리오 올리오", "미트 파르미자나",
+        "샤와르마", "포크 인 밀크", "콘치즈", "사과 수플레",
+        "넛츠 초코 비스킷", "바삭한 초코 카나페", "토마토 크림 생선 커넬",
+        "파이크퍼치 필레 리소토", "홍차", "가든 샐러드",
+        "대만찬: 거센 바람의 페어리 플로스",
+        "대만찬: 꺼지지 않는 불의 뵈프 부르기뇽"
+    };
+    Check(reviewedFoodNames.All(CraftingQueries.IsVerifiedFoodRecipe) &&
+          !CraftingQueries.IsVerifiedFoodRecipe("짜먹는 간식") &&
+          !CraftingQueries.IsVerifiedFoodRecipe("여행자 간식") &&
+          !CraftingQueries.IsVerifiedFoodRecipe("숙련 캠프파이어 키트"),
+        "all reviewed food exceptions are categorized without misclassifying item-table recipes");
+
+    var mislabelledFood = new CraftableItem("카레라이스", true, 1, null,
+        Array.Empty<CraftingIngredient>(), CraftingCategory.Item);
+    var unknownFood = new CraftableItem("알리오 올리오", false, 1, null,
+        Array.Empty<CraftingIngredient>(), CraftingCategory.Unknown);
+    var itemCraft = new CraftableItem("숙련 캠프파이어 키트", true, 1, null,
+        Array.Empty<CraftingIngredient>(), CraftingCategory.Item);
+    Check(CraftingQueries.ResolveUiCategory(mislabelledFood) == CraftingCategory.Food &&
+          CraftingQueries.ResolveUiCategory(unknownFood) == CraftingCategory.Food &&
+          CraftingQueries.ResolveUiCategory(itemCraft) == CraftingCategory.Item &&
+          CraftingQueries.ForUiCategory(
+              new[] { mislabelledFood, unknownFood, itemCraft }, CraftingCategory.Food)
+              .Select(x => x.DisplayName)
+              .SequenceEqual(new[] { "카레라이스", "알리오 올리오" }),
+        "curry rice and ambiguous foods always open Food card even with generic Item metadata");
+
     var metadataSparse = new[]
     {
         new CraftableItem("야채볶음", true, 1, null, Array.Empty<CraftingIngredient>(), CraftingCategory.Unknown),

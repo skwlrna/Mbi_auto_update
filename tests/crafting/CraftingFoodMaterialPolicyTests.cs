@@ -26,6 +26,52 @@ internal static class CraftingFoodMaterialPolicyTests
               !CraftingFoodMaterialPolicy.IsShopOnly("콩"),
             "reviewed 14 shop-only ingredients do not block gatherable apples/cabbages/crops");
 
+        string[] unsupported =
+        {
+            "셀러리", "샐러리", "생강", "커다란 고기",
+            "만찬 재료: 휘몰아치는 바람", "만찬 재료: 꺼지지 않는 불",
+            "파프리카", "조각 초콜릿", "조각 초콜렛", "라벤더 꽃",
+            "당근", "카레 가루", "파이크퍼치", "민물꼬치고기",
+            "금린어", "갈색송어", "고등어", "연어"
+        };
+        check(unsupported.All(CraftingFoodMaterialPolicy.IsUnsupportedDirect) &&
+              !CraftingFoodMaterialPolicy.IsUnsupportedDirect("감자") &&
+              !CraftingFoodMaterialPolicy.IsUnsupportedDirect("양배추") &&
+              !CraftingFoodMaterialPolicy.IsUnsupportedDirect("쌀") &&
+              !CraftingFoodMaterialPolicy.IsUnsupportedDirect("찻잎"),
+            "home/dungeon/raid/shop/fishing materials are unavailable to free field gathering");
+
+        var celery = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("양배추", 0, 8), Row("셀러리", 0, 2) },
+            (_, _) => throw new Exception("no stock read for root shortage"),
+            CancellationToken.None);
+        var curryPowder = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("카레 가루", 1, 3) },
+            (_, _) => throw new Exception("no stock read for root shortage"),
+            CancellationToken.None);
+        check(celery is { MaterialName: "셀러리", Required: 2 } &&
+              curryPowder is { MaterialName: "카레 가루", Required: 2 },
+            "unavailable celery and curry powder block the dish before gather");
+
+        var maturedMeat = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("숙성된 커다란 고기", 0, 2) },
+            Stock(new Dictionary<string, long> { ["커다란 고기"] = 1 }),
+            CancellationToken.None);
+        check(maturedMeat is { MaterialName: "커다란 고기", Required: 1 },
+            "processed matured meat checks nested dungeon-only raw meat and stock");
+
+        var nutOil = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("헤이즐넛 오일", 0, 3) },
+            Stock(new Dictionary<string, long>()), CancellationToken.None);
+        var tea = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("발효된 찻잎", 0, 3) },
+            Stock(new Dictionary<string, long>()), CancellationToken.None);
+        var oats = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("오트밀", 0, 3) },
+            Stock(new Dictionary<string, long>()), CancellationToken.None);
+        check(nutOil is null && tea is null && oats is null,
+            "nuts oil, fermented tea and oatmeal have gatherable processing chains");
+
         string[] processed =
         {
             "밀가루", "치즈", "마요네즈", "면", "생크림",

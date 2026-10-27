@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "V3.2.72",
+  "purpose": "food_crafting_category_and_unsupported_ingredient_fix",
+  "approvedBy": "user_direct_request_in_chat",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "requestedAtKst": "2026-10-28",
+  "request": "다음버전은 71이야 확인하고 업데이트 진행해"
+}
