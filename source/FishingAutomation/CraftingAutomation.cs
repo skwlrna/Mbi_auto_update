@@ -175,10 +175,8 @@ internal sealed class CraftingAutomation
             catch (Exception ex) when (
                 ex is InvalidOperationException or InvalidDataException or IOException)
             {
-                if (recoveries >= maxRecoveries)
+                if (ex is CraftingMaterialAcquisitionException materialFailure)
                 {
-                    if (ex is CraftingMaterialAcquisitionException materialFailure)
-                    {
                         // A skip is permitted only after the screen returns to a
                         // neutral, verified state that can start the next recipe.
                         // Failed cleanup is a global stop, NOT a skipped recipe.
@@ -212,12 +210,12 @@ internal sealed class CraftingAutomation
                             $"현재 음식은 건너뛰며 이전 제작 {CompletedCrafts}/{requiredCrafts}회는 유지합니다. " +
                             materialFailure.Message,
                             materialFailure);
-                    }
+                }
+                if (recoveries >= maxRecoveries)
                     throw new InvalidOperationException(
                         $"제작 퀘스트 자동복구를 {maxRecoveries}회 시도했지만 현재 배치를 복구하지 못했습니다. " +
                         $"완료 확정된 이전 제작 {CompletedCrafts}/{requiredCrafts}회는 유지합니다.",
                         ex);
-                }
 
                 recoveries++;
                 Log?.Invoke(
@@ -267,6 +265,26 @@ internal sealed class CraftingAutomation
                 return;
             }
 
+            if (plan.Category == CraftingCategory.Food)
+            {
+                var purchaseShortage = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+                    deficits,
+                    (name, token) => _data.InventoryOnlyCountWithLoadingRetryAsync(
+                        name, token, Log), ct);
+                if (purchaseShortage is not null)
+                {
+                    Log?.Invoke(
+                        $"[제작][상점재료] {plan.DisplayName} · {purchaseShortage.Parent} 하위 재료 " +
+                        $"{purchaseShortage.MaterialName} 부족 {purchaseShortage.Required}개 · " +
+                        "자동 구매하지 않고 현재 음식만 건너뛰기");
+                    throw new CraftingMaterialAcquisitionException(
+                        purchaseShortage.MaterialName,
+                        $"{plan.DisplayName} 상점 구매 재료 부족: " +
+                        $"{purchaseShortage.MaterialName} {purchaseShortage.Required}개 " +
+                        $"(상위 재료 {purchaseShortage.Parent})");
+                }
+            }
+
             string signature = string.Join("|", deficits.Select(x =>
                 $"{(string.IsNullOrWhiteSpace(x.DisplayName) ? "[행]" : x.DisplayName)}:{x.Current}/{x.Required}@{x.RowY}"));
             if (signature == previousSignature) unchanged++;
@@ -302,7 +320,10 @@ internal sealed class CraftingAutomation
             var gatherable = gatherableCatalog.SingleOrDefault(x =>
                 string.Equals(x.DisplayName, deficit.DisplayName, StringComparison.Ordinal));
 
-            bool intermediate = await IsKnownAlteringOutputAsync(deficit.DisplayName, ct);
+            bool intermediate =
+                (plan.Category == CraftingCategory.Food &&
+                 CraftingFoodMaterialPolicy.IsKnownProcessing(deficit.DisplayName)) ||
+                await IsKnownAlteringOutputAsync(deficit.DisplayName, ct);
 
             // Direct materials use the crafting quest route. Quest-only materials
             // such as insects may not appear in get_gatherable_items, so anything
