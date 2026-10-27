@@ -1,7 +1,7 @@
 namespace FishingAutomation;
 
 // The callback must return only after the recipe's completion and output
-// have been verified. Any error/cancellation stops the whole queue.
+// have been verified. Only confirmed material failures may skip; other errors stop.
 // Only confirmed material acquisition failures may skip a queued recipe.
 // Unknown UI/input/identity faults must still abort the full queue.
 internal sealed class CraftingMaterialAcquisitionException : InvalidOperationException
