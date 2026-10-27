@@ -369,6 +369,7 @@ try
     Check((await cli.QueryAsync("execute_crafting")).State == "blocked" && launches == 0,
         "execute_crafting cannot cross the read-only CLI process boundary");
 
+    await CraftingFoodMaterialPolicyTests.RunAsync(Check);
     await CraftingFlowTests.RunAsync(Check, log);
     await BulkGatheringFlowTests.RunAsync(Check);
     if (args.Length == 1 && args[0] == "--live-readonly") await LiveReadOnlyTests.RunAsync(Check, log);
