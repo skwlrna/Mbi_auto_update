@@ -1,3 +1,4 @@
+using DungeonVisionBot;
 using FishingAutomation;
 
 internal static class CraftingFoodMaterialPolicyTests
