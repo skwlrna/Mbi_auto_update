@@ -185,6 +185,19 @@ internal sealed class CraftingAutomation
                         try
                         {
                             await _screen.RecoverBatchPreparationAsync(plan, ct);
+                            // A neutral popup is not enough: a previous
+                            // auto-travel/gather operation must also be idle.
+                            for (int check = 0; check < 2; check++)
+                            {
+                                var activity = await _gathering.ActivityAsync(ct);
+                                if (!activity.IsSafeField || activity.IsAutoTraveling ||
+                                    activity.IsGathering || activity.IsFishing ||
+                                    activity.MainButtonState == "Stop")
+                                    throw new InvalidOperationException(
+                                        "재료 채집/이동이 끝나지 않아 다음 음식으로 안전하게 전환할 수 없습니다.");
+                                if (check == 0)
+                                    await _delay(TimeSpan.FromMilliseconds(500), ct);
+                            }
                         }
                         catch (OperationCanceledException) { throw; }
                         catch (Exception cleanupError)
