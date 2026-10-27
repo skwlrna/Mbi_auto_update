@@ -990,8 +990,14 @@ internal sealed class CraftingScreen : ICraftingScreen
             }
         }
 
+        // Named target with verified insufficient stock: material acquisition
+        // failure. The caller may skip this recipe only after safe UI cleanup.
+        if (!string.IsNullOrWhiteSpace(deficit.DisplayName))
+            throw new CraftingMaterialAcquisitionException(
+                deficit.DisplayName,
+                $"{label} 추천 획득처 진행을 제한 시간 안에 확인하지 못했습니다. 현재 배치 자동복구 대상으로 전환합니다.");
         throw new InvalidOperationException(
-            $"{label} 추천 획득처 진행을 제한 시간 안에 확인하지 못했습니다. 현재 배치 자동복구 대상으로 전환합니다.");
+            $"{label} 추천 획득처 진행을 제한 시간 안에 확인하지 못했습니다. 재료명 미확인으로 전체 안전 정지합니다.");
     }
 
     private async Task ClickStableQuestDeficitRowAsync(
