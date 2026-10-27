@@ -9,7 +9,11 @@ public sealed partial class MainForm
             case "/status":
             case "상태":
                 string summary = GetRemoteStatus();
-                string detail = await GetMultiAlteringTelegramDetailsAsync();
+                string alteringDetail = await GetMultiAlteringTelegramDetailsAsync();
+                string craftingDetail = GetCraftingTelegramDetails();
+                string detail = string.Join("\n\n",
+                    new[] { alteringDetail, craftingDetail }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
                 return string.IsNullOrWhiteSpace(detail)
                     ? summary
                     : summary + "\n\n" + detail;
