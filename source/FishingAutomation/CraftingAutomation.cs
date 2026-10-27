@@ -176,10 +176,35 @@ internal sealed class CraftingAutomation
                 ex is InvalidOperationException or InvalidDataException or IOException)
             {
                 if (recoveries >= maxRecoveries)
+                {
+                    if (ex is CraftingMaterialAcquisitionException materialFailure)
+                    {
+                        // A skip is permitted only after the screen returns to a
+                        // neutral, verified state that can start the next recipe.
+                        // Failed cleanup is a global stop, NOT a skipped recipe.
+                        try
+                        {
+                            await _screen.RecoverBatchPreparationAsync(plan, ct);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception cleanupError)
+                        {
+                            throw new InvalidOperationException(
+                                $"재료 확보 실패 후 {plan.DisplayName} 화면을 안전하게 정리하지 못해 전체 순차 제작을 중지합니다.",
+                                cleanupError);
+                        }
+                        throw new CraftingMaterialAcquisitionException(
+                            materialFailure.MaterialName,
+                            $"{plan.DisplayName} 재료 확보 실패 · {materialFailure.MaterialName} · " +
+                            $"현재 음식은 건너뛰며 이전 제작 {CompletedCrafts}/{requiredCrafts}회는 유지합니다. " +
+                            materialFailure.Message,
+                            materialFailure);
+                    }
                     throw new InvalidOperationException(
                         $"제작 퀘스트 자동복구를 {maxRecoveries}회 시도했지만 현재 배치를 복구하지 못했습니다. " +
                         $"완료 확정된 이전 제작 {CompletedCrafts}/{requiredCrafts}회는 유지합니다.",
                         ex);
+                }
 
                 recoveries++;
                 Log?.Invoke(
@@ -235,8 +260,9 @@ internal sealed class CraftingAutomation
             else unchanged = 0;
             previousSignature = signature;
             if (unchanged >= 3)
-                throw new InvalidOperationException(
-                    "제작 퀘스트 부족 재료 상태가 3회 연속 변하지 않아 중복 입력 없이 정지합니다.");
+                throw new CraftingMaterialAcquisitionException(
+                    deficits[0].DisplayName,
+                    "제작 퀘스트 부족 재료 상태가 3회 연속 변하지 않아 중복 입력 없이 재료 확보를 중단합니다.");
 
             var deficit = deficits[0];
             long shortage = Math.Max(0, deficit.Required - deficit.Current);
@@ -271,7 +297,8 @@ internal sealed class CraftingAutomation
             if (gatherable is not null || !intermediate)
             {
                 if (gatherable is not null && !gatherable.ToolOk)
-                    throw new InvalidOperationException(
+                    throw new CraftingMaterialAcquisitionException(
+                        deficit.DisplayName,
                         $"{deficit.DisplayName} 채집 도구가 없거나 내구도가 부족합니다.");
 
                 Log?.Invoke(
@@ -310,7 +337,9 @@ internal sealed class CraftingAutomation
             await _delay(TimeSpan.FromMilliseconds(500), ct);
         }
 
-        throw new InvalidOperationException("제작 퀘스트 재료 해결 반복 한도를 초과했습니다.");
+        throw new CraftingMaterialAcquisitionException(
+            previousSignature ?? "미확인 재료",
+            "제작 퀘스트 재료 해결 반복 한도를 초과했습니다.");
     }
 
     private async Task<bool> IsKnownAlteringOutputAsync(
