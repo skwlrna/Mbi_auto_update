@@ -274,12 +274,12 @@ internal sealed class CraftingAutomation
                 if (purchaseShortage is not null)
                 {
                     Log?.Invoke(
-                        $"[제작][상점재료] {plan.DisplayName} · {purchaseShortage.Parent} 하위 재료 " +
+                        $"[제작][수급 불가] {plan.DisplayName} · {purchaseShortage.Parent} 하위 재료 " +
                         $"{purchaseShortage.MaterialName} 부족 {purchaseShortage.Required}개 · " +
-                        "자동 구매하지 않고 현재 음식만 건너뛰기");
+                        "상점/마이홈/던전/낚시 자동 수급 대상 아님 · 현재 음식만 건너뛰기");
                     throw new CraftingMaterialAcquisitionException(
                         purchaseShortage.MaterialName,
-                        $"{plan.DisplayName} 상점 구매 재료 부족: " +
+                        $"{plan.DisplayName} 자동 수급 불가 재료 부족: " +
                         $"{purchaseShortage.MaterialName} {purchaseShortage.Required}개 " +
                         $"(상위 재료 {purchaseShortage.Parent})");
                 }
@@ -332,10 +332,25 @@ internal sealed class CraftingAutomation
                  CraftingFoodMaterialPolicy.IsKnownProcessing(deficit.DisplayName)) ||
                 await IsKnownAlteringOutputAsync(deficit.DisplayName, ct);
 
-            // Direct materials use the crafting quest route. Quest-only materials
-            // such as insects may not appear in get_gatherable_items, so anything
-            // that is not a known processing output also stays on the quest path.
-            if (gatherable is not null || !intermediate)
+            // Food recipes are fail-closed: a named shortage must be positively
+            // confirmed as CLI gatherable, our reviewed living-skill source,
+            // a quest-only insect, or a known processing output. Unknown items
+            // may be purchased, MyHome-grown, fished or dungeon/raid-only.
+            // Do not press the quest's generic recommended first row for them.
+            bool supportedDirect =
+                gatherable is not null ||
+                LivingSkillGatheringCatalog.TryResolveBulk(deficit.DisplayName, out _) ||
+                LivingSkillGatheringCatalog.IsQuestOnlyMaterial(deficit.DisplayName);
+            if (plan.Category == CraftingCategory.Food &&
+                !supportedDirect && !intermediate)
+                throw new CraftingMaterialAcquisitionException(
+                    deficit.DisplayName,
+                    $"음식 재료 {deficit.DisplayName}의 일반 채집/가공 경로가 검증되지 않았습니다. " +
+                    "임의 추천 획득처를 누르지 않고 현재 음식만 건너뜁니다.");
+
+            // Verified direct sources use the existing crafting quest route.
+            if (supportedDirect && !intermediate ||
+                plan.Category != CraftingCategory.Food && !intermediate)
             {
                 if (gatherable is not null && !gatherable.ToolOk)
                     throw new CraftingMaterialAcquisitionException(
