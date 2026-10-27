@@ -46,6 +46,7 @@
     <Compile Include="../../source/FishingAutomation/CraftingPlan.cs" Link="CraftingPlan.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingGatherCompletionPolicy.cs" Link="CraftingGatherCompletionPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingQueueCoordinator.cs" Link="CraftingQueueCoordinator.cs" />
+    <Compile Include="../../source/FishingAutomation/CraftingTelegramStatus.cs" Link="CraftingTelegramStatus.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryLootTracker.cs" Link="InventoryLootTracker.cs" />
     <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
     <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />

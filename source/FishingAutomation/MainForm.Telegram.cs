@@ -9,7 +9,11 @@ public sealed partial class MainForm
             case "/status":
             case "상태":
                 string summary = GetRemoteStatus();
-                string detail = await GetMultiAlteringTelegramDetailsAsync();
+                string alteringDetail = await GetMultiAlteringTelegramDetailsAsync();
+                string craftingDetail = GetCraftingTelegramDetails();
+                string detail = string.Join("\n\n",
+                    new[] { alteringDetail, craftingDetail }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
                 return string.IsNullOrWhiteSpace(detail)
                     ? summary
                     : summary + "\n\n" + detail;
@@ -50,7 +54,7 @@ public sealed partial class MainForm
         string mode = _activeMode ?? SelectedMode;
         string running = AnyRunning ? "실행 중" : "대기 중";
         string dungeon = mode == "어비스" ? $"\n던전: {SelectedAbyssDungeon}" : "";
-        string started = mode is "던전" or "어비스" or "가공"
+        string started = mode is "던전" or "어비스" or "가공" or "제작"
             ? _dungeonStartedAt?.ToString("HH:mm:ss") ?? "—"
             : _fishingStartedAt?.ToString("HH:mm:ss") ?? "—";
         string altering = mode == "가공" ? GetAlteringRemoteStatus() : "";

@@ -45,6 +45,73 @@ try
           !CraftingGatherCompletionPolicy.MustStopUnnamed("허브", 100, true),
         "unnamed material cannot be treated as completed from idle alone");
 
+    var telegramExample = new CraftingTelegramSnapshot(
+        new CraftingTelegramItem[]
+        {
+            new("음식", "가든 샐러드", 60, 60, 6, 6,
+                CraftingTelegramPhase.Completed, "완료", null),
+            new("음식", "생선구이", 5, 50, 1, 10,
+                CraftingTelegramPhase.Active, "소금 0/10 · 퀘스트 채집", null),
+            new("아이템", "붕대", 0, 20, 0, 4,
+                CraftingTelegramPhase.Pending, "순서 대기", null)
+        },
+        1, "생선구이 부족 재료 처리", DateTimeOffset.Now, true, null);
+    string activeTelegram = CraftingTelegramStatus.Format(telegramExample);
+    Check(activeTelegram.Contains("현재 순서: 2/3 · 생선구이", StringComparison.Ordinal) &&
+          activeTelegram.Contains("목표 합계: 65/130개", StringComparison.Ordinal) &&
+          activeTelegram.Contains("소금 0/10", StringComparison.Ordinal) &&
+          activeTelegram.Contains("남은 제작 9회", StringComparison.Ordinal) &&
+          activeTelegram.Contains("□ 대기", StringComparison.Ordinal),
+        "telegram 상태 reports verified per-recipe quantities, stage and pending queue");
+    var skippedTelegram = telegramExample with
+    {
+        Items = new CraftingTelegramItem[]
+        {
+            telegramExample.Items[0],
+            telegramExample.Items[1] with
+            {
+                Phase = CraftingTelegramPhase.Skipped,
+                Reason = "상점 구매 재료 부족: 소금 10개"
+            },
+            telegramExample.Items[2] with
+            {
+                Phase = CraftingTelegramPhase.Active,
+                Stage = "다음 품목 제작 준비"
+            }
+        },
+        ActiveIndex = 2,
+        LastAction = "세 번째 품목 시작"
+    };
+    string skippedStatus = CraftingTelegramStatus.Format(skippedTelegram);
+    Check(skippedStatus.Contains("재료 부족 건너뜀 1종", StringComparison.Ordinal) &&
+          skippedStatus.Contains("상점 구매 재료 부족: 소금 10개", StringComparison.Ordinal) &&
+          skippedStatus.Contains("현재 순서: 3/3 · 붕대", StringComparison.Ordinal),
+        "telegram 상태 preserves skip reason and proceeds to third recipe");
+    var stoppedTelegram = skippedTelegram with
+    {
+        Items = skippedTelegram.Items.Select(x =>
+            x.DisplayName == "붕대"
+                ? x with { Phase = CraftingTelegramPhase.Stopped, Reason = "정지 요청" }
+                : x).ToArray(),
+        ActiveIndex = -1,
+        Running = false,
+        Error = "정지 요청"
+    };
+    Check(CraftingTelegramStatus.Format(stoppedTelegram).Contains(
+              "정지/오류 사유: 정지 요청", StringComparison.Ordinal),
+        "telegram 상태 distinguishes stopped run without claiming completion");
+    var manyRows = Enumerable.Range(0, 200).Select(i =>
+        new CraftingTelegramItem("음식", "레시피" + i, 0, 100, 0, 10,
+            CraftingTelegramPhase.Pending, "대기", null)).ToArray();
+    string truncatedTelegram = CraftingTelegramStatus.Format(telegramExample with
+    {
+        Items = manyRows,
+        ActiveIndex = -1
+    });
+    Check(truncatedTelegram.Length < 3100 &&
+          truncatedTelegram.Contains("나머지 품목 생략", StringComparison.Ordinal),
+        "telegram crafting details are line-capped before the global message limit");
+
     var serialFirst = new CraftingPlan(CraftingCategory.Food, "가든 샐러드", 60, 1);
     var serialSecond = new CraftingPlan(CraftingCategory.Food, "생선구이", 50, 1);
     var order = new List<string>();
