@@ -107,7 +107,7 @@ internal static class CraftingFlowTests
                 new(cli), new(cli), screen, null!, (_, ct) => Task.CompletedTask);
 
             await automation.RunAsync(
-                new(CraftingCategory.Food, "야채볶음", 1, 1),
+                new(CraftingCategory.Item, "야채볶음", 1, 1),
                 CancellationToken.None);
 
             check(screen.NamelessGathered &&
