@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "V3.2.70",
+  "purpose": "crafting_material_skip_and_nested_recipe_check",
+  "approvedBy": "user_direct_request_in_chat",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "requestedAtKst": "2026-10-27",
+  "request": "테스트 진행하고 배포까지해"
+}

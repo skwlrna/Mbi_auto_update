@@ -61,6 +61,31 @@ try
         "start:생선구이", "verified:생선구이"
     }), "queued recipes are executed strictly one at a time");
 
+    var serialThird = new CraftingPlan(CraftingCategory.Food, "버섯볶음", 20, 1);
+    order.Clear();
+    var skipResult = await CraftingQueueCoordinator.RunAsync(
+        new[] { serialFirst, serialSecond, serialThird },
+        (recipe, index, ct) =>
+        {
+            order.Add("start:" + recipe.DisplayName);
+            if (index == 1)
+                throw new CraftingMaterialAcquisitionException("소금", "소금 부족");
+            order.Add("verified:" + recipe.DisplayName);
+            return Task.CompletedTask;
+        }, CancellationToken.None,
+        (recipe, index, error, ct) =>
+        {
+            order.Add("skipped:" + recipe.DisplayName + ":" + error.MaterialName);
+            return Task.CompletedTask;
+        });
+    Check(skipResult.Completed == 2 && skipResult.Skipped == 1 &&
+          order.SequenceEqual(new[]
+          {
+              "start:가든 샐러드", "verified:가든 샐러드",
+              "start:생선구이", "skipped:생선구이:소금",
+              "start:버섯볶음", "verified:버섯볶음"
+          }), "unavailable material skips only the affected recipe and continues to the third");
+
     order.Clear();
     try
     {
@@ -344,6 +369,8 @@ try
     Check((await cli.QueryAsync("execute_crafting")).State == "blocked" && launches == 0,
         "execute_crafting cannot cross the read-only CLI process boundary");
 
+    await CraftingFoodMaterialPolicyTests.RunAsync(Check);
+    await CraftingFoodMaterialIntegrationTests.RunAsync(Check, log);
     await CraftingFlowTests.RunAsync(Check, log);
     await BulkGatheringFlowTests.RunAsync(Check);
     if (args.Length == 1 && args[0] == "--live-readonly") await LiveReadOnlyTests.RunAsync(Check, log);

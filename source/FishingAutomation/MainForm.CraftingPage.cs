@@ -88,9 +88,12 @@ public sealed partial class MainForm
         {
             internal CraftingPlan Plan { get; }
             internal bool Completed { get; set; }
+            internal string? SkipReason { get; set; }
             internal QueuedCraftingChoice(CraftingPlan plan) => Plan = plan;
             public override string ToString() =>
-                (Completed ? "✓ " : "□ ") + Plan.DisplayName + " · " + Plan.TargetQuantity.ToString("N0") + "개";
+                (Completed ? "✓ " : SkipReason is not null ? "⚠ " : "□ ") +
+                Plan.DisplayName + " · " + Plan.TargetQuantity.ToString("N0") + "개" +
+                (SkipReason is not null && !Completed ? " · 재료 확보 실패" : "");
         }
         internal bool HasQueueEntries => _craftingQueue.Items.Count > 0;
         internal IReadOnlyList<CraftingPlan> PendingCraftingPlans =>
@@ -102,6 +105,22 @@ public sealed partial class MainForm
                 .FirstOrDefault(x => !x.Completed && x.Plan == plan);
             if (item is null) return;
             item.Completed = true;
+            _craftingQueue.Refresh();
+            UpdateExecution();
+        }
+        internal void MarkCraftingSkipped(CraftingPlan plan, string reason)
+        {
+            var item = _craftingQueue.Items.Cast<QueuedCraftingChoice>()
+                .FirstOrDefault(x => !x.Completed && x.SkipReason is null && x.Plan == plan);
+            if (item is null) return;
+            item.SkipReason = reason;
+            _craftingQueue.Refresh();
+            UpdateExecution();
+        }
+        internal void ResetCraftingSkips()
+        {
+            foreach (var item in _craftingQueue.Items.Cast<QueuedCraftingChoice>())
+                item.SkipReason = null;
             _craftingQueue.Refresh();
             UpdateExecution();
         }
