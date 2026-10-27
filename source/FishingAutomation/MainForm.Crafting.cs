@@ -14,6 +14,7 @@ public sealed partial class MainForm
         {
             var selectedPlans = SelectedCraftingPlans();
             foreach (var selectedPlan in selectedPlans) selectedPlan.Validate();
+            _craftingPage.ResetCraftingSkips();
             var plan = selectedPlans[0];
 
             string[] requiredCommands =
@@ -156,7 +157,7 @@ public sealed partial class MainForm
                 {
                     try
                     {
-                        await CraftingQueueCoordinator.RunAsync(queue,
+                        var queueResult = await CraftingQueueCoordinator.RunAsync(queue,
                             async (current, index, runToken) =>
                         {
                             activePlan = current;
@@ -194,11 +195,31 @@ public sealed partial class MainForm
                                     $"{current.DisplayName} +{confirmedGain}개");
                                 RefreshProductionDashboard();
                             });
-                        }, token);
+                        }, token, (failedPlan, index, materialError, ct) =>
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            int step = index + 1;
+                            Ui(() =>
+                            {
+                                _craftingPage.MarkCraftingSkipped(failedPlan, materialError.Message);
+                                _productionProgressSummary =
+                                    $"순차 {step}/{queue.Count} · 재료 미확보, 다음 품목 진행";
+                                _log.Write(
+                                    $"[제작][순차] {step}/{queue.Count} 재료 확보 실패 · " +
+                                    $"{failedPlan.DisplayName} 건너뛰기 · {materialError.Message}");
+                                RefreshProductionDashboard();
+                            });
+                            return Task.CompletedTask;
+                        });
                         Ui(() =>
                         {
                             _craftingPage.ClearCompletedQueue();
-                            _log.Write("[제작] 전체 순차 제작 목표 작업 완료");
+                            _productionProgressSummary = queueResult.Skipped > 0
+                                ? $"순차 제작 종료 · 완료 {queueResult.Completed}종 / 재료 미확보 {queueResult.Skipped}종"
+                                : "전체 순차 제작 목표 작업 완료";
+                            _log.Write(queueResult.Skipped > 0
+                                ? $"[제작][순차] 완료 {queueResult.Completed}종 · 재료 미확보 건너뜀 {queueResult.Skipped}종 · 미완료 품목은 대기 목록 유지"
+                                : "[제작] 전체 순차 제작 목표 작업 완료");
                             RefreshProductionDashboard();
                         });
                     }
