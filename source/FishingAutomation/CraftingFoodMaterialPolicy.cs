@@ -1,3 +1,4 @@
+using DungeonVisionBot;
 namespace FishingAutomation;
 
 // Reviewed food-only acquisition catalog. This is intentionally an exact-name
