@@ -20,7 +20,27 @@ internal static class CraftingFoodMaterialPolicy
         "딸기", "담백한 고기"
     };
 
-    // Publicly documented 2025 food/fabric processing recipes. The game CLI
+
+    // Confirmed food materials that cannot be obtained by the current
+    // crafting quest's ordinary field gathering. Some are MyHome-grown,
+    // dungeon/raid/feast loot, fish, or shop stock (not shop-only).
+    // An item already owned is always usable. Never buy or fish automatically.
+    private static readonly HashSet<string> OtherUnsupportedSources = new(StringComparer.Ordinal)
+    {
+        "셀러리", "샐러리", "생강", "커다란 고기",
+        "만찬 재료: 휘몰아치는 바람", "만찬 재료: 꺼지지 않는 불",
+        "파프리카", "조각 초콜릿", "조각 초콜렛", "라벤더 꽃",
+        "당근", "카레 가루",
+        "브리흐네 잉어", "은붕어", "무지개 송어", "은어",
+        "고등어", "연어", "메기", "농어", "금린어", "갈색송어",
+        "파이크퍼치", "민물꼬치고기"
+    };
+
+    internal static bool IsUnsupportedDirect(string? name)
+        => name is not null &&
+           (ShopOnly.Contains(name.Trim()) || OtherUnsupportedSources.Contains(name.Trim()));
+
+    // Publicly documented food/fabric processing recipes. The game CLI
     // is authoritative for whether a recipe can be produced at run time;
     // this table is used only to detect missing shop inputs BEFORE gathering.
     private static readonly Dictionary<string, CraftingFoodProcessingRecipe> Processing =
@@ -40,7 +60,15 @@ internal static class CraftingFoodMaterialPolicy
 
             // Nested prerequisite recipes for the nine reviewed foods.
             ["물에 불린 쌀"] = Recipe(5, ("쌀", 30), ("물이 든 병", 6)),
-            ["옷감"] = Recipe(3, ("양털", 10))
+            ["옷감"] = Recipe(3, ("양털", 10)),
+            // Verified higher-level food intermediates.
+            ["말린 찻잎"] = Recipe(3, ("찻잎", 30)),
+            ["발효된 찻잎"] = Recipe(3, ("말린 찻잎", 5), ("옷감", 1)),
+            ["오트밀"] = Recipe(3, ("귀리", 30)),
+            ["숙성된 커다란 고기"] = Recipe(1, ("커다란 고기", 1),
+                ("허브", 6), ("마늘", 2), ("소금", 2), ("후추", 1)),
+            ["옷감+"] = Recipe(3, ("옷감", 3), ("양털", 4)),
+            ["헤이즐넛 오일"] = Recipe(3, ("헤이즐넛", 15), ("옷감+", 1))
         };
 
     internal static bool IsShopOnly(string? name)
@@ -86,21 +114,21 @@ internal static class CraftingFoodMaterialPolicy
                 throw new InvalidDataException("가공 재료 순환 의존성이 감지되었습니다: " + name);
             try
             {
-                if (isRoot && IsShopOnly(name))
+                if (isRoot && IsUnsupportedDirect(name))
                     return new CraftingFoodPurchaseShortage(name, missing, 0, parent);
 
                 if (!isRoot)
                 {
                     // Raw harvestables do not need inventory preflight; the
                     // existing gatherer obtains them when the quest needs them.
-                    if (!IsShopOnly(name) && !Processing.ContainsKey(name))
+                    if (!IsUnsupportedDirect(name) && !Processing.ContainsKey(name))
                         return null;
                     long available = await AvailableAsync(name);
                     long consumed = Math.Min(available, missing);
                     left[name] = available - consumed;
                     missing -= consumed;
                     if (missing <= 0) return null;
-                    if (IsShopOnly(name))
+                    if (IsUnsupportedDirect(name))
                         return new CraftingFoodPurchaseShortage(name, missing, available, parent);
                 }
 
