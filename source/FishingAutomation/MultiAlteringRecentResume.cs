@@ -251,6 +251,12 @@ internal static class MultiAlteringRecentResume
             reloaded.State != MultiAlteringBatchState.Active ||
             reloaded.Identity != actual.Identity ||
             reloaded.Items.Length != actual.Items.Length ||
+            // The whole journal, not merely the roster length, must remain
+            // unchanged while we sampled inventory and the live queue. An
+            // independent controller may update queued/received counts, holds,
+            // stage or consumption between those reads. Refuse a stale preview.
+            !string.Equals(JsonSerializer.Serialize(reloaded),
+                JsonSerializer.Serialize(actual), StringComparison.Ordinal) ||
             reloaded.PreparedConsumption is not null ||
             reloaded.PendingReceipt is not null ||
             reloaded.Items.Any(x => x.PendingRegistration ||
