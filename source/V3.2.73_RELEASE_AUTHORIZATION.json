@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "version": "V3.2.73",
+  "purpose": "f9_hub_and_food_material_ocr_recovery",
+  "approvedBy": "user_direct_request_in_chat",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "requestedAtKst": "2026-10-28",
+  "request": "진행해",
+  "sourcePullRequest": 337,
+  "sourcePullRequestHead": "0c671cd8f326460ea08c733901f7eff60c210e18",
+  "sourcePullRequestMergeCommit": "1c8b5990113115415828c08f370e512245eb3069",
+  "note": "The user requested continuation after the PR #337 4/4 checks; Windows CI, package integrity and rollback safety remain mandatory."
+}
