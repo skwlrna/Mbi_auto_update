@@ -506,12 +506,13 @@ try
     Check(Has(ScreenCalls("CollectAsync", 3), "CollectAsyncAtBoundary") &&
           Count(collect, "WaitForCollectPromptAsync") == 2 &&
           Has(collect, "CanRetryManagedFacilityReceipt") &&
-          Count(collect, "TapFresh") == 2 &&
+          Count(collect, "TapFresh") == 1 &&
+          Count(collect, "TapVerifiedFreshAsync") == 2 &&
           Has(collect, "TravelToFacilityAsync") &&
           Has(collect, "ConfirmCompletionResultAsync") &&
           Has(collect, "AfterVerifiedFacilityEntry") &&
-          Has(collect, "Invoke") && Has(collect, "TapFresh"),
-        "V3.1.74 managed receipt keeps coordinator travel, whole-lane checks and durable boundary");
+          Has(collect, "Invoke") && Has(collect, "TapVerifiedFreshAsync"),
+        "Managed receipt retains coordinator travel, durable boundary and verified final input frames");
     Check(Has(collect, "HasCollectPromptAsync") &&
           !Has(collect, "HasCollectButtonVisual"),
         "F02 compiled receipt rechecks full lane after durable marker, without any direct blue-pixel veto");
@@ -529,16 +530,18 @@ try
         : -1;
     Check(f02DurableBoundary >= 0 && f02DurableBoundary < f02FinalGate &&
           f02FinalGate < f02ReceiveSpace &&
-          Count(collect, "TapFresh") == 2,
-        "F02 compiled ordering: durable marker -> latest facility/whole-lane gate -> first Space, one guarded retry");
+          Count(collect, "TapFresh") == 1 &&
+          Count(collect, "TapVerifiedFreshAsync") == 2,
+        "F02 compiled ordering: durable marker -> whole-lane gate -> final-frame verified Space, one verified retry");
     Check(Has(collect, "RequireManagedIdleAsync"),
         "F03 actual managed receipt Space still has fresh CLI idle gate");
     Check(Has(collect, "CanRetryManagedFacilityReceipt") &&
           Count(collect, "ConfirmCompletionResultAsync") == 2 &&
-          Count(collect, "TapFresh") == 2 &&
+          Count(collect, "TapFresh") == 1 &&
+          Count(collect, "TapVerifiedFreshAsync") == 2 &&
           Has(collect, "TryFacilityWorkCountAsync") &&
           !Has(collect, "HasCollectButtonVisual"),
-        "V3.1.74 manager one retry only after unchanged entire lane, never blue pixels");
+        "Manager retry still needs unchanged full lane, and both managed Space boundaries are verified");
 
     Check(CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
               true, 7, 7, true, true, true, false, false, false) &&
