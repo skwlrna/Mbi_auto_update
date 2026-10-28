@@ -756,6 +756,41 @@ try
     bool PixelGate(string name, Bitmap image) =>
         (bool)(Method(screen, name, 1).Invoke(null, new object[] { image }) ?? false);
 
+    // Replay approved, already-public real full-frame fixtures against the
+    // SAME production pixel gates and the new scene arbiter. The incident
+    // private PNGs remain outside this public repository; these are offline
+    // single frames and do not imply a two-frame or real-CLI input permit.
+    using (var realHub = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+               "facility-hub-fixtures", "hub-wood-20261026-161326.png")))
+    using (var realRemote = new Bitmap(Path.Combine("tests",
+               "altering-screen-integration", "facility-move-fixtures",
+               "remote-wood-20261007-172137.png")))
+    using (var realCave = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+               "managed-field-fixtures", "cave-20261026-190933.png")))
+    {
+        bool hubProof = PixelGate("HasFixedProcessingHubVisual", realHub);
+        bool remotePanelProof = PixelGate("HasVisibleFacilityPanelWithoutEntryProof", realRemote);
+        bool caveWorldProof = PixelGate("HasManagedKEntryFieldHudVisual", realCave);
+        var sceneHub = ManagedProductionSceneArbiter.Classify(
+            new ManagedProductionSceneSignals(ProcessingHub: hubProof));
+        var sceneRemote = ManagedProductionSceneArbiter.Classify(
+            new ManagedProductionSceneSignals(FacilityPanel: remotePanelProof));
+        var sceneCave = ManagedProductionSceneArbiter.Classify(
+            new ManagedProductionSceneSignals(WorldHud: caveWorldProof));
+        Check(hubProof && sceneHub == ManagedProductionSceneKind.ProcessingHub,
+            "scene L4-public: actual processing hub 6-card pixels classify only as hub");
+        Check(remotePanelProof && sceneRemote == ManagedProductionSceneKind.FacilityPanel &&
+              sceneRemote != ManagedProductionSceneKind.WorldHud,
+            "scene L4-public: actual remote wood panel does not become field or onsite authority");
+        Check(caveWorldProof && sceneCave == ManagedProductionSceneKind.WorldHud &&
+              !ManagedProductionSceneArbiter.Allows(ManagedProductionAction.EnterKMenu,
+                  new ManagedProductionActionEvidence(sceneCave)),
+            "scene L4-public: actual cave world pixels alone never authorize K without CLI and 2 fresh frames");
+    }
+    Check(Has(ScreenCalls("QueueAsync", 4), "ClickVerifiedFreshAsync") &&
+          Has(ScreenCalls("CollectAsyncAtBoundary", 4), "TapVerifiedFreshAsync"),
+        "compiled managed F9 registration and receipt now revalidate at final input boundary");
+
     // Only tiny generic shortcut labels are retained from the incident corpus.
     // No player, chat, recipe inventory or complete gameplay screenshot is in
     // this public repository. Baseline/field booleans are offline observations,
