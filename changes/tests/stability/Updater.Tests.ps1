@@ -58,7 +58,7 @@ try {
         if(-not $settings.Contains('keep')){throw "$case lost user settings"}
         if(Test-Path (Join-Path $global:installTest '.update_pending')){throw "$case left pending health marker"}
         $after = [IO.File]::ReadAllBytes($manifest)
-        if(-not [Linq.Enumerable]::SequenceEqual([byte[]]$before, [byte[]]$after)) {
+        if(-not ([BitConverter]::ToString($before) -eq [BitConverter]::ToString($after))) {
             throw "$case altered durable F9 resume manifest"
         }
         $readBack = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
