@@ -153,7 +153,7 @@ jobs:
           $ci=Get-Content '.github/workflows/ci.yml' -Raw
           if($ci -notmatch 'N02 deterministic batch persistence regressions' -or
              $ci -notmatch 'Updater rollback regression tests' -or
-             $ci -notmatch 'Run compiled production screen') {
+             $ci -notmatch 'tests/altering-screen-integration/Regression.csproj') {
             throw 'Main CI does not exercise required F9 production regressions'
           }
           Write-Warning 'V3.2.75 direct user-approved unverified rollout; post-update game tests remain pending, rollback provided.'
