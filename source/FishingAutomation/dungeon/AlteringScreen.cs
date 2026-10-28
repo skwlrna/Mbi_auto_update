@@ -890,8 +890,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(second, "F9 가공 탭 클릭 전 확인창 패널/버튼 감지 · 입력 차단");
 
         await RequireManagedIdleAsync(plan, directive, "F9 가공 탭 고정 네비 클릭 직전", ct);
-        _ui.ClickFresh(new Point(360, 948), ct);
-        Log?.Invoke("[자동 가공] F9 CLI 유휴+네비 2프레임 확인 · 가공 탭 (360,948) · 반복 OCR 없이 1회 클릭");
+        await _ui.ClickVerifiedFreshAsync(new Point(360, 948),
+            latest => Task.FromResult(
+                HasManagedProcessingBottomTabVisual(latest) &&
+                !HasManagedKEntryBlockingModal(latest) &&
+                HasProcessingBottomNavigationLabels(latest)), ct);
+        Log?.Invoke("[자동 가공] F9 CLI 유휴+네비 2프레임+최종 입력 프레임 확인 · 가공 탭 (360,948) · 1회 클릭");
         await Task.Delay(550, ct);
         return true;
     }
@@ -991,6 +995,33 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Log?.Invoke($"[자동 가공] 시설 변경 · {requestedTitle} 진입 전 이전 시설 인식 캐시 해제");
     }
 
+    // F9 screen classification: observation only. A missing field HUD is never
+    // proof that a facility, menu or safe return-to-world exists.
+    private async Task<ManagedProductionSceneKind> ClassifyManagedProductionSceneAsync(
+        Bitmap frame, CancellationToken ct)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return ManagedProductionSceneKind.Unknown;
+        bool hub = HasFixedProcessingHubVisual(frame);
+        bool panel = HasVisibleFacilityPanelWithoutEntryProof(frame);
+        bool food = HasManagedFoodCraftingNavigationVisual(frame);
+        bool world = HasManagedKEntryFieldHudVisual(frame) &&
+            (DetectManagedWorldHudTemplates(frame).Matched >= 2 ||
+             DetectManagedWorldHudKeys(frame).Found);
+        bool armor = false;
+        if (!hub && !panel && !world && !food &&
+            !HasManagedKEntryBlockingModal(frame))
+            armor = await FindAsync(frame, new Rectangle(40, 28, 210, 80),
+                "방어구", ct) is not null;
+        bool otherKMenu = !hub && !panel && !food && !armor &&
+            HasManagedProcessingBottomTabVisual(frame);
+        return ManagedProductionSceneArbiter.Classify(new(
+            WorldHud: world, ProcessingHub: hub, FacilityPanel: panel,
+            FoodMenu: food, ArmorMenu: armor, OtherProductionMenu: otherKMenu,
+            MoveDialog: HasManagedKEntryBlockingModal(frame),
+            ReceiptResult: HasManagedCompletionResultVisual(frame)));
+    }
+
     private async Task EnterFacilityAsync(
         AlteringPlan plan, CancellationToken ct,
         AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
@@ -1026,6 +1057,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             using (var frame = Capture(ct))
             {
+                ManagedProductionSceneKind managedScene =
+                    directive == AlteringFacilityEntryDirective.Automatic
+                        ? ManagedProductionSceneKind.Unknown
+                        : await ClassifyManagedProductionSceneAsync(frame, ct);
+                if (managedScene == ManagedProductionSceneKind.ArmorMenu)
+                    Fail(frame, "F9 화면 분류: 방어구 제작 메뉴 · 가공 허브 아님 · K/시설 클릭 없이 정지");
+                if (managedScene is ManagedProductionSceneKind.Ambiguous or
+                    ManagedProductionSceneKind.MoveDialog or
+                    ManagedProductionSceneKind.ReceiptResult)
+                    Fail(frame, "F9 화면 분류: 상충 화면/이동창/결과창 · 추정 복귀 입력 금지");
                 // Before ANY fourth-pass UI input (including food navigation),
                 // require a verified target facility OR the incident's proven
                 // no-modal six-card hub after one prior card click and managed K.
@@ -1113,7 +1154,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             Fail(freshHub, "시설 카드 재시도 조건 미충족 · 추가 클릭 차단");
                     }
                     await RequireManagedIdleAsync(plan, directive, "시설 카드 클릭 직전 CLI 재검증", ct);
-                    _ui.ClickFresh(click, ct);
+                    if (directive == AlteringFacilityEntryDirective.Automatic)
+                        _ui.ClickFresh(click, ct);
+                    else
+                        await _ui.ClickVerifiedFreshAsync(click, latest =>
+                            Task.FromResult(
+                                HasFixedProcessingHubVisual(latest) &&
+                                !HasManagedKEntryBlockingModal(latest) &&
+                                !HasBottomConfirmationModal(latest) &&
+                                ManagedProductionSceneArbiter.Classify(new(
+                                    ProcessingHub: true,
+                                    ViewportValid: latest.Width == 800 &&
+                                                   latest.Height == 1000)) ==
+                                ManagedProductionSceneKind.ProcessingHub), ct);
                     hubCardClicks++;
                     Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 카드 클릭 {hubCardClicks}/2 · 좌표=({click.X},{click.Y}) · " +
                         (hubCardClicks == 1 ? "고정 카드 중심" : "새 허브 2프레임 확인 + 기존 고정 좌표 재시도"));
@@ -1127,8 +1180,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         {
                             bool facility = HasVerifiedFacilityEntryScreen(image) &&
                                 !HasManagedKEntryBlockingModal(image) &&
-                                (HasVisibleFacilityPanelWithoutEntryProof(image) ||
-                                 await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null);
+                                // A generic facility layout is not an exact target identity.
+                                await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null;
                             stableFacilityFrames = facility ? stableFacilityFrames + 1 : 0;
                             return stableFacilityFrames >= 2;
                         }, 3000, ct))
@@ -1241,6 +1294,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (HasVisibleFacilityPanelWithoutEntryProof(frame))
                     Fail(frame,
                         "시설 제목/제품 카드가 보이지만 시설 진입 증거 불충분 · K 입력 차단 · 추가 진단 필요");
+                if (directive != AlteringFacilityEntryDirective.Automatic &&
+                    managedScene != ManagedProductionSceneKind.WorldHud)
+                    Fail(frame,
+                        $"F9 화면 분류={managedScene} · 필드 양성 증거 없음 · K 재진입 금지");
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
                 // Never press K over an unknown green/travel modal in a managed run.
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
@@ -2510,6 +2567,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private async Task<bool> VerifyManagedKFrameAsync(Bitmap frame, string route,
         ManagedWorldHudKeys expectedKeys, CancellationToken ct)
     {
+        // The last frame must positively prove world HUD; a template score alone
+        // can also occur in a dungeon or while another production UI is present.
+        if (await ClassifyManagedProductionSceneAsync(frame, ct) !=
+            ManagedProductionSceneKind.WorldHud)
+            return false;
         if (HasManagedKEntryBlockingModal(frame) || HasFixedProcessingHubVisual(frame) ||
             HasManagedProcessingBottomTabVisual(frame) || HasManagedFoodCraftingNavigationVisual(frame))
             return false;
@@ -4367,10 +4429,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 continue;
             }
 
-            // Do not press anything on an unknown/transition frame. Two consecutive
-            // frames with no altering detail/facility/hub evidence are required before
-            // authorizing the gathering screen to open the profile with C.
-            stableFieldFrames++;
+            // Negative evidence is not proof of a world field. Require positive
+            // world structure and no active travel before the gathering handoff.
+            bool positiveWorld = await ClassifyManagedProductionSceneAsync(frame, ct) ==
+                ManagedProductionSceneKind.WorldHud &&
+                await TryAutoTravelingAsync(ct) == false;
+            stableFieldFrames = positiveWorld ? stableFieldFrames + 1 : 0;
             if (stableFieldFrames >= 2)
             {
                 Log?.Invoke("[자동 가공] 채집 전 가공 UI 종료 확인 · 일반 필드 2프레임 확인");
