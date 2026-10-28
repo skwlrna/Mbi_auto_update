@@ -3310,11 +3310,35 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 HasFacilityTravelConfirmationVisual(frame) || HasBottomConfirmationModal(frame);
             // No PRE-click label/color recognition required. Only observed
             // post-click change in the exact same fixed button rectangle.
+            // Post-click pixel displacement can prove the old fixed move ROI
+            // changed even if the broad teal remote-button detector stays true.
+            // The exact remote label is an independent veto; this route is
+            // registration-only and still needs stable frames + delayed recheck.
+            bool changedRegionOnsite = false;
+            bool changedRegionExactRemoteLabel = false;
+            if (AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+                    managedFreshArrival, receiptMode, moveClickSent,
+                    moveRegionChange, facilityVisible,
+                    HasOnsiteCloseButtonVisual(frame),
+                    activity?.IsAutoTraveling, popupVisible))
+            {
+                changedRegionExactRemoteLabel = await FindAsync(
+                    frame, AlteringFacilityLayout.MoveButtonVisualArea,
+                    "설비로 이동", ct) is not null;
+                changedRegionOnsite =
+                    AlteringFacilityTravelConfirmPolicy.HasVerifiedChangedRegionOnsiteCandidate(
+                        managedFreshArrival, receiptMode, moveClickSent,
+                        moveRegionChange, facilityVisible,
+                        HasOnsiteCloseButtonVisual(frame),
+                        activity?.IsAutoTraveling, popupVisible,
+                        changedRegionExactRemoteLabel);
+            }
             bool instantArrival = managedFreshArrival &&
-                AlteringFacilityTravelConfirmPolicy.HasVerifiedFixedMovePixelDisappearance(
+                (AlteringFacilityTravelConfirmPolicy.HasVerifiedFixedMovePixelDisappearance(
                     moveClickSent, moveRegionChange, facilityVisible,
                     HasOnsiteCloseButtonVisual(frame), moveVisible,
-                    activity?.IsAutoTraveling, popupVisible);
+                    activity?.IsAutoTraveling, popupVisible) ||
+                 changedRegionOnsite);
 
             // If the SAME button-area pixels stay unchanged for >=3 seconds,
             // the click likely did not register. One controlled retry ONLY;
@@ -3441,12 +3465,32 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         ProductionUiRuntime.MeasureVisualChangeRatio(
                             moveBaseline, finalFrame, AlteringFacilityLayout.MoveButtonVisualArea,
                             sampleStep: 3, channelDelta: 24);
+                    bool finalModalVisible = finalPopupVisible ||
+                        HasBottomConfirmationModal(finalFrame);
+                    bool finalChangedRegionOnsite = false;
+                    if (AlteringFacilityTravelConfirmPolicy.ShouldProbeChangedRegionOnsite(
+                            managedFreshArrival, receiptMode, moveClickSent,
+                            finalMoveRegionChange, finalFacilityVisible,
+                            HasOnsiteCloseButtonVisual(finalFrame),
+                            finalActivity?.IsAutoTraveling, finalModalVisible))
+                    {
+                        bool finalExactRemoteLabel = await FindAsync(
+                            finalFrame, AlteringFacilityLayout.MoveButtonVisualArea,
+                            "설비로 이동", ct) is not null;
+                        finalChangedRegionOnsite =
+                            AlteringFacilityTravelConfirmPolicy.HasVerifiedChangedRegionOnsiteCandidate(
+                                managedFreshArrival, receiptMode, moveClickSent,
+                                finalMoveRegionChange, finalFacilityVisible,
+                                HasOnsiteCloseButtonVisual(finalFrame),
+                                finalActivity?.IsAutoTraveling, finalModalVisible,
+                                finalExactRemoteLabel);
+                    }
                     bool finalInstantArrival = managedFreshArrival &&
-                        AlteringFacilityTravelConfirmPolicy.HasVerifiedFixedMovePixelDisappearance(
+                        (AlteringFacilityTravelConfirmPolicy.HasVerifiedFixedMovePixelDisappearance(
                             moveClickSent, finalMoveRegionChange,
                             finalFacilityVisible, HasOnsiteCloseButtonVisual(finalFrame),
                             finalMoveVisible, finalActivity?.IsAutoTraveling,
-                            finalPopupVisible || HasBottomConfirmationModal(finalFrame));
+                            finalModalVisible) || finalChangedRegionOnsite);
                     bool finalArrivalObservation = managedFreshArrival
                         ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
                             finalFacilityVisible, finalActivity?.IsAutoTraveling,
@@ -3470,7 +3514,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"[자동 가공] {plan.ScreenTitle} · 설비 도착 확인 · " +
                             $"가공창 유지 + {onsiteStableFrames}프레임/{stableFor.TotalSeconds:F1}초 " +
                             $"(관리 Fresh={managedFreshArrival}, 실제 이동전환={confirmedMoveTransition}, " +
-                            $"픽셀버튼소멸={finalInstantArrival}, 픽셀변화={finalMoveRegionChange:P1}, " +
+                            $"픽셀버튼소멸={finalInstantArrival}, 변화ROI현장={finalChangedRegionOnsite}, 픽셀변화={finalMoveRegionChange:P1}, " +
                             $"재클릭사용={moveRetried}, 이동버튼={finalMoveVisible}) " +
                             "+ 1.2초 후행 재확인 · CLI AutoTraveling=false · 이동확인창 없음");
                         return;
@@ -3506,6 +3550,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"화면이탈/로딩={sawDeparture} · 가공창={facilityVisible} · " +
                     $"이동버튼확정={moveVisible} · 수령상태분리={receiptMode && moveClickSent} · " +
                     $"F01 검증전환={confirmedMoveTransition} · 픽셀버튼소멸={instantArrival} · " +
+                    $"변화ROI현장후보={changedRegionOnsite} · 원격정확문구={changedRegionExactRemoteLabel} · " +
                     $"픽셀변화={moveRegionChange:P1} · 픽셀동일연속={identicalMoveFrames} · " +
                     $"재클릭사용={moveRetried} · 현장닫기X={HasOnsiteCloseButtonVisual(frame)} · " +
                     $"파란수령버튼={HasCollectButtonVisual(frame)} · 동시로딩/타이틀부재연속={loadingDepartureStreak} · " +
