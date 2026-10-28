@@ -1127,7 +1127,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         {
                             bool facility = HasVerifiedFacilityEntryScreen(image) &&
                                 !HasManagedKEntryBlockingModal(image) &&
-                                (HasFixedFacilityHeaderVisual(image) ||
+                                (HasVisibleFacilityPanelWithoutEntryProof(image) ||
                                  await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null);
                             stableFacilityFrames = facility ? stableFacilityFrames + 1 : 0;
                             return stableFacilityFrames >= 2;
