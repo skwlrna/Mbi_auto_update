@@ -25,7 +25,8 @@ internal readonly record struct ManagedProductionSceneSignals(
     bool MoveDialog = false,
     bool ReceiptResult = false,
     bool OtherModal = false,
-    bool Loading = false);
+    bool Loading = false,
+    bool ViewportValid = true);
 
 internal readonly record struct ManagedProductionActionEvidence(
     ManagedProductionSceneKind Scene,
@@ -43,7 +44,8 @@ internal readonly record struct ManagedProductionActionEvidence(
     bool WithinSevenSlots = false,
     bool AllFacilityWorksCompleted = false,
     bool CorrectTabVerified = false,
-    bool WeightBelowLimit = false);
+    bool WeightBelowLimit = false,
+    bool ViewportValid = true);
 
 internal static class ManagedProductionSceneArbiter
 {
@@ -51,6 +53,7 @@ internal static class ManagedProductionSceneArbiter
     // normal scene candidates are ambiguous; "not a facility" never means "world".
     internal static ManagedProductionSceneKind Classify(ManagedProductionSceneSignals s)
     {
+        if (!s.ViewportValid) return ManagedProductionSceneKind.Unknown;
         if (s.MoveDialog) return ManagedProductionSceneKind.MoveDialog;
         if (s.ReceiptResult) return ManagedProductionSceneKind.ReceiptResult;
         if (s.OtherModal) return ManagedProductionSceneKind.OtherModal;
@@ -76,7 +79,7 @@ internal static class ManagedProductionSceneArbiter
     // Never persist this answer or convert unknown CLI/identity to false.
     internal static bool Allows(ManagedProductionAction action, ManagedProductionActionEvidence e)
     {
-        if (!e.NotCancelled || !e.ExclusiveUiLease || !e.CliIdle ||
+        if (!e.ViewportValid || !e.NotCancelled || !e.ExclusiveUiLease || !e.CliIdle ||
             !e.NoBlockingModal || !e.TwoDistinctFrames || !e.LatestFrameMatches)
             return false;
         return action switch
@@ -117,7 +120,7 @@ internal static class ManagedProductionSceneArbiter
 
     // Positive world evidence is mandatory: absence of a known menu is not proof.
     internal static bool ConfirmsWorldHandoff(ManagedProductionActionEvidence e)
-        => e.Scene == ManagedProductionSceneKind.WorldHud &&
+        => e.ViewportValid && e.Scene == ManagedProductionSceneKind.WorldHud &&
            e.TwoDistinctFrames && e.LatestFrameMatches &&
            e.CliIdle && e.NoBlockingModal && e.NotCancelled &&
            e.ExclusiveUiLease;
