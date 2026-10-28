@@ -1345,6 +1345,46 @@ static class Program
                 return Task.CompletedTask;
             }, "장부");
         });
+
+        await Test("F9 concurrent journal mutation during preflight is not silently approved", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            string dir = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            using (var first = new MultiAlteringBatchStore(dir))
+            {
+                await first.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                first.PlanStore(Wood).Save(first.Session(Wood) with
+                {
+                    QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress
+                });
+                await world.QueueAsync(Wood, () => { }, default);
+            }
+            var selected = MultiAlteringRecentResume.Latest(temp.Path)!;
+            int reads = 0;
+            world.OnWorksRead = () =>
+            {
+                if (++reads != 2) return;
+                // An independent controller touches the durable record after
+                // the first CLI queue sample, without altering queue shape.
+                // Comparing only batch ID and roster length misses this race.
+                string file = Path.Combine(dir, "batch.json");
+                var manifest = JsonSerializer.Deserialize<MultiAlteringBatch>(
+                    File.ReadAllText(file))!;
+                var changed = manifest with
+                {
+                    Items = manifest.Items.Select(x =>
+                        x with { Stage = "other controller changed evidence" }).ToArray()
+                };
+                File.WriteAllText(file, JsonSerializer.Serialize(changed));
+            };
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                selected, Identity, world, default), "저장 기록이 변경");
+            Check(reads == 2 && world.Registered.Count == 1 &&
+                  File.Exists(Path.Combine(dir, "batch.json")),
+                "A concurrent journal change was approved or destroyed during preflight");
+        });
         Console.WriteLine($"N02: {passed} deterministic tests passed; temporary files; fake game only.");
     }
 
@@ -1406,7 +1446,7 @@ static class Program
         public bool ImmediateCompletion = true, InjectPartial, PartialSeen;
         public int MaxQueue, Receipts, PartialReceipts;
         public string? FailInventory;
-        public Action? BeforeReceipt, AfterReceipt, BeforeReceiptPrompt;
+        public Action? BeforeReceipt, AfterReceipt, BeforeReceiptPrompt, OnWorksRead;
         public World(IReadOnlyList<AlteringPlan> plans) { this.plans = plans; foreach (var p in plans) Counts[p.OutputName] = 0; }
         public Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
         { ct.ThrowIfCancellationRequested(); return Task.FromResult<IReadOnlyList<AlteringRecipe>>(plans.Select(p => new AlteringRecipe(p.DisplayName, true, p.ProducedPerWork, null, Array.Empty<AlteringIngredient>(), p.FacilityName)).ToArray()); }
@@ -1416,6 +1456,7 @@ static class Program
             if (ImmediateCompletion) CompleteAll();
             if (InjectPartial && !PartialSeen && Works.Count == 7)
             { Works[0] = Works[0] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 }; PartialSeen = true; }
+            OnWorksRead?.Invoke();
             return Task.FromResult<IReadOnlyList<AlteringWork>>(Works.ToArray());
         }
         public Task<long> ItemCountAsync(string name, CancellationToken ct)
