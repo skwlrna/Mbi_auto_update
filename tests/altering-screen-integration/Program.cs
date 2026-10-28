@@ -760,6 +760,10 @@ try
     bool PixelGate(string name, Bitmap image) =>
         (bool)(Method(screen, name, 1).Invoke(null, new object[] { image }) ?? false);
 
+    // 27 dated runtime incidents: read-only policy + approved real PNG fixtures.
+    // These are safety regression assertions, NOT private-image/live replay.
+    HistoricalIncidentRegression.Run(Check, PixelGate);
+
     // Replay approved, already-public real full-frame fixtures against the
     // SAME production pixel gates and the new scene arbiter. The incident
     // private PNGs remain outside this public repository; these are offline
