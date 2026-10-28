@@ -188,6 +188,85 @@ internal static class HistoricalIncidentRegression
             !Allows(ManagedProductionAction.ClickFacilityMove,
                 all with { Scene = facility, ExactFacilityIdentity = false }),
             "muted facility panel must not be routed into blind K/move");
+
+        // Earlier incidents from 2026-10-04 through 2026-10-16, outside
+        // the initial 27 selected post-10-07 safety examples. Historical
+        // descriptions come from real runtime-errors summary.json files.
+        // These simulate a conservative fail-closed rule, not live success.
+        Case("20261004_115732 reviving-not-idle",
+            !Allows(ManagedProductionAction.BeginGathering,
+                all with { Scene = world, CliIdle = false }),
+            "revive/activity state cannot authorize immediate field gathering");
+        Case("20261004_123237 gather-detail-popup",
+            !Allows(ManagedProductionAction.BeginGathering,
+                all with { Scene = ManagedProductionSceneKind.OtherModal }) &&
+            !Allows(ManagedProductionAction.BeginGathering,
+                all with { Scene = world, NoBlockingModal = false }),
+            "unknown gathering detail must not permit blind coordinate input");
+        Case("20261005_082836 receipt-result-unseen",
+            !Allows(ManagedProductionAction.ReceiveAll,
+                all with { Scene = ManagedProductionSceneKind.ReceiptResult }) &&
+            !Allows(ManagedProductionAction.ReceiveAll,
+                all with { Scene = facility, JournalReady = false }),
+            "unverified receipt result cannot authorize second Space");
+        Case("20261005_170318 metal-recipe-detail",
+            !Allows(ManagedProductionAction.RegisterRecipe,
+                all with { Scene = facility, ExactRecipeIdentity = false }) &&
+            !Allows(ManagedProductionAction.RegisterRecipe,
+                all with { Scene = detail, ExactRecipeIdentity = false }),
+            "a fixed recipe click alone is not positive detail identification");
+        Case("20261006_115518 onsite-transition",
+            !Allows(ManagedProductionAction.SelectRecipe,
+                all with { Scene = facility, CoordinatorOnsite = false }),
+            "unknown post-travel arrival does not prove onsite ownership");
+        Case("20261006_191106 remote-two-frames",
+            !Allows(ManagedProductionAction.RegisterRecipe,
+                all with { Scene = facility, CoordinatorOnsite = false }) &&
+            !Allows(ManagedProductionAction.SelectRecipe,
+                all with { Scene = facility, CoordinatorOnsite = false }),
+            "two identical remote observations do not grant onsite registration");
+        Case("20261007_040512 receipt-outcome-unknown",
+            !Allows(ManagedProductionAction.ReceiveAll,
+                all with { Scene = ManagedProductionSceneKind.Unknown }) &&
+            !Allows(ManagedProductionAction.ReceiveAll,
+                all with { Scene = facility, JournalReady = false }),
+            "unknown receipt outcome requires journal verification, not retry");
+        Case("20261008_040537 travel-timeout",
+            !Allows(ManagedProductionAction.ClickFacilityMove,
+                all with { Scene = dialog }) &&
+            !Allows(ManagedProductionAction.ClickFacilityMove,
+                all with { Scene = facility, CliIdle = false }),
+            "a move timeout must not trigger repeated move input");
+        Case("20261010_061544 K-dialog",
+            !Allows(ManagedProductionAction.EnterKMenu,
+                all with { Scene = dialog }) &&
+            !Allows(ManagedProductionAction.EnterKMenu,
+                all with { Scene = world, NoBlockingModal = false }),
+            "K denied over travel/confirmation overlay");
+        Case("20261011_083524 copper-mapping-unverified",
+            !Allows(ManagedProductionAction.BeginGathering,
+                all with { Scene = ManagedProductionSceneKind.Unknown }),
+            "uncertain gathering route requires independent material mapping");
+        Case("20261012_103036 recovering-menu-timeout",
+            !Allows(ManagedProductionAction.EnterKMenu,
+                all with { Scene = ManagedProductionSceneKind.LoadingTransition }) &&
+            !Allows(ManagedProductionAction.SelectFacilityCard,
+                all with { Scene = hub, LatestFrameMatches = false }),
+            "recovery timeout cannot confer stale menu click authority");
+        Case("20261014_225002 HUD-3of4",
+            !Allows(ManagedProductionAction.EnterKMenu,
+                all with { Scene = world, TwoDistinctFrames = false }),
+            "partial 3/4 HUD score never substitutes two independent captures");
+        Case("20261015_052440 receipt-onsite-return",
+            !Allows(ManagedProductionAction.SelectRecipe,
+                all with { Scene = facility, CoordinatorOnsite = false }),
+            "a receipt cannot restore facility onsite ownership without proof");
+        Case("20261016_000111 abyss-exit-transition",
+            !ManagedProductionSceneArbiter.ConfirmsWorldHandoff(
+                all with { Scene = ManagedProductionSceneKind.Unknown }) &&
+            !ManagedProductionSceneArbiter.ConfirmsWorldHandoff(
+                all with { Scene = world, ExclusiveUiLease = false }),
+            "Abyss exit without confirmed field and lease cannot hand off");
         return cases;
     }
 }
