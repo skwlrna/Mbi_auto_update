@@ -32,7 +32,10 @@ try
         Console.WriteLine("PASS L2: " + label);
     }
 
-    // New 35-case compiled F9 scene/action regression suite.\n    SceneArbiterRegression.Run(Check);\n\n    MethodInfo Method(Type owner, string name, int parameters)
+    // New 35-case compiled F9 scene/action regression suite.
+    SceneArbiterRegression.Run(Check);
+
+    MethodInfo Method(Type owner, string name, int parameters)
     {
         var matches = owner.GetMethods(all).Where(m =>
             m.Name == name && m.GetParameters().Length == parameters).ToArray();
