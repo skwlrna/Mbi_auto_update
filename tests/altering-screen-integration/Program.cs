@@ -448,8 +448,9 @@ try
           Has(managedTab, "HasManagedProcessingBottomTabVisual") &&
           Has(managedTab, "RequireManagedIdleAsync") &&
           Has(managedTab, "HasManagedKEntryBlockingModal") &&
-          Has(managedTab, "ClickFresh"),
-        "V3.1.72 compiled F9 uses positive K navigation pixels, two frames and CLI-idle-gated click");
+          Has(managedTab, "ClickVerifiedFreshAsync") &&
+          !Has(managedTab, "ClickFresh"),
+        "F9 tab uses stable nav and final fresh-frame verified click");
     Check(!Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
                    "FindFacilityHeaderAsync") &&
           !Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
