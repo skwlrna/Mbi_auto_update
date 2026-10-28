@@ -36,6 +36,74 @@ try
         "observed bandage quest omits ratio and stays separate from instant crafting");
 
 
+    // V3.2.72 10:41: potato was gathered 8/60 -> 66/60, while
+    // the remaining onion 6/60 row lost its dim OCR label.
+    var priorPumpkinSoup = new[]
+    {
+        new DungeonVisionBot.CraftingQuestDeficit("감자", 8, 60, 777),
+        new DungeonVisionBot.CraftingQuestDeficit("양파", 6, 60, 822)
+    };
+    var unnamedOnion = new[] { new DungeonVisionBot.CraftingQuestDeficit("", 6, 60, 778) };
+    var freshAfterPotato = new Dictionary<string, long>(StringComparer.Ordinal)
+    {
+        ["감자"] = 66, ["양파"] = 6
+    };
+    var recoveredOnion = DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup, unnamedOnion, freshAfterPotato);
+    Check(recoveredOnion?.DisplayName == "양파" &&
+          recoveredOnion.Current == 6 && recoveredOnion.RowY == 778,
+        "10:41 pumpkin soup recovers only known 6/60 onion after CLI proves 66/60 potato");
+
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup, unnamedOnion,
+        new Dictionary<string, long> { ["감자"] = 8, ["양파"] = 6 }) is null,
+        "still-short potato must block replacing unknown 6/60 row");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup, unnamedOnion,
+        new Dictionary<string, long> { ["감자"] = 66, ["양파"] = 7 }) is null,
+        "stale onion inventory must never authorize recovered identity");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup, unnamedOnion,
+        new Dictionary<string, long> { ["양파"] = 6 }) is null,
+        "missing inventory proof for another prior shortage fails closed");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup,
+        new[] { new DungeonVisionBot.CraftingQuestDeficit("", 7, 60, 778) },
+        freshAfterPotato) is null,
+        "changed shortage ratio is not guessed as an older ingredient");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup,
+        new[] { new DungeonVisionBot.CraftingQuestDeficit("", 6, 70, 778) },
+        freshAfterPotato) is null,
+        "changed batch requirement is rejected");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup,
+        new[] { new DungeonVisionBot.CraftingQuestDeficit("", 6, 60, 778),
+                new DungeonVisionBot.CraftingQuestDeficit("", 8, 60, 815) },
+        freshAfterPotato) is null,
+        "two simultaneous nameless rows are never inferred");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        new[]
+        {
+            new DungeonVisionBot.CraftingQuestDeficit("양파", 6, 60, 777),
+            new DungeonVisionBot.CraftingQuestDeficit("양배추", 6, 60, 822)
+        }, unnamedOnion,
+        new Dictionary<string, long> { ["양파"] = 6, ["양배추"] = 6 }) is null,
+        "equal-count distinct materials remain ambiguous even with fresh CLI");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        Array.Empty<DungeonVisionBot.CraftingQuestDeficit>(), unnamedOnion,
+        freshAfterPotato) is null,
+        "new quest or missing previous named OCR never reuses an old material");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+        priorPumpkinSoup,
+        new[]
+        {
+            new DungeonVisionBot.CraftingQuestDeficit("소금", 1, 60, 730),
+            new DungeonVisionBot.CraftingQuestDeficit("", 6, 60, 778)
+        },
+        new Dictionary<string, long> { ["감자"] = 66, ["양파"] = 6, ["소금"] = 1 }) is null,
+        "unexpected named row indicates a changed quest and blocks identity recovery");
+
     Check(!CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 32, 100, 5) &&
           !CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 1) &&
           CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 2),

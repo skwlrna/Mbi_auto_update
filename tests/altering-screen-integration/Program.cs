@@ -1128,6 +1128,7 @@ try
         Paint(hub, new Rectangle(231, 955, 60, 21), Color.FromArgb(165, 165, 165));
         Paint(hub, new Rectangle(427, 955, 50, 21), Color.FromArgb(165, 165, 165));
         Paint(hub, new Rectangle(509, 955, 57, 21), Color.FromArgb(165, 165, 165));
+        Paint(hub, new Rectangle(347, 936, 38, 32), Color.FromArgb(28, 189, 211));
         Check(PixelGate("HasFixedProcessingHubVisual", hub) &&
               !PixelGate("HasManagedProcessingBottomTabVisual", hub),
             "V3.1.72 real six-card hub must win over persistent bottom K bar");
@@ -1400,8 +1401,34 @@ try
 
         for (int column = 0; column < 3; column++)
             Paint(hub, new Rectangle(119 + column * 242, 597, 94, 20), Color.White);
+        // 10/28 real incident showed '방어구' crafting on a four-column
+        // product grid, but the old hub heuristic could approve its bright
+        // heading + card shapes. Even ALL six mock card anchors must NOT
+        // authorize a card click without the three K footer labels.
+        Check(!PixelGate("HasFixedProcessingHubVisual", hub),
+            "10:41 armour-like item grid without processing footer cannot impersonate six-card hub");
+        Paint(hub, new Rectangle(231, 955, 60, 21), Color.FromArgb(165, 165, 165));
+        Paint(hub, new Rectangle(427, 955, 50, 21), Color.FromArgb(165, 165, 165));
+        Paint(hub, new Rectangle(509, 955, 57, 21), Color.FromArgb(165, 165, 165));
+        Check(!PixelGate("HasFixedProcessingHubVisual", hub),
+            "10:41 six-card lookalike with neutral K tabs but no active cyan 가공 remains blocked");
+        Paint(hub, new Rectangle(347, 936, 38, 32), Color.FromArgb(28, 189, 211));
         Check(PixelGate("HasFixedProcessingHubVisual", hub),
-            "V3.1.63 real-style six-card hub wins over persistent '가공' bottom tab");
+            "V3.1.63 real-style six-card hub with active cyan 가공 and 3-label footer is recognized");
+        using (var wrongActiveTab = new Bitmap(hub))
+        {
+            Paint(wrongActiveTab, new Rectangle(328, 929, 76, 62), Color.FromArgb(24, 23, 29));
+            Paint(wrongActiveTab, new Rectangle(428, 936, 38, 32), Color.FromArgb(28, 189, 211));
+            Check(!PixelGate("HasFixedProcessingHubVisual", wrongActiveTab),
+                "10:41 other K-page active tab cannot impersonate processing hub");
+        }
+        using (var armourLookalike = new Bitmap(hub))
+        {
+            Paint(armourLookalike, new Rectangle(200, 934, 405, 66),
+                Color.FromArgb(24, 23, 29));
+            Check(!PixelGate("HasFixedProcessingHubVisual", armourLookalike),
+                "10:41 full card-grid lookalike loses hub proof when K footer is absent");
+        }
         Check(!PixelGate("HasFixedFacilityHeaderVisual", hub),
             "V3.1.63 six-card hub is not the selected single-facility screen");
 
