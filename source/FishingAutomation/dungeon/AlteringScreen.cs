@@ -895,8 +895,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 HasManagedProcessingBottomTabVisual(latest) &&
                 !HasManagedKEntryBlockingModal(latest) &&
                 HasProcessingBottomNavigationLabels(latest)), ct);
-        Log?.Invoke("[자동 가공] F9 CLI 유휴+네비 2프레임+최종 입력 프레임 확인 · 가공 탭 (360,948) · 1회 클릭");
-        await Task.Delay(550, ct);
+        // F9 next stage already polls for a positively identified hub.
+        // Start observing immediately instead of spending 550ms in a blind
+        // sleep; the caller retains its former 550+900ms timeout budget.
+        Log?.Invoke("[자동 가공] F9 CLI 유휴+네비 2프레임+최종 입력 프레임 확인 · 가공 탭 (360,948) · 1회 클릭 · 화면전환 즉시 감시");
         return true;
     }
 
@@ -1170,7 +1172,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     hubCardClicks++;
                     Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 카드 클릭 {hubCardClicks}/2 · 좌표=({click.X},{click.Y}) · " +
                         (hubCardClicks == 1 ? "고정 카드 중심" : "새 허브 2프레임 확인 + 기존 고정 좌표 재시도"));
-                    await Task.Delay(550, ct);
+                    // Single-altering retains its historical transition delay.
+                    // Managed F9 may start waiting for the EXACT facility now:
+                    // two consecutive fresh positive frames are still required.
+                    // Keep its original 550+3000ms maximum transition budget.
+                    if (directive == AlteringFacilityEntryDirective.Automatic)
+                        await Task.Delay(550, ct);
 
                     // The chosen facility card was positively clicked in
                     // the fixed hub. A fixed facility screen (title + level)
@@ -1184,7 +1191,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null;
                             stableFacilityFrames = facility ? stableFacilityFrames + 1 : 0;
                             return stableFacilityFrames >= 2;
-                        }, 3000, ct))
+                        }, directive == AlteringFacilityEntryDirective.Automatic
+                            ? 3000 : 3550, ct))
                     {
                         Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
                         return;
@@ -1228,7 +1236,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // entirely and goes directly to the existing safe K path.
                 if (await TrySelectManagedProcessingTabAsync(frame, plan, directive, ct))
                 {
-                    await WaitForProcessingHubAsync(900, ct);
+                    // Old sequence: 550ms fixed sleep + 900ms positive hub
+                    // polling. Let fast machines continue as soon as the hub
+                    // exists, with the same 1450ms total slow-machine budget.
+                    await WaitForProcessingHubAsync(1450, ct);
                     continue;
                 }
                 // Managed F9 must never interpret unrelated world OCR "가공"
