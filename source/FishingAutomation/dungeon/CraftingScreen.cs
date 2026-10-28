@@ -13,6 +13,9 @@ internal sealed class CraftingScreen : ICraftingScreen
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
     private CraftingQuestDeficit? _lastSingleQuestDeficit;
+    // Per quest/batch only: no reuse across a freshly created quest.
+    private string? _lastNamedDeficitRecipe;
+    private IReadOnlyList<CraftingQuestDeficit> _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
     private IReadOnlyList<string>? _questMaterialNameCatalog;
     private IReadOnlyList<string> _questRecipeMaterialNames = Array.Empty<string>();
 
@@ -51,6 +54,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
+        _lastNamedDeficitRecipe = null;
+        _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
 
         await OpenProductAsync(plan, ct);
         await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
@@ -489,6 +494,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal))
         {
             _lastSingleQuestDeficit = null;
+            _lastNamedDeficitRecipe = null;
+            _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
             Log?.Invoke("[제작] 재료 충분 직접 제작 · 퀘스트 재료 확인 생략");
             return Array.Empty<CraftingQuestDeficit>();
         }
@@ -540,6 +547,8 @@ internal sealed class CraftingScreen : ICraftingScreen
                         $"[제작] 퀘스트 재료행 없음 · 직전 마지막 부족 재료 재고 검증 완료 · " +
                         $"{verified.DisplayName} {current}/{verified.Required} · 부족 재료 없음으로 진행");
                     _lastSingleQuestDeficit = null;
+                    _lastNamedDeficitRecipe = null;
+                    _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
                     return Array.Empty<CraftingQuestDeficit>();
                 }
             }
@@ -617,6 +626,58 @@ internal sealed class CraftingScreen : ICraftingScreen
                         $"행Y={ratio.Y} · 이름 없이 부족 행으로 등록");
                 deficits.Add(new(name ?? "", ratio.Current, ratio.Required, ratio.Y));
             }
+        }
+
+        // An unnamed FOOD deficit is not a generic gathering instruction.
+        // Only prior OCR-identified rows from THIS quest and fresh exact CLI
+        // inventory may recover a unique identity. No fixed-name guessing
+        // and no resurrection of an old batch after quest recreation.
+        if (plan.Category == CraftingCategory.Food &&
+            deficits.Count > 0 &&
+            deficits.Any(x => string.IsNullOrWhiteSpace(x.DisplayName)) &&
+            string.Equals(_lastNamedDeficitRecipe, plan.DisplayName, StringComparison.Ordinal) &&
+            _lastNamedDeficits.Count > 0)
+        {
+            try
+            {
+                var fresh = new Dictionary<string, long>(StringComparer.Ordinal);
+                foreach (string name in _lastNamedDeficits.Select(x => x.DisplayName)
+                             .Distinct(StringComparer.Ordinal))
+                    fresh[name] = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                        name, ct, Log);
+
+                var recovered = CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+                    _lastNamedDeficits, deficits, fresh);
+                if (recovered is not null)
+                {
+                    int index = deficits.FindIndex(x => string.IsNullOrWhiteSpace(x.DisplayName));
+                    deficits[index] = recovered;
+                    Log?.Invoke(
+                        $"[제작] 이전 퀘스트 재료명 안전 복원 · {recovered.DisplayName} " +
+                        $"{recovered.Current}/{recovered.Required} · 이전 명시 OCR + 새 CLI 재고 유일 일치 · " +
+                        "이후 일반 재료 수급 검증 유지");
+                }
+                else
+                    Log?.Invoke(
+                        "[제작] 재료명 복원 미확정 · 이전 이름/수량과 새 CLI 재고가 유일하게 일치하지 않아 " +
+                        "음식 건너뛰기 안전 정책 유지");
+            }
+            catch (InvalidDataException ex)
+            {
+                Log?.Invoke(
+                    $"[제작] 재료명 복원 CLI 검증 실패 · {ex.Message} · 재료명 미확인 유지");
+            }
+        }
+
+        if (deficits.Count == 0)
+        {
+            _lastNamedDeficitRecipe = null;
+            _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
+        }
+        else if (deficits.All(x => !string.IsNullOrWhiteSpace(x.DisplayName)))
+        {
+            _lastNamedDeficitRecipe = plan.DisplayName;
+            _lastNamedDeficits = deficits.ToArray();
         }
 
         _lastSingleQuestDeficit =
@@ -1117,6 +1178,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
         _lastSingleQuestDeficit = null;
+        _lastNamedDeficitRecipe = null;
+        _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
 
         int stableNeutralFrames = 0;
         for (int attempt = 1; attempt <= 12; attempt++)
