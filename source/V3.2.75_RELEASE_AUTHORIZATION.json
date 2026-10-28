@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.75",
+  "purpose": "f9_unified_scene_resume_stock_and_latency",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "테스트는 다하고 자동업데이트 까지 진행해",
+  "requestedAtKst": "2026-10-28",
+  "sourcePullRequest": 341,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "Only release after PR HEAD CI, merged-main push CI, compiled Windows source/binary smoke, ZIP SHA256, rollback asset checks and safe auto-update policy; live-game verification explicitly deferred until after release. Historic corpus 118 multi incidents, 41 sampled safety assertions, 77 not individually replayed."
+}
