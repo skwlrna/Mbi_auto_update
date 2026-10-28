@@ -1128,6 +1128,7 @@ try
         Paint(hub, new Rectangle(231, 955, 60, 21), Color.FromArgb(165, 165, 165));
         Paint(hub, new Rectangle(427, 955, 50, 21), Color.FromArgb(165, 165, 165));
         Paint(hub, new Rectangle(509, 955, 57, 21), Color.FromArgb(165, 165, 165));
+        Paint(hub, new Rectangle(347, 936, 38, 32), Color.FromArgb(28, 189, 211));
         Check(PixelGate("HasFixedProcessingHubVisual", hub) &&
               !PixelGate("HasManagedProcessingBottomTabVisual", hub),
             "V3.1.72 real six-card hub must win over persistent bottom K bar");
@@ -1409,8 +1410,18 @@ try
         Paint(hub, new Rectangle(231, 955, 60, 21), Color.FromArgb(165, 165, 165));
         Paint(hub, new Rectangle(427, 955, 50, 21), Color.FromArgb(165, 165, 165));
         Paint(hub, new Rectangle(509, 955, 57, 21), Color.FromArgb(165, 165, 165));
+        Check(!PixelGate("HasFixedProcessingHubVisual", hub),
+            "10:41 six-card lookalike with neutral K tabs but no active cyan 가공 remains blocked");
+        Paint(hub, new Rectangle(347, 936, 38, 32), Color.FromArgb(28, 189, 211));
         Check(PixelGate("HasFixedProcessingHubVisual", hub),
-            "V3.1.63 real-style six-card hub with 3-label footer wins over persistent '가공' bottom tab");
+            "V3.1.63 real-style six-card hub with active cyan 가공 and 3-label footer is recognized");
+        using (var wrongActiveTab = new Bitmap(hub))
+        {
+            Paint(wrongActiveTab, new Rectangle(328, 929, 76, 62), Color.FromArgb(24, 23, 29));
+            Paint(wrongActiveTab, new Rectangle(428, 936, 38, 32), Color.FromArgb(28, 189, 211));
+            Check(!PixelGate("HasFixedProcessingHubVisual", wrongActiveTab),
+                "10:41 other K-page active tab cannot impersonate processing hub");
+        }
         using (var armourLookalike = new Bitmap(hub))
         {
             Paint(armourLookalike, new Rectangle(200, 934, 405, 66),
