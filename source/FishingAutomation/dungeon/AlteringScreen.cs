@@ -185,6 +185,57 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             HasOnsiteCloseButtonVisual(frame) ||
             HasFacilityQueueSlotStructureVisual(frame));
 
+    // 2026-10-28 14:38: the real metal facility is open, but its muted
+    // gray-blue "설비로 이동" pill is not the older saturated-teal button.
+    // This is facility ENTRY evidence only. Do not use it to authorize the
+    // fixed move-button click: that still requires the original strict guard.
+    private static bool HasMutedFacilityMovePillVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        var area = AlteringFacilityLayout.MoveButtonAnchorArea;
+        int sampled = 0, slate = 0, bounded = 0, lightText = 0;
+        for (int y = area.Top; y < area.Bottom; y += 2)
+        for (int x = area.Left; x < area.Right; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            // Blue-gray filled pill, rather than a teal move control or
+            // background colour. The two outside edges are the independent
+            // bounded-shape proof; currency and field labels cannot supply it.
+            bool muted = p.R >= 38 && p.R <= 145 &&
+                         p.G >= p.R + 8 && p.B >= p.G + 4 &&
+                         p.B <= p.G + 48 && p.B <= 190;
+            if (muted)
+            {
+                slate++;
+                Color above = frame.GetPixel(x, 205);
+                Color below = frame.GetPixel(x, 265);
+                if (p.G >= above.G + 9 && p.B >= above.B + 9 &&
+                    p.G >= below.G + 9 && p.B >= below.B + 9)
+                    bounded++;
+            }
+            else if (x >= 46 && x <= 128 && y >= 220 && y <= 249 &&
+                     Math.Min(p.R, Math.Min(p.G, p.B)) >= 150 &&
+                     Math.Max(p.R, Math.Max(p.G, p.B)) -
+                     Math.Min(p.R, Math.Min(p.G, p.B)) <= 50)
+                lightText++;
+        }
+        return sampled > 0 && slate * 100 >= sampled * 28 &&
+               bounded * 100 >= sampled * 17 && lightText >= 8;
+    }
+
+    // Facility-entry proof is distinct from permission to click "설비로 이동".
+    // The latter keeps the strict teal/X/queue guard. A muted, bounded pill
+    // can only rescue navigation after a VERIFIED six-card hub/card selection,
+    // with two consecutive fully structured facility frames.
+    private static bool HasVerifiedFacilityEntryScreen(Bitmap frame)
+        => HasVerifiedFacilityMoveClickScreen(frame) ||
+           (HasFixedFacilityHeaderVisual(frame) &&
+            HasFacilityPanelStructureVisual(frame) &&
+            !HasFacilityTravelConfirmationVisual(frame) &&
+            !HasBottomConfirmationModal(frame) &&
+            HasMutedFacilityMovePillVisual(frame));
+
     // A header can render before the rest of the facility panel. Observe only;
     // never send K/Esc/card/move input while waiting for this transition.
     private static int AdvanceFacilityReadyFrames(int previous, bool verified)
@@ -978,7 +1029,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // This prevents a fourth K/Esc/tab click on an unknown screen.
                 if (attempt == maxAttempts)
                 {
-                    if (HasVerifiedFacilityMoveClickScreen(frame) &&
+                    if (HasVerifiedFacilityEntryScreen(frame) &&
                         await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
                     {
                         Log?.Invoke($"[자동 가공] 마지막 허브 복구 전 시설 진입 확인 · {plan.ScreenTitle}");
@@ -1004,7 +1055,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     await WaitForManagedProcessingNavigationReadyAsync(1000, ct);
                     continue;
                 }
-                if (HasVerifiedFacilityMoveClickScreen(frame) &&
+                if (HasVerifiedFacilityEntryScreen(frame) &&
                     await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null)
                 {
                     Log?.Invoke($"[자동 가공] 현재 화면={plan.ScreenTitle} · 시설 진입 확인");
@@ -1071,7 +1122,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     int stableFacilityFrames = 0;
                     if (await WaitForScreenStateAsync(async image =>
                         {
-                            bool facility = HasVerifiedFacilityMoveClickScreen(image) &&
+                            bool facility = HasVerifiedFacilityEntryScreen(image) &&
                                 !HasManagedKEntryBlockingModal(image) &&
                                 (HasFixedFacilityHeaderVisual(image) ||
                                  await FindFacilityHeaderAsync(image, plan.ScreenTitle, ct) is not null);
@@ -1083,6 +1134,30 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         return;
                     }
 
+                    // The 14:38 screenshot was ALREADY the correct metal facility.
+                    // Report every visual gate instead of treating a missed muted
+                    // pill/queue ring as proof that we returned to the world.
+                    using (var afterCard = Capture(ct))
+                    {
+                        bool header = HasFixedFacilityHeaderVisual(afterCard);
+                        bool panel = HasFacilityPanelStructureVisual(afterCard);
+                        bool mutedPill = HasMutedFacilityMovePillVisual(afterCard);
+                        bool move = HasFacilityMoveButtonVisual(afterCard);
+                        bool close = HasOnsiteCloseButtonVisual(afterCard);
+                        bool slots = HasFacilityQueueSlotStructureVisual(afterCard);
+                        bool modal = HasFacilityTravelConfirmationVisual(afterCard) ||
+                                     HasBottomConfirmationModal(afterCard);
+                        Log?.Invoke($"[자동 가공][시설 화면 진단] 목표={plan.ScreenTitle} · " +
+                            $"제목/레벨={header} · 카드/전체={panel} · 회색이동버튼={mutedPill} · " +
+                            $"청록이동버튼={move} · 닫기X={close} · 슬롯테두리={slots} · " +
+                            $"확인창={modal} · 진입연속2프레임=실패");
+                        // A visible facility is not a world HUD. Never issue K
+                        // over its recipe grid even when one guard still fails.
+                        if (header && panel)
+                            Fail(afterCard,
+                                "시설 제목/제품 카드 확인됐으나 시설 진입 연속 2프레임 검증 실패 · " +
+                                "K 재입력 없이 안전 정지 · 시설 화면 진단 참조");
+                    }
                     Log?.Invoke($"[자동 가공] 시설 전환 확인 대기 {attempt}/{maxAttempts} · 현재 화면을 다시 판정합니다.");
                     await WaitForProcessingNavigationReadyAsync(plan, 900, ct);
                     continue;
@@ -1157,6 +1232,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // ordinary field. Do one bounded K re-entry only; never spam keys blindly.
                 // A fourth pass is reserved exclusively for the visually
                 // confirmed six-card hub above; no extra K is ever permitted.
+                // A facility-looking screen is NOT the ordinary field. No K
+                // while the facility title and independent card structure remain
+                // visible, even if our extra control proof is inconclusive.
+                if (HasFixedFacilityHeaderVisual(frame) &&
+                    HasFacilityPanelStructureVisual(frame))
+                    Fail(frame,
+                        "시설 제목/제품 카드가 보이지만 시설 진입 증거 불충분 · K 입력 차단 · 추가 진단 필요");
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
                 // Never press K over an unknown green/travel modal in a managed run.
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
