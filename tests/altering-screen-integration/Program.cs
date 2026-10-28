@@ -1283,6 +1283,62 @@ try
               PixelGate("HasVerifiedFacilityMoveClickScreen", pillMiss),
             "remote facility remains input-eligible when teal pill pixels are missed but work-ring structure is intact");
     }
+    // 2026-10-28 14:38 muted metal move button incident. The private log
+    // screenshot is intentionally NOT committed to this public repository.
+    // Recreate its gray-blue bounded pill and low-contrast/absent work rings
+    // on an existing, reviewed facility layout. Do not relax the world veto.
+    using (var mutedMetalStyle = new Bitmap(Path.Combine(moveFixtures,
+        "remote-wood-20261007-172137.png")))
+    {
+        // Preserve the header, category pill and three product-card interiors.
+        // Hide all historical teal/queue proofs to force the new evidence path.
+        Paint(mutedMetalStyle, new Rectangle(15, 205, 690, 150),
+            Color.FromArgb(28, 29, 36));
+        Paint(mutedMetalStyle, new Rectangle(23, 217, 126, 37),
+            Color.FromArgb(82, 108, 125));
+        // Neutral text strokes inside the fixed bounded pill; pixel proof
+        // deliberately does not depend on machine-specific Korean fonts/OCR.
+        for (int x = 50; x <= 120; x += 14)
+            Paint(mutedMetalStyle, new Rectangle(x, 226, 6, 15),
+                Color.FromArgb(225, 225, 225));
+
+        Check(PixelGate("HasFixedFacilityHeaderVisual", mutedMetalStyle) &&
+              PixelGate("HasFacilityPanelStructureVisual", mutedMetalStyle) &&
+              !PixelGate("HasFacilityMoveButtonVisual", mutedMetalStyle) &&
+              !PixelGate("HasFacilityQueueSlotStructureVisual", mutedMetalStyle) &&
+              !PixelGate("HasOnsiteCloseButtonVisual", mutedMetalStyle),
+            "14:38 synthetic gray move pill retains facility anchors but loses legacy teal/X/ring proof");
+        Check(PixelGate("HasMutedFacilityMovePillVisual", mutedMetalStyle) &&
+              PixelGate("HasVerifiedFacilityEntryScreen", mutedMetalStyle) &&
+              PixelGate("HasVerifiedFacilityMoveClickScreen", mutedMetalStyle),
+            "14:38 gray move pill allows facility entry and verified move boundary only with full-panel proof");
+        Check(!PixelGate("HasBottomConfirmationModal", mutedMetalStyle) &&
+              !PixelGate("HasFacilityTravelConfirmationVisual", mutedMetalStyle),
+            "14:38 muted move pill never impersonates a travel/confirm modal");
+        Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3),
+                  "HasVerifiedFacilityEntryScreen") &&
+              Has(ScreenCalls("TravelToFacilityAsync", 5),
+                  "HasVerifiedFacilityMoveClickScreen"),
+            "real compiled navigation and input boundary both use independently verified full facility proof");
+
+        using var noText = new Bitmap(mutedMetalStyle);
+        Paint(noText, new Rectangle(46, 220, 90, 30),
+            Color.FromArgb(82, 108, 125));
+        Check(!PixelGate("HasMutedFacilityMovePillVisual", noText) &&
+              !PixelGate("HasVerifiedFacilityMoveClickScreen", noText),
+            "gray background fill without independent bright pill label cannot authorize an input");
+    }
+    using (var falseMutedField = BlackFrame())
+    {
+        Paint(falseMutedField, new Rectangle(23, 217, 126, 37),
+            Color.FromArgb(82, 108, 125));
+        for (int x = 50; x <= 120; x += 14)
+            Paint(falseMutedField, new Rectangle(x, 226, 6, 15),
+                Color.White);
+        Check(!PixelGate("HasVerifiedFacilityEntryScreen", falseMutedField) &&
+              !PixelGate("HasVerifiedFacilityMoveClickScreen", falseMutedField),
+            "world/transition frame cannot use a lone gray pill for a facility or a fixed-coordinate click");
+    }
     // Bright fake facility anchors on an ordinary field are insufficient,
     // even when HUD templates are absent. No real pill/X -> no coordinate.
     using (var fakeFacility = BlackFrame())
