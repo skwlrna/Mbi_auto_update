@@ -1169,6 +1169,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                     ViewportValid: latest.Width == 800 &&
                                                    latest.Height == 1000)) ==
                                 ManagedProductionSceneKind.ProcessingHub), ct);
+                    var facilityOpenWatch = Stopwatch.StartNew();
                     hubCardClicks++;
                     Log?.Invoke($"[자동 가공] {plan.ScreenTitle} 시설 카드 클릭 {hubCardClicks}/2 · 좌표=({click.X},{click.Y}) · " +
                         (hubCardClicks == 1 ? "고정 카드 중심" : "새 허브 2프레임 확인 + 기존 고정 좌표 재시도"));
@@ -1194,7 +1195,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         }, directive == AlteringFacilityEntryDirective.Automatic
                             ? 3000 : 3550, ct))
                     {
-                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인");
+                        Log?.Invoke($"[자동 가공] 시설 진입 성공 {attempt}/{maxAttempts} · {plan.ScreenTitle} · 고정 화면 위치 확인" +
+                            (directive == AlteringFacilityEntryDirective.Automatic
+                                ? "" : $" · F9 카드→정확 시설 2프레임 {facilityOpenWatch.ElapsedMilliseconds}ms"));
                         return;
                     }
 
@@ -1239,7 +1242,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     // Old sequence: 550ms fixed sleep + 900ms positive hub
                     // polling. Let fast machines continue as soon as the hub
                     // exists, with the same 1450ms total slow-machine budget.
-                    await WaitForProcessingHubAsync(1450, ct);
+                    var hubReadyWatch = Stopwatch.StartNew();
+                    bool hubReady = await WaitForProcessingHubAsync(1450, ct);
+                    Log?.Invoke($"[자동 가공] F9 가공 탭→허브 화면 확인={hubReady} · {hubReadyWatch.ElapsedMilliseconds}ms · 추가 입력 없음");
                     continue;
                 }
                 // Managed F9 must never interpret unrelated world OCR "가공"
