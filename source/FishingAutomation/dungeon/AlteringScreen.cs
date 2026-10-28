@@ -252,7 +252,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // The genuine six-card processing hub ALSO has three separate bottom
         // navigation labels. Without them, never authorize a fixed card click.
         if (frame.Width != 800 || frame.Height != 1000 ||
-            !HasProcessingBottomNavigationLabels(frame)) return false;
+            !HasProcessingBottomNavigationLabels(frame) ||
+            !HasActiveProcessingHubTabVisual(frame)) return false;
 
         static int WhiteGlyphSamples(Bitmap bitmap, Rectangle area)
         {
@@ -297,13 +298,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return topTitles >= 2 && bottomTitles >= 2 && darkCards >= 5;
     }
 
-    private async Task<bool> IsProcessingHubAsync(Bitmap frame, CancellationToken ct)
+    private Task<bool> IsProcessingHubAsync(Bitmap frame, CancellationToken ct)
     {
-        if (HasFixedProcessingHubVisual(frame)) return true;
-        // The single-facility screen also has a large top-left title and
-        // facility-level subtitle; don't treat it as the hub via fuzzy OCR.
-        if (HasFixedFacilityHeaderVisual(frame)) return false;
-        return await FindFacilityHeaderAsync(frame, "가공", ct) is not null;
+        ct.ThrowIfCancellationRequested();
+        // A fuzzy '가공' OCR hit may describe an unrelated crafting screen.
+        // Only the full six-card geometry AND active processing footer can
+        // identify the hub; OCR alone never authorizes its coordinates.
+        return Task.FromResult(HasFixedProcessingHubVisual(frame));
     }
 
     private async Task<bool> HasCollectPromptAsync(
@@ -786,6 +787,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return NeutralGlyphs(frame, new Rectangle(222, 940, 91, 45)) >= 8 &&
                NeutralGlyphs(frame, new Rectangle(410, 940, 82, 45)) >= 8 &&
                NeutralGlyphs(frame, new Rectangle(496, 940, 85, 45)) >= 8;
+    }
+
+    // The three navigation labels exist on other K pages too. On the real
+    // processing hub '가공' is the cyan ACTIVE centre tab; the adjacent 제작
+    // or 빠른 제작 pages select a different tab. Only use this as an extra
+    // positive hub identity signal, never as proof of an actionable click.
+    private static bool HasActiveProcessingHubTabVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        int cyan = 0;
+        for (int y = 932; y < 989; y += 3)
+        for (int x = 339; x < 396; x += 3)
+        {
+            var p = frame.GetPixel(x, y);
+            if (p.G >= 110 && p.B >= 135 &&
+                p.B >= p.R + 45 && p.G >= p.R + 45)
+                cyan++;
+        }
+        return cyan >= 16;
     }
 
     private static bool HasManagedProcessingBottomTabVisual(Bitmap frame)
