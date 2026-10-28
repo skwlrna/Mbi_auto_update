@@ -1245,6 +1245,106 @@ static class Program
                 return Task.CompletedTask;
             }, "게임 대기열");
         });
+        await Test("F9 stock-independent resume: sales, outside stock, reboot, exact original goal", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            // The player owned 80 of this item before starting the 100-output goal.
+            world.Counts[Wood.OutputName] = 80;
+            string dir = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            string batchId;
+            using (var batch = new MultiAlteringBatchStore(dir))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                batchId = batch.BatchId;
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with {
+                    QueuedWorks = 3, MultiState = MultiAlteringItemState.InProgress
+                });
+                for (int i = 0; i < 3; i++)
+                    await world.QueueAsync(Wood, () => { }, default);
+                await world.Delay(TimeSpan.Zero, default);
+                await batch.BeginReceiptWithEvidenceAsync(Wood, world, default);
+                await world.CollectAsync(Wood, default);
+                // Sold/used both the old inventory and the newly produced 30.
+                world.Counts[Wood.OutputName] = 0;
+                await batch.ConfirmReceiptAsync(Wood, world, default);
+                Check(batch.Session(Wood).ConfirmedReceivedWorks == 3 &&
+                      batch.Session(Wood).QueuedWorks == 3,
+                    "Confirmed F9 receipts disappeared after a stock decrease");
+            }
+
+            // Simulate full app termination and new process: reopen from disk
+            // rather than sharing an in-memory session object.
+            var latest = MultiAlteringRecentResume.Latest(temp.Path)!;
+            Check(latest.BatchId == batchId, "F9 batch lost after restart");
+            var afterSale = (await MultiAlteringRecentResume.VerifyAsync(
+                latest, Identity, world, default)).Single();
+            Check(afterSale.Confirmed == 30 && afterSale.RegisteredOutput == 0 &&
+                  afterSale.AdditionalOutput == 70,
+                "Inventory sale caused a restart or miscount of the 100 target");
+
+            // External stock gain is not a fabricated F9 receipt.
+            world.Counts[Wood.OutputName] = 1000;
+            var afterPurchase = (await MultiAlteringRecentResume.VerifyAsync(
+                latest, Identity, world, default)).Single();
+            Check(afterPurchase.Confirmed == 30 &&
+                  afterPurchase.AdditionalOutput == 70,
+                "Externally obtained inventory was falsely counted as F9 progress");
+
+            // Restart again after another stock change; resume only 7 missing
+            // registrations. Each verified receipt is immediately consumed.
+            world.Counts[Wood.OutputName] = 0;
+            world.AfterReceipt = () => world.Counts[Wood.OutputName] = 0;
+            world.ImmediateCompletion = true;
+            using (var reopened = new MultiAlteringBatchStore(dir))
+            {
+                await reopened.OpenAsync(new[] { Wood }, Identity, world, default);
+                Check(reopened.IsResuming && reopened.BatchId == batchId &&
+                      reopened.Session(Wood).QueuedWorks == 3,
+                    "Restart opened a new goal rather than the durable F9 batch");
+                await new Harness(reopened, new[] { Wood }, world).Run();
+                Check(reopened.Session(Wood).MultiState == MultiAlteringItemState.Completed &&
+                      reopened.Session(Wood).ConfirmedReceivedWorks == 10 &&
+                      world.Registered.Count == 10 &&
+                      world.Counts[Wood.OutputName] == 0,
+                    "Repeated inventory consumption duplicated registration or blocked durable completion");
+            }
+        });
+        await Test("F9 stock-independent resume still refuses uncertain queue and old unjournaled stock", async () =>
+        {
+            using var temp = new Temp();
+            var world = new World(new[] { Wood }) { ImmediateCompletion = false };
+            string dir = Path.Combine(temp.Path, "fresh-runs",
+                "f9-" + Guid.NewGuid().ToString("N"));
+            using (var batch = new MultiAlteringBatchStore(dir))
+            {
+                await batch.OpenFreshAsync(new[] { Wood }, Identity, world, default);
+                batch.PlanStore(Wood).Save(batch.Session(Wood) with {
+                    QueuedWorks = 1, MultiState = MultiAlteringItemState.InProgress
+                });
+                await world.QueueAsync(Wood, () => { }, default);
+            }
+            world.Counts[Wood.OutputName] = 999;
+            var latest = MultiAlteringRecentResume.Latest(temp.Path)!;
+            Check((await MultiAlteringRecentResume.VerifyAsync(
+                latest, Identity, world, default)).Single().Confirmed == 0,
+                "External stock alone credited an unreceived work");
+            world.Works.Clear(); // Manual cancellation, not a receipt.
+            await Reject(() => MultiAlteringRecentResume.VerifyAsync(
+                latest, Identity, world, default), "대기열");
+            Check(world.Registered.Count == 1 && File.Exists(Path.Combine(dir, "batch.json")),
+                "Uncertain queue resumed registration or discarded the goal");
+
+            var legacy = AlteringSessionState.Create(Wood, Identity, 100, 0) with {
+                QueuedWorks = 1, LastObservedOutputQuantity = 110,
+                ReceiptTrackingEnabled = false
+            };
+            await Reject(() => {
+                MultiAlteringRecentResume.ReconcileOwnedWorks(legacy, -100, 0);
+                return Task.CompletedTask;
+            }, "장부");
+        });
         Console.WriteLine($"N02: {passed} deterministic tests passed; temporary files; fake game only.");
     }
 
