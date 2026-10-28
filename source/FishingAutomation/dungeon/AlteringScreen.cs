@@ -2407,7 +2407,24 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Fail(immediate, reason);
                 }
                 ct.ThrowIfCancellationRequested();
-                _ui.ClickFresh(liveCenter, ct);
+                if (directive == AlteringFacilityEntryDirective.Automatic)
+                {
+                    _ui.ClickFresh(liveCenter, ct);
+                }
+                else
+                {
+                    // N01/F07 managed F9: a previous image, even one captured
+                    // after the last CLI read, cannot authorize a later DOWN.
+                    // Re-check the exact detail, recipe identity, remote veto
+                    // and same free-action geometry in the input guard's frame.
+                    await _ui.ClickVerifiedFreshAsync(liveCenter, async finalFrame =>
+                        await IsRecipeDetailStructureAsync(finalFrame, ct) &&
+                        await FindRecipeAsync(finalFrame, plan, ct) is not null &&
+                        !(await DetectRemoteProcessStateAsync(finalFrame, ct)).IsRemote &&
+                        TryFindFreeProcessButtonVisual(finalFrame, out Point finalCenter) &&
+                        AlteringRecipeIdentityPolicy.IsStableFreshFreeActionTarget(
+                            liveCenter, finalCenter, FreeProcessVisualButton), ct);
+                }
                 // Optional storage transfer after free registration. Without it
                 // the caller waits for a CLI +1 that can never appear.
                 await HandleOptionalMaterialTransferPromptAsync(ct);
@@ -4257,7 +4274,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         await RequireManagedIdleAsync(
             plan, directive, "모두 받기 최종 Space 직전 활동 검사", ct);
         ct.ThrowIfCancellationRequested();
-        _ui.TapFresh(0x39, ct);
+        if (directive == AlteringFacilityEntryDirective.Automatic)
+            _ui.TapFresh(0x39, ct);
+        else
+            await _ui.TapVerifiedFreshAsync(0x39,
+                async finalFrame => await HasCollectPromptAsync(
+                    finalFrame, plan, directive, ct) &&
+                    await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null &&
+                    !HasManagedKEntryBlockingModal(finalFrame), ct);
         await Task.Delay(450, ct);
 
         bool confirmedReceipt = await ConfirmCompletionResultAsync(
@@ -4333,7 +4357,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                 receiptRetryUsed = true;
                 ct.ThrowIfCancellationRequested();
-                _ui.TapFresh(0x39, ct); // The only possible second receive input.
+                // F02: the same final-frame guard protects the bounded retry;
+                // an unknown/partially completed lane must never get a second DOWN.
+                await _ui.TapVerifiedFreshAsync(0x39, async finalFrame =>
+                    await HasCollectPromptAsync(finalFrame, plan, directive, ct) &&
+                    await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null &&
+                    HasOnsiteCloseButtonVisual(finalFrame) &&
+                    !HasManagedKEntryBlockingModal(finalFrame), ct);
                 Log?.Invoke("[자동 가공] CLI 작업건 동일 + 현장/전체완료 재확인 · 파란색 검사 없이 Space 재시도 1/1");
                 await Task.Delay(450, ct);
                 confirmedReceipt = await ConfirmCompletionResultAsync(
