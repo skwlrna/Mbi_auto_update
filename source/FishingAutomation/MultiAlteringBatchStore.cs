@@ -469,6 +469,7 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                      !Guid.TryParseExact(s.PendingConsumptionTransactionId, "N", out _))) ||
                 (s.MultiState == MultiAlteringItemState.Completed &&
                  (s.CompletedAt is null || s.QueuedWorks != s.RequiredWorks || s.PendingRegistration ||
+                  !s.ReceiptTrackingEnabled &&
                   s.LastObservedOutputQuantity - s.BaselineQuantity - s.InitialExistingMinimum < p.ExpectedQuantity ||
                   s.ReceiptTrackingEnabled &&
                   s.ConfirmedReceivedWorks != s.InitialExistingWorks + s.QueuedWorks) ||
@@ -796,20 +797,25 @@ internal sealed class MultiAlteringBatchStore : IDisposable
                 if (receivedWorks > s.InitialExistingWorks + s.QueuedWorks)
                     throw new InvalidOperationException(
                         "수령 기록이 등록 횟수를 초과합니다 · RecoveryRequired 유지");
-                if (current - s.BaselineQuantity < checked((long)receivedWorks * s.ProducedPerWork))
-                    throw new InvalidOperationException(
-                        "수령 후 보유량이 확인한 작업 수보다 적습니다 · RecoveryRequired 유지");
+                // Never substitute volatile stock for the before-input lane
+                // snapshot and the verified post-input queue drain. Players can
+                // consume, trade or obtain the output independently of this run.
             }
-            if (current < s.LastObservedOutputQuantity)
-                throw new InvalidOperationException("수령 수량 감소 · 완료 증거 불확실 · RecoveryRequired 유지");
+            else if (current < s.LastObservedOutputQuantity)
+                throw new InvalidOperationException(
+                    "구형 장부 수령 수량 감소 · 완료 증거 불확실 · RecoveryRequired 유지");
             long gain = current - s.BaselineQuantity - s.InitialExistingMinimum;
             bool complete = s.QueuedWorks == s.RequiredWorks && !s.PendingRegistration &&
-                gain >= p.ExpectedQuantity &&
-                (!s.ReceiptTrackingEnabled ||
-                 receivedWorks == s.InitialExistingWorks + s.QueuedWorks);
+                (s.ReceiptTrackingEnabled
+                    ? receivedWorks == s.InitialExistingWorks + s.QueuedWorks
+                    : gain >= p.ExpectedQuantity);
             if (s.QueuedWorks == s.RequiredWorks && !complete)
                 throw new InvalidOperationException("전량 등록 품목의 수령 증거 부족 · RecoveryRequired 유지");
-            items[i] = s with { LastObservedOutputQuantity = current,
+            items[i] = s with {
+                // Historical maximum is diagnostic for journaled runs, never a
+                // current-stock floor. Preserve monotonic manifest invariants.
+                LastObservedOutputQuantity = s.ReceiptTrackingEnabled
+                    ? Math.Max(s.LastObservedOutputQuantity, current) : current,
                 ConfirmedReceivedWorks = receivedWorks,
                 MultiState = complete ? MultiAlteringItemState.Completed : MultiAlteringItemState.InProgress,
                 CompletedAt = complete ? DateTimeOffset.UtcNow : null, Stage = complete ? "완료" : "가공 진행" };
