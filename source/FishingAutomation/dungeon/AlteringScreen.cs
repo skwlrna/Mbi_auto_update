@@ -183,12 +183,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
            !HasBottomConfirmationModal(frame) &&
            (HasFacilityMoveButtonVisual(frame) ||
             HasOnsiteCloseButtonVisual(frame) ||
-            HasFacilityQueueSlotStructureVisual(frame));
+            HasFacilityQueueSlotStructureVisual(frame) ||
+            // 14:38 metal screenshot: the real bounded move pill is slate,
+            // not the historical teal. Header, three product cards and a
+            // fresh frame are still mandatory before a click is authorized.
+            HasMutedFacilityMovePillVisual(frame));
 
     // 2026-10-28 14:38: the real metal facility is open, but its muted
     // gray-blue "설비로 이동" pill is not the older saturated-teal button.
-    // This is facility ENTRY evidence only. Do not use it to authorize the
-    // fixed move-button click: that still requires the original strict guard.
+    // The pill is evidence only with the full independent facility header
+    // and product-card geometry; never act on this colour match in isolation.
     private static bool HasMutedFacilityMovePillVisual(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000) return false;
@@ -224,17 +228,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                bounded * 100 >= sampled * 17 && lightText >= 8;
     }
 
-    // Facility-entry proof is distinct from permission to click "설비로 이동".
-    // The latter keeps the strict teal/X/queue guard. A muted, bounded pill
-    // can only rescue navigation after a VERIFIED six-card hub/card selection,
-    // with two consecutive fully structured facility frames.
+    // Navigation and the move-input boundary both require the SAME fully
+    // structured facility proof. The gray pill is never sufficient alone.
     private static bool HasVerifiedFacilityEntryScreen(Bitmap frame)
-        => HasVerifiedFacilityMoveClickScreen(frame) ||
-           (HasFixedFacilityHeaderVisual(frame) &&
-            HasFacilityPanelStructureVisual(frame) &&
-            !HasFacilityTravelConfirmationVisual(frame) &&
-            !HasBottomConfirmationModal(frame) &&
-            HasMutedFacilityMovePillVisual(frame));
+        => HasVerifiedFacilityMoveClickScreen(frame);
 
     // A header can render before the rest of the facility panel. Observe only;
     // never send K/Esc/card/move input while waiting for this transition.
@@ -2836,7 +2833,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Log?.Invoke($"[자동 가공] {plan.ScreenTitle} · 시설 전환 검증 실패 · " +
                     $"연속2프레임={stableFacility} · 전체시설UI={HasFacilityPanelStructureVisual(confirmed)} · " +
                     $"시설제목={HasFixedFacilityHeaderVisual(confirmed)} · " +
-                    $"이동버튼={HasFacilityMoveButtonVisual(confirmed)} · " +
+                    $"청록이동버튼={HasFacilityMoveButtonVisual(confirmed)} · " +
+                    $"회색이동버튼={HasMutedFacilityMovePillVisual(confirmed)} · " +
                     $"현장닫기={HasOnsiteCloseButtonVisual(confirmed)} · " +
                     $"작업슬롯={HasFacilityQueueSlotStructureVisual(confirmed)}");
                 Fail(confirmed, "설비 이동 전 실제 시설창의 제목/독립 UI 구조를 확인하지 못했습니다 · 일반 필드 좌표 클릭 차단");
@@ -3479,7 +3477,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Bitmap frame,
         CancellationToken ct)
     {
-        if (HasFacilityMoveButtonVisual(frame))
+        // The recorded metal move control is a muted blue-gray pill.
+        // Require the same independent facility panel and header as the
+        // input gate before treating the visual as a positive move button.
+        if (HasFacilityMoveButtonVisual(frame) ||
+            (HasFixedFacilityHeaderVisual(frame) &&
+             HasFacilityPanelStructureVisual(frame) &&
+             HasMutedFacilityMovePillVisual(frame) &&
+             !HasManagedKEntryBlockingModal(frame)))
             return true;
 
         // OCR is a positive-only fallback. Missing OCR never proves on-site, but
