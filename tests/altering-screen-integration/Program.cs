@@ -1315,6 +1315,12 @@ try
         Check(!PixelGate("HasBottomConfirmationModal", mutedMetalStyle) &&
               !PixelGate("HasFacilityTravelConfirmationVisual", mutedMetalStyle),
             "14:38 muted move pill never impersonates a travel/confirm modal");
+        object mutedProbe = RuntimeHelpers.GetUninitializedObject(screen);
+        var mutedPositive = (Task<bool>)Method(screen,
+            "HasFacilityMoveButtonPositiveEvidenceAsync", 2).Invoke(mutedProbe,
+            new object[] { mutedMetalStyle, CancellationToken.None })!;
+        Check(await mutedPositive,
+            "14:38 existing receipt/non-forced path accepts independently bounded gray move control without OCR");
         Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3),
                   "HasVerifiedFacilityEntryScreen") &&
               Has(ScreenCalls("TravelToFacilityAsync", 5),
