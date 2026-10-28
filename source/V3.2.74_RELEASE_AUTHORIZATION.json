@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "version": "V3.2.74",
+  "purpose": "f9_muted_metal_facility_entry_recovery",
+  "approvedBy": "user_direct_request_in_chat",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "requestedAtKst": "2026-10-28",
+  "request": "직접배포해",
+  "sourcePullRequest": 339,
+  "sourcePullRequestMergeCommit": "3d2b86e9f130f13cfef49a06aa227eeb6f783561",
+  "note": "User explicitly requested direct deployment. Windows main CI, package integrity, smoke and rollback gates remain mandatory."
+}
