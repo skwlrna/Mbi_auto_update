@@ -89,7 +89,8 @@ internal static class MultiAlteringRecentResume
         AlteringSessionState session, long gainedOutput, int liveWorks)
     {
         if (session.ProducedPerWork <= 0 || session.InitialExistingWorks < 0 ||
-            session.QueuedWorks < 0 || liveWorks < 0 || gainedOutput < 0)
+            session.QueuedWorks < 0 || liveWorks < 0 ||
+            (!session.ReceiptTrackingEnabled && gainedOutput < 0))
             throw new InvalidOperationException(
                 $"{session.DisplayName}: 이어하기 가공 장부 값이 잘못됐습니다.");
         long total = checked((long)session.InitialExistingWorks + session.QueuedWorks);
@@ -104,10 +105,10 @@ internal static class MultiAlteringRecentResume
                 throw new InvalidOperationException(
                     $"{session.DisplayName}: 수령 확정 {trackedReceived}건 / 전체 {total}건 / " +
                     $"예상 대기열 {expected}건 / 실제 {liveWorks}건 · 게임 대기열 불일치");
-            long minimumOutput = checked(trackedReceived * session.ProducedPerWork);
-            if (gainedOutput < minimumOutput)
-                throw new InvalidOperationException(
-                    $"{session.DisplayName}: 수령 확정 {trackedReceived}건에 비해 완성품 증가가 부족합니다 · 안전 정지");
+            // Stock is a volatile balance: sales, manual consumption or
+            // external acquisition do not undo a durable pre-input+post-input
+            // receipt. Only the saved counts and the still-live queue prove
+            // this F9 goal. Never infer an extra receipt from stock surplus.
             long ownReceived = Math.Max(0, trackedReceived - session.InitialExistingWorks);
             long ownPending = session.QueuedWorks - ownReceived;
             return new(trackedReceived, checked(ownReceived * session.ProducedPerWork),
@@ -195,10 +196,14 @@ internal static class MultiAlteringRecentResume
             }
             long current = checked(await data.ItemCountAsync(plan.OutputName, ct) +
                 session.CreditedInternalConsumptionQuantity);
-            if (current < session.LastObservedOutputQuantity ||
-                current < session.BaselineQuantity)
+            // V2 receipt-journal batches measure *production*, not inventory
+            // retained by the player. Treat stock as a diagnostic observation.
+            // Legacy pre-journal batches still require exact inventory evidence.
+            if (!session.ReceiptTrackingEnabled &&
+                (current < session.LastObservedOutputQuantity ||
+                 current < session.BaselineQuantity))
                 throw new InvalidOperationException(
-                    $"{plan.DisplayName}: 저장 이후 완성품 재고가 감소했거나 소비 기록과 불일치합니다 · 자동 복원 차단");
+                    $"{plan.DisplayName}: 구형 장부의 재고 감소/소비를 증명할 수 없습니다 · 자동 복원 차단");
             var facility = before.Where(x => x.FacilityName == plan.FacilityName).ToArray();
             int live = facility.Count(x =>
                 x.DisplayName == plan.DisplayName || x.DisplayName == plan.OutputName);
