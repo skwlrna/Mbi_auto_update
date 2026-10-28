@@ -193,7 +193,7 @@ jobs:
             exit 0
           }
           $p=Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          foreach($tag in @('<Version>3.2.74</Version>','<AssemblyVersion>3.2.74.0</AssemblyVersion>','<FileVersion>3.2.74.0</FileVersion>')){
+          foreach($tag in @('<Version>3.2.75</Version>','<AssemblyVersion>3.2.75.0</AssemblyVersion>','<FileVersion>3.2.75.0</FileVersion>')){
             if(-not $p.Contains($tag)){throw "Version mismatch: $tag"}
           }
           if(-not (Test-Path source/RELEASE_NOTES_V3.2.75.md)){throw 'Release notes missing'}
@@ -224,7 +224,7 @@ jobs:
           if($LASTEXITCODE-ne0){throw 'app publish failed'}
           dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
           if($LASTEXITCODE-ne0){throw 'watchdog publish failed'}
-          if((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.2.74.0'){throw 'EXE version mismatch'}
+          if((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.2.75.0'){throw 'EXE version mismatch'}
           if(-not (Test-Path artifacts/watchdog/MacroWatchdog.exe)){throw 'Missing watchdog'}
 
       - name: Smoke test executable
