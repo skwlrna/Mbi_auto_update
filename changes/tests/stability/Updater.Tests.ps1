@@ -35,6 +35,17 @@ try {
         'old exe' | Set-Content (Join-Path $global:installTest 'release/FishingAutomation.exe')
         'new exe' | Set-Content (Join-Path $incoming 'release/FishingAutomation.exe')
         '{"private":"keep"}' | Set-Content (Join-Path $global:installTest 'release/notification.json')
+        # A REAL F9 resume record lives under user LocalAppData, outside
+        # InstallRoot. The update must not touch it even on a failed install,
+        # rollback or restart. Keep the bytes and batch identity unchanged.
+        $localAppData = Join-Path $testRoot ($case+'-LocalAppData')
+        $batchId = [Guid]::NewGuid().ToString('N')
+        $f9Dir = Join-Path $localAppData ("MabiAuto/multi-altering/fresh-runs/f9-"+$batchId)
+        New-Item -ItemType Directory -Force -Path $f9Dir | Out-Null
+        $manifest = Join-Path $f9Dir 'batch.json'
+        ('{"Version":2,"BatchId":"'+$batchId+'","State":0,"Items":[{"TargetQuantity":100,"QueuedWorks":3,"ConfirmedReceivedWorks":2}]}') |
+            Set-Content -LiteralPath $manifest -Encoding UTF8
+        $before = [IO.File]::ReadAllBytes($manifest)
         $zip=Join-Path $testRoot ($case+'.zip')
         Compress-Archive (Join-Path $incoming '*') $zip
         $global:healthyTest=$case -ne 'health-failure'
@@ -46,7 +57,19 @@ try {
         $settings=Get-Content (Join-Path $global:installTest 'release/notification.json') -Raw
         if(-not $settings.Contains('keep')){throw "$case lost user settings"}
         if(Test-Path (Join-Path $global:installTest '.update_pending')){throw "$case left pending health marker"}
-        Write-Host "PASS updater $case preserves settings and correct executable"
+        $after = [IO.File]::ReadAllBytes($manifest)
+        if(-not ([BitConverter]::ToString($before) -eq [BitConverter]::ToString($after))) {
+            throw "$case altered durable F9 resume manifest"
+        }
+        $readBack = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+        if($readBack.BatchId -ne $batchId -or $readBack.Items[0].TargetQuantity -ne 100 -or
+            $readBack.Items[0].QueuedWorks -ne 3 -or $readBack.Items[0].ConfirmedReceivedWorks -ne 2) {
+            throw "$case lost F9 goal/ledger after update or rollback"
+        }
+        if((@(Get-ChildItem -LiteralPath (Split-Path $f9Dir -Parent) -Directory)).Count -ne 1) {
+            throw "$case duplicated user F9 batch after update"
+        }
+        Write-Host "PASS updater $case preserves settings, F9 resume batch and correct executable"
     }
 } finally {
     foreach($name in @('Start-Sleep','Get-Process','Add-Type','Start-Process','Copy-Item')) { Remove-Item "Function:\global:$name" -ErrorAction SilentlyContinue }

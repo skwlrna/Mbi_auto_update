@@ -1,4 +1,5 @@
 ﻿using System.Drawing;
+using FishingAutomation;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
@@ -31,6 +32,9 @@ try
         checks++;
         Console.WriteLine("PASS L2: " + label);
     }
+
+    // New 35-case compiled F9 scene/action regression suite.
+    SceneArbiterRegression.Run(Check);
 
     MethodInfo Method(Type owner, string name, int parameters)
     {
@@ -445,8 +449,19 @@ try
           Has(managedTab, "HasManagedProcessingBottomTabVisual") &&
           Has(managedTab, "RequireManagedIdleAsync") &&
           Has(managedTab, "HasManagedKEntryBlockingModal") &&
-          Has(managedTab, "ClickFresh"),
-        "V3.1.72 compiled F9 uses positive K navigation pixels, two frames and CLI-idle-gated click");
+          Has(managedTab, "ClickVerifiedFreshAsync") &&
+          !Has(managedTab, "ClickFresh"),
+        "F9 tab uses stable nav and final fresh-frame verified click");
+    // F9 latency: the ONLY deliberate delay inside this compiled tab method
+    // is the first/second independent capture separation (160ms). After its
+    // final verified click, positive hub polling in EnterFacilityCoreAsync
+    // replaces the former unconditional 550ms nap. Do not relax two frames,
+    // fresh-input proof, modal veto, cancellation or idle CLI authorization.
+    Check(Count(managedTab, "Delay") == 1 &&
+          Has(enter, "WaitForProcessingHubAsync") &&
+          Has(enter, "WaitForScreenStateAsync") &&
+          Has(enter, "ClickVerifiedFreshAsync"),
+        "F9 tab/card transitions poll verified scenes without a 550ms tab sleep");
     Check(!Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
                    "FindFacilityHeaderAsync") &&
           !Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
@@ -501,12 +516,13 @@ try
     Check(Has(ScreenCalls("CollectAsync", 3), "CollectAsyncAtBoundary") &&
           Count(collect, "WaitForCollectPromptAsync") == 2 &&
           Has(collect, "CanRetryManagedFacilityReceipt") &&
-          Count(collect, "TapFresh") == 2 &&
+          Count(collect, "TapFresh") == 1 &&
+          Count(collect, "TapVerifiedFreshAsync") == 2 &&
           Has(collect, "TravelToFacilityAsync") &&
           Has(collect, "ConfirmCompletionResultAsync") &&
           Has(collect, "AfterVerifiedFacilityEntry") &&
-          Has(collect, "Invoke") && Has(collect, "TapFresh"),
-        "V3.1.74 managed receipt keeps coordinator travel, whole-lane checks and durable boundary");
+          Has(collect, "Invoke") && Has(collect, "TapVerifiedFreshAsync"),
+        "Managed receipt retains coordinator travel, durable boundary and verified final input frames");
     Check(Has(collect, "HasCollectPromptAsync") &&
           !Has(collect, "HasCollectButtonVisual"),
         "F02 compiled receipt rechecks full lane after durable marker, without any direct blue-pixel veto");
@@ -524,16 +540,18 @@ try
         : -1;
     Check(f02DurableBoundary >= 0 && f02DurableBoundary < f02FinalGate &&
           f02FinalGate < f02ReceiveSpace &&
-          Count(collect, "TapFresh") == 2,
-        "F02 compiled ordering: durable marker -> latest facility/whole-lane gate -> first Space, one guarded retry");
+          Count(collect, "TapFresh") == 1 &&
+          Count(collect, "TapVerifiedFreshAsync") == 2,
+        "F02 compiled ordering: durable marker -> whole-lane gate -> final-frame verified Space, one verified retry");
     Check(Has(collect, "RequireManagedIdleAsync"),
         "F03 actual managed receipt Space still has fresh CLI idle gate");
     Check(Has(collect, "CanRetryManagedFacilityReceipt") &&
           Count(collect, "ConfirmCompletionResultAsync") == 2 &&
-          Count(collect, "TapFresh") == 2 &&
+          Count(collect, "TapFresh") == 1 &&
+          Count(collect, "TapVerifiedFreshAsync") == 2 &&
           Has(collect, "TryFacilityWorkCountAsync") &&
           !Has(collect, "HasCollectButtonVisual"),
-        "V3.1.74 manager one retry only after unchanged entire lane, never blue pixels");
+        "Manager retry still needs unchanged full lane, and both managed Space boundaries are verified");
 
     Check(CallBoolean(receiptPolicy, "CanRetryManagedFacilityReceipt",
               true, 7, 7, true, true, true, false, false, false) &&
@@ -751,6 +769,45 @@ try
     // driver injection, Space, ClickFresh or paid interaction occurs.
     bool PixelGate(string name, Bitmap image) =>
         (bool)(Method(screen, name, 1).Invoke(null, new object[] { image }) ?? false);
+
+    // 27 dated runtime incidents: read-only policy + approved real PNG fixtures.
+    // These are safety regression assertions, NOT private-image/live replay.
+    HistoricalIncidentRegression.Run(Check, PixelGate);
+
+    // Replay approved, already-public real full-frame fixtures against the
+    // SAME production pixel gates and the new scene arbiter. The incident
+    // private PNGs remain outside this public repository; these are offline
+    // single frames and do not imply a two-frame or real-CLI input permit.
+    using (var realHub = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+               "facility-hub-fixtures", "hub-wood-20261026-161326.png")))
+    using (var realRemote = new Bitmap(Path.Combine("tests",
+               "altering-screen-integration", "facility-move-fixtures",
+               "remote-wood-20261007-172137.png")))
+    using (var realCave = new Bitmap(Path.Combine(AppContext.BaseDirectory,
+               "managed-field-fixtures", "cave-20261026-190933.png")))
+    {
+        bool hubProof = PixelGate("HasFixedProcessingHubVisual", realHub);
+        bool remotePanelProof = PixelGate("HasVisibleFacilityPanelWithoutEntryProof", realRemote);
+        bool caveWorldProof = PixelGate("HasManagedKEntryFieldHudVisual", realCave);
+        var sceneHub = ManagedProductionSceneArbiter.Classify(
+            new ManagedProductionSceneSignals(ProcessingHub: hubProof));
+        var sceneRemote = ManagedProductionSceneArbiter.Classify(
+            new ManagedProductionSceneSignals(FacilityPanel: remotePanelProof));
+        var sceneCave = ManagedProductionSceneArbiter.Classify(
+            new ManagedProductionSceneSignals(WorldHud: caveWorldProof));
+        Check(hubProof && sceneHub == ManagedProductionSceneKind.ProcessingHub,
+            "scene L4-public: actual processing hub 6-card pixels classify only as hub");
+        Check(remotePanelProof && sceneRemote == ManagedProductionSceneKind.FacilityPanel &&
+              sceneRemote != ManagedProductionSceneKind.WorldHud,
+            "scene L4-public: actual remote wood panel does not become field or onsite authority");
+        Check(caveWorldProof && sceneCave == ManagedProductionSceneKind.WorldHud &&
+              !ManagedProductionSceneArbiter.Allows(ManagedProductionAction.EnterKMenu,
+                  new ManagedProductionActionEvidence(sceneCave)),
+            "scene L4-public: actual cave world pixels alone never authorize K without CLI and 2 fresh frames");
+    }
+    Check(Has(ScreenCalls("QueueAsync", 4), "ClickVerifiedFreshAsync") &&
+          Has(ScreenCalls("CollectAsyncAtBoundary", 4), "TapVerifiedFreshAsync"),
+        "compiled managed F9 registration and receipt now revalidate at final input boundary");
 
     // Only tiny generic shortcut labels are retained from the incident corpus.
     // No player, chat, recipe inventory or complete gameplay screenshot is in

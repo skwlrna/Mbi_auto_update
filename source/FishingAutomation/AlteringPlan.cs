@@ -457,10 +457,15 @@ internal sealed class AlteringAutomation
 
             long currentOutput = EffectiveOutputQuantity(
                 await _data.ItemCountAsync(plan.OutputName, ct));
-            if (currentOutput < _session.LastObservedOutputQuantity)
+            // New F9 batches have a durable per-facility receipt journal. A
+            // sale, manual craft or acquisition changes stock but must not
+            // erase the number of works we definitively produced/received.
+            // Older non-journal sessions keep their strict stock guards.
+            if (!_session.ReceiptTrackingEnabled &&
+                currentOutput < _session.LastObservedOutputQuantity)
                 throw new InvalidOperationException(
                     $"이어하기 확인 중 {plan.OutputName} 보유량이 감소했습니다: 마지막 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {currentOutput:N0}. " +
-                    "완성품 소비로 목표 추적이 모호해져 중복 등록 방지를 위해 정지합니다.");
+                    "구형 장부의 수령을 구별할 수 없어 중복 등록 방지를 위해 정지합니다.");
 
             // When this session started with no pre-existing same-item jobs, every
             // current matching job belongs to this session. Rebuild progress from
@@ -478,10 +483,9 @@ internal sealed class AlteringAutomation
                     throw new InvalidOperationException(
                         $"{plan.DisplayName}: 수령 확정 기록과 게임 대기열 불일치 · " +
                         $"예상 {expectedLive}건 / 현재 {currentKnownWorks}건 · 안전 정지");
-                if (currentOutput - baseline <
-                    checked((long)_session.ConfirmedReceivedWorks * plan.ProducedPerWork))
-                    throw new InvalidOperationException(
-                        $"{plan.DisplayName}: 수령 기록에 비해 완성품이 부족합니다 · 안전 정지");
+                // The receipt journal is authoritative for production progress.
+                // The inventory balance is not a receipt counter (sales/uses
+                // and independent acquisitions may occur between executions).
             }
             else if (initialExistingCount == 0)
             {
@@ -702,24 +706,35 @@ internal sealed class AlteringAutomation
                         receipt.InitialExistingWorks + QueuedWorks)
                     throw new InvalidOperationException(
                         $"{plan.DisplayName}: 대기열이 비었지만 수령 확정 기록이 부족합니다 · 자동 완료 차단");
-                long grossGained = EffectiveOutputQuantity(
+                bool journaled = _session is { ReceiptTrackingEnabled: true };
+                long grossGained = journaled ? 0 : EffectiveOutputQuantity(
                     await _data.ItemCountAsync(plan.OutputName, ct)) - baseline;
                 long oldMinimum = checked((long)initialExistingCount * plan.ProducedPerWork);
-                long targetGained = Math.Max(0, grossGained - oldMinimum);
+                long targetGained = journaled
+                    ? checked((long)Math.Max(0,
+                        _session!.ConfirmedReceivedWorks - _session.InitialExistingWorks) *
+                        plan.ProducedPerWork)
+                    : Math.Max(0, grossGained - oldMinimum);
                 if (targetGained < plan.ExpectedQuantity)
                     throw new InvalidOperationException(
-                        $"작업은 종료됐지만 새 목표 수령 수량 확인이 부족합니다: +{targetGained} / 최소 {plan.ExpectedQuantity}. " +
-                        $"총 인벤토리 변화 +{grossGained}, 기존 작업 최소 생산량 {oldMinimum} 제외. 중복 시작 없이 정지합니다.");
+                        journaled
+                            ? $"{plan.DisplayName}: 대기열은 비었지만 F9 수령 장부 실적 {targetGained}/{plan.ExpectedQuantity} 부족 · 중복 등록 없이 정지"
+                            : $"작업은 종료됐지만 새 목표 수령 수량 확인이 부족합니다: +{targetGained} / 최소 {plan.ExpectedQuantity}. " +
+                              $"총 인벤토리 변화 +{grossGained}, 기존 작업 최소 생산량 {oldMinimum} 제외. 중복 시작 없이 정지합니다.");
 
                 Log?.Invoke(
-                    $"[자동 가공] 완료 · {plan.DisplayName} 새 목표 +{targetGained}개 · 등록 {QueuedWorks}회 · 기존 작업 최소 {oldMinimum}개 제외 · 버튼 비용 예약 {ReservedWings}개");
+                    journaled
+                        ? $"[자동 가공] 완료 · {plan.DisplayName} 확정 수령 장부 {targetGained}개 · 등록 {QueuedWorks}회 · 실제 보유량과 독립"
+                        : $"[자동 가공] 완료 · {plan.DisplayName} 새 목표 +{targetGained}개 · 등록 {QueuedWorks}회 · 기존 작업 최소 {oldMinimum}개 제외 · 버튼 비용 예약 {ReservedWings}개");
                 if (_session?.BatchId is not null)
                     SaveSession(_session with
                     {
                         MultiState = MultiAlteringItemState.Completed,
                         CompletedAt = DateTimeOffset.UtcNow,
                         Stage = "완료",
-                        LastObservedOutputQuantity = checked(grossGained + baseline)
+                        LastObservedOutputQuantity = journaled
+                            ? _session.LastObservedOutputQuantity
+                            : checked(grossGained + baseline)
                     });
                 else
                     _sessionStore?.Delete(); // single/dependency lifetime remains unchanged
@@ -1246,11 +1261,14 @@ internal sealed class AlteringAutomation
             await _data.ItemCountAsync(plan.OutputName, ct));
         if (_session is not null)
         {
-            if (current < _session.LastObservedOutputQuantity)
+            if (!_session.ReceiptTrackingEnabled &&
+                current < _session.LastObservedOutputQuantity)
                 throw new InvalidOperationException(
                     $"{plan.OutputName} 보유량이 자동 가공 중 감소했습니다: 이전 확인 {_session.LastObservedOutputQuantity:N0} / 현재 {current:N0}. " +
-                    "완성품 소비로 목표 추적이 모호해져 중복 생산 없이 정지합니다.");
-            if (current != _session.LastObservedOutputQuantity)
+                    "구형 장부는 완성품 소비를 추적하지 못해 중복 생산 없이 정지합니다.");
+            // Preserve the last observed high-water mark for journaled runs.
+            // Never overwrite a confirmed production count with live stock.
+            if (current > _session.LastObservedOutputQuantity)
                 SaveSession(_session with { LastObservedOutputQuantity = current });
         }
 

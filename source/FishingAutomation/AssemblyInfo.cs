@@ -8,3 +8,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("F05ConsumptionJournalRegression")]
 
 [assembly: InternalsVisibleTo("CombinedSchedulerRegression")]
+
+[assembly: InternalsVisibleTo("AlteringScreenIntegrationRegression")]
