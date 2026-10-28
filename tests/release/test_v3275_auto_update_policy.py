@@ -44,6 +44,14 @@ class V3275ReleaseSafety(unittest.TestCase):
         ):
             self.assertIn(marker, workflow)
         self.assertNotIn("  push:\\n", workflow)
+        for exact in ("<Version>3.2.75</Version>",
+                      "<AssemblyVersion>3.2.75.0</AssemblyVersion>",
+                      "<FileVersion>3.2.75.0</FileVersion>",
+                      "VersionInfo.FileVersion -ne '3.2.75.0'"):
+            self.assertIn(exact, workflow,
+                          f"V3.2.75 release workflow missing exact published version check: {exact}")
+        self.assertNotIn("3.2.74", workflow,
+                         "V3.2.75 workflow must never validate stale V3.2.74 binaries")
         self.assertIn('CurrentVersion = "V3.2.75"', UPDATER.read_text(encoding="utf-8"))
         project = PROJECT.read_text(encoding="utf-8")
         for marker in ("<Version>3.2.75</Version>",
