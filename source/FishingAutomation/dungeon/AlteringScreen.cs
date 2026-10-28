@@ -1519,7 +1519,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             $"[자동 가공] {plan.ScreenTitle} 고정좌표 선택 · {plan.DisplayName} · " +
             $"순번 {plan.RecipeOrdinal}/{plan.RecipeCount} · ({center.X},{center.Y}) · 카드명 OCR 없음");
         await RequireManagedIdleAsync(plan, directive, "고정 품목 카드 선택 직전", ct);
-        _ui.ClickFresh(center, ct);
+        if (directive == AlteringFacilityEntryDirective.Automatic)
+            _ui.ClickFresh(center, ct);
+        else
+            await _ui.ClickVerifiedFreshAsync(center, async latest =>
+                HasVerifiedFacilityEntryScreen(latest) &&
+                !HasBottomConfirmationModal(latest) &&
+                await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null, ct);
         await Task.Delay(350, ct);
 
         bool detailConfirmed;
@@ -1571,7 +1577,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     $"[자동 가공] {plan.DisplayName} 고정좌표 1차 클릭 미반영 확인 · " +
                     $"시설 목록 유지 + 중앙 지시/기존 안전판정 유지 · 동일 좌표 재클릭 1/1");
                 await RequireManagedIdleAsync(plan, directive, "고정 품목 재클릭 직전", ct);
-                _ui.ClickFresh(center, ct);
+                if (directive == AlteringFacilityEntryDirective.Automatic)
+                    _ui.ClickFresh(center, ct);
+                else
+                    await _ui.ClickVerifiedFreshAsync(center, async latest =>
+                        HasVerifiedFacilityEntryScreen(latest) &&
+                        !HasBottomConfirmationModal(latest) &&
+                        await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null, ct);
                 await Task.Delay(450, ct);
 
                 using var retryPopup = Capture(ct);
@@ -2976,7 +2988,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             // after CLI idle and before the fixed coordinate is sent.
             await _ui.ClickVerifiedFreshAsync(
                 AlteringFacilityLayout.MoveButtonPoint,
-                latest => Task.FromResult(HasVerifiedFacilityMoveClickScreen(latest)), ct);
+                async latest =>
+                    HasVerifiedFacilityMoveClickScreen(latest) &&
+                    await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null, ct);
             moveClickSent = true;
             moveClickAt = DateTime.UtcNow;
         }
@@ -3306,13 +3320,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         // the facility UI and the unchanged move-button ROI.
                         await _ui.ClickVerifiedFreshAsync(
                             AlteringFacilityLayout.MoveButtonPoint,
-                            latest => Task.FromResult(
+                            async latest =>
                                 HasVerifiedFacilityMoveClickScreen(latest) &&
+                                await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null &&
                                 ProductionUiRuntime.MeasureVisualChangeRatio(
                                     moveBaseline!, latest,
                                     AlteringFacilityLayout.MoveButtonVisualArea,
                                     sampleStep: 3, channelDelta: 24) <=
-                                AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio),
+                                AlteringFacilityTravelConfirmPolicy.UnchangedMoveRegionMaxRatio,
                             ct);
                         moveRetried = true;
                         moveClickAt = DateTime.UtcNow;
