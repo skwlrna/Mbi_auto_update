@@ -113,6 +113,12 @@ jobs:
             }
           }
 
+      - name: V3.2.75 F9 user-authorized auto-update release safety policy
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/release -p 'test_v3275_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.75 release policy failed; do not publish' }
+
       - name: V3.2.49 auto-update source policy
         shell: pwsh
         run: |
