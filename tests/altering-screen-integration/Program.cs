@@ -452,6 +452,16 @@ try
           Has(managedTab, "ClickVerifiedFreshAsync") &&
           !Has(managedTab, "ClickFresh"),
         "F9 tab uses stable nav and final fresh-frame verified click");
+    // F9 latency: the ONLY deliberate delay inside this compiled tab method
+    // is the first/second independent capture separation (160ms). After its
+    // final verified click, positive hub polling in EnterFacilityCoreAsync
+    // replaces the former unconditional 550ms nap. Do not relax two frames,
+    // fresh-input proof, modal veto, cancellation or idle CLI authorization.
+    Check(Count(managedTab, "Delay") == 1 &&
+          Has(enter, "WaitForProcessingHubAsync") &&
+          Has(enter, "WaitForScreenStateAsync") &&
+          Has(enter, "ClickVerifiedFreshAsync"),
+        "F9 tab/card transitions poll verified scenes without a 550ms tab sleep");
     Check(!Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
                    "FindFacilityHeaderAsync") &&
           !Has(ScreenCalls("WaitForManagedProcessingNavigationReadyAsync", 2),
