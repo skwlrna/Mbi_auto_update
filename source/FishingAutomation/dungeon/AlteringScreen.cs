@@ -233,6 +233,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private static bool HasVerifiedFacilityEntryScreen(Bitmap frame)
         => HasVerifiedFacilityMoveClickScreen(frame);
 
+    // Diagnostic-only ambiguous facility proof. Kept separate from K-entry IL:
+    // the managed K input path must remain field-template/CLI authorized.
+    private static bool HasVisibleFacilityPanelWithoutEntryProof(Bitmap frame)
+        => HasFixedFacilityHeaderVisual(frame) &&
+           HasFacilityPanelStructureVisual(frame);
+
     // A header can render before the rest of the facility panel. Observe only;
     // never send K/Esc/card/move input while waiting for this transition.
     private static int AdvanceFacilityReadyFrames(int previous, bool verified)
@@ -1232,8 +1238,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // A facility-looking screen is NOT the ordinary field. No K
                 // while the facility title and independent card structure remain
                 // visible, even if our extra control proof is inconclusive.
-                if (HasFixedFacilityHeaderVisual(frame) &&
-                    HasFacilityPanelStructureVisual(frame))
+                if (HasVisibleFacilityPanelWithoutEntryProof(frame))
                     Fail(frame,
                         "시설 제목/제품 카드가 보이지만 시설 진입 증거 불충분 · K 입력 차단 · 추가 진단 필요");
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
