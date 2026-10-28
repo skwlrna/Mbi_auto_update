@@ -1142,7 +1142,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     // pill/queue ring as proof that we returned to the world.
                     using (var afterCard = Capture(ct))
                     {
-                        bool header = HasFixedFacilityHeaderVisual(afterCard);
+                        bool header = HasVisibleFacilityPanelWithoutEntryProof(afterCard);
                         bool panel = HasFacilityPanelStructureVisual(afterCard);
                         bool mutedPill = HasMutedFacilityMovePillVisual(afterCard);
                         bool move = HasFacilityMoveButtonVisual(afterCard);
