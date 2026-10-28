@@ -501,7 +501,8 @@ try
     // Only a fresh matching facility UI, no modal or movement, and ALL jobs
     // complete in the exact facility may authorize the receipt Space.
     var managedPrompt = ScreenCalls("HasManagedCollectReadyAsync", 3);
-    Check(Has(managedPrompt, "FindFacilityHeaderAsync") &&
+    Check(Has(managedPrompt, "HasManagedReceiptPanelVisual") &&
+          Has(managedPrompt, "FindFacilityHeaderAsync") &&
           Has(managedPrompt, "HasBottomConfirmationModal") &&
           Has(managedPrompt, "HasManagedFacilityTravelConfirmationVisual") &&
           Has(managedPrompt, "IsFacilityTravelDialogAsync") &&
@@ -893,6 +894,25 @@ try
         using var graphics = Graphics.FromImage(frame);
         using var brush = new SolidBrush(color);
         graphics.FillRectangle(brush, bounds);
+    }
+
+    // Deterministic receipt UI regression: a cached title can survive a panel
+    // transition. CLI completion and idle state must not make that title sufficient.
+    using (var receiptPanel = BlackFrame())
+    {
+        Paint(receiptPanel, new Rectangle(14, 42, 155, 46), Color.White);
+        Paint(receiptPanel, new Rectangle(15, 144, 230, 48), Color.White);
+        Paint(receiptPanel, new Rectangle(75, 106, 49, 24), Color.White);
+        Check(PixelGate("HasManagedReceiptPanelVisual", receiptPanel),
+            "managed receipt accepts header plus category and three dark card interiors");
+        Paint(receiptPanel, new Rectangle(75, 106, 49, 24), Color.Black);
+        Check(PixelGate("HasFixedFacilityHeaderVisual", receiptPanel) &&
+              !PixelGate("HasManagedReceiptPanelVisual", receiptPanel),
+            "managed receipt vetoes title-only transition despite preserved header");
+        Paint(receiptPanel, new Rectangle(75, 106, 49, 24), Color.White);
+        Paint(receiptPanel, new Rectangle(300, 383, 83, 95), Color.White);
+        Check(!PixelGate("HasManagedReceiptPanelVisual", receiptPanel),
+            "managed receipt vetoes missing independent product card structure");
     }
 
     // Use the real production pixel diff with the canonical 155x65 ROI.
