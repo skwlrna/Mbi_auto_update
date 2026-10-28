@@ -247,7 +247,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // a bottom tab alone is NEVER sufficient evidence of a K-menu overlay.
     private static bool HasFixedProcessingHubVisual(Bitmap frame)
     {
-        if (frame.Width != 800 || frame.Height != 1000) return false;
+        // 2026-10-28 10:41: a four-column armour crafting grid and its
+        // '방어구' header mimicked the old white-title/dark-card hub heuristic.
+        // The genuine six-card processing hub ALSO has three separate bottom
+        // navigation labels. Without them, never authorize a fixed card click.
+        if (frame.Width != 800 || frame.Height != 1000 ||
+            !HasProcessingBottomNavigationLabels(frame)) return false;
 
         static int WhiteGlyphSamples(Bitmap bitmap, Rectangle area)
         {
@@ -753,12 +758,14 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // screenshot instead has a dark chat strip and NO left/right nav labels.
     // The actual six-card hub and individual facility are handled earlier.
     // This is a positive visual gate, never an inference from CLI work counts.
-    private static bool HasManagedProcessingBottomTabVisual(Bitmap frame)
+    // A real K production navigation strip is independently visible below
+    // both the six-card hub and the preceding tab menu. Keep this pixel proof
+    // separate from either screen classifier to avoid a recursive shortcut.
+    // A crafting item grid has no such footer even if its text/cards resemble
+    // a processing hub. It is NEVER sufficient by itself to enter the hub.
+    private static bool HasProcessingBottomNavigationLabels(Bitmap frame)
     {
-        if (frame.Width != 800 || frame.Height != 1000 ||
-            HasFixedProcessingHubVisual(frame) ||
-            HasFixedFacilityHeaderVisual(frame))
-            return false;
+        if (frame.Width != 800 || frame.Height != 1000) return false;
 
         static int NeutralGlyphs(Bitmap image, Rectangle roi)
         {
@@ -775,11 +782,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             return count;
         }
 
-        // Side labels are required: the center "가공" text alone is also
-        // visible on the hub and may be erroneously read over a field HUD.
+        // Three independent side labels, never just the centre '가공' glyph.
         return NeutralGlyphs(frame, new Rectangle(222, 940, 91, 45)) >= 8 &&
                NeutralGlyphs(frame, new Rectangle(410, 940, 82, 45)) >= 8 &&
                NeutralGlyphs(frame, new Rectangle(496, 940, 85, 45)) >= 8;
+    }
+
+    private static bool HasManagedProcessingBottomTabVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000 ||
+            HasFixedProcessingHubVisual(frame) ||
+            HasFixedFacilityHeaderVisual(frame))
+            return false;
+        return HasProcessingBottomNavigationLabels(frame);
     }
 
     private async Task<bool> TrySelectManagedProcessingTabAsync(
