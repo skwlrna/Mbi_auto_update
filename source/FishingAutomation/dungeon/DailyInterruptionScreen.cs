@@ -47,8 +47,7 @@ internal sealed class DailyInterruptionScreen
         {
             var rightLines = await _readLines(frame, new(500, 15, 295, 935), 2, ct)
                 .ConfigureAwait(false);
-            var hits = rightLines.Where(x => new[] { "건너뛰기", "대화넘기기", "넘기기", "스킵", "skip" }
-                .Contains(FuzzyText.Normalize(x.ReadText ?? ""))).ToArray();
+            var hits = rightLines.Where(x => IsNpcSkipLabel(x.ReadText ?? "")).ToArray();
             if (hits.Length == 1) skip = hits[0].Center;
         }
         if (!_greetingActive && bubble)
@@ -68,6 +67,14 @@ internal sealed class DailyInterruptionScreen
     private async Task<bool> Text(Bitmap frame, Rectangle area, string text, CancellationToken ct)
         => (await _readLines(frame, area, 2, ct).ConfigureAwait(false))
             .Any(x => FuzzyText.ContainsApprox(x.ReadText ?? "", text, 0));
+
+    internal static bool IsNpcSkipLabel(string text)
+    {
+        string normalized = FuzzyText.Normalize(text);
+        if (normalized.EndsWith("esc", StringComparison.Ordinal)) normalized = normalized[..^3];
+        return normalized is "건너뛰기" or "대화건너뛰기" or "대화넘기기" or
+            "넘기기" or "스킵" or "대화스킵" or "skip";
+    }
 
     internal static bool HasGreetingBubble(Bitmap frame)
     {

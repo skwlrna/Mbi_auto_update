@@ -104,6 +104,10 @@ foreach (bool escWorks in new[] { true, false })
     Check(polls == 0, "cleanup read token cannot re-arm modal inputs after F10");
 }
 #if WINDOWS_FIXTURES
+foreach (string label in new[] { "건너뛰기", "대화 건너뛰기", "대화 넘기기", "넘기기", "스킵", "대화 스킵", "SKIP", "대화 건너뛰기 (ESC)" })
+    Check(DailyInterruptionScreen.IsNpcSkipLabel(label), "NPC skip wording variant: " + label);
+foreach (string label in new[] { "퀘스트 건너뛰기", "확인", "결제", "오늘도" })
+    Check(!DailyInterruptionScreen.IsNpcSkipLabel(label), "unrelated right-side text rejected: " + label);
 foreach (string name in new[] { "stella", "greeting", "notice", "travel", "hub" })
 {
     using var image = new Bitmap(Path.Combine(AppContext.BaseDirectory, "fixtures", name + ".png"));
