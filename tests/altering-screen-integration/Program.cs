@@ -328,21 +328,21 @@ try
           CallBoolean(travelPolicy, "HasVerifiedManagedMoveTransition", true, false, 2),
         "F01 compiled policy rejects uncorrelated OCR title misses, CLI-only loading and missing move input");
     // V3.1.77 live 21:09:58 regression: immediate 2/4 then 3/4 after
-    // Esc must NOT fail immediately. A subsequent 3/4 within two seconds
+    // Esc must NOT fail immediately. A subsequent 3/4 within three seconds
     // may authorize one K, always after fresh CLI idle and no modal/menu.
     Check(CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.Zero) &&
-          CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromMilliseconds(1999)) &&
-          !CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromSeconds(2)) &&
+          CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromMilliseconds(2999)) &&
+          !CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromSeconds(3)) &&
           !CallBoolean(screen, "IsManagedKReentryWithinLimit", TimeSpan.FromSeconds(-1)) &&
           !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 2, 3, false, false) &&
           CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, false) &&
           !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, true, false) &&
           !CallBoolean(screen, "CanAuthorizeManagedKEntry", false, 3, 3, false, true),
-        "V3.1.77 F9 K re-entry 2/4->3/4 waits, 3/4->3/4 passes within 2s only without modal/menu");
+        "V3.1.77 F9 K re-entry 2/4->3/4 waits, 3/4->3/4 passes within 3s only without modal/menu");
 
     // V3.2.0 14:16:48 production capture: Home/End fail while K/I are
     // stable. 2/4 alone remains vetoed; two frames of K+I PLUS separately
-    // verified gold minimap and teal skill disc may authorize the field path.
+    // verified upper/lower shortcut layout may authorize the field path.
     Check(CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
             true, true, true, true, true, true, false, false) &&
           !CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
@@ -988,8 +988,8 @@ try
             Color.FromArgb(0, 190, 145));
         Check(PixelGate("HasBottomConfirmationModal", grassyField) &&
               !PixelGate("HasManagedKEntryBlockingModal", grassyField) &&
-              PixelGate("HasManagedKEntryFieldHudVisual", grassyField),
-            "V3.1.71 06:15 field foliage false green-popup is explicitly excluded from F9 K block");
+              !PixelGate("HasManagedKEntryFieldHudVisual", grassyField),
+            "foliage/coloured blobs alone are neither a popup nor positive shortcut evidence");
 
         // The 16:43 field was positively recognized, but a separately
         // sampled facility/header-like bright region can coexist in a
@@ -997,9 +997,9 @@ try
         Paint(grassyField, new Rectangle(14, 42, 155, 46), Color.White);
         Paint(grassyField, new Rectangle(15, 144, 230, 48), Color.White);
         Check(!PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
-              PixelGate("HasManagedKEntryFieldHudVisual", grassyField) &&
+              !PixelGate("HasManagedKEntryFieldHudVisual", grassyField) &&
               !PixelGate("HasManagedKEntryBlockingModal", grassyField),
-            "field HUD rejects misleading facility anchors while preserving authorized K route");
+            "misleading facility anchors and coloured blobs cannot establish field authority");
 
         Paint(realKModal, new Rectangle(175, 754, 450, 218),
             Color.FromArgb(37, 44, 59));
@@ -1025,9 +1025,8 @@ try
     // six-card processing screenshot contains 3 independent low-saturation
     // caption regions across the bottom K tabs. OCR of the static "가공"
     // caption is avoided ONLY when this nav structure is stable twice.
-    // Historical F9 HUD incidents: compare the actual snapshots, not
-    // synthetic template scores. The cave has NO broad gold minimap rim;
-    // previous green/gold fields still use their unchanged original path.
+    // Historical F9 HUD incidents: compare actual snapshots and masked
+    // minimaps. Shortcut geometry must work across day/night HUD layouts.
     // These detectors alone never issue keys: managed K requires TWO frames,
     // positive K/I or stable Home/End/ESC, explicit menu/modal veto and fresh CLI idle.
     {
@@ -1075,63 +1074,50 @@ try
               !PixelGate("HasFixedProcessingHubVisual", cave),
             "17:45 cave screenshot becomes independent field proof, not a processing hub or confirmation popup");
         Check(Has(ScreenCalls("HasManagedKEntryFieldHudVisual", 1),
-                "HasManagedKEntryNonGoldFieldHudVisual") &&
-              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "HasManagedKEntryBlockingModal") &&
+                "DetectManagedWorldHudKeys") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "WaitForManagedFacilityExitAsync") &&
               Has(ScreenCalls("EnterFacilityCoreAsync", 3), "RequireManagedIdleAsync") &&
               Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryFieldHudVisual"),
-            "new non-gold pixel proof is used only with compiled last-frame/modal and manager CLI guards");
-        // Both immutable cave screenshots MUST prove the same independent
-        // field even though the orange day/night icon changes or disappears.
+            "shortcut proof reaches exit observation, CLI and final input guards");
+        Check(screen.GetMethod("HasManagedBlueMinimapRingVisual", all) is null &&
+              screen.GetMethod("HasManagedKEntryNonGoldFieldHudVisual", all) is null,
+            "minimap rim detectors are completely removed, not retained as fallback");
         using var caveNight = new Bitmap(Path.Combine(corpus, "cave-20261026-190933.png"));
-        Check(CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", cave, 30) &&
-              PixelGate("HasManagedBlueMinimapRingVisual", cave) &&
-              PixelGate("HasManagedBlueMinimapRingVisual", caveNight) &&
-              CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", caveNight, 30) &&
-              PixelGate("HasManagedKEntryFieldHudVisual", caveNight) &&
-              !PixelGate("HasManagedKEntryBlockingModal", caveNight) &&
-              !PixelGate("HasFixedProcessingHubVisual", caveNight),
-            "17:45 daytime and 19:09 nighttime cave incident frames both prove blue-ring K+Space field");
-        Check(Has(ScreenCalls("HasManagedKEntryNonGoldFieldHudVisual", 2),
-                  "HasManagedBlueMinimapRingVisual"),
-            "non-gold field condition uses actual circular minimap arc, never clock/day marker");
-        using var noSkill = new Bitmap(caveNight);
-        using var noCompass = new Bitmap(caveNight);
-        using var noMinimap = new Bitmap(caveNight);
-        Paint(noSkill, new Rectangle(16, 865, 62, 76), Color.Black);
-        Paint(noCompass, new Rectangle(339, 808, 124, 125), Color.Black);
-        Paint(noMinimap, new Rectangle(645, 94, 153, 140), Color.Black);
-        Check(!PixelGate("HasManagedKEntryFieldHudVisual", noSkill) &&
-              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noCompass, 30) &&
-              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noMinimap, 30) &&
-              !PixelGate("HasManagedBlueMinimapRingVisual", noMinimap),
-            "night cave missing K disc, Space ring, or circular minimap stays blocked");
-        // Change ONLY orange daylight pixels and preserve actual blue arc.
-        // Orange night/day pixels must be irrelevant to field permission.
-        using var noDayIndicator = new Bitmap(cave);
-        for (int y = 148; y <= 182; y++)
-        for (int x = 770; x <= 795; x++)
+        Check(PixelGate("HasManagedKEntryFieldHudVisual", caveNight),
+            "historical night cave uses shortcut layout without a minimap condition");
+        string[] incidents = {
+            "field-workshop-20261031-022454.png",
+            "field-workshop-20261031-070147.png"
+        };
+        foreach (string file in historical.Concat(incidents).Concat(new[] {
+            "cave-20261026-174515.png", "cave-20261026-190933.png" }))
         {
-            Color p = noDayIndicator.GetPixel(x, y);
-            if (p.R >= 160 && p.G >= 115 &&
-                p.R >= p.B + 50 && p.G >= p.B + 18)
-                noDayIndicator.SetPixel(x, y, Color.FromArgb(61, 91, 118));
+            using var original = new Bitmap(Path.Combine(corpus, file));
+            using var masked = new Bitmap(original);
+            Paint(masked, new Rectangle(640, 94, 160, 145), Color.Black);
+            Check(PixelGate("HasManagedKEntryFieldHudVisual", original) &&
+                  PixelGate("HasManagedKEntryFieldHudVisual", masked),
+                "field proof is independent of the entire minimap: " + file);
+            using var noK = new Bitmap(masked);
+            using var noI = new Bitmap(masked);
+            using var noUpper = new Bitmap(masked);
+            Paint(noK, new Rectangle(50, 905, 40, 40), Color.Black);
+            Paint(noI, new Rectangle(755, 905, 45, 40), Color.Black);
+            Paint(noUpper, new Rectangle(550, 70, 250, 30), Color.Black);
+            Check(!PixelGate("HasManagedKEntryFieldHudVisual", noK) &&
+                  !PixelGate("HasManagedKEntryFieldHudVisual", noI) &&
+                  !PixelGate("HasManagedKEntryFieldHudVisual", noUpper),
+                "missing independent shortcut anchors remain blocked: " + file);
         }
-        Check(CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", noDayIndicator, 30) &&
-              PixelGate("HasManagedBlueMinimapRingVisual", noDayIndicator),
-            "daytime cave remains valid with orange clock/day indicator removed");
         using var wrongSize = new Bitmap(799, 1000);
         using var empty = BlackFrame();
-        Check(!PixelGate("HasManagedBlueMinimapRingVisual", wrongSize) &&
-              !PixelGate("HasManagedKEntryFieldHudVisual", empty) &&
-              !CallBoolean(screen, "HasManagedKEntryNonGoldFieldHudVisual", empty, 0),
-            "unknown-size/empty K screen remains rejected");
-        // Old positive world fixtures must remain recognized; blue-only
-        // geometry cannot produce permission on six-card hub or popup.
+        Check(!PixelGate("HasManagedKEntryFieldHudVisual", wrongSize) &&
+              !PixelGate("HasManagedKEntryFieldHudVisual", empty),
+            "wrong viewport and empty frame cannot authorize K");
         using var hub = new Bitmap(Path.Combine(AppContext.BaseDirectory,
             "facility-hub-fixtures", "hub-wood-20261026-161326.png"));
-        Check(!PixelGate("HasManagedBlueMinimapRingVisual", hub) &&
-              !PixelGate("HasManagedKEntryFieldHudVisual", hub),
-            "prior real processing hub never passes new field recognition");
+        Check(!PixelGate("HasManagedKEntryFieldHudVisual", hub),
+            "actual processing hub cannot impersonate upper/lower shortcuts");
         using var blockedModal = new Bitmap(caveNight);
         Paint(blockedModal, new Rectangle(175, 754, 450, 218), Color.FromArgb(37, 44, 59));
         Paint(blockedModal, new Rectangle(405, 889, 189, 55), Color.FromArgb(0, 185, 90));
@@ -1165,8 +1151,8 @@ try
         Paint(world, new Rectangle(21, 880, 48, 46),
             Color.FromArgb(0, 190, 145));
         Check(!PixelGate("HasManagedProcessingBottomTabVisual", world) &&
-              PixelGate("HasManagedKEntryFieldHudVisual", world),
-            "V3.1.72 06:15 field vegetation+minimap+K button cannot impersonate K bottom tab");
+              !PixelGate("HasManagedKEntryFieldHudVisual", world),
+            "vegetation and coloured blobs cannot impersonate navigation tabs or shortcut glyphs");
 
         Paint(hub, new Rectangle(0, 0, 800, 1000),
             Color.FromArgb(75, 66, 55));

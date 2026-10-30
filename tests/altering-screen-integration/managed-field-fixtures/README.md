@@ -12,8 +12,15 @@ All five PNGs are exact, unaltered `screen.png` files from the owner's `skwlrna/
 
 All originals reside under `runtime-errors/YYYY-MM-DD/<incident>/screen.png`. The latest cave incident logged K/I template scores around 0.993/0.902, actual Home/End/ESC shortcut glyphs ~0.958/0.960/1.000, but a false independent gold-minimap field score. Historic incidents logged alternative combinations of 2/4 stable HUD icons.
 
+The corpus additionally includes the owner's unaltered V3.2.76 screenshots:
+- `field-workshop-20261031-022454.png`: blob `50848429f80d96e010d1eed6603a31e844c96f6c`.
+- `field-workshop-20261031-070147.png`: blob `972afb624b08ac5d25851c797b9de24c0e38248f`.
+
 Tested boundaries:
-- Original gold-rim + teal K path remains unchanged for historical outdoor screenshots.
-- New non-gold path requires a circular blue minimap rim in two sectors, the K skill disc and green Space compass ring. The orange day/night icon must not affect recognition; missing rim/K/Space is separately rejected.
-- Menu, popup, unknown frame and stale HUD remain blocked via existing two-frame authorization, last-input frame, fresh CLI idle and modal veto. The new pixel predicate alone never authorizes a K input.
-- These are offline frames, not proof of successful input or completed in-game processing.
+- No minimap colour, rim, shape or day/night marker participates in field evidence.
+- Upper shortcut glyphs (Home/ESC, plus End when available) and BOTH lower K/I glyphs are required.
+- Every historical and new field remains positive with the whole minimap blacked out.
+- Removing K, I or the upper shortcut labels rejects field evidence.
+- Empty frames, wrong viewports, production hubs and actual travel popups remain blocked.
+- Two actual captures, latest input-frame verification and fresh CLI idle remain required.
+- Offline frames verify recognition only, not live movement or collection success.
