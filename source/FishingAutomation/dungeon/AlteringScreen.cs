@@ -48,9 +48,20 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         _debugDir = debugDir; _cli = cli;
         _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "altering");
+        _ui.Log += text => Log?.Invoke(text);
+        _ui.InterruptionRecovered += () =>
+        {
+            _confirmedOnsiteFacility = null;
+            _postTravelProvenFacilityTitle = null;
+            _repeatOcrFreeFacilityTitle = null;
+            _cachedRecipeKey = null;
+            _hasCachedRecipeCenter = false;
+        };
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[자동 가공][상태] {stage} · {detail}");
     }
+
+    internal Task<bool> CheckInterruptionsAsync(CancellationToken ct) => _ui.CheckInterruptionsAsync(ct);
 
     private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
 

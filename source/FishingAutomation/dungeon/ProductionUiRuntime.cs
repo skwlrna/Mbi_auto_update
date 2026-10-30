@@ -24,6 +24,10 @@ internal sealed class ProductionUiRuntime : IDisposable
     private readonly string _debugStem;
     private readonly ProductionEvidenceBuffer _evidence;
     private bool _disposed;
+    private readonly SemaphoreSlim _interruptionsGate = new(1, 1);
+    private readonly DailyInterruptionScreen _interruptions;
+    internal event Action<string>? Log;
+    internal event Action? InterruptionRecovered;
 
     internal ProductionUiRuntime(
         nint hwnd,
@@ -39,6 +43,7 @@ internal sealed class ProductionUiRuntime : IDisposable
             new InterceptionInput(
                 settings.InterceptionMouseDevice,
                 settings.InterceptionKeyboardDevice));
+        _interruptions = new DailyInterruptionScreen(_ocr);
     }
 
     internal string InputMode => _input.ModeName;
@@ -46,6 +51,41 @@ internal sealed class ProductionUiRuntime : IDisposable
     internal nint WindowHandle => _hwnd;
 
     internal Bitmap Capture(CancellationToken ct)
+    {
+        // Callers include synchronous screen methods on the UI thread. Run
+        // WinRT OCR off its synchronization context to avoid blocking it.
+        Task.Run(() => RecoverInterruptionsAsync(ct), ct)
+            .GetAwaiter().GetResult();
+        return CaptureRaw(ct); // return only a NEW post-dismissal frame
+    }
+
+    internal Task<bool> CheckInterruptionsAsync(CancellationToken ct)
+        => RecoverInterruptionsAsync(ct);
+
+    private async Task<bool> RecoverInterruptionsAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        await _interruptionsGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var recovery = new FishingAutomation.DailyInterruptionRecovery(
+                async token =>
+                {
+                    using var frame = CaptureRaw(token);
+                    return await _interruptions.ObserveAsync(frame, token).ConfigureAwait(false);
+                },
+                token => _input.TapScanCode(0x01, token),
+                (point, token) => _input.ClickClientPoint(_hwnd, point, token),
+                Task.Delay,
+                message => { _evidence.Note("daily_interruption", message); Log?.Invoke(message); });
+            bool handled = await recovery.RecoverAsync(ct).ConfigureAwait(false);
+            if (handled) InterruptionRecovered?.Invoke();
+            return handled;
+        }
+        finally { _interruptionsGate.Release(); }
+    }
+
+    private Bitmap CaptureRaw(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (_disposed)

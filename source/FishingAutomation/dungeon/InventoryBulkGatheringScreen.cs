@@ -59,9 +59,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         _fallback = new GatheringScreen(hwnd, settings, debugDir, cli, data);
         _fallback.Log += text => Log?.Invoke(text);
         _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "bulk-gathering");
+        _ui.Log += text => Log?.Invoke(text);
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[대량 채집][상태] {stage} · {detail}");
     }
+
+    internal Task<bool> CheckInterruptionsAsync(CancellationToken ct) => _ui.CheckInterruptionsAsync(ct);
 
     private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
 

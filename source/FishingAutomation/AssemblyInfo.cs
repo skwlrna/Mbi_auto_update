@@ -10,3 +10,5 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("CombinedSchedulerRegression")]
 
 [assembly: InternalsVisibleTo("AlteringScreenIntegrationRegression")]
+
+[assembly: InternalsVisibleTo("DailyInterruptionRegression")]

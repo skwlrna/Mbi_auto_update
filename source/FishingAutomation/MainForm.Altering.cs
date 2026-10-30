@@ -212,6 +212,7 @@ public sealed partial class MainForm
 
             _dungeonTask = Task.Run(async () =>
             {
+                using var interruptions = ProductionInterruptionCheckpoint.Install(visualAltering.CheckInterruptionsAsync, token);
                 using (screen)
                 using (gatheringScreen)
                 {
