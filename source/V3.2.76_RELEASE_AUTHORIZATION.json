@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.76",
+  "purpose": "daily_interruptions_popup_recovery",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "진행해",
+  "requestedAtKst": "2026-10-30",
+  "sourcePullRequest": 342,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User authorized V3.2.76 rollout of PR #342 daily popup/NPC/notice recovery; all PR and prior merged main CI passed; new merged main CI, binary startup smoke, ZIP SHA256, rollback and exact build commit required before public release. Real game unverified."
+}
