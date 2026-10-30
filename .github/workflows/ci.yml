@@ -877,7 +877,7 @@ jobs:
               $managerEntry -notmatch 'Stopwatch.StartNew\(\)' -or
               $managerEntry -notmatch 'previousHud = currentHud' -or
               $managerEntry -notmatch 'Task.Delay\(180, ct\)' -or
-              $screen -notmatch 'ManagedKReentryHudTimeout = TimeSpan.FromSeconds\(2\)' -or
+              $screen -notmatch 'ManagedKReentryHudTimeout = TimeSpan.FromSeconds\(3\)' -or
               $managerEntry -notmatch 'HasManagedKEntryFieldHudVisual' -or
               $managerEntry -notmatch 'CanAuthorizeManagedKFieldFallback' -or
               $managerEntry -notmatch 'VerifyManagedKFrameAsync' -or
@@ -889,6 +889,13 @@ jobs:
               $screen -notmatch 'abyss/templates/outside_k_v75.png' -or
               $screen -notmatch 'abyss/templates/outside_i_v75.png') {
               throw 'V3.2.0 F9 K requires consecutive 3/4 HUD or guarded K/I+field evidence, with modal/menu veto and fresh CLI idle before input'
+          }
+          # Current F9 field proof must not reintroduce any minimap rim fallback.
+          if ($screen -match 'HasManagedBlueMinimapRingVisual|HasManagedKEntryNonGoldFieldHudVisual' -or
+              $screen -notmatch 'managed_k_key.png' -or
+              $screen -notmatch 'managed_i_key.png' -or
+              $screen -notmatch 'WaitForManagedFacilityExitAsync') {
+              throw 'F9 navigation requires shortcut evidence and bounded post-Esc observation without minimap rim detectors'
           }
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           if ($zeroWing -notmatch 'ZeroWingAlteringScreen : IAlteringScreen' -or
@@ -1053,6 +1060,13 @@ jobs:
           $bulkEngine = Get-Content source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs -Raw
           $mapping = Get-Content source/FishingAutomation/LivingSkillGatheringCatalog.cs -Raw
           $resolver = Get-Content source/FishingAutomation/RecursiveAlteringSupplyResolver.cs -Raw
+          # Current F9 field proof must not reintroduce any minimap rim fallback.
+          if ($screen -match 'HasManagedBlueMinimapRingVisual|HasManagedKEntryNonGoldFieldHudVisual' -or
+              $screen -notmatch 'managed_k_key.png' -or
+              $screen -notmatch 'managed_i_key.png' -or
+              $screen -notmatch 'WaitForManagedFacilityExitAsync') {
+              throw 'F9 navigation requires shortcut evidence and bounded post-Esc observation without minimap rim detectors'
+          }
           $zeroWing = Get-Content source/FishingAutomation/ZeroWingScreenGuards.cs -Raw
           $alteringPlan = Get-Content source/FishingAutomation/AlteringPlan.cs -Raw
           $multiGather = Get-Content source/FishingAutomation/MultiGatheringCoordinator.cs -Raw
