@@ -18,9 +18,12 @@ internal sealed class GatheringScreen : IGatheringScreen
     {
         _settings=settings; _debugDir=debugDir; _cli=cli; _data=data;
         _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "gathering");
+        _ui.Log += text => Log?.Invoke(text);
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[자동채집][상태] {stage} · {detail}");
     }
+    internal Task<bool> CheckInterruptionsAsync(CancellationToken ct) => _ui.CheckInterruptionsAsync(ct);
+
     private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
     private async Task<bool> AtMaterialAsync(GatheringPlan plan,CancellationToken ct)
     {

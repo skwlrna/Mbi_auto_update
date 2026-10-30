@@ -1,0 +1,25 @@
+name: Daily interruption recovery
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/daily-interruptions]
+permissions:
+  contents: read
+jobs:
+  recovery-and-real-screens:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build production app and test daily recovery with real screenshots
+        shell: pwsh
+        run: |
+          dotnet run --project tests/daily-interruptions/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Daily interruption regressions failed' }
+          dotnet run --project tests/cli-readonly/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'CLI read-only boundary regression failed' }
+          dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Input cancellation regression failed' }

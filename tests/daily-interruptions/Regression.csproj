@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><AssemblyName>DailyInterruptionRegression</AssemblyName>
+    <TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework><UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget><DefineConstants>$(DefineConstants);WINDOWS_FIXTURES</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <Compile Include="../../source/FishingAutomation/DailyInterruptionRecovery.cs" Link="DailyInterruptionRecovery.cs" />
+    <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
+    <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ProjectReference Include="../../source/FishingAutomation/FishingAutomation.csproj" />
+  </ItemGroup>
+  <ItemGroup><None Update="fixtures/*.png" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+</Project>

@@ -28,12 +28,15 @@ internal sealed class CraftingScreen : ICraftingScreen
         _data = new CraftingCliData(cli);
         _cli = cli;
         _ui = new ProductionUiRuntime(hwnd, settings, debugDir, "crafting");
+        _ui.Log += text => Log?.Invoke(text);
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[제작][상태] {stage} · {detail}");
     }
 
     public string InputMode => _ui.InputMode;
     public event Action<string>? Log;
+
+    internal Task<bool> CheckInterruptionsAsync(CancellationToken ct) => _ui.CheckInterruptionsAsync(ct);
 
     private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
 

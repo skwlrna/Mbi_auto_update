@@ -196,6 +196,7 @@ public sealed partial class MainForm
             var visualGathering = new InventoryBulkGatheringScreen(
                 windows[0].Handle, settings,
                 Path.Combine(AppContext.BaseDirectory, "debug", "gathering"), _cli, gatheringData);
+            using var interruptions = ProductionInterruptionCheckpoint.Install(visualAltering.CheckInterruptionsAsync);
             using var screen = new ZeroWingAlteringScreen(visualAltering, _cli, identity);
             using var gatheringScreen = new ZeroWingGatheringScreen(visualGathering, _cli, identity);
 

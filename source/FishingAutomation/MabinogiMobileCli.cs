@@ -136,10 +136,14 @@ public sealed class MabinogiMobileCli
             return Finish(new(command, false, "blocked", null, null, "invalid_body"));
 
         token.ThrowIfCancellationRequested();
+        await ProductionInterruptionCheckpoint.CheckAsync(token).ConfigureAwait(false);
         try
         {
             var output = await RunFilteredQuery(
                 BuildFilteredQueryArguments(command, filterName), token).ConfigureAwait(false);
+            if (await ProductionInterruptionCheckpoint.CheckAsync(token).ConfigureAwait(false))
+                output = await RunFilteredQuery(
+                    BuildFilteredQueryArguments(command, filterName), token).ConfigureAwait(false);
             return Finish(Parse(command, output));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -161,9 +165,15 @@ public sealed class MabinogiMobileCli
             return Finish(new(command, false, "blocked", null, null, "command_not_allowed"));
 
         token.ThrowIfCancellationRequested();
+        await ProductionInterruptionCheckpoint.CheckAsync(token).ConfigureAwait(false);
         try
         {
             var output = await _run(command, token).ConfigureAwait(false);
+            // A modal can arrive while the CLI process is reading. If it was
+            // dismissed, discard that stale activity/inventory response and
+            // repeat ONLY this allowlisted read, never a game action.
+            if (await ProductionInterruptionCheckpoint.CheckAsync(token).ConfigureAwait(false))
+                output = await _run(command, token).ConfigureAwait(false);
             return Finish(Parse(command, output));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -320,4 +330,24 @@ public sealed class MabinogiMobileCli
     // must never launch it, even if ZeroWingMode is false or requiresConfirm is false.
     private static bool IsAllowedAction(string command)
         => false;
+}
+
+// Execution-context scoped: dashboard polling and another run cannot inherit
+// input authority. Production loops inspect modals before fresh read-only CLI
+// responses even while no screen navigation is taking place.
+internal static class ProductionInterruptionCheckpoint
+{
+    private static readonly AsyncLocal<Func<CancellationToken, Task<bool>>?> Current = new();
+    internal static Task<bool> CheckAsync(CancellationToken ct)
+        => Current.Value?.Invoke(ct) ?? Task.FromResult(false);
+    internal static IDisposable Install(Func<CancellationToken, Task<bool>> check)
+    {
+        var previous = Current.Value;
+        Current.Value = check;
+        return new Scope(previous);
+    }
+    private sealed class Scope(Func<CancellationToken, Task<bool>>? previous) : IDisposable
+    {
+        public void Dispose() => Current.Value = previous;
+    }
 }
