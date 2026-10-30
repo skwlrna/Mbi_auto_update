@@ -340,10 +340,14 @@ internal static class ProductionInterruptionCheckpoint
     private static readonly AsyncLocal<Func<CancellationToken, Task<bool>>?> Current = new();
     internal static Task<bool> CheckAsync(CancellationToken ct)
         => Current.Value?.Invoke(ct) ?? Task.FromResult(false);
-    internal static IDisposable Install(Func<CancellationToken, Task<bool>> check)
+    internal static IDisposable Install(Func<CancellationToken, Task<bool>> check,
+        CancellationToken runToken = default)
     {
         var previous = Current.Value;
-        Current.Value = check;
+        // Cleanup may perform read-only queries with a fresh token after F10.
+        // Such a token must never re-arm modal input for the cancelled run.
+        Current.Value = ct => runToken.IsCancellationRequested
+            ? Task.FromResult(false) : check(ct);
         return new Scope(previous);
     }
     private sealed class Scope(Func<CancellationToken, Task<bool>>? previous) : IDisposable

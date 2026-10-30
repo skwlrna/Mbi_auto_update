@@ -131,7 +131,7 @@ public sealed partial class MainForm
             _log.Write("[자동 채집] 시작(F9) · " + _gatheringDisplay + " · CLI 조회 전용 / 일반 이동");
             _dungeonTask = Task.Run(async () =>
             {
-                using var interruptions = ProductionInterruptionCheckpoint.Install(visual.CheckInterruptionsAsync);
+                using var interruptions = ProductionInterruptionCheckpoint.Install(visual.CheckInterruptionsAsync, token);
                 using (screen)
                 {
                     try

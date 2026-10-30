@@ -95,6 +95,14 @@ foreach (bool escWorks in new[] { true, false })
     await cli.GetItemsAsync();
     Check(polls == before, "disposed scope stops modal inputs outside the run");
 }
+{
+    using var run = new CancellationTokenSource(); int polls = 0;
+    using var scope = ProductionInterruptionCheckpoint.Install(ct =>
+        { polls++; return Task.FromResult(false); }, run.Token);
+    run.Cancel();
+    await ProductionInterruptionCheckpoint.CheckAsync(CancellationToken.None);
+    Check(polls == 0, "cleanup read token cannot re-arm modal inputs after F10");
+}
 #if WINDOWS_FIXTURES
 foreach (string name in new[] { "stella", "greeting", "notice", "travel", "hub" })
 {
