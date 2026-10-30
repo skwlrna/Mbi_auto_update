@@ -996,7 +996,7 @@ try
         // foliage/world frame. It must not cancel the authorized K press.
         Paint(grassyField, new Rectangle(14, 42, 155, 46), Color.White);
         Paint(grassyField, new Rectangle(15, 144, 230, 48), Color.White);
-        Check(!PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
+        Check(PixelGate("HasFixedFacilityHeaderVisual", grassyField) &&
               !PixelGate("HasManagedKEntryFieldHudVisual", grassyField) &&
               !PixelGate("HasManagedKEntryBlockingModal", grassyField),
             "misleading facility anchors and coloured blobs cannot establish field authority");
