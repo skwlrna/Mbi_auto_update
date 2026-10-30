@@ -52,12 +52,22 @@ class V3275ReleaseSafety(unittest.TestCase):
                           f"V3.2.75 release workflow missing exact published version check: {exact}")
         self.assertNotIn("3.2.74", workflow,
                          "V3.2.75 workflow must never validate stale V3.2.74 binaries")
-        self.assertIn('CurrentVersion = "V3.2.75"', UPDATER.read_text(encoding="utf-8"))
+        # Historical V3.2.75 release remains immutable, while current source may
+        # advance to a newer, separately authorized release.
+        current = UPDATER.read_text(encoding="utf-8")
         project = PROJECT.read_text(encoding="utf-8")
-        for marker in ("<Version>3.2.75</Version>",
-                       "<AssemblyVersion>3.2.75.0</AssemblyVersion>",
-                       "<FileVersion>3.2.75.0</FileVersion>"):
-            self.assertIn(marker, project)
+        if 'CurrentVersion = "V3.2.75"' in current:
+            for marker in ("<Version>3.2.75</Version>",
+                           "<AssemblyVersion>3.2.75.0</AssemblyVersion>",
+                           "<FileVersion>3.2.75.0</FileVersion>"):
+                self.assertIn(marker, project)
+        else:
+            self.assertIn('CurrentVersion = "V3.2.76"', current)
+            for marker in ("<Version>3.2.76</Version>",
+                           "<AssemblyVersion>3.2.76.0</AssemblyVersion>",
+                           "<FileVersion>3.2.76.0</FileVersion>"):
+                self.assertIn(marker, project)
+            self.assertTrue((ROOT / ".github/workflows/release-v3276-auto-update.yml").exists())
 
     def test_no_unverified_shortcuts_and_required_package_guards(self):
         w = WORKFLOW.read_text(encoding="utf-8")
