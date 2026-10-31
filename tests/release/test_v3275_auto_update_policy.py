@@ -61,13 +61,24 @@ class V3275ReleaseSafety(unittest.TestCase):
                            "<AssemblyVersion>3.2.75.0</AssemblyVersion>",
                            "<FileVersion>3.2.75.0</FileVersion>"):
                 self.assertIn(marker, project)
-        else:
+        elif 'CurrentVersion = "V3.2.76"' in current:
             self.assertIn('CurrentVersion = "V3.2.76"', current)
             for marker in ("<Version>3.2.76</Version>",
                            "<AssemblyVersion>3.2.76.0</AssemblyVersion>",
                            "<FileVersion>3.2.76.0</FileVersion>"):
                 self.assertIn(marker, project)
             self.assertTrue((ROOT / ".github/workflows/release-v3276-auto-update.yml").exists())
+        else:
+            self.assertIn('CurrentVersion = "V3.2.77"', current)
+            for marker in ("<Version>3.2.77</Version>",
+                           "<AssemblyVersion>3.2.77.0</AssemblyVersion>",
+                           "<FileVersion>3.2.77.0</FileVersion>"):
+                self.assertIn(marker, project)
+            self.assertTrue((ROOT / ".github/workflows/release-v3277-auto-update.yml").exists())
+            authorization = json.loads((ROOT / "source/V3.2.77_RELEASE_AUTHORIZATION.json").read_text())
+            self.assertEqual(authorization["sourcePullRequest"], 344)
+            self.assertEqual(authorization["request"], "진행해")
+
 
     def test_no_unverified_shortcuts_and_required_package_guards(self):
         w = WORKFLOW.read_text(encoding="utf-8")

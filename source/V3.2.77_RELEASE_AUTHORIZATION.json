@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.77",
+  "purpose": "f9_shortcut_field_without_minimap",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "진행해",
+  "requestedAtKst": "2026-10-31",
+  "sourcePullRequest": 344,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User requested continuing PR #344 through merge and update rollout. Compiled screen and Korean OCR regressions passed on the same application source; exact new-version main CI, binary startup smoke, K/I assets, ZIP SHA256, rollback and BUILD_COMMIT gates are mandatory. Real game not verified."
+}
