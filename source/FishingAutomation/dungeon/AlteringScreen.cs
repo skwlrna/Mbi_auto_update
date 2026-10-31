@@ -25,7 +25,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // Every managed K, including the first, needs positive ordinary-field proof.
     // Unknown->K navigation must
     // positively match 3/4 HUD templates on two fresh frames, or
-    // K+I / Home+End pairs PLUS independent minimap + life-skill HUD evidence.
+    // K+I / Home+End pairs PLUS the upper/lower shortcut glyph layout.
     // Both routes keep fresh modal/menu checks and CLI idle before any key.
     private bool _managedKInputIssued;
     private static readonly Rectangle Whole = new(0, 0, 800, 1000);
@@ -100,9 +100,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private static bool HasWorldHudForFacilityVeto(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000) return false;
-        // Gold minimap + life-skill disc is the existing independent field
-        // evidence. Underground gray minimaps instead retain the three exact
-        // Home/End/ESC glyphs; use the existing production template matcher.
+        // Upper/lower shortcut layout or the exact upper shortcut trio.
+        // No minimap pixels participate in this negative facility veto.
         // This is a negative facility veto, never permission to send input.
         return HasManagedKEntryFieldHudVisual(frame) ||
                DetectManagedWorldHudKeys(frame).Found;
@@ -1008,6 +1007,29 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Log?.Invoke($"[자동 가공] 시설 변경 · {requestedTitle} 진입 전 이전 시설 인식 캐시 해제");
     }
 
+    private async Task<ManagedProductionSceneKind> WaitForManagedFacilityExitAsync(CancellationToken ct)
+    {
+        var watch = Stopwatch.StartNew();
+        var previous = ManagedProductionSceneKind.Unknown;
+        int stable = 0;
+        while (watch.Elapsed < ManagedKReentryHudTimeout)
+        {
+            using var frame = Capture(ct);
+            var scene = await ClassifyManagedProductionSceneAsync(frame, ct);
+            if (scene is ManagedProductionSceneKind.MoveDialog or
+                ManagedProductionSceneKind.ReceiptResult or ManagedProductionSceneKind.Ambiguous)
+                Fail(frame, $"Esc 후 차단 화면={scene} · 추가 입력 없이 정지");
+            bool ready = scene is ManagedProductionSceneKind.WorldHud or
+                ManagedProductionSceneKind.ProcessingHub;
+            stable = ready ? (scene == previous ? stable + 1 : 1) : 0;
+            if (stable >= 2) return scene;
+            previous = scene;
+            await Task.Delay(180, ct);
+        }
+        // The caller reclassifies a NEW capture; no blind Esc/K retry here.
+        return ManagedProductionSceneKind.Unknown;
+    }
+
     // F9 screen classification: observation only. A missing field HUD is never
     // proof that a facility, menu or safe return-to-world exists.
     private async Task<ManagedProductionSceneKind> ClassifyManagedProductionSceneAsync(
@@ -1307,7 +1329,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     Log?.Invoke($"[자동 가공] 현재 화면={otherFacility} · 2프레임 확인 · 가공 허브로 돌아갑니다 · Esc");
                     await RequireManagedIdleAsync(plan, directive, "시설 상세/다른창 Esc 직전", ct);
                     _ui.TapFresh(0x01, ct);
-                    await WaitForProcessingHubAsync(900, ct);
+                    if (directive == AlteringFacilityEntryDirective.Automatic)
+                        await WaitForProcessingHubAsync(900, ct);
+                    else
+                    {
+                        // Esc can close directly to WORLD instead of the hub.
+                        // Observe both destinations; do not assume the hub won.
+                        var destination = await WaitForManagedFacilityExitAsync(ct);
+                        Log?.Invoke($"[자동 가공] Esc 후 화면 확인={destination} · 다음 단계 새 화면 재검증");
+                    }
                     continue;
                 }
 
@@ -1321,10 +1351,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (HasVisibleFacilityPanelWithoutEntryProof(frame))
                     Fail(frame,
                         "시설 제목/제품 카드가 보이지만 시설 진입 증거 불충분 · K 입력 차단 · 추가 진단 필요");
-                if (directive != AlteringFacilityEntryDirective.Automatic &&
-                    managedScene != ManagedProductionSceneKind.WorldHud)
-                    Fail(frame,
-                        $"F9 화면 분류={managedScene} · 필드 양성 증거 없음 · K 재진입 금지");
+                // Unknown is an observation, not an immediate failure. The
+                // bounded two-frame loop below must run before deciding to stop.
                 Log?.Invoke($"[자동 가공] 현재 화면=일반/전환 중 · 가공 메뉴 재진입 시도 {attempt}/{maxAttempts}");
                 // Never press K over an unknown green/travel modal in a managed run.
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
@@ -1333,13 +1361,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Func<Bitmap, Task<bool>>? verifyManagedK = null;
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // First entry and re-entry both require actual consecutive
-                    // field frames. The 14:16:48
-                    // V3.1.99 live field had K/I=0.969/0.910 yet Home/End=0.37/0.39,
-                    // so also accept two consecutive K+I plus the independent
-                    // minimap-rim and lower-left life-skill HUD visual. Neither
-                    // path relaxes the popup/menu veto or last-moment CLI idle.
-                    // Limit remains 2 seconds; no unverified extra K is sent.
+                    // First entry, resume and post-Esc re-entry share the same
+                    // bounded observation loop. No minimap evidence is used.
+                    // Unknown frames reset consecutive proof; they send no input.
                     bool firstEntry = !_managedKInputIssued;
                     var started = Stopwatch.StartNew();
                     var previousHud = DetectManagedWorldHudTemplates(frame);
@@ -1384,6 +1408,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             break;
                         }
 
+                        // Every route needs the upper + lower shortcut layout
+                        // on both actual frames, even if legacy icon scores pass.
                         // Each successful route must be consecutive across TWO
                         // actual frames. A 2/4 score alone is never authorization.
                         bool templateAuthorized = CanAuthorizeManagedKEntry(
@@ -1394,10 +1420,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 previousHud.KFound, previousHud.IFound,
                                 currentHud.KFound, currentHud.IFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
-                        // 2026-10-20 23:45: Home/End ~0.94 both matched but
-                        // K/I ~0.41/0.61 missed despite two positive field frames.
-                        // Require BOTH Home+End on BOTH frames plus the existing
-                        // independent gold-minimap/teal-skill field check.
+                        // Legacy icon routes also require the independent
+                        // upper/lower shortcut glyph layout on both frames.
                         bool homeEndAuthorized =
                             CanAuthorizeManagedKHomeEndFieldFallback(
                                 previousHud.HomeFound, previousHud.EndFound,
@@ -1406,7 +1430,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
                         bool keysAuthorized = previousKeys.IsConsecutiveWith(currentKeys) &&
                             previousField && currentField && !actualModal && !unexpectedMenu;
-                        if ((templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
+                        if (previousField && currentField &&
+                            (templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
                         {
                             string route = templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
                                 homeEndAuthorized ? "Home/End" : "key-labels";
@@ -1417,8 +1442,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
                         if (!withinLimit)
                             Fail(freshField,
-                                "관리 가공 K 재진입 HUD 3/4 연속 2프레임 및 " +
-                                "K/I 또는 Home/End 또는 가변배치 단축키 + 미니맵 + 생활스킬 필드 인증 모두 2초 내 실패 · 입력 없이 정지");
+                                "관리 가공 K 재진입 상단 Home/End/ESC + 하단 K/I 연속 2프레임 인증 실패 · " +
+                                "3초 재관찰 후 입력 없이 정지 · HUD/단축키/팝업 진단 참조");
                         previousHud = currentHud;
                         previousField = currentField;
                         previousKeys = currentKeys;
@@ -2711,7 +2736,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
            firstHudMatches >= 3 && secondHudMatches >= 3;
 
     // V3.2.0: the fallback does not relax the standard 3/4 threshold.
-    // K and I must BOTH match and the field minimap/K-disc pixels must BOTH
+    // K and I must BOTH match and the upper/lower shortcut layout must BOTH
     // match on two consecutive frames, while modal/menu remain absent.
     // Caller separately checks fresh CLI idle immediately before input.
     internal static bool CanAuthorizeManagedKFieldFallback(
@@ -2724,7 +2749,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     // Independent visual fallback for the 2026-10-20 production failure:
     // matching just two HUD icons never suffices; both Home and End and the
-    // minimap+skill world evidence must persist across two actual frames.
+    // upper/lower shortcut world evidence must persist across two actual frames.
     // Popup/menu veto and fresh CLI-idle checks stay in the caller.
     internal static bool CanAuthorizeManagedKHomeEndFieldFallback(
         bool previousHome, bool previousEnd, bool currentHome, bool currentEnd,
@@ -2736,7 +2761,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     // Bounded visual stabilization after Esc; clock runs continuously from
     // the first unknown-field frame and is never reset on weak HUD matches.
-    internal static readonly TimeSpan ManagedKReentryHudTimeout = TimeSpan.FromSeconds(2);
+    internal static readonly TimeSpan ManagedKReentryHudTimeout = TimeSpan.FromSeconds(3);
 
     internal static bool IsManagedKReentryWithinLimit(TimeSpan elapsed)
         => elapsed >= TimeSpan.Zero && elapsed < ManagedKReentryHudTimeout;
@@ -2767,99 +2792,28 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             k.Found, i.Found, home.Found, end.Found);
     }
 
-    // Positive ordinary-world evidence for the managed unknown->K route.
-    // On the real 800x1000 field the top-right circular minimap has a gold
-    // rim and the bottom-left K life-skill button has a bright teal disc.
-    // Do NOT use green field vegetation or the center Space compass.
+    // F9 world evidence deliberately excludes ALL minimap pixels, rim shape,
+    // colours and day/night markers. Require spatially separated shortcut
+    // glyphs: the upper Home/End/ESC layout and BOTH lower K/I labels.
+    // This observation never grants input without fresh CLI + two frames.
     private static bool HasManagedKEntryFieldHudVisual(Bitmap frame)
     {
-        if (frame.Width != 800 || frame.Height != 1000)
-            return false;
-
-        int minimapGold = 0;
-        for (int y = 104; y <= 215; y += 4)
-        for (int x = 663; x <= 783; x += 4)
-        {
-            Color p = frame.GetPixel(x, y);
-            if (p.R >= 135 && p.G >= 105 &&
-                p.R >= p.B + 42 && p.G >= p.B + 25)
-                minimapGold++;
-        }
-
-        int kButtonTeal = 0;
-        for (int y = 874; y <= 934; y += 3)
-        for (int x = 18; x <= 70; x += 3)
-        {
-            Color p = frame.GetPixel(x, y);
-            if (p.G >= 105 && p.G >= p.R + 20 &&
-                p.G >= p.B + 8)
-                kButtonTeal++;
-        }
-        // The minimap's small orange clock icon is a DAY indicator; it is
-        // absent at night and can appear on ordinary fields and in caves.
-        // Never use the day/night indicator as proof that K is safe.
-        // Preserve the proven gold-world route and separately recognize the
-        // actual cyan/blue circular minimap rim + K disc + Space ring.
-        return (minimapGold >= 20 && kButtonTeal >= 10) ||
-               HasManagedKEntryNonGoldFieldHudVisual(frame, kButtonTeal);
-    }
-
-    // 17:45 V3.2.66 and 19:09 V3.2.67 are the same cave WORLD at different
-    // day/night indicator states. The blue circular minimap structure (not
-    // an orange time-of-day icon), the life-skill K disc and the center
-    // green Space compass ring are three independent physical anchors.
-    // The CALLER additionally requires 2 stable K/I or Home/End frames,
-    // no menu/modal, 2s bound, fresh CLI idle and pre-input revalidation.
-    private static bool HasManagedKEntryNonGoldFieldHudVisual(
-        Bitmap frame, int kButtonTeal)
-    {
-        if (frame.Width != 800 || frame.Height != 1000 || kButtonTeal < 10)
-            return false;
-
-        int compassGreenRing = 0;
-        for (int y = 810; y <= 928; y += 3)
-        for (int x = 344; x <= 457; x += 3)
-        {
-            int dx = x - 400, dy = y - 869;
-            int radiusSquared = dx * dx + dy * dy;
-            if (radiusSquared < 38 * 38 || radiusSquared > 56 * 56)
-                continue;
-            Color p = frame.GetPixel(x, y);
-            if (p.G >= 105 && p.G >= p.R + 18 && p.G >= p.B + 9)
-                compassGreenRing++;
-        }
-
-        return compassGreenRing >= 22 && HasManagedBlueMinimapRingVisual(frame);
-    }
-
-    // Restrict samples to a circular arc around the actual 720,161 minimap
-    // center; arbitrary blue scenery elsewhere never counts as a minimap.
-    // Require pixels in at least two spatial sectors, not a single blue blob.
-    // Independent K and Space geometry is checked by the caller above.
-    internal static bool HasManagedBlueMinimapRingVisual(Bitmap frame)
-    {
-        if (frame.Width != 800 || frame.Height != 1000)
-            return false;
-        int blueRing = 0;
-        int[] sectors = new int[4];
-        for (int y = 94; y <= 228; y += 3)
-        for (int x = 649; x <= 791; x += 3)
-        {
-            int dx = x - 720, dy = y - 161;
-            int radiusSquared = dx * dx + dy * dy;
-            if (radiusSquared < 50 * 50 || radiusSquared > 74 * 74)
-                continue;
-            Color p = frame.GetPixel(x, y);
-            if (p.B < 130 || p.B < p.R + 38 || p.B < p.G + 17)
-                continue;
-            blueRing++;
-            int sector = (x < 720 ? 0 : 1) + (y < 161 ? 0 : 2);
-            sectors[sector]++;
-        }
-        int populatedSectors = 0;
-        foreach (int pixels in sectors)
-            if (pixels >= 3) populatedSectors++;
-        return blueRing >= 45 && populatedSectors >= 2;
+        if (frame.Width != 800 || frame.Height != 1000) return false;
+        var keys = DetectManagedWorldHudKeys(frame);
+        // Older HUD layouts have a differently drawn End label. Home + ESC
+        // at the known upper locations still provide two separate anchors;
+        // BOTH lower K/I labels remain mandatory in every layout.
+        bool upper = keys.Found ||
+            (!keys.Home.IsEmpty && !keys.Escape.IsEmpty &&
+             keys.Home.Left is >= 580 and <= 670 &&
+             keys.Escape.Left is >= 750 and <= 790 &&
+             Math.Abs(keys.Home.Top - keys.Escape.Top) <= 5);
+        if (!upper) return false;
+        var matcher = new TemplateMatcher(AppContext.BaseDirectory);
+        bool Key(Rectangle area, string name) => matcher.FindBrightGlyphMultiScale(
+            frame, area, "abyss/templates/" + name, 0.90, 0.95, 1.05, 0.05).Found;
+        return Key(new Rectangle(50, 905, 40, 40), "managed_k_key.png") &&
+               Key(new Rectangle(755, 905, 45, 40), "managed_i_key.png");
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
