@@ -75,7 +75,7 @@ class V3275ReleaseSafety(unittest.TestCase):
                            "<FileVersion>3.2.77.0</FileVersion>"):
                 self.assertIn(marker, project)
             self.assertTrue((ROOT / ".github/workflows/release-v3277-auto-update.yml").exists())
-            authorization = json.loads((ROOT / "source/V3.2.77_RELEASE_AUTHORIZATION.json").read_text())
+            authorization = json.loads((ROOT / "source/V3.2.77_RELEASE_AUTHORIZATION.json").read_text(encoding="utf-8"))
             self.assertEqual(authorization["sourcePullRequest"], 344)
             self.assertEqual(authorization["request"], "진행해")
 
