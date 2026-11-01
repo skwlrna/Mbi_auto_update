@@ -825,7 +825,9 @@ internal sealed class CraftingScreen : ICraftingScreen
         // false OCR failures. Reuse the verified existing popup instead.
         using (var existing = Capture(ct))
         {
-            if (await IsQuestMaterialPopupAsync(existing, ct))
+            if (await IsQuestMaterialPopupAsync(existing, ct) &&
+                (await _ui.Ocr.FindCompactLabelAsync(existing,
+                    new Rectangle(70, 130, 670, 780), plan.DisplayName, ct)).Found)
             {
                 Log?.Invoke("[제작] 이미 표시된 퀘스트 재료 팝업 재사용 · 추가 퀘스트 클릭 없음");
                 return;
@@ -848,7 +850,23 @@ internal sealed class CraftingScreen : ICraftingScreen
             before,
             after,
             CraftingHubLayout.ProductionQuestPopupArea);
-        Log?.Invoke($"[제작] 제작 퀘스트 팝업 전환 · 화면 변화 {ratio:P1} · 후속 재료행 OCR 진행");
+        // Pixel changes can come from the animated field; they do not prove a quest opened.
+        bool verified = false;
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            using var popup = Capture(ct);
+            var title = await _ui.Ocr.FindCompactLabelAsync(
+                popup, new Rectangle(70, 130, 670, 780), plan.DisplayName, ct);
+            if (title.Found && await IsQuestMaterialPopupAsync(popup, ct))
+            {
+                verified = true;
+                break;
+            }
+            await Task.Delay(300, ct);
+        }
+        if (!verified)
+            throw Fail(after, "목표 제작 퀘스트 제목/재료 팝업 미확인 · 재료 OCR 및 추가 클릭 중단");
+        Log?.Invoke($"[제작] 제작 퀘스트 제목/재료 팝업 확인 · 화면 변화 {ratio:P1} · 후속 재료행 OCR 진행");
     }
 
     public async Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
@@ -1190,6 +1208,22 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct.ThrowIfCancellationRequested();
             using var frame = Capture(ct);
 
+            var pharmacy = await _ui.Ocr.FindCompactLabelAsync(
+                frame, CraftingHubLayout.ProductListHeaderArea, "약품 제작대", ct);
+            var locationLines = await _ui.Ocr.ReadLinesAsync(
+                frame, new Rectangle(200, 140, 560, 570), 2, ct);
+            string locationText = string.Join("", locationLines.Select(x => x.ReadText ?? "")).Replace(" ", "");
+            bool locationMenu = locationText.Contains("성장가이드", StringComparison.Ordinal) &&
+                locationText.Contains("나의마이홈", StringComparison.Ordinal);
+            if (pharmacy.Found || locationMenu)
+            {
+                stableNeutralFrames = 0;
+                Log?.Invoke($"[제작][자동복구] 화면 정리 {attempt}/12 · 약품 제작대/장소 메뉴 확인 · Esc 후 재판정");
+                _ui.TapFresh(0x01, ct);
+                await Task.Delay(500, ct);
+                continue;
+            }
+
             var acquisitionHeader = await FindUniqueAsync(
                 frame,
                 CraftingHubLayout.AcquisitionMethodHeaderArea,
@@ -1261,13 +1295,20 @@ internal sealed class CraftingScreen : ICraftingScreen
                 continue;
             }
 
-            // Unknown transition frames receive no input. Two consecutive neutral
-            // frames are required before a fresh K navigation is allowed.
+            // Absence of a recognized modal is not proof of the field. Require
+            // positive HUD evidence on two independent captures before K.
+            if (!AlteringScreen.HasManagedKEntryFieldHudVisual(frame))
+            {
+                stableNeutralFrames = 0;
+                Log?.Invoke("[제작][자동복구] 필드 화면 미확인 · 복구 완료 판정 보류 · K 입력 금지");
+                await Task.Delay(350, ct);
+                continue;
+            }
             stableNeutralFrames++;
             if (stableNeutralFrames >= 2)
             {
                 Log?.Invoke(
-                    "[제작][자동복구] 기준 화면 복귀 확인 · 알려진 제작/퀘스트 모달 없음 2프레임 · " +
+                    "[제작][자동복구] 기준 화면 복귀 확인 · 필드 HUD 확인 2프레임 · " +
                     "다음 K 입력 허용");
                 return;
             }
@@ -1327,7 +1368,9 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct);
         var cancel = await FindUniqueAsync(frame, new Rectangle(100, 350, 600, 280), "취소", ct);
         bool questPopup = await IsQuestMaterialPopupAsync(frame, ct);
-        if (modalHeader is null && cancel is null && !questPopup)
+        var pharmacy = await _ui.Ocr.FindCompactLabelAsync(
+            frame, CraftingHubLayout.ProductListHeaderArea, "약품 제작대", ct);
+        if (modalHeader is null && cancel is null && !questPopup && !pharmacy.Found)
             return;
         _ui.TapFresh(0x01, ct);
         await Task.Delay(300, ct);
