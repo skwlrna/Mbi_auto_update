@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.78",
+  "purpose": "daily_npc_variable_dialogue_recovery",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "계속 진행해",
+  "requestedAtKst": "2026-11-01",
+  "sourcePullRequest": 345,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User requested continuing PR #345 through merge and auto-update rollout. Daily interruption and compiled-screen regressions passed for the fix. Exact final main CI, release-time daily interruption regression, binary startup smoke, ZIP SHA256, rollback and BUILD_COMMIT gates are mandatory. Live game recovery remains unverified."
+}
