@@ -108,7 +108,7 @@ foreach (string label in new[] { "건너뛰기", "대화 건너뛰기", "대화 
     Check(DailyInterruptionScreen.IsNpcSkipLabel(label), "NPC skip wording variant: " + label);
 foreach (string label in new[] { "퀘스트 건너뛰기", "확인", "결제", "오늘도" })
     Check(!DailyInterruptionScreen.IsNpcSkipLabel(label), "unrelated right-side text rejected: " + label);
-foreach (string name in new[] { "stella", "greeting", "notice", "travel", "hub" })
+foreach (string name in new[] { "stella", "greeting", "greeting-variable", "notice", "travel", "hub" })
 {
     using var image = new Bitmap(Path.Combine(AppContext.BaseDirectory, "fixtures", name + ".png"));
     // Recorded OCR lines isolate recognition/control integration from WinRT
@@ -120,6 +120,7 @@ foreach (string name in new[] { "stella", "greeting", "notice", "travel", "hub" 
             "stella" when roi.Y == 30 => "오늘의 스텔라 픽",
             "notice" => "공지사항 이벤트 쿠폰 입력 FAQ",
             "greeting" when roi.X == 220 => "오늘도 와 줘서 고마워",
+            "greeting-variable" when roi.X == 220 => "있잖아, 함께한 날들을 세어 보니 뭉클해",
             _ => ""
         };
         IReadOnlyList<DetectionResult> lines = text.Length == 0 ? Array.Empty<DetectionResult>() :
@@ -128,12 +129,34 @@ foreach (string name in new[] { "stella", "greeting", "notice", "travel", "hub" 
     });
     var observed = await detector.ObserveAsync(image, default);
     var expected = name switch { "stella" => DailyInterruptionKind.StellaPick,
-        "notice" => DailyInterruptionKind.Notice, "greeting" => DailyInterruptionKind.NpcGreeting,
+        "notice" => DailyInterruptionKind.Notice, "greeting" or "greeting-variable" => DailyInterruptionKind.NpcGreeting,
         _ => DailyInterruptionKind.None };
     Check(observed.Kind == expected, name + " complete detector with recorded OCR");
-    Check(DailyInterruptionScreen.HasGreetingBubble(image) == (name == "greeting"), name + " greeting structure");
+    Check(DailyInterruptionScreen.HasGreetingBubble(image) == (name is "greeting" or "greeting-variable"), name + " greeting structure");
     int row = DailyInterruptionScreen.NoticeTabsRow(image);
     Check((row >= 0) == (name == "notice"), name + " notice chrome, variable content ignored");
+    if (name == "greeting-variable")
+    {
+        // Same real incident geometry with alternate dialogue, empty OCR and
+        // absent name badge. Dynamic prose must work without weakening chrome.
+        foreach (string speech in new[] { "있잖아 함께한 날들을 세어 보니 뭉클해", "내일은 어떤 일이 기다리고 있을까", "" })
+        {
+            var variable = new DailyInterruptionScreen((frame, roi, scale, ct) =>
+                Task.FromResult<IReadOnlyList<DetectionResult>>(roi.X == 220 && speech.Length > 0
+                    ? new[] { new DetectionResult(true, roi, 1, speech) }
+                    : Array.Empty<DetectionResult>()));
+            Check((await variable.ObserveAsync(image, default)).Kind ==
+                (speech.Length > 0 ? DailyInterruptionKind.NpcGreeting : DailyInterruptionKind.None),
+                "variable NPC speech is structural; empty OCR cannot authorize input");
+        }
+        using var noBadge = (Bitmap)image.Clone();
+        using (var g = Graphics.FromImage(noBadge)) g.FillRectangle(Brushes.Black, 200, 85, 160, 30);
+        var negative = new DailyInterruptionScreen((frame, roi, scale, ct) =>
+            Task.FromResult<IReadOnlyList<DetectionResult>>(
+                new[] { new DetectionResult(true, roi, 1, "함께한 날들을 세어 보니 뭉클해") }));
+        Check((await negative.ObserveAsync(noBadge, default)).Kind == DailyInterruptionKind.None,
+            "speech without NPC badge never authorizes greeting input");
+    }
     if (name == "notice")
     {
         var close = DailyInterruptionScreen.FindNoticeClose(image, row);

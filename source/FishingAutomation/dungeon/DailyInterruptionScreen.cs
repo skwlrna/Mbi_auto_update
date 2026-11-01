@@ -55,7 +55,10 @@ internal sealed class DailyInterruptionScreen
             var bubbleLines = await _readLines(frame, new(220, 85, 370, 155), 2, ct)
                 .ConfigureAwait(false);
             string bubbleText = string.Concat(bubbleLines.Select(x => FuzzyText.Normalize(x.ReadText ?? "")));
-            _greetingActive = new[] { "오늘도", "어서와", "반가워", "잘왔어" }.Any(bubbleText.Contains);
+            // Daily NPC lines vary with the day, player name and dialogue step.
+            // The cinematic bubble + lime name badge authorize recognition;
+            // OCR proves actual speech, not membership in a greeting phrase list.
+            _greetingActive = bubbleText.Length >= 4;
         }
         if (_greetingActive && (bubble || skip is not null))
             return new(DailyInterruptionKind.NpcGreeting, new(220, 85, 370, 155),

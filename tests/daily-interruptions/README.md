@@ -22,3 +22,7 @@ NPC bubble / right-hand skip text. An unresolved modal remains bounded and
 cancellable; unknown dialogs, ordinary facility menus, paid actions and task
 registration/collection are never replayed by this handler. Real Korean WinRT
 OCR and the exact live NPC skip label still need game-host validation.
+
+The 2026-11-01 09:59 Alisa incident adds a sanitized greeting-variable fixture.
+Recognition accepts varying speech only inside the observed cinematic bubble
+and NPC name-badge geometry; empty OCR or a missing badge cannot authorize input.
