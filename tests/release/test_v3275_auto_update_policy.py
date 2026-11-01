@@ -78,7 +78,7 @@ class V3275ReleaseSafety(unittest.TestCase):
             authorization = json.loads((ROOT / "source/V3.2.77_RELEASE_AUTHORIZATION.json").read_text(encoding="utf-8"))
             self.assertEqual(authorization["sourcePullRequest"], 344)
             self.assertEqual(authorization["request"], "진행해")
-        else:
+        elif 'CurrentVersion = "V3.2.78"' in current:
             self.assertIn('CurrentVersion = "V3.2.78"', current)
             for tag, version in [('Version', '3.2.78'), ('AssemblyVersion', '3.2.78.0'), ('FileVersion', '3.2.78.0')]:
                 self.assertIn(f'<{tag}>{version}</{tag}>', project)
@@ -86,6 +86,15 @@ class V3275ReleaseSafety(unittest.TestCase):
             authorization = json.loads((ROOT / 'source/V3.2.78_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
             self.assertEqual(authorization['sourcePullRequest'], 345)
             self.assertEqual(authorization['request'], '계속 진행해')
+        else:
+            self.assertIn('CurrentVersion = "V3.2.79"', current)
+            for tag, version in [('Version', '3.2.79'), ('AssemblyVersion', '3.2.79.0'), ('FileVersion', '3.2.79.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            self.assertTrue((ROOT / '.github/workflows/release-v3279-auto-update.yml').exists())
+            authorization = json.loads((ROOT / 'source/V3.2.79_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(authorization['sourcePullRequest'], 346)
+            self.assertEqual(authorization['request'], '계속 진행해')
+
 
 
 

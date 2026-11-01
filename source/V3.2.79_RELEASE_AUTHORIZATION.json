@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.79",
+  "purpose": "production_screen_recovery",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "계속 진행해",
+  "requestedAtKst": "2026-11-02",
+  "sourcePullRequest": 346,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User requested continuing PR #346 through integration and auto-update rollout. Production screen and crafting regressions passed on the implementation commit. Exact final main CI, release-time screen and crafting regressions, binary startup smoke, ZIP SHA256, rollback and BUILD_COMMIT gates remain mandatory. Live game recovery remains unverified."
+}
