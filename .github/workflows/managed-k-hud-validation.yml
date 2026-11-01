@@ -25,3 +25,8 @@ jobs:
         run: |
           dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Compiled screen corpus failed' }
+      - name: Run crafting recovery regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Crafting regression failed' }

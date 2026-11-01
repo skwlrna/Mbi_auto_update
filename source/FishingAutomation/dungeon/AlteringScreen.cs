@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using FishingAutomation;
 
 namespace DungeonVisionBot;
@@ -1092,6 +1092,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
             using (var frame = Capture(ct))
             {
+                var locationLines = await _ui.Ocr.ReadLinesAsync(
+                    frame, new Rectangle(200, 140, 560, 570), 2, ct);
+                string locationText = string.Join("", locationLines.Select(x => x.ReadText ?? "")).Replace(" ", "");
+                if (locationText.Contains("성장가이드", StringComparison.Ordinal) &&
+                    locationText.Contains("나의마이홈", StringComparison.Ordinal))
+                {
+                    if (attempt == maxAttempts)
+                        Fail(frame, "장소 메뉴 닫힘 미확인 · 추가 입력 없이 정지");
+                    Log?.Invoke("[자동 가공] 장소 메뉴 확인 · Esc 1회 후 새 화면 재판정");
+                    _ui.TapFresh(0x01, ct);
+                    await Task.Delay(500, ct);
+                    continue;
+                }
                 ManagedProductionSceneKind managedScene =
                     directive == AlteringFacilityEntryDirective.Automatic
                         ? ManagedProductionSceneKind.Unknown
@@ -2796,7 +2809,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // colours and day/night markers. Require spatially separated shortcut
     // glyphs: the upper Home/End/ESC layout and BOTH lower K/I labels.
     // This observation never grants input without fresh CLI + two frames.
-    private static bool HasManagedKEntryFieldHudVisual(Bitmap frame)
+    internal static bool HasManagedKEntryFieldHudVisual(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000) return false;
         var keys = DetectManagedWorldHudKeys(frame);
