@@ -15,6 +15,9 @@ class F9ShortcutReleasePolicy(unittest.TestCase):
         for flag in ['rollbackProvided', 'mainCiRequired', 'postUpdateGameTestingPending']:
             self.assertIs(auth[flag], True)
         self.assertIs(auth['realGameTested'], False)
+        current = (ROOT / 'source/FishingAutomation/UpdateManager.cs').read_text(encoding="utf-8")
+        if 'CurrentVersion = "V3.2.77"' not in current:
+            return  # Historical version; current release has its own exact-version policy.
         self.assertIn('CurrentVersion = "V3.2.77"', (ROOT / 'source/FishingAutomation/UpdateManager.cs').read_text(encoding="utf-8"))
         project = (ROOT / 'source/FishingAutomation/FishingAutomation.csproj').read_text(encoding="utf-8")
         for tag, version in [('Version', '3.2.77'), ('AssemblyVersion', '3.2.77.0'), ('FileVersion', '3.2.77.0')]:
