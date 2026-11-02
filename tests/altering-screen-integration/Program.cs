@@ -1051,6 +1051,18 @@ try
         // Earlier builds had no flexible Home/End/ESC route. If the glyph
         // recognizer also fails, these frames remain safe-stop candidates.
         Type stableKeysType = production.GetType("DungeonVisionBot.ManagedWorldHudKeys", true)!;
+        bool HomeEndPair(Rectangle home, Rectangle end) =>
+            (bool)Method(stableKeysType, "HasHomeEndLayout", 2)
+                .Invoke(null, new object[] { home, end })!;
+        Check(HomeEndPair(new Rectangle(640, 78, 30, 12), new Rectangle(698, 78, 22, 12)),
+            "known Home End pair remains evidence without ESC");
+        Check(HomeEndPair(new Rectangle(590, 78, 30, 12), new Rectangle(698, 78, 22, 12)),
+            "alternate Home End spacing remains evidence without ESC");
+        Check(!HomeEndPair(Rectangle.Empty, new Rectangle(698, 78, 22, 12)) &&
+              !HomeEndPair(new Rectangle(640, 78, 30, 12), Rectangle.Empty) &&
+              !HomeEndPair(new Rectangle(640, 110, 30, 12), new Rectangle(698, 78, 22, 12)) &&
+              !HomeEndPair(new Rectangle(640, 78, 30, 12), new Rectangle(740, 78, 22, 12)),
+            "missing or misplaced shortcut labels cannot satisfy the Home End fallback");
         bool CurrentGlyphRoute(Bitmap image)
         {
             object keys = Method(screen, "DetectManagedWorldHudKeys", 1)

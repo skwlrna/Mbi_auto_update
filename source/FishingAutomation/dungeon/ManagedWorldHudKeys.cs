@@ -7,6 +7,19 @@ namespace DungeonVisionBot;
 internal sealed record ManagedWorldHudKeys(
     string Method, Rectangle Home, Rectangle End, Rectangle Escape, string Scores)
 {
+    // Pair evidence is used only with both lower K/I labels and two fresh frames.
+    // It does not change Found/IsConsecutiveWith, which still require all three keys.
+    internal static bool HasHomeEndLayout(Rectangle home, Rectangle end)
+    {
+        if (home.IsEmpty || end.IsEmpty) return false;
+        var h = new Point(home.Left + home.Width / 2, home.Top + home.Height / 2);
+        var e = new Point(end.Left + end.Width / 2, end.Top + end.Height / 2);
+        return h.X is >= 590 and <= 670 && e.X is >= 690 and <= 725 &&
+               h.Y is >= 75 and <= 95 && e.Y is >= 75 and <= 95 &&
+               Math.Abs(h.Y - e.Y) <= 5 &&
+               (e.X - h.X is >= 38 and <= 64 || e.X - h.X is >= 88 and <= 116);
+    }
+
     internal bool Found => HasKnownLayout(Home, End, Escape);
 
     internal static bool HasKnownLayout(Rectangle home, Rectangle end, Rectangle escape)

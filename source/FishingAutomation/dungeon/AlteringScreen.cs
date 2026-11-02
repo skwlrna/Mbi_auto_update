@@ -2817,6 +2817,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // at the known upper locations still provide two separate anchors;
         // BOTH lower K/I labels remain mandatory in every layout.
         bool upper = keys.Found ||
+            ManagedWorldHudKeys.HasHomeEndLayout(keys.Home, keys.End) ||
             (!keys.Home.IsEmpty && !keys.Escape.IsEmpty &&
              keys.Home.Left is >= 580 and <= 670 &&
              keys.Escape.Left is >= 750 and <= 790 &&
