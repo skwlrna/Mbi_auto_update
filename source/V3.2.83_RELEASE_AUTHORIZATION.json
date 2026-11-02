@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.83",
+  "purpose": "field_receipt_classification",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "배포해",
+  "requestedAtKst": "2026-11-02",
+  "sourcePullRequest": 352,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User explicitly requested release of PR #352. Only receipt scene classification is changed to require reward layout and confirmation. Real field replay to final WorldHud and live game testing remain pending. Exact main CI, packaging regression, startup, checksum and rollback gates required."
+}
