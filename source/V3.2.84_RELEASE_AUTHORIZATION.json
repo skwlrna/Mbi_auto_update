@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.84",
+  "purpose": "home_end_field_fallback",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "배포해",
+  "requestedAtKst": "2026-11-03",
+  "sourcePullRequest": 353,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User explicitly requested deployment of PR #353. Implementation Windows build and full CI passed. Actual incident-image final field/K-input replay and live game verification remain pending. Exact main CI, packaging regressions, startup, checksums and rollback gates required."
+}
