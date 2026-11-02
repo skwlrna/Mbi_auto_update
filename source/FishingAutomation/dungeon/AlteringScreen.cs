@@ -1054,7 +1054,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             WorldHud: world, ProcessingHub: hub, FacilityPanel: panel,
             FoodMenu: food, ArmorMenu: armor, OtherProductionMenu: otherKMenu,
             MoveDialog: HasManagedKEntryBlockingModal(frame),
-            ReceiptResult: HasManagedCompletionResultVisual(frame)));
+            ReceiptResult: HasManagedSceneReceiptResultVisual(frame)));
     }
 
     private async Task EnterFacilityAsync(
@@ -2859,6 +2859,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // screen has FOUR independent anchors (blue chest halo, brown chest body, white centered
     // result heading, cyan reward cards). A green travel popup has none of
     // this fixed reward layout. Visual proof never replaces CLI receipt proof.
+    // Scene classification needs the visible confirmation control as well as reward colors.
+    // Field scenery can satisfy all four color counts without any result dialog.
+    private static bool HasManagedSceneReceiptResultVisual(Bitmap frame)
+        => HasManagedCompletionResultVisual(frame) && HasBottomConfirmationModal(frame);
+
     private static bool HasManagedCompletionResultVisual(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000)
