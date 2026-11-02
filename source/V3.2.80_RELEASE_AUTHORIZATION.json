@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.80",
+  "purpose": "abyss_recruitment_wait",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "배포해",
+  "requestedAtKst": "2026-11-02",
+  "sourcePullRequest": 347,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User explicitly requested deployment of PR #347. Windows build, full production CI and 31-second recruitment regression passed. Real-game OCR remains unverified. Exact release main CI, packaging regressions, checksum, binary smoke and rollback gates remain required."
+}
