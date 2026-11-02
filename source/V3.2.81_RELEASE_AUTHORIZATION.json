@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.81",
+  "purpose": "abyss_loading_no_timeout",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "계속 진행해",
+  "requestedAtKst": "2026-11-02",
+  "sourcePullRequest": 349,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User requested continuing PR #349 through deployment. Recruitment and loading >30 seconds and cancellation regressions passed. Exact main CI and packaging gates required; real game testing pending."
+}

@@ -93,6 +93,13 @@ class V3275ReleaseSafety(unittest.TestCase):
             authorization = json.loads((ROOT / 'source/V3.2.80_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
             self.assertEqual(authorization['sourcePullRequest'], 347)
             self.assertEqual(authorization['request'], '배포해')
+        elif 'CurrentVersion = "V3.2.81"' in current:
+            for tag, version in [('Version', '3.2.81'), ('AssemblyVersion', '3.2.81.0'), ('FileVersion', '3.2.81.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            self.assertTrue((ROOT / '.github/workflows/release-v3281-auto-update.yml').exists())
+            authorization = json.loads((ROOT / 'source/V3.2.81_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(authorization['sourcePullRequest'], 349)
+            self.assertEqual(authorization['request'], '계속 진행해')
         else:
             self.assertIn('CurrentVersion = "V3.2.79"', current)
             for tag, version in [('Version', '3.2.79'), ('AssemblyVersion', '3.2.79.0'), ('FileVersion', '3.2.79.0')]:
