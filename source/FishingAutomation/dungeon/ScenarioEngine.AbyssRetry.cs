@@ -459,8 +459,8 @@ internal sealed partial class ScenarioEngine
         int gone = 0;
         int recruitmentFrames = 0;
         bool recruitmentConfirmed = false;
-        var lastKnown = Stopwatch.StartNew();
-        while (lastKnown.Elapsed < TimeSpan.FromSeconds(30))
+        Log?.Invoke("[어비스] 재입장 대기 · 모집/로딩 시간 제한 없음 · 추가 클릭 없이 던전 내부 확인까지 대기");
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
@@ -476,7 +476,6 @@ internal sealed partial class ScenarioEngine
                     AbyssTransitionTo(AbyssFlowState.Recruiting, "모집창 제목+자동 입장 안내 2프레임 확인");
                     Log?.Invoke("[어비스] 파티 모집 대기 · 모집 중에는 30초 전환 제한 없음 · 추가 클릭 없음");
                 }
-                lastKnown.Restart();
             }
             if (recruiting)
             {
@@ -506,9 +505,6 @@ internal sealed partial class ScenarioEngine
             }
             await Task.Delay(Math.Max(300, _settings.PollIntervalMs), ct);
         }
-        DiagnosticPersistFailure("abyss_retry_transition_unknown");
-        throw new InvalidOperationException(recruitmentConfirmed
-            ? "어비스 모집창 이후 30초 동안 모집/던전 화면을 확인하지 못했습니다. 중복 클릭 없이 정지합니다."
-            : "어비스 다시 하기 후 30초 동안 모집창/던전 화면을 확인하지 못했습니다. 중복 클릭 없이 정지합니다.");
+
     }
 }

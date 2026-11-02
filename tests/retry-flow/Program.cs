@@ -41,14 +41,15 @@ namespace DungeonVisionBot
   public event Action<string>? Log;
   int captures;bool disappear;long detectedAt;
   Stopwatch? recruitmentClock;
+  bool loading;
   Task<nint> ResolveRequiredGameWindowAsync(CancellationToken ct)=>Task.FromResult((nint)1);
   Task<bool> DetectAbyssOutsideWorkflowAsync(Bitmap b,CancellationToken ct)=>throw new Exception("retry transition must not query outside HUD");
-  Task<bool> HasAbyssCombatEvidenceAsync(Bitmap b,CancellationToken ct)=>Task.FromResult(true);
+  Task<bool> HasAbyssCombatEvidenceAsync(Bitmap b,CancellationToken ct)=>Task.FromResult(!loading || recruitmentClock!.Elapsed >= TimeSpan.FromSeconds(31));
   Task<bool> ConfirmHallucinationLootAsync(Bitmap a,Bitmap b,Dictionary<string,DetectionResult> x,Dictionary<string,DetectionResult> y,CancellationToken ct)=>Task.FromResult(false);
   Task<Bitmap> CaptureGameWindowAsync(CancellationToken ct)
   {
    ct.ThrowIfCancellationRequested();captures++;
-   if(recruitmentClock != null) OcrRecognizer.Recruiting = recruitmentClock.Elapsed < TimeSpan.FromSeconds(31);
+   if(recruitmentClock != null) OcrRecognizer.Recruiting = !loading && recruitmentClock.Elapsed < TimeSpan.FromSeconds(31);
    if(captures==2)detectedAt=Stopwatch.GetTimestamp();
    var b=new Bitmap(800,1000);using var g=Graphics.FromImage(b);g.Clear(Color.Black);
    if(recruitmentClock==null&&_input.Clicks==0&&(!disappear||captures<=2))g.FillRectangle(Brushes.Lime,new Rectangle(160,905,480,85));
@@ -65,6 +66,13 @@ namespace DungeonVisionBot
    using(var ct=new CancellationTokenSource(40000))await waiting.WaitForAbyssRetryTransitionAsync(ct.Token);
    Check(waiting.recruitmentClock.Elapsed.TotalSeconds>=31 && waiting.flow==AbyssFlowState.CombatClearWait && waiting._input.Clicks==0,"recruitment beyond 30 seconds waits without clicks, then accepts combat");
    OcrRecognizer.Recruiting=false;
+   var loadingWait=new ScenarioEngine(){recruitmentClock=Stopwatch.StartNew(),loading=true};
+   using(var ct=new CancellationTokenSource(40000))await loadingWait.WaitForAbyssRetryTransitionAsync(ct.Token);
+   Check(loadingWait.recruitmentClock.Elapsed.TotalSeconds>=31 && loadingWait.flow==AbyssFlowState.CombatClearWait && loadingWait._input.Clicks==0,"loading without recruitment OCR beyond 30 seconds waits then accepts combat without clicks");
+   var cancelled=new ScenarioEngine(){recruitmentClock=Stopwatch.StartNew(),loading=true};
+   bool stopped=false;
+   using(var ct=new CancellationTokenSource(700)){try{await cancelled.WaitForAbyssRetryTransitionAsync(ct.Token);}catch(OperationCanceledException){stopped=true;}}
+   Check(stopped && cancelled._input.Clicks==0 && cancelled.flow!=AbyssFlowState.CombatClearWait,"unknown loading remains cancellable and cannot imply combat");
    var e=new ScenarioEngine();e._detector.Hallucination=true;
    using(var frame=new Bitmap(800,1000))Check((await e.DetectAbyssLootAsync(frame,default)).Count==0,"production template winner cannot bypass protected-item gate");
    e=new();OcrRecognizer.Lines=new[]{new DetectionResult(true,new(150,300,150,20),1,"허상의 마력석")};
