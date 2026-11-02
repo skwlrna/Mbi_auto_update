@@ -1473,6 +1473,12 @@ try
         Check(PixelGate("HasManagedCompletionResultVisual", result) &&
               PixelGate("HasBottomConfirmationModal", result),
             "verified fixed blue halo + wooden chest + heading + reward cards + green confirms real result without OCR");
+        Check(PixelGate("HasManagedSceneReceiptResultVisual", result),
+            "scene classifier accepts the full reward layout with confirmation");
+        Paint(result, new Rectangle(180, 921, 440, 56), Color.Black);
+        Check(PixelGate("HasManagedCompletionResultVisual", result) &&
+              !PixelGate("HasManagedSceneReceiptResultVisual", result),
+            "reward colors without a confirmation control cannot override field as ReceiptResult");
         // A wrong client size must not be trusted even with painted anchors.
         using var badSize = new Bitmap(799, 1000);
         Check(!PixelGate("HasManagedCompletionResultVisual", badSize),
