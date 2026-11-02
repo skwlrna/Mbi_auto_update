@@ -51,7 +51,7 @@ namespace DungeonVisionBot
    if(recruitmentClock != null) OcrRecognizer.Recruiting = recruitmentClock.Elapsed < TimeSpan.FromSeconds(31);
    if(captures==2)detectedAt=Stopwatch.GetTimestamp();
    var b=new Bitmap(800,1000);using var g=Graphics.FromImage(b);g.Clear(Color.Black);
-   if(_input.Clicks==0&&(!disappear||captures<=2))g.FillRectangle(Brushes.Lime,new Rectangle(160,905,480,85));
+   if(recruitmentClock==null&&_input.Clicks==0&&(!disappear||captures<=2))g.FillRectangle(Brushes.Lime,new Rectangle(160,905,480,85));
    return Task.FromResult(b);
   }
   static void Check(bool v,string s){if(!v)throw new Exception(s);Console.WriteLine("PASS "+s);}
@@ -88,3 +88,4 @@ namespace DungeonVisionBot
   }
  }
 }
+
