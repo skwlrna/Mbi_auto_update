@@ -437,7 +437,16 @@ internal sealed partial class ScenarioEngine
         var titleRoi = ScaleAbyssResultRoi(new Rectangle(150, 610, 300, 65), frame.Size);
         var noticeRoi = ScaleAbyssResultRoi(new Rectangle(200, 915, 420, 70), frame.Size);
         var title = await _abyssResultOcr.FindCompactLabelAsync(frame, titleRoi, "우연한 만남", ct);
-        var notice = await _abyssResultOcr.FindCompactLabelAsync(frame, noticeRoi, "모든 플레이어가 모이면 자동 입장합니다.", ct);
+        // Compact-label OCR accepts at most three words; this observed notice has six.
+        var notice = DetectionResult.NotFound;
+        foreach (int scale in new[] { 1, 2 })
+        {
+            var lines = await _abyssResultOcr.ReadLinesAsync(frame, noticeRoi, scale, ct);
+            notice = lines.FirstOrDefault(line => line.Found && noticeRoi.Contains(line.Center) &&
+                FuzzyText.Normalize(line.ReadText ?? "").Equals(
+                    FuzzyText.Normalize("모든 플레이어가 모이면 자동 입장합니다."), StringComparison.Ordinal));
+            if (notice.Found) break;
+        }
         DiagnosticObserveDetection("abyss_recruitment_title", title);
         DiagnosticObserveDetection("abyss_recruitment_notice", notice);
         return title.Found && notice.Found && titleRoi.Contains(title.Center) && noticeRoi.Contains(notice.Center);

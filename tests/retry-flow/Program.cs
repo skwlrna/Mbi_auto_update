@@ -21,7 +21,7 @@ namespace DungeonVisionBot
   public static bool Recruiting;
   public static IReadOnlyList<DetectionResult> Lines=Array.Empty<DetectionResult>();
   public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)=>Task.FromResult(Recruiting ? new DetectionResult(true,r,1,t) : DetectionResult.NotFound);
-  public Task<IReadOnlyList<DetectionResult>> ReadLinesAsync(Bitmap b,Rectangle r,int scale,CancellationToken ct)=>Task.FromResult(Lines);
+  public Task<IReadOnlyList<DetectionResult>> ReadLinesAsync(Bitmap b,Rectangle r,int scale,CancellationToken ct)=>Task.FromResult<IReadOnlyList<DetectionResult>>(Recruiting ? new[]{new DetectionResult(true,r,1,"모든 플레이어가 모이면 자동 입장합니다.")} : Lines);
  }
  class Detector {public bool Hallucination;public Task<DetectionResult> DetectAsync(string id,Bitmap b,CancellationToken ct)=>Task.FromResult(Hallucination && id=="abyss_loot_hallucination_stone" ? new DetectionResult(true,new(100,300,40,40),.95,null) : DetectionResult.NotFound);}
  class Settings {public int PollIntervalMs=1,ClickSettleMs=1;}
