@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.2.82",
+  "purpose": "crafting_shortage_popup",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "배포까지 계속 진행해",
+  "requestedAtKst": "2026-11-02",
+  "sourcePullRequest": 351,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User requested deployment of PR #351. Implementation full Windows CI passed. Actual incident OCR replay and live game verification remain incomplete. Exact main CI, packaging regressions, startup smoke, checksum and rollback gates required."
+}
