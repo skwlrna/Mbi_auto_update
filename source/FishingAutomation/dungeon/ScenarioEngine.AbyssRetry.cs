@@ -429,18 +429,52 @@ internal sealed partial class ScenarioEngine
             $"나가기/다른 던전 가기로 우회하지 않습니다. 상태={AbyssFlowStateText()}; 진단: {_lastAbyssResultDiagnostic}; {DiagnosticSummary()}");
     }
 
+    // Observed in runtime-errors/2026-11-02/...5866bf/screen.png.
+    // Both labels are required; a dark overlay or a missing result row is not evidence.
+    private async Task<bool> HasAbyssRecruitmentEvidenceAsync(Bitmap frame, CancellationToken ct)
+    {
+        _abyssResultOcr ??= new OcrRecognizer();
+        var titleRoi = ScaleAbyssResultRoi(new Rectangle(150, 610, 300, 65), frame.Size);
+        var noticeRoi = ScaleAbyssResultRoi(new Rectangle(200, 915, 420, 70), frame.Size);
+        var title = await _abyssResultOcr.FindCompactLabelAsync(frame, titleRoi, "우연한 만남", ct);
+        var notice = await _abyssResultOcr.FindCompactLabelAsync(frame, noticeRoi, "모든 플레이어가 모이면 자동 입장합니다.", ct);
+        DiagnosticObserveDetection("abyss_recruitment_title", title);
+        DiagnosticObserveDetection("abyss_recruitment_notice", notice);
+        return title.Found && notice.Found && titleRoi.Contains(title.Center) && noticeRoi.Contains(notice.Center);
+    }
+
     private async Task WaitForAbyssRetryTransitionAsync(CancellationToken ct)
     {
         AbyssRequireState(AbyssFlowState.Reentering, "다시 하기 후 재입장 전환 확인");
 
-        var timer = Stopwatch.StartNew();
         int gone = 0;
-        while (timer.Elapsed < TimeSpan.FromSeconds(30))
+        int recruitmentFrames = 0;
+        bool recruitmentConfirmed = false;
+        var lastKnown = Stopwatch.StartNew();
+        while (lastKnown.Elapsed < TimeSpan.FromSeconds(30))
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
             // Check the retry label itself so a single missing companion label cannot authorize transition.
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
+            bool recruiting = !retry.Found && await HasAbyssRecruitmentEvidenceAsync(frame, ct);
+            recruitmentFrames = recruiting ? recruitmentFrames + 1 : 0;
+            if (recruitmentFrames >= 2)
+            {
+                if (!recruitmentConfirmed)
+                {
+                    recruitmentConfirmed = true;
+                    AbyssTransitionTo(AbyssFlowState.Recruiting, "모집창 제목+자동 입장 안내 2프레임 확인");
+                    Log?.Invoke("[어비스] 파티 모집 대기 · 모집 중에는 30초 전환 제한 없음 · 추가 클릭 없음");
+                }
+                lastKnown.Restart();
+            }
+            if (recruiting)
+            {
+                gone = 0;
+                await Task.Delay(Math.Max(500, _settings.PollIntervalMs), ct);
+                continue;
+            }
             if (retry.Found) { gone = 0; }
             else
             {
@@ -454,7 +488,7 @@ internal sealed partial class ScenarioEngine
                     // retry screen absent for 3 frames and no entry/outside screen.
                     AbyssTransitionTo(
                         AbyssFlowState.CombatClearWait,
-                        "결과 화면 3회 연속 이탈 + 입장/필드 화면 아님");
+                        "모집창/결과 화면 없음 + 던전 내부 증거 3프레임 확인");
                     CommitInventoryLootRetry();
                     _abyssLootCountedForCurrentResult = false;
                     Log?.Invoke("[어비스] 다시 하기 결과 화면 이탈 확인 -> 선택 화면 없이 전투 대기로 복귀");
@@ -463,6 +497,9 @@ internal sealed partial class ScenarioEngine
             }
             await Task.Delay(Math.Max(300, _settings.PollIntervalMs), ct);
         }
-        throw new InvalidOperationException("어비스 다시 하기 후 화면 전환을 확인하지 못했습니다. 중복 클릭 없이 정지합니다.");
+        DiagnosticPersistFailure("abyss_retry_transition_unknown");
+        throw new InvalidOperationException(recruitmentConfirmed
+            ? "어비스 모집창 이후 30초 동안 모집/던전 화면을 확인하지 못했습니다. 중복 클릭 없이 정지합니다."
+            : "어비스 다시 하기 후 30초 동안 모집창/던전 화면을 확인하지 못했습니다. 중복 클릭 없이 정지합니다.");
     }
 }

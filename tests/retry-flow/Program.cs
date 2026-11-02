@@ -18,8 +18,9 @@ namespace DungeonVisionBot
  {public Point Center=>new(Bounds.X+Bounds.Width/2,Bounds.Y+Bounds.Height/2);public static DetectionResult NotFound=>new(false,Rectangle.Empty,0,null);}
  class OcrRecognizer
  {
+  public static bool Recruiting;
   public static IReadOnlyList<DetectionResult> Lines=Array.Empty<DetectionResult>();
-  public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)=>Task.FromResult(DetectionResult.NotFound);
+  public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)=>Task.FromResult(Recruiting ? new DetectionResult(true,r,1,t) : DetectionResult.NotFound);
   public Task<IReadOnlyList<DetectionResult>> ReadLinesAsync(Bitmap b,Rectangle r,int scale,CancellationToken ct)=>Task.FromResult(Lines);
  }
  class Detector {public bool Hallucination;public Task<DetectionResult> DetectAsync(string id,Bitmap b,CancellationToken ct)=>Task.FromResult(Hallucination && id=="abyss_loot_hallucination_stone" ? new DetectionResult(true,new(100,300,40,40),.95,null) : DetectionResult.NotFound);}
@@ -33,11 +34,13 @@ namespace DungeonVisionBot
  internal sealed partial class ScenarioEngine
  {
   readonly string _baseDir="abyss";readonly Settings _settings=new();readonly Definition _scenario=new();readonly Detector _detector=new();readonly Input _input=new();nint _hwnd;
-  enum AbyssFlowState {ResultConfirmed,RetryClicked,Reentering,CombatClearWait}
-  void AbyssTransitionTo(AbyssFlowState s,string r){}void AbyssRequireState(AbyssFlowState s,string r){}
+  enum AbyssFlowState {ResultConfirmed,RetryClicked,Reentering,Recruiting,CombatClearWait}
+  AbyssFlowState flow;
+  void AbyssTransitionTo(AbyssFlowState s,string r){flow=s;}void AbyssRequireState(AbyssFlowState s,string r){}
   void DiagnosticObserveDetection(string s,DetectionResult r){}void DiagnosticObserveClick(string s,Point p){}void DiagnosticPersistFailure(string s){}string DiagnosticSummary()=>"test";string AbyssFlowStateText()=>"test";
   public event Action<string>? Log;
   int captures;bool disappear;long detectedAt;
+  Stopwatch? recruitmentClock;
   Task<nint> ResolveRequiredGameWindowAsync(CancellationToken ct)=>Task.FromResult((nint)1);
   Task<bool> DetectAbyssOutsideWorkflowAsync(Bitmap b,CancellationToken ct)=>throw new Exception("retry transition must not query outside HUD");
   Task<bool> HasAbyssCombatEvidenceAsync(Bitmap b,CancellationToken ct)=>Task.FromResult(true);
@@ -45,6 +48,7 @@ namespace DungeonVisionBot
   Task<Bitmap> CaptureGameWindowAsync(CancellationToken ct)
   {
    ct.ThrowIfCancellationRequested();captures++;
+   if(recruitmentClock != null) OcrRecognizer.Recruiting = recruitmentClock.Elapsed < TimeSpan.FromSeconds(31);
    if(captures==2)detectedAt=Stopwatch.GetTimestamp();
    var b=new Bitmap(800,1000);using var g=Graphics.FromImage(b);g.Clear(Color.Black);
    if(_input.Clicks==0&&(!disappear||captures<=2))g.FillRectangle(Brushes.Lime,new Rectangle(160,905,480,85));
@@ -57,6 +61,10 @@ namespace DungeonVisionBot
    Check(AbyssOutsidePolicy.CanAccept(true,3,false,false),"outside HUD accepted only after exit is armed");
    Check(!AbyssOutsidePolicy.CanAccept(true,4,true,false),"clear screen blocks outside acceptance");
    Check(!AbyssOutsidePolicy.CanAccept(true,4,false,true),"touch prompt blocks outside acceptance");
+   var waiting=new ScenarioEngine(){recruitmentClock=Stopwatch.StartNew()};
+   using(var ct=new CancellationTokenSource(40000))await waiting.WaitForAbyssRetryTransitionAsync(ct.Token);
+   Check(waiting.recruitmentClock.Elapsed.TotalSeconds>=31 && waiting.flow==AbyssFlowState.CombatClearWait && waiting._input.Clicks==0,"recruitment beyond 30 seconds waits without clicks, then accepts combat");
+   OcrRecognizer.Recruiting=false;
    var e=new ScenarioEngine();e._detector.Hallucination=true;
    using(var frame=new Bitmap(800,1000))Check((await e.DetectAbyssLootAsync(frame,default)).Count==0,"production template winner cannot bypass protected-item gate");
    e=new();OcrRecognizer.Lines=new[]{new DetectionResult(true,new(150,300,150,20),1,"허상의 마력석")};

@@ -11,7 +11,8 @@ internal sealed partial class ScenarioEngine
         TouchClicked,
         ResultConfirmed,
         RetryClicked,
-        Reentering
+        Reentering,
+        Recruiting
     }
 
     private readonly object _abyssFlowStateLock = new();
@@ -44,6 +45,8 @@ internal sealed partial class ScenarioEngine
             (AbyssFlowState.ResultConfirmed, AbyssFlowState.RetryClicked) => true,
             (AbyssFlowState.RetryClicked, AbyssFlowState.Reentering) => true,
             (AbyssFlowState.Reentering, AbyssFlowState.CombatClearWait) => true,
+            (AbyssFlowState.Reentering, AbyssFlowState.Recruiting) => true,
+            (AbyssFlowState.Recruiting, AbyssFlowState.CombatClearWait) => true,
 
             _ => false
         };
@@ -93,7 +96,7 @@ internal sealed partial class ScenarioEngine
             }
 
             _abyssFlowState = next;
-            if (next == AbyssFlowState.CombatClearWait && previous == AbyssFlowState.Reentering)
+            if (next == AbyssFlowState.CombatClearWait && (previous == AbyssFlowState.Reentering || previous == AbyssFlowState.Recruiting))
                 _abyssCombatStartedAt = null;
         }
 
