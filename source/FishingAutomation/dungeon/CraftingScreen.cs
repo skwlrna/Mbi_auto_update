@@ -825,12 +825,15 @@ internal sealed class CraftingScreen : ICraftingScreen
         // false OCR failures. Reuse the verified existing popup instead.
         using (var existing = Capture(ct))
         {
-            if (await IsQuestMaterialPopupAsync(existing, ct) &&
-                (await _ui.Ocr.FindCompactLabelAsync(existing,
-                    new Rectangle(70, 130, 670, 780), plan.DisplayName, ct)).Found)
+            if (await IsQuestMaterialPopupAsync(existing, ct))
             {
-                Log?.Invoke("[제작] 이미 표시된 퀘스트 재료 팝업 재사용 · 추가 퀘스트 클릭 없음");
-                return;
+                await Task.Delay(300, ct);
+                using var confirmed = Capture(ct);
+                if (await IsQuestMaterialPopupAsync(confirmed, ct))
+                {
+                    Log?.Invoke("[제작] 기존 부족 재료 팝업 2프레임 확인 · 추가 퀘스트 클릭 없음");
+                    return;
+                }
             }
         }
         await CloseOverlayAsync(ct);
@@ -851,13 +854,15 @@ internal sealed class CraftingScreen : ICraftingScreen
             after,
             CraftingHubLayout.ProductionQuestPopupArea);
         // Pixel changes can come from the animated field; they do not prove a quest opened.
+        // The generic shortage dialog does not display the recipe name.
+        int stablePopupFrames = 0;
         bool verified = false;
         for (int attempt = 0; attempt < 3; attempt++)
         {
             using var popup = Capture(ct);
-            var title = await _ui.Ocr.FindCompactLabelAsync(
-                popup, new Rectangle(70, 130, 670, 780), plan.DisplayName, ct);
-            if (title.Found && await IsQuestMaterialPopupAsync(popup, ct))
+            stablePopupFrames = await IsQuestMaterialPopupAsync(popup, ct)
+                ? stablePopupFrames + 1 : 0;
+            if (stablePopupFrames >= 2)
             {
                 verified = true;
                 break;
@@ -865,8 +870,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             await Task.Delay(300, ct);
         }
         if (!verified)
-            throw Fail(after, "목표 제작 퀘스트 제목/재료 팝업 미확인 · 재료 OCR 및 추가 클릭 중단");
-        Log?.Invoke($"[제작] 제작 퀘스트 제목/재료 팝업 확인 · 화면 변화 {ratio:P1} · 후속 재료행 OCR 진행");
+            throw Fail(after, "부족 재료 팝업 연속 2프레임 미확인 · 재료 OCR 및 추가 클릭 중단");
+        Log?.Invoke($"[제작] 부족 재료 팝업 2프레임 확인 · 화면 변화 {ratio:P1} · 후속 재료행 OCR 진행");
     }
 
     public async Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
