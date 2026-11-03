@@ -944,7 +944,17 @@ public sealed partial class MainForm
                 persistMaterialHold: batchStore.RecordMaterialHold,
                 clearMaterialHold: batchStore.ClearMaterialHold,
                 verifySafePreInputRead: VerifyReadQuarantineAsync,
-                reportReadQuarantine: RecordReadQuarantineDiagnostic), token);
+                reportReadQuarantine: RecordReadQuarantineDiagnostic,
+                reportLongWaitAdvisory: message => Ui(() =>
+                {
+                    // Observation only: do not count a warning as manager progress.
+                    _productionProgressSummary = message;
+                    _log.Write(message);
+                    SetStatus("다중가공 장기 보류 · 재확인 정책 유지", Color.DarkOrange);
+                    RefreshProductionDashboard();
+                    // Respect existing notifier configuration. No screenshot or error upload.
+                    _ = _notifier.SendAlertAsync("다중가공 장기 보류", message, false);
+                })), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
