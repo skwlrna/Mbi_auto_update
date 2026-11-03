@@ -12,6 +12,8 @@ try
         Console.WriteLine("PASS " + label);
     }
 
+    CraftingRestartSafetyTests.Run(Check);
+
     DateTimeOffset ocrAdvisoryNow = new(2026, 11, 3, 0, 0, 0, TimeSpan.Zero);
     var ocrTracker = new CraftingOcrWaitAdvisoryTracker(() => ocrAdvisoryNow);
     Check(ocrTracker.NoteDeferred(0) is null && ocrTracker.NoteDeferred(1) is null,
