@@ -29,6 +29,8 @@ jobs:
         run: dotnet run --project tests/offline-simulation/OfflineSimulation.csproj -c Release
       - name: Run existing start-preflight regressions
         run: dotnet run --project tests/start-preflight/Regression.csproj -c Release
+      - name: Verify legacy publisher event isolation (no release side effects)
+        run: python3 -m unittest discover -s tests/release -p 'test_legacy_release_event_isolation.py' -v
 
   windows-build:
     name: Windows build and isolated regressions
