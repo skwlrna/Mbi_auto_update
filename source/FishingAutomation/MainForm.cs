@@ -16,6 +16,10 @@ public sealed partial class MainForm : Form
     private readonly RuntimeErrorUploader _errorUploader;
     private readonly WatchdogClient _watchdog;
     private readonly SchedulerRunMonitor _schedulerMonitor = new();
+    // Observes active mode/worker flags only. Does not intercept or modify
+    // the existing F9 start, F10 stop, retry or game input pipeline.
+    private readonly MacroStabilitySupervisor _stability = new(
+        emit: MacroStabilityJournal.Append);
     private DateTime _lastFishingProgressAt = DateTime.Now;
     private bool _fishingStallAlerted;
     private string _lastFishingStatus = "준비";
@@ -159,6 +163,7 @@ public sealed partial class MainForm : Form
         _log.Line += s => Ui(() =>
         {
             _schedulerMonitor.ObserveLog(s);
+            _stability.ObserveActivity(s);
             _logBox.AppendText(s + Environment.NewLine);
             if (_logBox.TextLength > 35000) _logBox.Text = _logBox.Text[^22000..];
             _logBox.SelectionStart = _logBox.TextLength;
@@ -209,6 +214,16 @@ public sealed partial class MainForm : Form
         _uiTimer.Tick += (_, _) =>
         {
             _watchdog.Touch();
+            MacroStableMode observedMode = _schedulerRunning
+                ? MacroStableMode.Scheduler
+                : _multiAlteringRunning ? MacroStableMode.MultiAltering
+                    : MacroStabilitySupervisor.FromUi(_activeMode ?? "");
+            bool observedBusy = _schedulerRunning || _multiAlteringRunning ||
+                                DungeonRunning;
+            _stability.ObserveRuntime(observedMode, observedBusy);
+            if (_stability.Tick())
+                _log.Write("[안정화] 15분 활동 정체 관찰 · " +
+                    "추가 게임 입력/자동 재시작 없음 · 실제 진행 여부는 별도 확인 필요");
             // The UI heartbeat and sub-worker processing watchdog already exist.
             // This is advisory only: no automatic restart or F10 on quiet work.
             if (_schedulerMonitor.Observe(TimeSpan.FromMinutes(15)))
