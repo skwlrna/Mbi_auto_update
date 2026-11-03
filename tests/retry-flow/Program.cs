@@ -42,6 +42,7 @@ namespace DungeonVisionBot
   int captures;bool disappear;long detectedAt;
   Stopwatch? recruitmentClock;
   bool loading;
+  bool competitionPanel;
   Task<nint> ResolveRequiredGameWindowAsync(CancellationToken ct)=>Task.FromResult((nint)1);
   Task<bool> DetectAbyssOutsideWorkflowAsync(Bitmap b,CancellationToken ct)=>throw new Exception("retry transition must not query outside HUD");
   Task<bool> HasAbyssCombatEvidenceAsync(Bitmap b,CancellationToken ct)=>Task.FromResult(!loading || recruitmentClock!.Elapsed >= TimeSpan.FromSeconds(31));
@@ -53,6 +54,15 @@ namespace DungeonVisionBot
    if(captures==2)detectedAt=Stopwatch.GetTimestamp();
    var b=new Bitmap(800,1000);using var g=Graphics.FromImage(b);g.Clear(Color.Black);
    if(recruitmentClock==null&&_input.Clicks==0&&(!disappear||captures<=2))g.FillRectangle(Brushes.Lime,new Rectangle(160,905,480,85));
+   if(competitionPanel&&_input.Clicks==0)
+   {
+    // Synthetic variant of the observed 2026-11-02 competition mission screen.
+    // A full-width green bar by itself must never trigger this pathway.
+    g.FillRectangle(Brushes.Goldenrod,new Rectangle(335,113,130,90)); // crest
+    g.FillRectangle(Brushes.Goldenrod,new Rectangle(313,232,182,31)); // competition title
+    g.FillRectangle(Brushes.White,new Rectangle(363,318,84,22)); // mission gift
+    g.FillRectangle(Brushes.White,new Rectangle(377,941,46,16)); // confirm text
+   }
    return Task.FromResult(b);
   }
   static void Check(bool v,string s){if(!v)throw new Exception(s);Console.WriteLine("PASS "+s);}
@@ -62,6 +72,18 @@ namespace DungeonVisionBot
    Check(AbyssOutsidePolicy.CanAccept(true,3,false,false),"outside HUD accepted only after exit is armed");
    Check(!AbyssOutsidePolicy.CanAccept(true,4,true,false),"clear screen blocks outside acceptance");
    Check(!AbyssOutsidePolicy.CanAccept(true,4,false,true),"touch prompt blocks outside acceptance");
+   using(var falseMission=new Bitmap(800,1000))
+   {
+    using(var g=Graphics.FromImage(falseMission)){g.Clear(Color.Black);g.FillRectangle(Brushes.Lime,new Rectangle(160,920,480,58));}
+    var rejected=new ScenarioEngine();
+    Check(!await rejected.TryAcknowledgeRetryCompetitionMissionAsync(falseMission,default)&&rejected._input.Clicks==0,
+        "single green bar without mission crest/title/gift cannot authorize confirmation");
+   }
+   var competition=new ScenarioEngine(){competitionPanel=true};
+   using(var ct=new CancellationTokenSource(7000))
+    await competition.WaitForAbyssRetryTransitionAsync(ct.Token);
+   Check(competition._input.Clicks==1&&competition.flow==AbyssFlowState.CombatClearWait,
+       "post-retry competition mission confirmation once then combat evidence");
    var waiting=new ScenarioEngine(){recruitmentClock=Stopwatch.StartNew()};
    using(var ct=new CancellationTokenSource(40000))await waiting.WaitForAbyssRetryTransitionAsync(ct.Token);
    Check(waiting.recruitmentClock.Elapsed.TotalSeconds>=31 && waiting.flow==AbyssFlowState.CombatClearWait && waiting._input.Clicks==0,"recruitment beyond 30 seconds waits without clicks, then accepts combat");
