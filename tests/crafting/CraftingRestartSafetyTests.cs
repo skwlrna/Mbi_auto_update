@@ -54,13 +54,13 @@ internal static class CraftingRestartSafetyTests
                 check(recovered.ReviewRequired?.PendingBatch is null,
                     "acknowledged NEW run never imports old craft attempt or credit");
 
-                recovered.BeginBatch(0, first, 2, 60, 2);
+                recovered.BeginBatch(0, first, 10, 60, 10);
                 bool missingProofBlocked = false;
                 try { recovered.ConfirmBatch(0, first, 61); }
                 catch (InvalidOperationException) { missingProofBlocked = true; }
                 check(missingProofBlocked && recovered.ReviewRequired?.PendingBatch is not null,
                     "insufficient post-click inventory evidence cannot clear pending intent");
-                recovered.ConfirmBatch(0, first, 62);
+                recovered.ConfirmBatch(0, first, 70);
                 recovered.MarkPlanCompleted(0, first);
                 recovered.FinishQueue(1, 0);
                 check(recovered.ReviewRequired is null,
@@ -70,8 +70,8 @@ internal static class CraftingRestartSafetyTests
             using (var another = new CraftingRestartSafetyJournal(directory))
             {
                 another.StartFresh(new[] { first, second }, identity);
-                another.BeginBatch(0, first, 1, 1, 1);
-                another.ConfirmBatch(0, first, 2);
+                another.BeginBatch(0, first, 10, 1, 10);
+                another.ConfirmBatch(0, first, 11);
                 another.MarkPlanCompleted(0, first);
                 another.MarkMaterialSkipped(1, second);
                 another.FinishQueue(1, 1);
