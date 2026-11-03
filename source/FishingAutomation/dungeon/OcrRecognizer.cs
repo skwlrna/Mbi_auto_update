@@ -9,6 +9,9 @@ namespace DungeonVisionBot;
 internal sealed class OcrRecognizer
 {
     private readonly OcrEngine _engine;
+    // WinRT OCR engines do not accept overlapping RecognizeAsync calls.
+    // Keep processing outside the gate; serialize only the engine invocation.
+    private readonly SemaphoreSlim _engineGate = new(1, 1);
 
     public OcrRecognizer()
     {
@@ -73,7 +76,7 @@ internal sealed class OcrRecognizer
             using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
             using var prepared = PrepareAlteringText(crop, scale, mode.Threshold);
             using var software = await ToSoftwareBitmapAsync(prepared);
-            var result = await _engine.RecognizeAsync(software);
+            var result = await RecognizeEngineSafeAsync(software, ct);
             ct.ThrowIfCancellationRequested();
             string normalized = FishingAutomation.AlteringText.Normalize(wanted);
             foreach (var line in result.Lines)
@@ -144,7 +147,7 @@ internal sealed class OcrRecognizer
         using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
         using var prepared = scale == 1 ? (Bitmap)crop.Clone() : ResizeNearest(crop, crop.Width * scale, crop.Height * scale);
         using var software = await ToSoftwareBitmapAsync(prepared);
-        var ocr = await _engine.RecognizeAsync(software);
+        var ocr = await RecognizeEngineSafeAsync(software, ct);
         ct.ThrowIfCancellationRequested();
 
         string wantedNorm = FuzzyText.Normalize(wanted);
@@ -197,7 +200,7 @@ internal sealed class OcrRecognizer
             using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
             using var prepared = PrepareAlteringText(crop, 3, threshold);
             using var software = await ToSoftwareBitmapAsync(prepared);
-            var result = await _engine.RecognizeAsync(software);
+            var result = await RecognizeEngineSafeAsync(software, ct);
             ct.ThrowIfCancellationRequested();
 
             foreach (var line in result.Lines)
@@ -246,7 +249,7 @@ internal sealed class OcrRecognizer
             ? (Bitmap)crop.Clone()
             : ResizeNearest(crop, crop.Width * scale, crop.Height * scale);
         using var software = await ToSoftwareBitmapAsync(prepared);
-        var ocr = await _engine.RecognizeAsync(software);
+        var ocr = await RecognizeEngineSafeAsync(software, ct);
         ct.ThrowIfCancellationRequested();
 
         var lines = new List<DetectionResult>();
@@ -279,7 +282,7 @@ internal sealed class OcrRecognizer
         using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
         using var prepared = scale == 1 ? (Bitmap)crop.Clone() : ResizeNearest(crop, crop.Width * scale, crop.Height * scale);
         using var software = await ToSoftwareBitmapAsync(prepared);
-        var ocr = await _engine.RecognizeAsync(software);
+        var ocr = await RecognizeEngineSafeAsync(software, ct);
         ct.ThrowIfCancellationRequested();
 
         foreach (var line in ocr.Lines)
@@ -301,6 +304,20 @@ internal sealed class OcrRecognizer
             return new DetectionResult(true, bounds, 1.0, lineText);
         }
         return DetectionResult.NotFound;
+    }
+
+    private async Task<OcrResult> RecognizeEngineSafeAsync(SoftwareBitmap bitmap, CancellationToken ct)
+    {
+        await _engineGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            return await _engine.RecognizeAsync(bitmap);
+        }
+        finally
+        {
+            _engineGate.Release();
+        }
     }
 
     private static Bitmap ResizeNearest(Bitmap src, int w, int h)
