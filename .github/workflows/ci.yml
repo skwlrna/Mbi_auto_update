@@ -132,6 +132,13 @@ jobs:
           python -m unittest discover -s tests/release -p 'test_v3285_auto_update_policy.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'V3.2.85 release policy failed' }
 
+      - name: V3.2.86 phase1 stability release policy
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/release -p 'test_v3286_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.86 release policy failed' }
+
       - name: V3.2.84 Home End fallback release policy
         shell: pwsh
         run: |
