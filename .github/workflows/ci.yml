@@ -937,26 +937,41 @@ jobs:
               $managerEntry -notmatch 'WaitForManagedProcessingNavigationReadyAsync' -or
               $managerEntry -notmatch 'await ClickLabelAsync\("가공"' -or
               $visualWait -match 'FindAsync\(|FindFacilityHeaderAsync\(' -or
-              $screen -notmatch 'HasManagedKEntryFieldHudVisual' -or
               $screen -notmatch 'HasFixedProcessingHubVisual' -or
-              $managerEntry -notmatch 'CanAuthorizeManagedKEntry' -or
-              $managerEntry -notmatch 'DetectManagedWorldHudTemplates' -or
-              $managerEntry -notmatch 'IsManagedKReentryWithinLimit' -or
-              $managerEntry -notmatch 'Stopwatch.StartNew\(\)' -or
-              $managerEntry -notmatch 'previousHud = currentHud' -or
+              $managerEntry -notmatch 'HasManagedKISpaceFieldHudAsync' -or
+              $managerEntry -notmatch 'CanAuthorizeManagedKSpaceFallback' -or
               $managerEntry -notmatch 'Task.Delay\(180, ct\)' -or
-              $screen -notmatch 'ManagedKReentryHudTimeout = TimeSpan.FromSeconds\(3\)' -or
-              $managerEntry -notmatch 'HasManagedKEntryFieldHudVisual' -or
-              $managerEntry -notmatch 'CanAuthorizeManagedKFieldFallback' -or
+              $managerEntry -notmatch 'Stopwatch.StartNew\(\)' -or
               $managerEntry -notmatch 'VerifyManagedKFrameAsync' -or
               $managerEntry -notmatch 'TapVerifiedFreshAsync' -or
               $managerEntry -notmatch 'RequireManagedIdleAsync' -or
-              $screen -notmatch 'CanAuthorizeManagedKFieldFallback' -or
-              $screen -notmatch 'abyss/templates/outside_home_v75.png' -or
-              $screen -notmatch 'abyss/templates/outside_end_v75.png' -or
-              $screen -notmatch 'abyss/templates/outside_k_v75.png' -or
-              $screen -notmatch 'abyss/templates/outside_i_v75.png') {
-              throw 'V3.2.0 F9 K requires consecutive 3/4 HUD or guarded K/I+field evidence, with modal/menu veto and fresh CLI idle before input'
+              $managerEntry -notmatch 'HasManagedKEntryBlockingModal' -or
+              $managerEntry -notmatch 'HasVisibleFacilityPanelWithoutEntryProof' -or
+              $screen -notmatch 'HasManagedKIShortcutGlyphs' -or
+              $screen -notmatch 'managed_k_key.png' -or
+              $screen -notmatch 'managed_i_key.png') {
+              throw 'F9 K requires K/I/Space on two fresh frames, final scene check, popup/menu veto and fresh CLI idle before input'
+          }
+          # The managed K-entry field-proof section must NOT retain
+          # Home/End/ESC or the previous 3-of-4 outside HUD authorization.
+          # Other Abyss/legacy read-only detectors may continue using them.
+          $f9FieldGate = [regex]::Match($managerEntry,
+              'Func<Bitmap, Task<bool>>\? verifyManagedK = null;[\s\S]*?(?=await RequireManagedIdleAsync\(plan, directive, "가공 메뉴 K 직전")').Value
+          $f9FinalGate = [regex]::Match($screen,
+              'private async Task<bool> VerifyManagedKFrameAsync[\s\S]*?(?=\r?\n    internal static bool HasManagedFoodCraftingNavigationVisual)').Value
+          $f9WorldScene = [regex]::Match($screen,
+              'private async Task<ManagedProductionSceneKind> ClassifyManagedProductionSceneAsync[\s\S]*?(?=\r?\n    private async Task EnterFacilityAsync)').Value
+          if ([string]::IsNullOrWhiteSpace($f9FieldGate) -or
+              [string]::IsNullOrWhiteSpace($f9FinalGate) -or
+              [string]::IsNullOrWhiteSpace($f9WorldScene) -or
+              $f9FieldGate -notmatch 'HasManagedKISpaceFieldHudAsync' -or
+              $f9FieldGate -notmatch 'CanAuthorizeManagedKSpaceFallback' -or
+              $f9FieldGate -match 'DetectManagedWorldHudTemplates|CanAuthorizeManagedKEntry|CanAuthorizeManagedKFieldFallback|CanAuthorizeManagedKHomeEndFieldFallback|FindManagedWorldHudKeysAsync' -or
+              $f9FinalGate -notmatch 'ClassifyManagedProductionSceneAsync' -or
+              $f9FinalGate -match 'DetectManagedWorldHudTemplates|HasManagedKEntryFieldHudVisual|DetectManagedWorldHudKeys' -or
+              $f9WorldScene -notmatch 'HasManagedKISpaceFieldHudAsync' -or
+              $f9WorldScene -match 'DetectManagedWorldHudTemplates|DetectManagedWorldHudKeys|HasManagedKEntryFieldHudVisual') {
+              throw 'F9 managed field must use only fixed K/I glyphs plus Space in preflight, classification and final capture'
           }
           # Current F9 field proof must not reintroduce any minimap rim fallback.
           if ($screen -match 'HasManagedBlueMinimapRingVisual|HasManagedKEntryNonGoldFieldHudVisual' -or
