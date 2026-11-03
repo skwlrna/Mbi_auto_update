@@ -477,10 +477,11 @@ internal sealed partial class ScenarioEngine
                 recruitmentFrames = 0;
                 continue;
             }
-            if (competitionConfirmationClicked &&
-                AbyssMissionCompletePolicy.HasVisualEvidence(frame))
+            if (AbyssMissionCompletePolicy.HasVisualEvidence(frame))
             {
-                // Do not click again while its dismissal is unconfirmed.
+                // Even when the exact label/OCR is unconfirmed, this is NOT
+                // evidence of dungeon combat. Wait without extra input until
+                // the special panel is explicitly handled or disappears.
                 gone = 0;
                 await Task.Delay(Math.Max(300, _settings.PollIntervalMs), ct);
                 continue;
