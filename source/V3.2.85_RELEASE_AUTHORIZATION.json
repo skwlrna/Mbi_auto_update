@@ -16,9 +16,9 @@
   ],
   "realGameTested": false,
   "postUpdateGameTestingPending": true,
-  "offlineRegressionPassed": false,
+  "offlineRegressionPassed": true,
   "rollbackProvided": true,
   "mainCiRequired": true,
   "rolloutMode": "user_requested_unverified_release",
-  "note": "Six reviewed PRs were examined. Offline combined CI for the integrated empty-bottle fix and the release candidate is pending at candidate creation. This flag must be changed only after passing. Live game input behavior remains unverified. Exact main CI, Windows compile, binary smoke, checksum, and rollback are mandatory."
+  "note": "Exact V3.2.85 candidate commit 5fed35ed9c866e6a09967334fef8e5372d9ab4a9 passed full Windows production CI #41570785097. Integrated empty-bottle code also passed full Windows CI #41570093529; merged baseline passed #41569377616. Final main SHA must independently pass production CI before any public release. Real-game validation is still pending; rollback provided."
 }
