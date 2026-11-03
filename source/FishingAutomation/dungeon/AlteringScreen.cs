@@ -1454,9 +1454,35 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         }
 
                         if (!withinLimit)
+                        {
+                            // The old upper-key-dependent route has exhausted
+                            // its 3-second observation window. Try ONE bounded,
+                            // independent K/I/Space check on two new frames.
+                            bool spaceFirst = await HasManagedKISpaceFieldHudAsync(
+                                freshField, ct);
+                            if (spaceFirst)
+                            {
+                                await Task.Delay(180, ct);
+                                using var secondSpace = Capture(ct);
+                                bool spaceSecond = await HasManagedKISpaceFieldHudAsync(
+                                    secondSpace, ct);
+                                if (CanAuthorizeManagedKISpaceFallback(
+                                        spaceFirst, spaceSecond,
+                                        HasManagedKEntryBlockingModal(secondSpace),
+                                        HasFixedProcessingHubVisual(secondSpace) ||
+                                        HasManagedProcessingBottomTabVisual(secondSpace) ||
+                                        HasManagedFoodCraftingNavigationVisual(secondSpace)))
+                                {
+                                    verifyManagedK = last => VerifyManagedKFrameAsync(
+                                        last, "K/I/Space", currentKeys, ct);
+                                    Log?.Invoke("[자동 가공] K 화면 인증 · K/I/Space 별도 2프레임 확인 · 기존 CLI 안전 검증 유지");
+                                    break;
+                                }
+                            }
                             Fail(freshField,
-                                "관리 가공 K 재진입 상단 Home/End/ESC + 하단 K/I 연속 2프레임 인증 실패 · " +
-                                "3초 재관찰 후 입력 없이 정지 · HUD/단축키/팝업 진단 참조");
+                                "관리 가공 K 재진입 · 상단 단축키 3초 인증 및 K/I/Space 2프레임 보완 인증 실패 · " +
+                                "입력 없이 정지 · HUD/단축키/팝업 진단 참조");
+                        }
                         previousHud = currentHud;
                         previousField = currentField;
                         previousKeys = currentKeys;
@@ -2658,9 +2684,49 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             $"정확 OCR Home={home is not null},End={end is not null},ESC={escape is not null}");
     }
 
+    // Supplemental proof for the 2026-11-03 07:35 field capture:
+    // the lower K / I shortcut glyphs and the central "Space" label remain
+    // visible even when the Home/End/ESC glyphs score below 0.90.
+    // This is not an input permit by itself: two fresh frames, a modal/menu
+    // veto, and the managed CLI NotInDungeon/safe-idle gate are still required.
+    private async Task<bool> HasManagedKISpaceFieldHudAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (frame.Width != 800 || frame.Height != 1000 ||
+            HasManagedKEntryBlockingModal(frame) ||
+            HasFixedProcessingHubVisual(frame) ||
+            HasVisibleFacilityPanelWithoutEntryProof(frame) ||
+            HasManagedProcessingBottomTabVisual(frame) ||
+            HasManagedFoodCraftingNavigationVisual(frame) ||
+            HasManagedSceneReceiptResultVisual(frame))
+            return false;
+
+        var hud = DetectManagedWorldHudTemplates(frame);
+        if (!hud.KFound || !hud.IFound) return false;
+
+        // Narrow, fixed world shortcut ROI. OCR must match the actual Space
+        // label, never chat text or a generic green circle in the scenery.
+        var space = await _ui.FindCompactAsync(
+            frame, new Rectangle(396, 879, 79, 48), "Space", ct);
+        return space is not null;
+    }
+
+    internal static bool CanAuthorizeManagedKISpaceFallback(
+        bool firstSpaceField, bool secondSpaceField,
+        bool popupVisible, bool processingMenuVisible)
+        => firstSpaceField && secondSpaceField &&
+           !popupVisible && !processingMenuVisible;
+
     private async Task<bool> VerifyManagedKFrameAsync(Bitmap frame, string route,
         ManagedWorldHudKeys expectedKeys, CancellationToken ct)
     {
+        if (route == "K/I/Space")
+        {
+            // The new fallback must re-read the CURRENT frame, not inherit
+            // a previously recognized HUD. Existing negative screen gates
+            // are preserved; caller independently rechecks CLI idle.
+            return await HasManagedKISpaceFieldHudAsync(frame, ct);
+        }
+
         // The last frame must positively prove world HUD; a template score alone
         // can also occur in a dungeon or while another production UI is present.
         if (await ClassifyManagedProductionSceneAsync(frame, ct) !=
