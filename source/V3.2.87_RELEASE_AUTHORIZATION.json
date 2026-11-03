@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.87",
+  "purpose": "f9_ki_space_single_field_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "진행해",
+  "requestedAtKst": "2026-11-03",
+  "sourcePullRequest": 371,
+  "sourcePullRequests": [
+    371
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "The user's instruction to proceed after CI completion authorizes merging PR #371 and preparing the next official release. The F9 field classifier uses K/I fixed glyphs plus Space OCR; existing CLI, menu and modal vetoes remain. This is not live-game evidence. Public release requires successful exact-main Windows CI, source and binary hashes, rollback assets, release checks and duplicate-tag prevention."
+}
