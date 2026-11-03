@@ -240,13 +240,13 @@ public sealed partial class MainForm
                             // screen and CLI idle before emitting this type.
                             // Never mark the queued recipe as completed/skipped.
                             ct.ThrowIfCancellationRequested();
+                            string? reportedWait = longOcrWaitNotices.TryGetValue(index, out var notice)
+                                ? notice : null;
                             Ui(() =>
                             {
                                 _productionProgressSummary =
-                                    longOcrWaitNotices.TryGetValue(index, out var longWait)
-                                        ? longWait
-                                        : $"순차 {index + 1}/{queue.Count} · " +
-                                          $"{failedPlan.DisplayName} OCR 오류 재시도 대기";
+                                    reportedWait ?? $"순차 {index + 1}/{queue.Count} · " +
+                                    $"{failedPlan.DisplayName} OCR 오류 재시도 대기";
                                 _log.Write($"[제작][순환 재시도] {failedPlan.DisplayName} · " +
                                     "정상 제작 1종 진행 후 재시도 예약 · " +
                                     recognitionError.Message);
