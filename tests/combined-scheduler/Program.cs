@@ -38,6 +38,27 @@ static AlteringWork WoodWork(long seconds, bool completed = false)
  Assert(AbyssClearEvidencePolicy.Confirmed(clearFrames) && clearFrames == 2,
      "two fresh paired title-and-prompt frames confirm actual clear");
 
+// Passive Abyss recruitment/loading monitor: 15-minute warnings are only
+// diagnostics. Its observation cannot satisfy any clear/entry/exit gate.
+DateTimeOffset abyssWaitClock = new(2026, 11, 4, 0, 0, 0, TimeSpan.Zero);
+var passiveAbyssWait = new AbyssPassiveWaitAdvisory(() => abyssWaitClock);
+Assert(passiveAbyssWait.Observe(AbyssPassiveWaitKind.UnconfirmedLoading) is null,
+    "Abyss unknown loading starts a warning clock without new game input");
+abyssWaitClock += TimeSpan.FromMinutes(14);
+Assert(passiveAbyssWait.Observe(AbyssPassiveWaitKind.UnconfirmedLoading) is null,
+    "Abyss loading does not warn before 15 minutes");
+abyssWaitClock += TimeSpan.FromMinutes(1);
+Assert(passiveAbyssWait.Observe(AbyssPassiveWaitKind.UnconfirmedLoading) == TimeSpan.FromMinutes(15) &&
+       passiveAbyssWait.Observe(AbyssPassiveWaitKind.UnconfirmedLoading) is null,
+    "Abyss unconfirmed loading warns once without retrying a click");
+abyssWaitClock += TimeSpan.FromHours(1);
+Assert(passiveAbyssWait.Observe(AbyssPassiveWaitKind.Recruiting) is null,
+    "verified recruitment starts a separate passive timer");
+abyssWaitClock += TimeSpan.FromMinutes(15);
+Assert(passiveAbyssWait.Observe(AbyssPassiveWaitKind.Recruiting) == TimeSpan.FromMinutes(15) &&
+       passiveAbyssWait.Observe(AbyssPassiveWaitKind.Recruiting) is null,
+    "Abyss recruitment emits one bounded diagnostic without forcing timeout");
+
 // Regression for 2026-10-12 V3.1.87 live report: the game menu was
 // visibly open, but step 1 searched only the CLOSED-menu ESC template
 // until it timed out. Two independent frames of the Abyss item in the
@@ -542,7 +563,13 @@ try
         "quiet activity causes one advisory but never cancels or restarts work");
 
     monitor.ObserveLog("[12:34] [제작] 검증된 제작 화면 진행");
-    monitorClock = monitorClock.AddMinutes(15);
+    // Repeated OCR retry and wait-notification logs are not proof that the
+    // game crafted anything. They must not reset the supervisor warning.
+    monitorClock = monitorClock.AddMinutes(14);
+    monitor.ObserveLog("[제작][순환 재시도] 동일 품목 OCR 실패, 작업 보류");
+    monitor.ObserveLog("[제작][OCR 장기 대기 알림] 제작 확정 없음");
+    monitor.ObserveLog("[어비스][장기 대기 알림] 모집/로딩 시간 제한 없음");
+    monitorClock = monitorClock.AddMinutes(1);
     Assert(monitor.Observe(TimeSpan.FromMinutes(15)),
         "new crafting activity resets the advisory window");
     monitor.Advance("handoff");
