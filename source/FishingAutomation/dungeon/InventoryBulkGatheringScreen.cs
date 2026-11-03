@@ -18,6 +18,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
     private readonly GatheringVision _navigationVision = new();
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("채집");
+    private bool _requiresEmptyBottle;
+    private static readonly Rectangle EmptyBottleMessageArea = new(217, 656, 391, 84);
+    private static readonly Rectangle EmptyBottleItemArea = new(205, 743, 214, 72);
+    private static readonly Rectangle EmptyBottleCountArea = new(512, 746, 99, 62);
+    private static readonly Rectangle EmptyBottleCancelArea = new(342, 890, 119, 65);
 
     // Fixed 800x1000 client coordinates confirmed from the live profile/life-skill UI.
     private static readonly Point ProfileLifeSkillPoint = new(400, 944);
@@ -79,6 +84,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 $"{plan.DisplayName}은(는) {kind} 재료라 생활 스킬 자동 채집을 시작할 수 없습니다.");
         }
 
+        _requiresEmptyBottle = source.RequiresEmptyBottle;
         _stage.Move(ProductionStage.OpenHub, $"생활 스킬 · {source.Category}");
         Log?.Invoke(
             $"[대량 채집] 생활 스킬 100회 우선 · 생활 스킬 전용 · {plan.DisplayName} → {source.Category}/{source.TargetName}");
@@ -388,6 +394,145 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         return true;
     }
 
+    // Exact live 2026-11-03 screenshot: an ESC-labelled "취소" button,
+    // "퀘스트를 위해 필요한 아이템이 없습니다" title, and "빈 병 0/1".
+    // Title, item, amount and cancel must ALL be present on two fresh frames.
+    private async Task<bool> HasEmptyBottleShortagePopupAsync(
+        Bitmap frame, CancellationToken ct)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        var heading = await _ui.Ocr.FindTextAsync(frame, EmptyBottleMessageArea,
+            "퀘스트를 위해 필요한 아이템이 없습니다", 2, true, ct);
+        if (!heading.Found) return false;
+
+        var bottle = await _ui.FindUniqueAsync(frame, EmptyBottleItemArea,
+            "빈 병", ct, dimText: true);
+        if (bottle is null) return false;
+
+        var countLines = await _ui.Ocr.ReadLinesAsync(
+            frame, EmptyBottleCountArea, 3, ct);
+        bool zeroOfOne = countLines.Any(line =>
+            System.Text.RegularExpressions.Regex.IsMatch(
+                line.ReadText ?? "", @"0\s*[/／]\s*1"));
+        if (!zeroOfOne) return false;
+
+        var cancel = await _ui.FindCompactAsync(
+            frame, EmptyBottleCancelArea, "취소", ct);
+        return cancel is not null;
+    }
+
+    private async Task<bool> IsLifeSkillOrProfileOpenAsync(
+        Bitmap frame, CancellationToken ct)
+    {
+        var skillTitle = await _ui.FindCompactAsync(
+            frame, new Rectangle(10, 24, 240, 95), "생활 스킬", ct);
+        if (skillTitle is not null) return true;
+
+        // ESC from the life-skill list may expose its original profile page.
+        // Accept the profile only with independent stat + lower life-skill label.
+        var lower = await _ui.FindCompactAsync(
+            frame, new Rectangle(245, 869, 310, 119), "생활 스킬", ct);
+        if (lower is null) return false;
+        return await _ui.FindUniqueAsync(
+                frame, new Rectangle(120, 630, 390, 250), "전투력", ct) is not null ||
+               await _ui.FindUniqueAsync(
+                frame, new Rectangle(120, 630, 390, 250), "생활력", ct) is not null;
+    }
+
+    private async Task<bool> IsEmptyBottleRecoveryFieldAsync(
+        Bitmap frame, CancellationToken ct)
+    {
+        if (frame.Width != 800 || frame.Height != 1000 ||
+            GatheringVision.HasStopButton(frame))
+            return false;
+
+        // The user confirmed K, I and Space are always visible on the ordinary
+        // world field. Their three separated HUD ROIs do not include the
+        // minimap or changing scenery.
+        bool k = _ui.FindTemplate(frame, new Rectangle(0, 820, 180, 180),
+            "abyss/templates/outside_k_v75.png", 0.72).Found;
+        bool i = _ui.FindTemplate(frame, new Rectangle(620, 800, 180, 200),
+            "abyss/templates/outside_i_v75.png", 0.72).Found;
+        if (!k || !i) return false;
+        return await _ui.FindCompactAsync(
+            frame, new Rectangle(396, 879, 79, 48), "Space", ct) is not null;
+    }
+
+    private static bool CanExitEmptyBottlePopup(
+        bool firstPopup, bool secondPopup, bool idleOutsideDungeon)
+        => firstPopup && secondPopup && idleOutsideDungeon;
+
+    private async Task TryRecoverEmptyBottleShortageAsync(CancellationToken ct)
+    {
+        if (!_requiresEmptyBottle) return;
+        using var observed = Capture(ct);
+        if (!await HasEmptyBottleShortagePopupAsync(observed, ct)) return;
+
+        await Task.Delay(180, ct);
+        using var confirmed = Capture(ct);
+        if (!await HasEmptyBottleShortagePopupAsync(confirmed, ct)) return;
+
+        var activity = await _data.ActivityAsync(ct);
+        bool outside = activity.DungeonState == "NotInDungeon" &&
+            !activity.IsDead && !activity.IsInCombat &&
+            !activity.IsAutoTraveling && !activity.IsGathering &&
+            !activity.IsFishing && !activity.IsInScenario &&
+            !activity.IsPlayingTutorial;
+        if (!CanExitEmptyBottlePopup(true, true, outside))
+            throw Fail(confirmed,
+                "빈 병 부족 안내창은 확인됐지만 채집/이동 중 또는 던전 밖 상태 미확인 · ESC 금지");
+
+        long bottles = await _data.ItemCountAsync("빈 병", ct);
+        if (bottles != 0)
+            throw Fail(confirmed,
+                $"빈 병 팝업 0/1과 CLI 재고 {bottles}개 불일치 · ESC/품목 보류 자동 처리 금지");
+
+        // The popup explicitly advertises ESC 취소. Never use an unverified
+        // ESC click if the modal vanished between OCR and input.
+        await _ui.TapVerifiedFreshAsync(0x01,
+            frame => HasEmptyBottleShortagePopupAsync(frame, ct), ct);
+        Log?.Invoke("[대량 채집][빈 병 0/1] 확인된 안내창에서 ESC 취소 1회 · 생활 스킬 화면 정리 시작");
+
+        int worldFrames = 0;
+        for (int attempt = 1; attempt <= 8; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(450, ct);
+            using var frame = Capture(ct);
+
+            bool world = await IsEmptyBottleRecoveryFieldAsync(frame, ct);
+            var freshActivity = await _data.ActivityAsync(ct);
+            bool idleField = world && GatheringSafetyPolicy.IsSafeField(freshActivity) &&
+                !freshActivity.IsGathering && !freshActivity.IsFishing &&
+                !freshActivity.IsAutoTraveling;
+            worldFrames = idleField ? worldFrames + 1 : 0;
+            if (worldFrames >= 2)
+            {
+                Log?.Invoke("[대량 채집][빈 병 부족] 일반 필드 K/I/Space 2프레임 + CLI 안전 대기 확인 · " +
+                    "현재 품목만 보류, 다른 가공으로 복귀");
+                throw new RecoveredEmptyBottleGatheringHoldException();
+            }
+            if (world) continue;
+
+            bool lifeSkill = await IsLifeSkillOrProfileOpenAsync(frame, ct);
+            if (!lifeSkill)
+                continue; // Unknown transition: observe, no blind ESC.
+
+            await Task.Delay(160, ct);
+            using var second = Capture(ct);
+            if (!await IsLifeSkillOrProfileOpenAsync(second, ct))
+                continue;
+            await _ui.TapVerifiedFreshAsync(0x01,
+                fresh => IsLifeSkillOrProfileOpenAsync(fresh, ct), ct);
+            Log?.Invoke($"[대량 채집][빈 병 부족] 생활 스킬/프로필 화면 확인 · ESC 종료 {attempt}/8");
+        }
+
+        using var failed = Capture(ct);
+        throw Fail(failed,
+            "빈 병 부족 팝업 ESC 후 K/I/Space 일반 필드 및 CLI 종료 상태 확인 실패 · 다른 작업 입력 금지");
+    }
+
     private async Task ResolveLifeSkillNearestResultAsync(
         string targetName,
         CancellationToken ct)
@@ -412,6 +557,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             poll++;
 
             var activity = await _data.ActivityAsync(ct);
+            if (_requiresEmptyBottle && (poll == 1 || poll % 3 == 0))
+                await TryRecoverEmptyBottleShortageAsync(ct);
             if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
                     $"{targetName} 가까운 위치 클릭 후 사망·대화·던전 등 진행 불가 상태가 확인되었습니다.");
@@ -765,6 +912,12 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         {
             ct.ThrowIfCancellationRequested();
             var activity = await _data.ActivityAsync(ct);
+            if (_requiresEmptyBottle &&
+                (!IsOwnedLifeSkillActivity(activity) ||
+                 !GatheringSafetyPolicy.IsSafeField(activity)) &&
+                (watch.Elapsed.TotalSeconds < 2 ||
+                 ((int)watch.Elapsed.TotalSeconds % 5 == 0)))
+                await TryRecoverEmptyBottleShortageAsync(ct);
             if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
                     "생활 스킬 100회 채집 중 사망·대화·던전 등 진행 불가 상태가 확인되어 정지합니다.");
