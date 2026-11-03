@@ -137,7 +137,9 @@ $eventCounts = @{}
 $eventsInWindow = 0
 $malformedEventCount = 0
 $reviewCodes = @('OWNER_CONFLICT_OBSERVED','QUIET_RECOVERY_LIMIT','QUIET_ACTIVITY_WARNING','START_REJECTED')
-if (Test-Path -LiteralPath $EventsPath -PathType Leaf) {
+$eventLogPresent = Test-Path -LiteralPath $EventsPath -PathType Leaf
+if (-not $eventLogPresent) { Add-UniqueCode $warnings 'STABILITY_EVENT_LOG_MISSING' }
+if ($eventLogPresent) {
     try {
         # The production log rotates at ~1MiB. No raw lines go into the report.
         Get-Content -LiteralPath $EventsPath -Tail 4096 -ErrorAction Stop | ForEach-Object {
@@ -196,6 +198,7 @@ $report = [ordered]@{
         min = $memoryMin
         max = $memoryMax
     }
+    stabilityEventLogPresent = $eventLogPresent
     stabilityEventCounts = $eventCounts
     stabilityEventsWithinWindow = $eventsInWindow
     malformedEventLinesIgnored = $malformedEventCount
