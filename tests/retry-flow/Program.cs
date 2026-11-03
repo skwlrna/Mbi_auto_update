@@ -38,6 +38,11 @@ namespace DungeonVisionBot
   AbyssFlowState flow;
   void AbyssTransitionTo(AbyssFlowState s,string r){flow=s;}void AbyssRequireState(AbyssFlowState s,string r){}
   void DiagnosticObserveDetection(string s,DetectionResult r){}void DiagnosticObserveClick(string s,Point p){}void DiagnosticPersistFailure(string s){}string DiagnosticSummary()=>"test";string AbyssFlowStateText()=>"test";
+  // The production competition modal handler lives in a different partial
+  // file. This isolated retry harness only models its absent-screen result.
+  bool _retryCompetitionConfirmationClicked;
+  Task<bool> TryAcknowledgeRetryCompetitionMissionCompleteAsync(
+      Bitmap frame, CancellationToken ct) => Task.FromResult(false);
   public event Action<string>? Log;
   int captures;bool disappear;long detectedAt;
   Stopwatch? recruitmentClock;

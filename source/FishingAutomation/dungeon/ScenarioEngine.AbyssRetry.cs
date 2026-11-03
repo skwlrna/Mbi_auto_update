@@ -413,6 +413,7 @@ internal sealed partial class ScenarioEngine
                 DiagnosticObserveClick("abyss_result_retry_fixed", click);
                 _input.ClickClientPoint(_hwnd, click);
                 _inventoryNextRoundClicked = true;
+                _retryCompetitionConfirmationClicked = false;
                 AbyssTransitionTo(AbyssFlowState.RetryClicked, "가운데 다시 하기 클릭 완료");
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
                 AbyssTransitionTo(AbyssFlowState.Reentering, "다시 하기 클릭 후 결과 화면 이탈 대기");
@@ -464,6 +465,15 @@ internal sealed partial class ScenarioEngine
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
+            // The verified retry click may lead to a separate competition
+            // completion screen with one full-width 확인 button. Handle it
+            // before OCR recruitment or dungeon evidence, and never double click.
+            if (await TryAcknowledgeRetryCompetitionMissionCompleteAsync(frame, ct))
+            {
+                gone = 0;
+                recruitmentFrames = 0;
+                continue;
+            }
             // Check the retry label itself so a single missing companion label cannot authorize transition.
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
             bool recruiting = !retry.Found && await HasAbyssRecruitmentEvidenceAsync(frame, ct);
