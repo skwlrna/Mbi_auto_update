@@ -4,6 +4,32 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+
+// An advisory is not a progress checkpoint and may never authorize input.
+DateTimeOffset holdAdvisoryNow = new(2026, 11, 3, 0, 0, 0, TimeSpan.Zero);
+var holdAdvisory = new MultiAlteringLongWaitAdvisoryTracker(() => holdAdvisoryNow);
+Check(holdAdvisory.Observe("금속 시설", "material:steel") is null &&
+      holdAdvisory.Observe("목재 시설", "safe_cli_read_quarantine") is null,
+    "long-hold monitor starts both independent facility clocks without input");
+holdAdvisoryNow += TimeSpan.FromMinutes(14);
+Check(holdAdvisory.Observe("금속 시설", "material:steel") is null &&
+      holdAdvisory.Observe("목재 시설", "safe_cli_read_quarantine") is null,
+    "no premature hold or read-quarantine notification at 14 minutes");
+holdAdvisoryNow += TimeSpan.FromMinutes(1);
+Check(holdAdvisory.Observe("금속 시설", "material:steel") == TimeSpan.FromMinutes(15) &&
+      holdAdvisory.Observe("목재 시설", "safe_cli_read_quarantine") == TimeSpan.FromMinutes(15),
+    "each unchanged hold type reports once after 15 minutes");
+holdAdvisoryNow += TimeSpan.FromMinutes(60);
+Check(holdAdvisory.Observe("금속 시설", "material:steel") is null &&
+      holdAdvisory.Observe("목재 시설", "safe_cli_read_quarantine") is null,
+    "long hold notifies once rather than flooding recurring alerts");
+Check(holdAdvisory.Observe("금속 시설", "material:iron") is null &&
+      holdAdvisory.Observe("목재 시설", "material:wood") is null,
+    "different verified hold reason restarts its own warning clock");
+holdAdvisory.Clear("금속 시설");
+Check(holdAdvisory.Observe("금속 시설", "material:iron") is null,
+    "resolved material hold clears stale notification history");
+
 // Integrated bag-weight and bottle-lack holds must persist per-lane only.
 var holdMethod = typeof(MultiAlteringBatchStore).GetMethod(
     "CanPersistMaterialHold",

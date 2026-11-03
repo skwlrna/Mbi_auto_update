@@ -297,6 +297,42 @@ internal sealed class MultiAlteringLaneDeferralTracker
     internal void Reset(string facility) => _blocked.Remove(facility);
 }
 
+// Local observation only. An unchanged material hold or safe CLI-read
+// quarantine produces one long-wait advisory; it never grants input authority.
+internal sealed class MultiAlteringLongWaitAdvisoryTracker
+{
+    private sealed record WaitState(string Reason, DateTimeOffset FirstSeen, bool Alerted);
+    private readonly Dictionary<string, WaitState> _states = new(StringComparer.Ordinal);
+    private readonly Func<DateTimeOffset> _now;
+    private readonly TimeSpan _threshold;
+
+    internal MultiAlteringLongWaitAdvisoryTracker(
+        Func<DateTimeOffset>? now = null, TimeSpan? threshold = null)
+    {
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+        _threshold = threshold ?? TimeSpan.FromMinutes(15);
+        if (_threshold <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(threshold));
+    }
+
+    internal TimeSpan? Observe(string facility, string reason)
+    {
+        var now = _now();
+        if (!_states.TryGetValue(facility, out var state) ||
+            state.Reason != reason || now < state.FirstSeen)
+        {
+            _states[facility] = new WaitState(reason, now, false);
+            return null;
+        }
+        if (state.Alerted || now - state.FirstSeen < _threshold)
+            return null;
+        _states[facility] = state with { Alerted = true };
+        return now - state.FirstSeen;
+    }
+
+    internal void Clear(string facility) => _states.Remove(facility);
+}
+
 internal sealed class MultiAlteringWaitWatchdog
 {
     private sealed record Checkpoint(
@@ -604,7 +640,8 @@ internal sealed class MultiAlteringCoordinator
         Action<AlteringPlan, MaterialSupplyHold>? persistMaterialHold = null,
         Action<AlteringPlan>? clearMaterialHold = null,
         Func<AlteringPlan, CancellationToken, Task>? verifySafePreInputRead = null,
-        Action<MultiAlteringReadQuarantineSnapshot>? reportReadQuarantine = null)
+        Action<MultiAlteringReadQuarantineSnapshot>? reportReadQuarantine = null,
+        Action<string>? reportLongWaitAdvisory = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -651,6 +688,7 @@ internal sealed class MultiAlteringCoordinator
         var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
+        var longWaitAdvisories = new MultiAlteringLongWaitAdvisoryTracker(_now);
         var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
         string? lastOptimizedOrder = null;
         // Only the explicit new-F9 mode gets one initial pass into vacant
@@ -739,11 +777,45 @@ internal sealed class MultiAlteringCoordinator
             {
                 if (PendingCount(facility) == 0)
                 {
+                    longWaitAdvisories.Clear(facility);
                     deferrals.Reset(facility);
                     continue;
                 }
                 var observed = works.Where(x => x.FacilityName == facility).ToArray();
                 Bottlenecks.ObserveWorks(facility, observed);
+
+                // Distinguish material-supply holds from safe CLI-read quarantine.
+                // Stable reason identity prevents a fresh stock count from
+                // restarting the 15-minute observation window.
+                string? waitReason = null;
+                string? waitDetail = null;
+                if (held.TryGetValue(facility, out var holdEvidence))
+                {
+                    waitReason = "material:" + MultiAlteringBatchStore.Key(holdEvidence.Plan);
+                    waitDetail = $"재료 보류 · {holdEvidence.Plan.DisplayName} · " +
+                        $"{holdEvidence.Reason.Item} {holdEvidence.Reason.Observed}/" +
+                        $"{holdEvidence.Reason.Required} · {holdEvidence.Reason.Category}";
+                }
+                else if (ReadQuarantine.HasUnverified(facility))
+                {
+                    waitReason = "safe_cli_read_quarantine";
+                    waitDetail = "사전 CLI 읽기 격리 · 입력 전 새 증거 확인 대기";
+                }
+                if (waitReason is null)
+                    longWaitAdvisories.Clear(facility);
+                else if (longWaitAdvisories.Observe(facility, waitReason)
+                    is TimeSpan waitingFor)
+                {
+                    string message = $"[다중가공][장기 보류 알림] {facility} · " +
+                        $"{waitDetail} · {waitingFor.TotalMinutes:0}분 이상 유지 · " +
+                        "게임 입력/자동 등록 없이 기존 안전 재확인만 계속";
+                    try { reportLongWaitAdvisory?.Invoke(message); }
+                    catch (Exception ex)
+                    {
+                        // An advisory failure cannot interrupt the existing batch.
+                        Log?.Invoke("[다중가공][진단 전송 실패] " + ex.Message);
+                    }
+                }
                 try
                 {
                     // An all-completed lane needs one guarded manager turn for
