@@ -385,6 +385,29 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
             true, true, true, true, true, true, false, true),
         "V3.2.50 Home+End world fallback needs both icons and independent field on 2 frames; popup/menu veto");
+    // 2026-11-03 user-confirmed world layout: K/I/Space are always shown
+    // on an ordinary field, including layouts where upper End/ESC are missed.
+    // These labels ALSO appear in Abyss, so the route still requires a fresh
+    // CLI NotInDungeon/safe idle check immediately before K.
+    Check(CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            false, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, false, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, false, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, true, false, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, true, true, false, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, true, true, true, false, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, true, true, true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFieldFallback",
+            true, true, true, true, true, true, false, true),
+        "K/I/Space fallback requires all three on 2 frames and vetoes popup/menu");
     var enter = ScreenCalls("EnterFacilityCoreAsync", 3);
     Check(Has(enter, "HasManagedKEntryBlockingModal") &&
           Has(enter, "DetectManagedWorldHudTemplates") &&
