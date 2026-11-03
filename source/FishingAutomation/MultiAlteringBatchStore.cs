@@ -596,7 +596,8 @@ internal sealed class MultiAlteringBatchStore : IDisposable
 
     private static bool CanPersistMaterialHold(string facility, MaterialSupplyHold evidence)
         => evidence.Required > 0 && evidence.Observed >= 0 &&
-           (facility == "식재료 가공 시설" && evidence.Observed < evidence.Required ||
+           (GatheringWeightLaneHoldPolicy.IsHold(evidence) ||
+            facility == "식재료 가공 시설" && evidence.Observed < evidence.Required ||
             facility == "가죽 가공 시설" &&
             LeatherRawMaterialPolicy.IsExternalRaw(evidence.Item) &&
             evidence.Category == "leather_recipe_inventory_mismatch");
