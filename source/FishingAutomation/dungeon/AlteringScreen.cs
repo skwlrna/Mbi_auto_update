@@ -1384,6 +1384,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     bool NeedsKeyOcr((int Matched, string Scores, bool KFound, bool IFound, bool HomeFound, bool EndFound) hud, bool field)
                         => hud.Matched < 3 && !(field && (hud.KFound && hud.IFound || hud.HomeFound && hud.EndFound));
                     var previousKeys = await FindManagedWorldHudKeysAsync(frame, NeedsKeyOcr(previousHud, previousField), ct);
+                    bool previousSpace = previousHud.KFound && previousHud.IFound &&
+                        await HasManagedKISpaceFieldEvidenceAsync(frame, ct);
                     int samples = 1;
                     bool menuAppeared = false;
                     while (true)
@@ -1393,6 +1395,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         var currentHud = DetectManagedWorldHudTemplates(freshField);
                         bool currentField = HasManagedKEntryFieldHudVisual(freshField);
                         var currentKeys = await FindManagedWorldHudKeysAsync(freshField, NeedsKeyOcr(currentHud, currentField), ct);
+                        bool currentSpace = currentHud.KFound && currentHud.IFound &&
+                            await HasManagedKISpaceFieldEvidenceAsync(freshField, ct);
                         samples++;
                         bool actualModal = HasManagedKEntryBlockingModal(freshField);
                         bool unexpectedMenu = HasFixedProcessingHubVisual(freshField) ||
@@ -1405,6 +1409,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
                             $"필드독립증거={previousField}→{currentField} · " +
                             $"K/I={previousHud.KFound}/{previousHud.IFound}→{currentHud.KFound}/{currentHud.IFound} · " +
+                            $"Space={previousSpace}→{currentSpace} · " +
                             $"단축키={previousKeys.Scores}→{currentKeys.Scores} · " +
                             $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
                             $"재확인={samples}프레임/{started.Elapsed.TotalSeconds:F1}초");
@@ -1440,13 +1445,19 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 previousHud.HomeFound, previousHud.EndFound,
                                 currentHud.HomeFound, currentHud.EndFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
+                        bool spaceAuthorized = CanAuthorizeManagedKISpaceFieldFallback(
+                            previousHud.KFound, previousHud.IFound, previousSpace,
+                            currentHud.KFound, currentHud.IFound, currentSpace,
+                            actualModal, unexpectedMenu);
                         bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
                         bool keysAuthorized = previousKeys.IsConsecutiveWith(currentKeys) &&
                             previousField && currentField && !actualModal && !unexpectedMenu;
-                        if (previousField && currentField &&
-                            (templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
+                        if (withinLimit &&
+                            (spaceAuthorized || previousField && currentField &&
+                             (templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized)))
                         {
-                            string route = templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
+                            string route = spaceAuthorized ? "K/I/Space" :
+                                templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
                                 homeEndAuthorized ? "Home/End" : "key-labels";
                             verifyManagedK = last => VerifyManagedKFrameAsync(last, route, currentKeys, ct);
                             Log?.Invoke($"[자동 가공] K 화면 인증 · {route} · 실제 연속 2프레임 · CLI 후 입력 프레임 재검증");
@@ -1459,6 +1470,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 "3초 재관찰 후 입력 없이 정지 · HUD/단축키/팝업 진단 참조");
                         previousHud = currentHud;
                         previousField = currentField;
+                        previousSpace = currentSpace;
                         previousKeys = currentKeys;
                     }
                     if (menuAppeared)
@@ -2658,17 +2670,60 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             $"정확 OCR Home={home is not null},End={end is not null},ESC={escape is not null}");
     }
 
+    // The ordinary field and Abyss both display K/I/Space. This is visual
+    // HUD evidence, NOT outside-dungeon authorization: RequireManagedIdleAsync
+    // must still confirm a fresh CLI NotInDungeon state immediately before K.
+    // Use a tight ROI around the visible bottom-centre Space badge instead
+    // of requiring every upper Home/End/ESC glyph.
+    private async Task<bool> HasManagedKISpaceFieldEvidenceAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (frame.Size != new Size(800, 1000) ||
+            HasManagedKEntryBlockingModal(frame) ||
+            HasFixedProcessingHubVisual(frame) ||
+            HasManagedProcessingBottomTabVisual(frame) ||
+            HasManagedFoodCraftingNavigationVisual(frame))
+            return false;
+        var hud = DetectManagedWorldHudTemplates(frame);
+        if (!hud.KFound || !hud.IFound) return false;
+
+        var spaceRoi = new Rectangle(389, 880, 73, 43);
+        var lines = await _ui.Ocr.ReadLinesAsync(frame, spaceRoi, 3, ct);
+        // Only the exact badge label in the lower centre qualifies; stray
+        // quest/chat/world text or an arbitrary 'space' elsewhere cannot.
+        return lines.Count(x => spaceRoi.Contains(x.Bounds) &&
+            FuzzyText.Normalize(x.ReadText ?? "") == "space") == 1;
+    }
+
+    internal static bool CanAuthorizeManagedKISpaceFieldFallback(
+        bool previousK, bool previousI, bool previousSpace,
+        bool currentK, bool currentI, bool currentSpace,
+        bool popupVisible, bool processingMenuVisible)
+        => previousK && previousI && previousSpace &&
+           currentK && currentI && currentSpace &&
+           !popupVisible && !processingMenuVisible;
+
     private async Task<bool> VerifyManagedKFrameAsync(Bitmap frame, string route,
         ManagedWorldHudKeys expectedKeys, CancellationToken ct)
     {
         // The last frame must positively prove world HUD; a template score alone
         // can also occur in a dungeon or while another production UI is present.
-        if (await ClassifyManagedProductionSceneAsync(frame, ct) !=
-            ManagedProductionSceneKind.WorldHud)
+        var scene = await ClassifyManagedProductionSceneAsync(frame, ct);
+        // The Space route intentionally works when Home/End glyph thresholds
+        // fail and the old classifier reports Unknown. Named menus and result
+        // states are still a hard veto. All routes recheck fresh CLI idle.
+        if (route == "K/I/Space")
+        {
+            if (scene is not (ManagedProductionSceneKind.WorldHud or
+                             ManagedProductionSceneKind.Unknown))
+                return false;
+        }
+        else if (scene != ManagedProductionSceneKind.WorldHud)
             return false;
         if (HasManagedKEntryBlockingModal(frame) || HasFixedProcessingHubVisual(frame) ||
             HasManagedProcessingBottomTabVisual(frame) || HasManagedFoodCraftingNavigationVisual(frame))
             return false;
+        if (route == "K/I/Space")
+            return await HasManagedKISpaceFieldEvidenceAsync(frame, ct);
         if (route == "key-labels")
         {
             var keys = expectedKeys.Method == "glyph" ? DetectManagedWorldHudKeys(frame) :
