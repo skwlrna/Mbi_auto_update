@@ -11,6 +11,56 @@ try
         checks++;
         Console.WriteLine("PASS " + label);
     }
+
+    DateTimeOffset ocrAdvisoryNow = new(2026, 11, 3, 0, 0, 0, TimeSpan.Zero);
+    var ocrTracker = new CraftingOcrWaitAdvisoryTracker(() => ocrAdvisoryNow);
+    Check(ocrTracker.NoteDeferred(0) is null && ocrTracker.NoteDeferred(1) is null,
+        "crafting OCR advisory is silent on the first safe deferral");
+    ocrAdvisoryNow += TimeSpan.FromMinutes(14);
+    Check(ocrTracker.NoteDeferred(0) is null,
+        "crafting OCR advisory does not fire prematurely");
+    ocrAdvisoryNow += TimeSpan.FromMinutes(1);
+    var firstOcrWarning = ocrTracker.NoteDeferred(0);
+    Check(firstOcrWarning?.Attempts == 3 &&
+          firstOcrWarning.Elapsed == TimeSpan.FromMinutes(15) &&
+          ocrTracker.NoteDeferred(0) is null &&
+          ocrTracker.NoteDeferred(1) is not null,
+        "deferred OCR warning fires once per recipe after 15 min without changing retries");
+    ocrTracker.Clear(0);
+    Check(ocrTracker.NoteDeferred(0) is null,
+        "confirmed finished or skipped recipe resets OCR advisory history");
+
+    // Exercise the actual sequential queue with a virtual clock; never
+    // wait fifteen real minutes, contact a CLI or send any game input.
+    DateTimeOffset ocrQueueClock = new(2026, 11, 3, 1, 0, 0, TimeSpan.Zero);
+    int longWaitAttempts = 0;
+    var longWaitEvents = new List<CraftingOcrWaitAdvisory>();
+    var queueWithOcrWait = await CraftingQueueCoordinator.RunAsync(
+        new[] { new CraftingPlan(CraftingCategory.Food, "가든 샐러드", 10, 1) },
+        (plan, index, ct) =>
+        {
+            longWaitAttempts++;
+            if (longWaitAttempts <= 4)
+                throw new CraftingRetryableScreenRecognitionException(
+                    "verified neutral screen only",
+                    new InvalidOperationException("OCR still unresolved"));
+            return Task.CompletedTask;
+        },
+        CancellationToken.None,
+        waitForRetryAsync: (delay, ct) =>
+        {
+            Check(delay == TimeSpan.FromSeconds(30),
+                "actual queued OCR retry interval stays exactly 30 seconds");
+            ocrQueueClock += TimeSpan.FromMinutes(6);
+            return Task.CompletedTask;
+        },
+        onOcrWaitAdvisory: (plan, index, advisory) => longWaitEvents.Add(advisory),
+        advisoryClock: () => ocrQueueClock);
+    Check(queueWithOcrWait.Completed == 1 && queueWithOcrWait.Skipped == 0 &&
+          longWaitAttempts == 5 && longWaitEvents.Count == 1 &&
+          longWaitEvents[0].Attempts == 4,
+        "actual OCR retry queue emits one alert and retains successful completion order");
+
     Check(CraftingQuestText.IsTitle("◆ 캠프파이어 키트 제작", "캠프파이어 키트") &&
           !CraftingQuestText.IsTitle("숙련 캠프파이어 키트 제작", "캠프파이어 키트"),
         "quest title exact match rejects prefixed recipe names");

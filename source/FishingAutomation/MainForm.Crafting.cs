@@ -173,6 +173,8 @@ public sealed partial class MainForm
                 {
                     try
                     {
+                        // Status-only warnings persist across later OCR retry callbacks.
+                        var longOcrWaitNotices = new Dictionary<int, string>();
                         var queueResult = await CraftingQueueCoordinator.RunAsync(queue,
                             async (current, index, runToken) =>
                         {
@@ -238,10 +240,12 @@ public sealed partial class MainForm
                             // screen and CLI idle before emitting this type.
                             // Never mark the queued recipe as completed/skipped.
                             ct.ThrowIfCancellationRequested();
+                            string? reportedWait = longOcrWaitNotices.TryGetValue(index, out var notice)
+                                ? notice : null;
                             Ui(() =>
                             {
                                 _productionProgressSummary =
-                                    $"순차 {index + 1}/{queue.Count} · " +
+                                    reportedWait ?? $"순차 {index + 1}/{queue.Count} · " +
                                     $"{failedPlan.DisplayName} OCR 오류 재시도 대기";
                                 _log.Write($"[제작][순환 재시도] {failedPlan.DisplayName} · " +
                                     "정상 제작 1종 진행 후 재시도 예약 · " +
@@ -249,6 +253,24 @@ public sealed partial class MainForm
                                 RefreshProductionDashboard();
                             });
                             return Task.CompletedTask;
+                        },
+                        onOcrWaitAdvisory: (waitingPlan, index, advisory) =>
+                        {
+                            string message = $"[제작][OCR 장기 대기 알림] " +
+                                $"순차 {index + 1}/{queue.Count} · {waitingPlan.DisplayName} · " +
+                                $"안전한 화면 인식 실패 {advisory.Attempts}회 · " +
+                                $"{advisory.Elapsed.TotalMinutes:0}분 이상 제작 확정 없음 · " +
+                                "기존 30초 재검증/F10 정책 유지 · 추가 게임 입력 없음";
+                            longOcrWaitNotices[index] = message;
+                            Ui(() =>
+                            {
+                                _productionProgressSummary = message;
+                                _log.Write(message);
+                                SetStatus("제작 OCR 장기 대기 · 재시도 정책 유지", Color.DarkOrange);
+                                RefreshProductionDashboard();
+                                // Optional configured notifier only, no screenshot or error upload.
+                                _ = _notifier.SendAlertAsync("제작 OCR 장기 대기", message, false);
+                            });
                         });
                         Ui(() =>
                         {
