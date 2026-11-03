@@ -443,7 +443,22 @@ public sealed partial class MainForm
                             $"분류={hold.Category} · 선행채집 제외 · 다른 시설 유지");
                     }
                     if (supported.Count > 0)
-                        await resolver.PreGatherKnownShortagesAsync(supported, token);
+                    {
+                        var beforeGlobalGather = await gatheringData.WeightAsync(token);
+                        var weight = GatheringWeightPolicy.Read(
+                            beforeGlobalGather.Current, beforeGlobalGather.Maximum);
+                        if (weight.MustStop)
+                        {
+                            // Optional shared preflight must not terminate every
+                            // facility simply because gathering is unsafe.
+                            // Each pending plan gets a fresh weight check at
+                            // its own no-input material-preparation boundary.
+                            _log.Write($"[다중가공] 가방 무게 {weight.FillPercent}% (90% 이상) · " +
+                                "전체 선행채집 생략 · 채집 필요 품목만 시설별 대기");
+                        }
+                        else
+                            await resolver.PreGatherKnownShortagesAsync(supported, token);
+                    }
                     _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 음식 보류 대상은 시설별 재확인");
                 }
             }
@@ -625,6 +640,22 @@ public sealed partial class MainForm
                     return;
                 }
 
+                // All known missing materials require fresh acquisition proof.
+                // With a 90%+ bag, do not start gathering or terminate the
+                // other facilities. The existing manager retains this plan
+                // as an atomic per-lane HOLD and rechecks inventory/recipe.
+                var beforePlanGather = await gatheringData.WeightAsync(ct);
+                var weightBeforePlan = GatheringWeightPolicy.Read(
+                    beforePlanGather.Current, beforePlanGather.Maximum);
+                if (weightBeforePlan.MustStop)
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공] {plan.DisplayName} 채집만 보류 · 가방 무게 " +
+                        $"{weightBeforePlan.FillPercent}% · 이미 보유한 재료로 가능한 다른 시설 계속"));
+                    throw new MaterialSupplyHoldException(
+                        GatheringWeightLaneHoldPolicy.Create(weightBeforePlan));
+                }
+
                 if (!MultiAlteringMaterialPreflightPolicy.CanRun(
                     batchStore?.IsResuming ?? true, occupied))
                 {
@@ -702,6 +733,17 @@ public sealed partial class MainForm
             async Task<MaterialSupplyHold?> RecheckSupplyHoldAsync(
                 AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
             {
+                if (GatheringWeightLaneHoldPolicy.IsHold(prior))
+                {
+                    var measured = await gatheringData.WeightAsync(ct);
+                    var weight = GatheringWeightPolicy.Read(
+                        measured.Current, measured.Maximum);
+                    if (weight.MustStop)
+                        return GatheringWeightLaneHoldPolicy.Create(weight);
+                    // Do not authorize input from weight alone; existing
+                    // recipe, screen, facility and ledger guards rerun.
+                    return await InspectSupplyRouteAsync(plan, ct);
+                }
                 if (plan.FacilityName == "가죽 가공 시설")
                 {
                     // A mismatch must re-read BOTH sources even if the bag is
