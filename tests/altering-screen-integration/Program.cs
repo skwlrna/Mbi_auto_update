@@ -53,6 +53,37 @@ try
     string? CallCache(string name, params object?[] parameters) =>
         (string?)Method(cachePolicy, name, parameters.Length).Invoke(null, parameters);
 
+    // 2026-11-03 missing-bottle incident: water and milk must pause
+    // before entering life-skill navigation, and their holds persist for
+    // independent non-food facilities without a fabricated completion.
+    {
+        var catalog = production.GetType("FishingAutomation.LivingSkillGatheringCatalog", true)!;
+        bool NeedsBottle(string name)
+        {
+            object?[] args = { name, null };
+            bool mapped = (bool)Method(catalog, "TryResolveBulk", 2).Invoke(null, args)!;
+            return mapped && (bool)args[1]!.GetType()
+                .GetProperty("RequiresEmptyBottle")!.GetValue(args[1])!;
+        }
+        Check(NeedsBottle("우유") && NeedsBottle("물이 든 병") &&
+              !NeedsBottle("달걀") && !NeedsBottle("동 광석"),
+            "empty bottle requirement is limited to verified milk/well-water paths");
+
+        var holdType = production.GetType("FishingAutomation.MaterialSupplyHold", true)!;
+        var store = production.GetType("FishingAutomation.MultiAlteringBatchStore", true)!;
+        bool Persist(string item, long needed, long owned, string category)
+        {
+            var evidence = Activator.CreateInstance(holdType, item, needed, owned, category)!;
+            return (bool)Method(store, "CanPersistMaterialHold", 2)
+                .Invoke(null, new object[] { "금속 가공 시설", evidence })!;
+        }
+        Check(Persist("빈 병", 1, 0, "missing_empty_bottle") &&
+              !Persist("빈 병", 1, 1, "missing_empty_bottle") &&
+              !Persist("동 광석", 1, 0, "missing_empty_bottle") &&
+              !Persist("빈 병", 1, 0, "unverified_popup"),
+            "only exact zero-stock empty-bottle hold can be persisted in other lanes");
+    }
+
     // Inspect compiled IL of the REAL async state machines. Merely recording a
     // manager directive in a fake screen does not prove it reaches the actual
     // fixed-card, medicine, cached recipe, detail or receipt implementations.
