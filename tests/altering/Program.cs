@@ -4,6 +4,26 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+var overweight = GatheringWeightPolicy.Read(1377m, 1490m);
+var overweightHold = GatheringWeightLaneHoldPolicy.Create(overweight);
+Check(overweight.MustStop && overweightHold.Item == "가방 무게" &&
+      overweightHold.Category == GatheringWeightLaneHoldPolicy.Category &&
+      overweightHold.Required == 900 && overweightHold.Observed == 924 &&
+      GatheringWeightLaneHoldPolicy.IsHold(overweightHold),
+    "confirmed 92.4-percent bag emits a strictly scoped read-only lane hold");
+var underweight = GatheringWeightPolicy.Read(1300m, 1490m);
+Check(!underweight.MustStop &&
+      !GatheringWeightLaneHoldPolicy.IsHold(new("가방 무게", 900, 899,
+          GatheringWeightLaneHoldPolicy.Category)) &&
+      !GatheringWeightLaneHoldPolicy.IsHold(new("동 광석", 900, 924,
+          GatheringWeightLaneHoldPolicy.Category)),
+    "bag hold rejects below-90-percent stock and fake item evidence");
+bool refusedUnderweightHold = false;
+try { GatheringWeightLaneHoldPolicy.Create(underweight); }
+catch (InvalidOperationException) { refusedUnderweightHold = true; }
+Check(refusedUnderweightHold,
+    "gathering lane hold cannot be created while bag is below the safety limit");
+
 // 2026-10-27: retry is a navigation action, never batch-registration proof.
 for (int clicks = 0; clicks <= 3; clicks++)
 foreach (bool oldHub in new[] { false, true })
