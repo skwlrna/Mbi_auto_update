@@ -221,6 +221,47 @@ try
               "start:버섯볶음", "verified:버섯볶음"
           }), "unavailable material skips only the affected recipe and continues to the third");
 
+    // A known, safely recovered OCR failure must not terminate the queue or
+    // be marked complete. After ONE normal success, retry exactly ONE held
+    // recipe. After all regular plans were visited, keep a delayed round-robin
+    // without replaying an unconfirmed craft action.
+    var retryAttempts = new Dictionary<int, int>();
+    var retryOrder = new List<string>();
+    var delayedRounds = 0;
+    var retryFourth = new CraftingPlan(CraftingCategory.Food, "감자수프", 20, 1);
+    var retryResult = await CraftingQueueCoordinator.RunAsync(
+        new[] { serialFirst, serialSecond, serialThird, retryFourth },
+        (recipe, index, ct) =>
+        {
+            int attempt = retryAttempts.GetValueOrDefault(index) + 1;
+            retryAttempts[index] = attempt;
+            retryOrder.Add(index + ":" + attempt);
+            if ((index == 1 && attempt <= 2) ||
+                (index == 3 && attempt == 1))
+                throw new CraftingRetryableScreenRecognitionException(
+                    "verified neutral screen recognition miss",
+                    new InvalidOperationException("OCR missed popup"));
+            return Task.CompletedTask;
+        }, CancellationToken.None,
+        onScreenDeferredAsync: (recipe, index, error, ct) =>
+        {
+            retryOrder.Add("deferred:" + index);
+            return Task.CompletedTask;
+        },
+        waitForRetryAsync: (delay, ct) =>
+        {
+            Check(delay >= TimeSpan.FromSeconds(30), "no rapid all-retry spin");
+            delayedRounds++;
+            return Task.CompletedTask;
+        });
+    Check(retryResult.Completed == 4 && retryResult.Skipped == 0 &&
+          delayedRounds == 2 &&
+          retryOrder.SequenceEqual(new[] {
+              "0:1", "1:1", "deferred:1", "2:1", "1:2", "deferred:1",
+              "3:1", "deferred:3", "1:3", "3:2"
+          }),
+        "screen OCR B resumes after C, deferred D follows later with safe rounds");
+
     order.Clear();
     try
     {
