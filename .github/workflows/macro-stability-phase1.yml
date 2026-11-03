@@ -9,6 +9,7 @@ on:
       - 'source/FishingAutomation/MacroRuntimeStability.cs'
       - 'source/FishingAutomation/MainForm.cs'
       - 'tests/stability-phase1/**'
+      - 'tools/validation/**'
       - '.github/workflows/macro-stability-phase1.yml'
   workflow_dispatch:
 
@@ -55,6 +56,9 @@ jobs:
         run: |
           dotnet run --project tests/stability-phase1/StabilityPhase1.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Stability regressions failed' }
+      - name: Read-only Windows process observer smoke (synthetic data)
+        shell: pwsh
+        run: ./tests/stability-phase1/Test-WindowsObservation.ps1
       - name: Existing crafting/altering/input safety checks
         shell: pwsh
         run: |
