@@ -4,6 +4,20 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// Integrated bag-weight and bottle-lack holds must persist per-lane only.
+var holdMethod = typeof(MultiAlteringBatchStore).GetMethod(
+    "CanPersistMaterialHold",
+    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+    ?? throw new Exception("missing material hold persistence guard");
+bool CanPersistHold(string facility, MaterialSupplyHold evidence) =>
+    (bool)(holdMethod.Invoke(null, new object[] { facility, evidence }) ?? false);
+Check(CanPersistHold("금속 가공 시설", new("가방 공간", 1, 0, "bag_capacity_90pct")) &&
+      CanPersistHold("식재료 가공 시설", new("빈 병", 1, 0, "missing_empty_bottle")) &&
+      !CanPersistHold("금속 가공 시설", new("가방 공간", 1, 0, "unverified_bag")) &&
+      !CanPersistHold("금속 가공 시설", new("가방 공간", 1, 1, "bag_capacity_90pct")) &&
+      !CanPersistHold("금속 가공 시설", new("빈 병", 1, 1, "missing_empty_bottle")),
+    "only exact weight and empty-bottle lane holds are durable");
+
 // 2026-10-27: retry is a navigation action, never batch-registration proof.
 for (int clicks = 0; clicks <= 3; clicks++)
 foreach (bool oldHub in new[] { false, true })

@@ -600,6 +600,11 @@ internal sealed class MultiAlteringBatchStore : IDisposable
             // facility. This does not confer registration or purchase authority.
             evidence.Category == "missing_empty_bottle" &&
             evidence.Item == "빈 병" && evidence.Required == 1 && evidence.Observed == 0 ||
+            // Only exact bag-capacity holds generated after a fresh 90%+ CLI
+            // weight reading are allowed as read-only facility deferrals.
+            evidence.Category == "bag_capacity_90pct" &&
+            evidence.Item == "가방 공간" &&
+            evidence.Required == 1 && evidence.Observed == 0 ||
             facility == "식재료 가공 시설" && evidence.Observed < evidence.Required ||
             facility == "가죽 가공 시설" &&
             LeatherRawMaterialPolicy.IsExternalRaw(evidence.Item) &&

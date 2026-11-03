@@ -18,6 +18,8 @@ var notice = new DailyInterruptionObservation(DailyInterruptionKind.Notice,
     new(80, 586, 645, 40), new(701, 345));
 var greeting = new DailyInterruptionObservation(DailyInterruptionKind.NpcGreeting,
     new(220, 85, 370, 155), Advance: new(400, 170));
+var attendance = new DailyInterruptionObservation(DailyInterruptionKind.Attendance,
+    new(16, 35, 350, 64), Skip: new(728, 62));
 
 // Same controller as the app; fake transport never sends native input.
 foreach (var modal in new[] { stella, notice })
@@ -49,6 +51,37 @@ foreach (bool escWorks in new[] { true, false })
         }, (ms, ct) => Task.CompletedTask, _ => { });
     Check(await chain.RecoverAsync(default), "NPC then notice chain handled before return");
     Check(clicks == 2 && escapes == 1, "two NPC clicks and one notice ESC");
+}
+{
+    var state = attendance;
+    int clicks = 0, escapes = 0;
+    var recovery = new DailyInterruptionRecovery(
+        ct => Task.FromResult(state),
+        ct => escapes++,
+        (p, ct) => { Check(p == attendance.Skip, "attendance exact skip position"); clicks++; state = none; },
+        (ms, ct) => Task.CompletedTask, _ => { });
+    Check(await recovery.RecoverAsync(default), "attendance is handled");
+    Check(clicks == 1 && escapes == 0, "attendance skip once, no NPC or ESC click");
+}
+{
+    int inputs = 0;
+    var blocked = attendance with { Skip = null };
+    var recovery = new DailyInterruptionRecovery(
+        ct => Task.FromResult(blocked),
+        ct => inputs++, (p, ct) => inputs++,
+        (ms, ct) => Task.CompletedTask, _ => { });
+    try { await recovery.RecoverAsync(default); throw new Exception("missing attendance skip must stop"); }
+    catch (InvalidOperationException) { Check(inputs == 0, "attendance without exact skip sends zero input"); }
+}
+{
+    int inputs = 0, reads = 0;
+    var recovery = new DailyInterruptionRecovery(
+        ct => Task.FromResult(++reads % 2 == 1
+            ? attendance : attendance with { Skip = new Point(700, 90) }),
+        ct => inputs++, (p, ct) => inputs++,
+        (ms, ct) => Task.CompletedTask, _ => { });
+    try { await recovery.RecoverAsync(default); throw new Exception("unstable attendance skip must stop"); }
+    catch (InvalidOperationException) { Check(inputs == 0, "unstable attendance skip sends zero input"); }
 }
 {
     int inputs = 0;
@@ -104,6 +137,31 @@ foreach (bool escWorks in new[] { true, false })
     Check(polls == 0, "cleanup read token cannot re-arm modal inputs after F10");
 }
 #if WINDOWS_FIXTURES
+foreach (string label in new[] { "출석부 건너뛰기", "출석부건너뛰기" })
+    Check(DailyInterruptionScreen.IsAttendanceSkipLabel(label), "attendance exact label: " + label);
+foreach (string label in new[] { "건너뛰기", "대화 건너뛰기", "출석" })
+    Check(!DailyInterruptionScreen.IsAttendanceSkipLabel(label), "unrelated skip never dismisses attendance: " + label);
+{
+    using var image = new Bitmap(Path.Combine(AppContext.BaseDirectory, "fixtures", "greeting.png"));
+    var recognized = new DailyInterruptionScreen((frame, roi, scale, ct) =>
+    {
+        string text = roi.X switch
+        {
+            16 => "매일매일 행운 출석",
+            667 => "출석부 건너뛰기",
+            220 => "기존 알리사 NPC 대화",
+            _ => ""
+        };
+        return Task.FromResult<IReadOnlyList<DetectionResult>>(
+            text.Length == 0 ? Array.Empty<DetectionResult>() :
+            new[] { new DetectionResult(true,
+                roi.X == 667 ? new Rectangle(688, 48, 85, 25) : roi,
+                1, text) });
+    });
+    var observation = await recognized.ObserveAsync(image, default);
+    Check(observation.Kind == DailyInterruptionKind.Attendance && observation.Skip is not null,
+        "attendance has priority over overlapping NPC bubble");
+}
 foreach (string label in new[] { "건너뛰기", "대화 건너뛰기", "대화 넘기기", "넘기기", "스킵", "대화 스킵", "SKIP", "대화 건너뛰기 (ESC)" })
     Check(DailyInterruptionScreen.IsNpcSkipLabel(label), "NPC skip wording variant: " + label);
 foreach (string label in new[] { "퀘스트 건너뛰기", "확인", "결제", "오늘도" })

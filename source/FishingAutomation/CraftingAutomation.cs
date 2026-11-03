@@ -212,10 +212,56 @@ internal sealed class CraftingAutomation
                             materialFailure);
                 }
                 if (recoveries >= maxRecoveries)
+                {
+                    // A known OCR-only preparation failure can be deferred
+                    // ONLY before the first craft of this recipe and after
+                    // confirmed neutral screen + idle CLI. A partially crafted
+                    // recipe needs a durable per-item remaining-quantity
+                    // checkpoint and is intentionally NOT retried blindly.
+                    bool recognizedOcrFault = ex.Message.Contains(
+                            "제작 퀘스트 재료 수량을 읽지 못했습니다",
+                            StringComparison.Ordinal) ||
+                        ex.Message.Contains(
+                            "부족 재료 팝업 연속 2프레임 미확인",
+                            StringComparison.Ordinal);
+                    if (recognizedOcrFault && CompletedCrafts == 0 && Gained == 0)
+                    {
+                        try
+                        {
+                            await _screen.RecoverBatchPreparationAsync(plan, ct);
+                            for (int check = 0; check < 2; check++)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                var activity = await _gathering.ActivityAsync(ct);
+                                if (!activity.IsSafeField || activity.IsAutoTraveling ||
+                                    activity.IsGathering || activity.IsFishing ||
+                                    activity.MainButtonState == "Stop")
+                                    throw new InvalidOperationException(
+                                        "제작 화면 복구 후 채집/이동 미종료 · 다른 제작 전환 금지");
+                                if (check == 0)
+                                    await _delay(TimeSpan.FromMilliseconds(500), ct);
+                            }
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception cleanupError)
+                        {
+                            throw new InvalidOperationException(
+                                "제작 OCR 오류 후 안전한 기본 화면/CLI 확인 실패 · 전체 작업 보호 정지",
+                                cleanupError);
+                        }
+
+                        Log?.Invoke($"[제작][OCR 보류] {plan.DisplayName} · " +
+                            "제작 입력 전 인식 실패 · 기본 화면/CLI 확인 완료 · " +
+                            "다른 정상 제작 1개 후 재시도 대기");
+                        throw new CraftingRetryableScreenRecognitionException(
+                            $"{plan.DisplayName} OCR 인식 오류 · 제작 미실행 · 재시도 대기",
+                            ex);
+                    }
                     throw new InvalidOperationException(
                         $"제작 퀘스트 자동복구를 {maxRecoveries}회 시도했지만 현재 배치를 복구하지 못했습니다. " +
                         $"완료 확정된 이전 제작 {CompletedCrafts}/{requiredCrafts}회는 유지합니다.",
                         ex);
+                }
 
                 recoveries++;
                 Log?.Invoke(

@@ -231,6 +231,24 @@ public sealed partial class MainForm
                                 RefreshProductionDashboard();
                             });
                             return Task.CompletedTask;
+                        },
+                        (failedPlan, index, recognitionError, ct) =>
+                        {
+                            // The engine confirms zero crafted output, neutral
+                            // screen and CLI idle before emitting this type.
+                            // Never mark the queued recipe as completed/skipped.
+                            ct.ThrowIfCancellationRequested();
+                            Ui(() =>
+                            {
+                                _productionProgressSummary =
+                                    $"순차 {index + 1}/{queue.Count} · " +
+                                    $"{failedPlan.DisplayName} OCR 오류 재시도 대기";
+                                _log.Write($"[제작][순환 재시도] {failedPlan.DisplayName} · " +
+                                    "정상 제작 1종 진행 후 재시도 예약 · " +
+                                    recognitionError.Message);
+                                RefreshProductionDashboard();
+                            });
+                            return Task.CompletedTask;
                         });
                         Ui(() =>
                         {

@@ -2,7 +2,7 @@ using System.Drawing;
 
 namespace FishingAutomation;
 
-internal enum DailyInterruptionKind { None, StellaPick, Notice, NpcGreeting }
+internal enum DailyInterruptionKind { None, StellaPick, Notice, NpcGreeting, Attendance }
 internal sealed record DailyInterruptionObservation(
     DailyInterruptionKind Kind, Rectangle Anchor, Point? Close = null,
     Point? Advance = null, Point? Skip = null);
@@ -31,7 +31,19 @@ internal sealed class DailyInterruptionRecovery(
 
             handled = true;
             log($"[일일 화면] {current.Kind} 확인 · 기존 작업 입력 일시 보류");
-            if (current.Kind != DailyInterruptionKind.NpcGreeting)
+            if (current.Kind == DailyInterruptionKind.Attendance)
+            {
+                // Attendance's top-right "출석부 건너뛰기" also dismisses its NPC
+                // dialogue. It must be selected instead of ESC or bubble clicks.
+                if (!StableTarget(first.Skip, current.Skip))
+                    throw new InvalidOperationException(
+                        "출석부 건너뛰기 위치 미확인 · 추정 좌표 클릭 금지");
+                ct.ThrowIfCancellationRequested();
+                click(current.Skip!.Value, ct);
+                log("[일일 화면] 출석부 건너뛰기 1회 클릭 · NPC 대화 포함 닫힘 확인 대기");
+                await delay(650, ct).ConfigureAwait(false);
+            }
+            else if (current.Kind != DailyInterruptionKind.NpcGreeting)
             {
                 ct.ThrowIfCancellationRequested();
                 escape(ct); // exactly once, then inspect before considering X

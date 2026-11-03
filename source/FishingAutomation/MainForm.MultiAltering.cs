@@ -302,6 +302,17 @@ public sealed partial class MainForm
             // Food follows existing route checks. Leather may recursively craft
             // intermediate hides, but external raw hides/tannin must never be
             // auto-gathered or purchased. Inspect before any movement or input.
+            // A high bag fill stops ONLY new raw gathering, not existing
+            // registered production in unrelated independent facilities.
+            async Task<GatheringWeightSnapshot> ReadBagCapacityAsync(CancellationToken ct)
+            {
+                var (current, maximum) = await gatheringData.WeightAsync(ct);
+                return GatheringWeightPolicy.Read(current, maximum);
+            }
+
+            MaterialSupplyHold BagCapacityHold() =>
+                new("가방 공간", 1, 0, "bag_capacity_90pct");
+
             async Task<MaterialSupplyHold?> InspectSupplyRouteAsync(
                 AlteringPlan plan, CancellationToken ct,
                 AlteringRecipe? selectedShortageEvidence = null)
@@ -444,19 +455,38 @@ public sealed partial class MainForm
                     }
                     if (supported.Count > 0)
                     {
-                        try
+                        var capacity = await ReadBagCapacityAsync(token);
+                        if (capacity.MustStop)
                         {
-                            await resolver.PreGatherKnownShortagesAsync(supported, token);
+                            _log.Write(
+                                $"[다중가공][선행채집 보류] 가방 무게 {capacity.Current}/{capacity.Maximum} " +
+                                $"({capacity.FillPercent}%) · 전체 선행채집 생략 · " +
+                                "시설별 재료 보류로 분리해 다른 가공 진행");
                         }
+                        else
+                        {
+                            try
+                            {
+                                await resolver.PreGatherKnownShortagesAsync(supported, token);
+                            }
+                            catch (GatheringBagCapacityException)
+                            {
+                                // Some earlier raw materials may already have been
+                                // gathered; keep their fresh CLI inventory. No
+                                // parent processing registration occurs here.
+                                _log.Write(
+                                    "[다중가공][선행채집 보류] 채집 중 가방 무게 90% 도달 · " +
+                                    "전체 작업 정지 대신 시설별 재료 검증으로 인계");
+                            }
                         catch (MaterialSupplyHoldException hold) when (
                             hold.Evidence.Category == "missing_empty_bottle" &&
                             hold.Evidence.Item == "빈 병")
                         {
-                            // The resolver checked stock before any material
-                            // gathering input. The global preflight is optional;
-                            // defer the missing-bottle plans to per-lane holds.
-                            _log.Write("[다중가공] 빈 병 0개 · 통합 선행채집 생략 · " +
-                                "품목별 재검증으로 넘기고 다른 시설 계속 · 자동 구매 없음");
+                            // The pre-gather resolver observed a missing bottle
+                            // before input. Defer that plan to its lane; no purchase.
+                            _log.Write("[다중가공] 빈 병 0개 · 통합 선행채집 보류 · " +
+                                "다른 시설 계속 · 재고 재확인 전 자동 구매/채집 없음");
+                        }
                         }
                     }
                     _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 음식 보류 대상은 시설별 재확인");
@@ -660,9 +690,32 @@ public sealed partial class MainForm
                     UpdateStats();
                     RefreshProductionDashboard();
                 });
-                await resolver.PreGatherKnownShortagesAsync(
-                    new[] { new MultiAlteringSupplyPreflight(plan, recipe, plan.RequiredWorks) },
-                    ct);
+                var capacity = await ReadBagCapacityAsync(ct);
+                if (capacity.MustStop)
+                {
+                    Ui(() => _log.Write(
+                        $"[다중가공][채집 보류] {plan.DisplayName} · " +
+                        $"가방 {capacity.Current}/{capacity.Maximum} ({capacity.FillPercent}%) · " +
+                        "등록 전 원재료 채집만 보류 · 다른 시설 계속"));
+                    throw new MaterialSupplyHoldException(BagCapacityHold());
+                }
+                try
+                {
+                    await resolver.PreGatherKnownShortagesAsync(
+                        new[] { new MultiAlteringSupplyPreflight(plan, recipe, plan.RequiredWorks) },
+                        ct);
+                }
+                catch (GatheringBagCapacityException)
+                {
+                    // The no-parent-registration preflight can have done harmless
+                    // partial gathering. Do not downgrade a registration/receipt
+                    // failure or assume a changed inventory; the normal scheduler
+                    // re-reads all stocks after the hold clears.
+                    Ui(() => _log.Write(
+                        $"[다중가공][채집 보류] {plan.DisplayName} · " +
+                        "선행채집 중 90% 도달 · 다른 시설 계속 · 자동 폐기 없음"));
+                    throw new MaterialSupplyHoldException(BagCapacityHold());
+                }
                 Ui(() => _log.Write(
                     $"[다중가공] {plan.DisplayName} 품목별 선행 채집 완료 · 등록 중 부족 재검증 유지"));
             }
@@ -717,11 +770,20 @@ public sealed partial class MainForm
             async Task<MaterialSupplyHold?> RecheckSupplyHoldAsync(
                 AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
             {
+                if (string.Equals(prior.Category, "bag_capacity_90pct", StringComparison.Ordinal))
+                {
+                    var capacity = await ReadBagCapacityAsync(ct);
+                    if (capacity.MustStop)
+                        return prior; // 30-second read-only recheck; no free gathering input.
+                    // The space is genuinely available again. Resume through
+                    // the SAME fresh recipe/queue/onsite guards as an ordinary turn.
+                    Ui(() => _log.Write(
+                        $"[다중가공][무게 보류 해제] {plan.DisplayName} · " +
+                        $"가방 {capacity.FillPercent}% · 재료/제법 재검증"));
+                    return await InspectSupplyRouteAsync(plan, ct);
+                }
                 if (prior.Category == "missing_empty_bottle")
                 {
-                    // Recheck a real inventory count, never release a hold
-                    // solely because 30 seconds elapsed. Material acquisition
-                    // and recipe identity are validated again on the next run.
                     long bottles = await managerState.ReadWithRecoveryAsync(
                         LifeSkillStage.Altering, "empty-bottle-hold-recheck",
                         inner => rawAlteringData.ItemCountAsync("빈 병", inner), ct);
