@@ -481,6 +481,29 @@ Assert(scheduleExitSource.Contains("_scheduledExitClicked = true") &&
        sceneMissionSource.Contains("HasStableMissionVisualFallback"),
     "post-exit mission confirm is one-shot, OCR-checked and guarded by exit proof");
 
+string retryTransitionSource = File.ReadAllText(Path.Combine(
+    Directory.GetCurrentDirectory(),
+    "source/FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs"));
+Assert(sceneMissionSource.Contains("TryAcknowledgeRetryCompetitionMissionCompleteAsync") &&
+       sceneMissionSource.Contains("\"경쟁 미션 완료\"") &&
+       sceneMissionSource.Contains("_inventoryNextRoundClicked") &&
+       sceneMissionSource.Contains("_retryCompetitionConfirmationClicked = true") &&
+       sceneMissionSource.Contains("AbyssMissionCompletePolicy.HasStableMissionVisualFallback") &&
+       sceneMissionSource.Contains("AbyssMissionCompletePolicy.IsStableTextEvidence") &&
+       sceneMissionSource.Contains("VerifyAbyssClickClientGeometry") &&
+       sceneMissionSource.Contains("경쟁 미션 완료 확인 버튼을 한 번") &&
+       retryTransitionSource.Contains(
+           "TryAcknowledgeRetryCompetitionMissionCompleteAsync(frame, ct)") &&
+       retryTransitionSource.Contains("_retryCompetitionConfirmationClicked = false") &&
+       retryTransitionSource.IndexOf(
+           "TryAcknowledgeRetryCompetitionMissionCompleteAsync(frame, ct)",
+           StringComparison.Ordinal) <
+       retryTransitionSource.IndexOf(
+           "HasAbyssRecruitmentEvidenceAsync(frame, ct)",
+           StringComparison.Ordinal),
+    "competition popup after retry needs exact two-frame/glyph proof, one click, visual dismissal, then recruitment");
+
+
 // Scheduler supervisory monitor: no new game input, replay or automatic restart.
 // A prior process's diagnostic snapshot is NEVER a durable resume authorization.
 string schedulerStateDir = Path.Combine(Path.GetTempPath(), "mabiauto-scheduler-monitor-" + Guid.NewGuid().ToString("N"));
