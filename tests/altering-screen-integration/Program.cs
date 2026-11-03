@@ -342,6 +342,32 @@ try
 
     // V3.2.0 14:16:48 production capture: Home/End fail while K/I are
     // stable. 2/4 alone remains vetoed; two frames of K+I PLUS separately
+    // 2026-11-03 world HUD: K/I/Space remain present even when End/ESC
+    // template scores drop below the old upper-strip threshold. The three
+    // shortcuts alone cannot permit K: scene/modal and fresh CLI guards remain.
+    Check(CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+            true, true, true, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+            true, true, false, true, true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+            true, true, true, true, false, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+            true, true, true, true, true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+            true, true, true, true, true, true, false, true),
+        "K/I/Space fallback requires both frames and never bypasses popup/menu veto");
+    Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3),
+              "CanAuthorizeManagedKSpaceFallback") &&
+          Has(ScreenCalls("VerifyManagedKFrameAsync", 4),
+              "HasManagedKISpaceFieldHudAsync") &&
+          Has(ScreenCalls("ClassifyManagedProductionSceneAsync", 2),
+              "HasManagedKISpaceFieldHudAsync") &&
+          Has(ScreenCalls("HasManagedKISpaceFieldHudAsync", 2),
+              "FindCompactAsync") &&
+          Has(ScreenCalls("EnterFacilityCoreAsync", 3),
+              "RequireManagedIdleAsync"),
+        "Space OCR route reaches independent scene proof and final fresh CLI verification");
+
     // verified upper/lower shortcut layout may authorize the field path.
     Check(CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
             true, true, true, true, true, true, false, false) &&
