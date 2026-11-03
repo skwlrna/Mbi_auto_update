@@ -25,6 +25,8 @@ class Phase1StabilityReleasePolicy(unittest.TestCase):
             self.assertIs(authorization[field], True)
         self.assertIs(authorization["realGameTested"], False)
         version = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        if 'CurrentVersion = "V3.2.86"' not in version:
+            return  # Historical release after upgrade; new version has its own exact-version gate.
         self.assertIn('CurrentVersion = "V3.2.86"', version)
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for field, value in (("Version","3.2.86"),("AssemblyVersion","3.2.86.0"),
