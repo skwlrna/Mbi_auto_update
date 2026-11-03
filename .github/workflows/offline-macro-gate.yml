@@ -1,0 +1,75 @@
+name: Offline Build and Mock Test Gate
+
+# Additive PR gate; never launches the game, sends input, or publishes a release.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulate:
+    name: Deterministic mock scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout unprivileged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Run mock game-state scenarios against real policy code
+        run: dotnet run --project tests/offline-simulation/OfflineSimulation.csproj -c Release
+      - name: Run existing start-preflight regressions
+        run: dotnet run --project tests/start-preflight/Regression.csproj -c Release
+
+  windows-build:
+    name: Windows build and isolated regressions
+    needs: simulate
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout unprivileged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore application and watchdog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'App restore failed' }
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Watchdog restore failed' }
+      - name: Build Windows x64 application and watchdog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Watchdog build failed' }
+      - name: Run offline crafting, altering, and input regressions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Crafting offline regressions failed' }
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering offline regressions failed' }
+          dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Input cancellation offline regressions failed' }
+
+# Compiled outputs are ephemeral. No upload, updater, release, deployment,
+# self-hosted runner, real game window, or input device is involved.
