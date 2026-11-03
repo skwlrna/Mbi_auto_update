@@ -10,6 +10,8 @@ public sealed partial class MainForm
     {
         _starting = true;
         _cancelStart = false;
+        CraftingRestartSafetyJournal? restartJournal = null;
+        bool journalTransferredToWorker = false;
         try
         {
             var selectedPlans = SelectedCraftingPlans();
@@ -59,6 +61,52 @@ public sealed partial class MainForm
             var identity = await CliIdentityGuard.CaptureAsync(_cli, CancellationToken.None);
             if (_cancelStart || IsDisposed) return;
             _log.Write("[제작] 캐릭터 문맥 저장 · " + identity.Description);
+
+            // Retain the cross-process lease from preflight until worker exit.
+            // An interrupted F10/crash run must not silently restart its full
+            // original target from a newly sampled inventory baseline.
+            string journalDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MabiAuto", "crafting");
+            restartJournal = new CraftingRestartSafetyJournal(journalDirectory);
+            var previous = restartJournal.ReviewRequired;
+            if (previous is not null)
+            {
+                string evidence = previous.PendingBatch is { } pending
+                    ? $"미확정 제작 입력: {pending.DisplayName} {pending.Attempts}회 · " +
+                      $"입력 직전 재고 {pending.InventoryBefore}"
+                    : $"마지막 품목 순번 {previous.LastPlanIndex + 1}, " +
+                      $"완료 확인 {previous.CompletedIndices.Length}종, " +
+                      $"재료 보류 {previous.SkippedIndices.Length}종";
+                string identityWarning = previous.Identity.ConflictsWith(identity.Baseline)
+                    ? "\n기존 캐릭터 정보와 현재 정보가 다릅니다."
+                    : "";
+                var choice = MessageBox.Show(
+                    this,
+                    "이전 제작이 정상 완료되지 않았습니다.\n" +
+                    evidence + identityWarning + "\n\n" +
+                    "기존 제작의 실제 결과/재고와 퀘스트를 직접 확인해야 합니다. " +
+                    "기록을 자동 복원하거나 남은 수량을 임의 추정하지 않습니다.\n\n" +
+                    "예: 이전 기록을 별도 보관하고 지금 선택한 전체 목표를 " +
+                    "완전히 새로운 제작으로 시작합니다. 이미 생산된 양이 중복될 수 있습니다.\n" +
+                    "아니요: 게임 입력 없이 새 제작을 중단합니다.\n\n" +
+                    "수동 확인을 완료했고 새로운 목표로 시작하겠습니까?",
+                    "이전 제작 기록 발견 · 중복 제작 방지",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (choice != DialogResult.Yes)
+                {
+                    _log.Write("[제작][재시작 보호] 이전 미완료/미확정 기록 유지 · " +
+                        "새로운 제작 입력 없음 · 직접 재고 확인 필요");
+                    SetStatus("제작 이전 기록 확인 필요 · 신규 시작 차단", Color.DarkOrange);
+                    return;
+                }
+                _log.Write("[제작][재시작 보호] 이전 실행 수동 확인 후 " +
+                    "명시적 신규 제작 승인 · 이전 기록 별도 보관 · 자동 이어하기 아님");
+            }
+            restartJournal.StartFresh(queue, identity.Baseline, previous?.RunId);
+            _log.Write("[제작][재시작 장부] 새 작업 기록 생성 · " +
+                "F10/비정상 종료 시 이전 목표 자동 재실행 차단");
 
             var windows = WindowTools.EnumerateVisibleWindows();
             if (windows.Count != 1)
@@ -166,6 +214,7 @@ public sealed partial class MainForm
 
             _dungeonTask = Task.Run(async () =>
             {
+                using var journalLease = restartJournal!;
                 using var interruptions = ProductionInterruptionCheckpoint.Install(rawCrafting.CheckInterruptionsAsync, token);
                 using (craftingScreen)
                 using (alteringScreen)
@@ -200,7 +249,8 @@ public sealed partial class MainForm
 
                             // Each plan must reach its verified target before
                             // the next plan is allowed to touch the game.
-                            await automation.RunAsync(current, token);
+                            await automation.RunAsync(current, token, journalLease, index);
+                            journalLease.MarkPlanCompleted(index, current);
                             completedCraftsBefore += automation.CompletedCrafts;
                             int confirmedCrafts = completedCraftsBefore;
                             int currentPlanCrafts = automation.CompletedCrafts;
@@ -220,6 +270,7 @@ public sealed partial class MainForm
                         }, token, (failedPlan, index, materialError, ct) =>
                         {
                             ct.ThrowIfCancellationRequested();
+                            journalLease.MarkMaterialSkipped(index, failedPlan);
                             int step = index + 1;
                             Ui(() =>
                             {
@@ -272,6 +323,7 @@ public sealed partial class MainForm
                                 _ = _notifier.SendAlertAsync("제작 OCR 장기 대기", message, false);
                             });
                         });
+                        journalLease.FinishQueue(queueResult.Completed, queueResult.Skipped);
                         Ui(() =>
                         {
                             _craftingPage.ClearCompletedQueue();
@@ -336,6 +388,7 @@ public sealed partial class MainForm
                     }
                 }
             });
+            journalTransferredToWorker = true;
         }
         catch (Exception ex)
         {
@@ -348,6 +401,8 @@ public sealed partial class MainForm
         }
         finally
         {
+            if (!journalTransferredToWorker)
+                restartJournal?.Dispose();
             _starting = false;
         }
     }
