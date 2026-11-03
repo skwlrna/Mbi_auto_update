@@ -1388,7 +1388,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     var started = Stopwatch.StartNew();
                     var previousHud = DetectManagedWorldHudTemplates(frame);
                     bool previousField = HasManagedKEntryFieldHudVisual(frame);
-                    bool previousSpace = !previousField &&
+                    // 17:13 field incident: the legacy outside-K HUD icon can miss
+                    // while the independent shortcut layout is present.
+                    // Check the K/I/Space fallback when that icon misses,
+                    // even if the first field detector already succeeded.
+                    bool previousSpace = (!previousField || !previousHud.KFound) &&
                         await HasManagedKISpaceFieldHudAsync(frame, ct);
                     previousField |= previousSpace;
                     bool NeedsKeyOcr((int Matched, string Scores, bool KFound, bool IFound, bool HomeFound, bool EndFound) hud, bool field)
@@ -1402,7 +1406,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         using var freshField = Capture(ct);
                         var currentHud = DetectManagedWorldHudTemplates(freshField);
                         bool currentField = HasManagedKEntryFieldHudVisual(freshField);
-                        bool currentSpace = !currentField &&
+                        bool currentSpace =
+                            (previousSpace || !currentField || !currentHud.KFound) &&
                             await HasManagedKISpaceFieldHudAsync(freshField, ct);
                         currentField |= currentSpace;
                         var currentKeys = await FindManagedWorldHudKeysAsync(freshField, NeedsKeyOcr(currentHud, currentField), ct);
@@ -1493,7 +1498,28 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (directive == AlteringFacilityEntryDirective.Automatic)
                     _ui.TapFresh(0x25, ct);
                 else if (verifyManagedK is not null)
-                    await _ui.TapVerifiedFreshAsync(0x25, verifyManagedK, ct);
+                {
+                    try
+                    {
+                        // Still one *verified* input at most. A rejected final
+                        // frame sends no key; only a brand-new two-frame entry
+                        // proof and fresh CLI idle may authorize another try.
+                        await _ui.TapVerifiedFreshAsync(0x25, verifyManagedK, ct);
+                    }
+                    catch (InvalidOperationException ex) when (
+                        attempt < maxAttempts - 1 &&
+                        !ct.IsCancellationRequested &&
+                        ex.Message.Contains(
+                            "관리 가공 K 입력 직전 화면 인증 변경",
+                            StringComparison.Ordinal))
+                    {
+                        Log?.Invoke(
+                            "[자동 가공] K 최종 프레임 인증 불일치 · 입력 0회" +
+                            " · 허용된 다음 재진입 회차에서 새 화면 2프레임/CLI 재판정" +
+                            " · 동일 완료품 수령/등록 자동 반복 없음");
+                        continue;
+                    }
+                }
                 else
                     Fail(frame, "관리 가공 K 화면 인증 근거 없음 · 입력 없이 정지");
                 if (directive != AlteringFacilityEntryDirective.Automatic)
@@ -2668,8 +2694,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         if (frame.Width != 800 || frame.Height != 1000)
             return false;
-        var lower = DetectManagedWorldHudTemplates(frame);
-        if (!lower.KFound || !lower.IFound)
+        // An independent upper+lower world shortcut glyph layout is
+        // mandatory. The older outside_K_v75 template may miss K despite
+        // its visible key pill: never make the Space route depend on that
+        // legacy template. This still cannot authorize input alone.
+        if (!HasManagedKEntryFieldHudVisual(frame))
             return false;
         // Space sits on the bottom-center round action control. Restrict OCR
         // to the key pill; the same word in quests/chat cannot qualify.
@@ -2701,32 +2730,61 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private async Task<bool> VerifyManagedKFrameAsync(Bitmap frame, string route,
         ManagedWorldHudKeys expectedKeys, CancellationToken ct)
     {
-        // The last frame must positively prove world HUD; a template score alone
-        // can also occur in a dungeon or while another production UI is present.
-        if (await ClassifyManagedProductionSceneAsync(frame, ct) !=
-            ManagedProductionSceneKind.WorldHud)
+        // The last input-guard capture is authoritative. A mismatch may only
+        // be re-observed in a NEW entry attempt; this method never sends K.
+        var scene = await ClassifyManagedProductionSceneAsync(frame, ct);
+        bool blockingModal = HasManagedKEntryBlockingModal(frame);
+        bool processingHub = HasFixedProcessingHubVisual(frame);
+        bool processingTab = HasManagedProcessingBottomTabVisual(frame);
+        bool foodMenu = HasManagedFoodCraftingNavigationVisual(frame);
+        bool fieldVisual = HasManagedKEntryFieldHudVisual(frame);
+        if (scene != ManagedProductionSceneKind.WorldHud ||
+            blockingModal || processingHub || processingTab || foodMenu)
+        {
+            Log?.Invoke(
+                $"[자동 가공][K 최종 진단] 거부 · route={route}" +
+                $" · scene={scene} · field={fieldVisual}" +
+                $" · modal={blockingModal} · hub={processingHub}" +
+                $" · tab={processingTab} · food={foodMenu}" +
+                " · 키 입력 없음");
             return false;
-        if (HasManagedKEntryBlockingModal(frame) || HasFixedProcessingHubVisual(frame) ||
-            HasManagedProcessingBottomTabVisual(frame) || HasManagedFoodCraftingNavigationVisual(frame))
-            return false;
+        }
+
+        bool authorized;
         if (route == "key-labels")
         {
             var keys = expectedKeys.Method == "glyph" ? DetectManagedWorldHudKeys(frame) :
                 await ReadManagedWorldHudKeysAsync(frame, ct);
-            return HasManagedKEntryFieldHudVisual(frame) && expectedKeys.IsConsecutiveWith(keys);
+            authorized = fieldVisual && expectedKeys.IsConsecutiveWith(keys);
         }
-        // Recheck the SAME final frame after the final CLI safe-idle response.
-        // Never carry forward a positive Space OCR from the earlier frames.
-        if (route == "K/I/Space")
-            return await HasManagedKISpaceFieldHudAsync(frame, ct);
-        var hud = DetectManagedWorldHudTemplates(frame);
-        return route switch
+        else if (route == "K/I/Space")
         {
-            "templates" => hud.Matched >= 3,
-            "K/I" => hud.KFound && hud.IFound && HasManagedKEntryFieldHudVisual(frame),
-            "Home/End" => hud.HomeFound && hud.EndFound && HasManagedKEntryFieldHudVisual(frame),
-            _ => false
-        };
+            // Re-read Space on the SAME final frame. Neither a previous
+            // successful OCR result nor a legacy outside-K template suffices.
+            authorized = await HasManagedKISpaceFieldHudAsync(frame, ct);
+        }
+        else
+        {
+            var hud = DetectManagedWorldHudTemplates(frame);
+            authorized = route switch
+            {
+                "templates" => hud.Matched >= 3,
+                "K/I" => hud.KFound && hud.IFound && fieldVisual,
+                "Home/End" => hud.HomeFound && hud.EndFound && fieldVisual,
+                _ => false
+            };
+        }
+        if (!authorized)
+        {
+            var hud = DetectManagedWorldHudTemplates(frame);
+            Log?.Invoke(
+                $"[자동 가공][K 최종 진단] 증거 부족 · route={route}" +
+                $" · scene={scene} · field={fieldVisual} · hud={hud.Matched}/4" +
+                $" · K={hud.KFound} · I={hud.IFound}" +
+                $" · Home={hud.HomeFound} · End={hud.EndFound}" +
+                " · 키 입력 없음");
+        }
+        return authorized;
     }
 
     internal static bool HasManagedFoodCraftingNavigationVisual(Bitmap frame)
