@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "version": "V3.2.86",
+  "purpose": "phase1_stability_wait_advisories",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "이번꺼 까지 하고 정식배포해",
+  "requestedAtKst": "2026-11-03",
+  "sourcePullRequest": 370,
+  "sourcePullRequests": [
+    367,
+    369,
+    370
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "User explicitly requested a new official release including PR #370. This is not evidence of live game stability. Release is conditional on PR #370 being merged, a new exact-main successful full Windows CI and phase1 regression tests. Existing updater ZIP checksum and rollback guard must pass before public publication."
+}
