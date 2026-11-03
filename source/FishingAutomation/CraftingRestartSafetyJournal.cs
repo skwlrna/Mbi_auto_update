@@ -15,6 +15,13 @@ internal sealed record CraftingPendingBatch
     public DateTimeOffset StartedAt { get; init; }
 }
 
+internal sealed record CraftingConfirmedPlanCredit
+{
+    public int PlanIndex { get; init; }
+    public int CraftCount { get; init; }
+    public long ConfirmedOutput { get; init; }
+}
+
 internal sealed record CraftingRestartSnapshot
 {
     public int Version { get; init; } = 1;
@@ -23,6 +30,7 @@ internal sealed record CraftingRestartSnapshot
     public CraftingPlan[] Plans { get; init; } = [];
     public int[] CompletedIndices { get; init; } = [];
     public int[] SkippedIndices { get; init; } = [];
+    public CraftingConfirmedPlanCredit[] ConfirmedCredits { get; init; } = [];
     public CraftingPendingBatch? PendingBatch { get; init; }
     public int LastPlanIndex { get; init; } = -1;
     public long LastConfirmedIncrease { get; init; }
@@ -94,6 +102,7 @@ internal sealed class CraftingRestartSafetyJournal : IDisposable
         if (s.Version != 1 || !Guid.TryParseExact(s.RunId, "N", out _) ||
             s.Identity is null || s.Plans is null || s.Plans.Length == 0 ||
             s.CompletedIndices is null || s.SkippedIndices is null ||
+            s.ConfirmedCredits is null ||
             s.StartedAt == default || s.UpdatedAt == default ||
             s.LastPlanIndex < -1 || s.LastPlanIndex >= s.Plans.Length ||
             s.LastConfirmedIncrease < 0)
@@ -104,6 +113,17 @@ internal sealed class CraftingRestartSafetyJournal : IDisposable
         if (all.Distinct().Count() != all.Length ||
             all.Any(i => i < 0 || i >= s.Plans.Length))
             throw new InvalidDataException("제작 재시작 기록에 중복 또는 범위 밖 품목이 있습니다.");
+        if (s.ConfirmedCredits.Select(c => c.PlanIndex).Distinct().Count() !=
+                s.ConfirmedCredits.Length ||
+            s.ConfirmedCredits.Any(c =>
+                c.PlanIndex < 0 || c.PlanIndex >= s.Plans.Length ||
+                c.CraftCount is < 1 || c.ConfirmedOutput <= 0))
+            throw new InvalidDataException("제작 확정 출력 기록이 유효하지 않습니다.");
+        if (s.CompletedIndices.Any(index =>
+                !s.ConfirmedCredits.Any(c => c.PlanIndex == index &&
+                    c.ConfirmedOutput >= s.Plans[index].TargetQuantity)))
+            throw new InvalidDataException(
+                "제작 완료 품목에 목표 수량의 확정 배치 증거가 없습니다.");
         if (s.PendingBatch is { } pending &&
             (s.Completed || pending.PlanIndex < 0 ||
              pending.PlanIndex >= s.Plans.Length ||
@@ -198,11 +218,27 @@ internal sealed class CraftingRestartSafetyJournal : IDisposable
             inventoryAfter - pending.InventoryBefore < pending.ExpectedIncrease)
             throw new InvalidOperationException(
                 "제작 배치의 재고 증가 증거가 미확정입니다 · 신규 제작 입력 차단");
+        long gained = inventoryAfter - pending.InventoryBefore;
+        var credits = current.ConfirmedCredits.ToList();
+        int position = credits.FindIndex(c => c.PlanIndex == planIndex);
+        if (position < 0)
+            credits.Add(new CraftingConfirmedPlanCredit
+            {
+                PlanIndex = planIndex,
+                CraftCount = pending.Attempts,
+                ConfirmedOutput = gained
+            });
+        else
+            credits[position] = credits[position] with
+            {
+                CraftCount = checked(credits[position].CraftCount + pending.Attempts),
+                ConfirmedOutput = checked(credits[position].ConfirmedOutput + gained)
+            };
         Save(current with
         {
             PendingBatch = null,
-            LastConfirmedIncrease = checked(current.LastConfirmedIncrease +
-                inventoryAfter - pending.InventoryBefore)
+            ConfirmedCredits = credits.ToArray(),
+            LastConfirmedIncrease = checked(current.LastConfirmedIncrease + gained)
         });
     }
 
@@ -211,8 +247,11 @@ internal sealed class CraftingRestartSafetyJournal : IDisposable
         var current = RequireActive(planIndex, plan);
         if (current.PendingBatch is not null ||
             current.CompletedIndices.Contains(planIndex) ||
-            current.SkippedIndices.Contains(planIndex))
-            throw new InvalidOperationException("제작 완료 중복 기록 또는 미확정 배치");
+            current.SkippedIndices.Contains(planIndex) ||
+            !current.ConfirmedCredits.Any(c => c.PlanIndex == planIndex &&
+                c.ConfirmedOutput >= plan.TargetQuantity))
+            throw new InvalidOperationException(
+                "제작 완료 기록에 목표 수량 이상의 확정 배치 증거가 없습니다.");
         Save(current with
         {
             LastPlanIndex = planIndex,
