@@ -49,9 +49,13 @@ internal sealed class CraftingAutomation
         _delay = delay ?? Task.Delay;
     }
 
-    internal async Task RunAsync(CraftingPlan plan, CancellationToken ct)
+    internal async Task RunAsync(
+        CraftingPlan plan, CancellationToken ct,
+        CraftingRestartSafetyJournal? restartJournal = null, int planIndex = -1)
     {
         plan.Validate();
+        if (restartJournal is not null && planIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(planIndex));
         _managerState?.BeginStage(LifeSkillStage.Crafting,
             "제작 퀘스트 시작 · 화면 확인 유지");
         Gained = 0;
@@ -100,6 +104,11 @@ internal sealed class CraftingAutomation
 
             long beforeCraft = await _data.ItemCountAsync(plan.DisplayName, ct);
             long expectedMinimum = checked((long)batchCrafts * plan.ProducedPerCraft);
+            // Atomic disk intent BEFORE the first potentially effective craft
+            // input. An F10/crash after this point leaves an unresolved attempt
+            // that must NEVER silently restart from the original full target.
+            restartJournal?.BeginBatch(
+                planIndex, plan, batchCrafts, beforeCraft, expectedMinimum);
             var workTicket = _workFence.Begin("craft:" + plan.DisplayName);
             long afterCraft;
             try
@@ -112,6 +121,9 @@ internal sealed class CraftingAutomation
                     plan.DisplayName, beforeCraft, expectedMinimum, ct);
                 _workFence.ConfirmInventoryIncrease(
                     workTicket, beforeCraft, afterCraft, expectedMinimum);
+                // Durable confirmation is required before another batch may
+                // reuse this recipe. Persistence failure is fail-closed.
+                restartJournal?.ConfirmBatch(planIndex, plan, afterCraft);
             }
             catch (Exception)
             {
