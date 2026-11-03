@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile the real, side-effect-free production decisions. No game assembly or input APIs. -->
+    <Compile Include="../../source/FishingAutomation/AutomationStartPreflightPolicy.cs" Link="Production/AutomationStartPreflightPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/CraftingGatherCompletionPolicy.cs" Link="Production/CraftingGatherCompletionPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/AlteringFixedRecipeRetryPolicy.cs" Link="Production/AlteringFixedRecipeRetryPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/dungeon/AbyssOutsidePolicy.cs" Link="Production/AbyssOutsidePolicy.cs" />
+  </ItemGroup>
+</Project>
