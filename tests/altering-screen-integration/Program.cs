@@ -436,64 +436,70 @@ try
           !CallBoolean(screen, "CanAuthorizeManagedKHomeEndFieldFallback",
             true, true, true, true, true, true, false, true),
         "V3.2.50 Home+End world fallback needs both icons and independent field on 2 frames; popup/menu veto");
+    // 2026-11-03 17:13 recurrence: old 3/4 HUD route passed 2 frames,
+    // yet the last input-boundary frame refused K. The active F9 route must
+    // use ONLY K/I key glyphs + exact Space in both the first two frames
+    // and the last fresh scene classification. Legacy methods may remain
+    // as non-input diagnostic/safety helpers but cannot grant F9 field entry.
     var enter = ScreenCalls("EnterFacilityCoreAsync", 3);
-    Check(Has(enter, "HasManagedKEntryBlockingModal") &&
-          Has(enter, "DetectManagedWorldHudTemplates") &&
-          Has(enter, "CanAuthorizeManagedKEntry") &&
-          Has(enter, "IsManagedKReentryWithinLimit") &&
-          Has(enter, "StartNew") &&
-          Has(enter, "HasManagedKEntryFieldHudVisual") &&
-          Has(enter, "CanAuthorizeManagedKFieldFallback") &&
-          Has(enter, "CanAuthorizeManagedKHomeEndFieldFallback") &&
-          Has(enter, "RequireManagedIdleAsync") &&
-          Has(enter, "Capture"),
-        "V3.2.0 K re-entry uses template path or guarded 2-frame K/I + minimap+skill visual; idle still required");
-    Check(Has(enter, "RequireManagedIdleAsync"),
-        "F03 managed K/Esc/menu selection rechecks safe CLI before navigation input");
-    // Earlier live captures had an unreliable minimap-only pixel gate;
-    // V3.2.0 never uses it by itself: two stable K+I template matches and
-    // independent field visual are BOTH mandatory after the first K.
-    // First entry now requires the same positive field proof as re-entry.
-    // A fresh popup veto and CLI idle remain required before any K input.
-    Check(!Has(enter, "HasFixedFacilityHeaderVisual") &&
-          Has(enter, "TapFresh") &&
-          Has(enter, "DetectManagedWorldHudTemplates") &&
-          Has(enter, "CanAuthorizeManagedKEntry") &&
-          Has(enter, "HasManagedKEntryFieldHudVisual") &&
+    var scene = ScreenCalls("ClassifyManagedProductionSceneAsync", 2);
+    var finalK = ScreenCalls("VerifyManagedKFrameAsync", 2);
+    var independentSpace = ScreenCalls("HasManagedKISpaceFieldHudAsync", 2);
+    var glyphs = ScreenCalls("HasManagedKIShortcutGlyphs", 1);
+    Check(CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+              true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+              true, false, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+              false, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+              true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
+              true, true, false, true),
+        "F9 K/I/Space requires two positive frames and forbids popup/menu authorization");
+    Check(Has(enter, "HasManagedKISpaceFieldHudAsync") &&
+          Has(enter, "CanAuthorizeManagedKSpaceFallback") &&
           Has(enter, "HasManagedKEntryBlockingModal") &&
-          Has(enter, "RequireManagedIdleAsync"),
-        "managed entry preserves independent template/field routes and fresh CLI safety");
-    var matchAbyssHud = ScreenCalls("DetectManagedWorldHudTemplates", 1);
-    Check(Count(matchAbyssHud, "FindTemplate") == 4 &&
-          !Has(matchAbyssHud, "HasManagedKEntryFieldHudVisual") &&
-          Has(ScreenCalls("CanAuthorizeManagedKEntry", 5), "get_Item1") == false &&
-          Has(ScreenCalls("CanAuthorizeManagedKFieldFallback", 8), "get_Item1") == false,
-        "V3.2.0 the four template thresholds remain independent of the field-only supplemental gate");
-    Check(!CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            true, 0, 0, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            true, 0, 0, true, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            true, 0, 0, false, true) &&
-          CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            false, 3, 3, false, false) &&
-          CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            false, 4, 3, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            false, 2, 4, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            false, 4, 2, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            false, 4, 4, true, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKEntry",
-            false, 4, 4, false, true),
-        "first K cannot bypass positive two-frame evidence; popup/menu veto still applies");
-    Check(Has(enter, "FindManagedWorldHudKeysAsync") &&
-          Has(enter, "TrySelectManagedFoodCraftingTabAsync") &&
+          Has(enter, "HasVisibleFacilityPanelWithoutEntryProof") &&
+          Has(enter, "RequireManagedIdleAsync") &&
           Has(enter, "TapVerifiedFreshAsync") &&
-          Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryBlockingModal") &&
-          Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedFoodCraftingNavigationVisual"),
-        "real managed entry routes food first and validates the same final input capture");
+          Has(enter, "Capture") &&
+          !Has(enter, "DetectManagedWorldHudTemplates") &&
+          !Has(enter, "CanAuthorizeManagedKEntry") &&
+          !Has(enter, "CanAuthorizeManagedKFieldFallback") &&
+          !Has(enter, "CanAuthorizeManagedKHomeEndFieldFallback") &&
+          !Has(enter, "FindManagedWorldHudKeysAsync") &&
+          !Has(enter, "HasManagedKEntryFieldHudVisual"),
+        "managed K preflight uses only K/I/Space, no Home/End/ESC or old HUD 3/4 input route");
+    Check(Has(scene, "HasManagedKISpaceFieldHudAsync") &&
+          Has(scene, "HasFixedProcessingHubVisual") &&
+          Has(scene, "HasVisibleFacilityPanelWithoutEntryProof") &&
+          Has(scene, "HasManagedKEntryBlockingModal") &&
+          !Has(scene, "DetectManagedWorldHudTemplates") &&
+          !Has(scene, "DetectManagedWorldHudKeys") &&
+          !Has(scene, "HasManagedKEntryFieldHudVisual"),
+        "F9 scene WorldHud proof is K/I/Space only with real menu/popup vetoes");
+    Check(Has(independentSpace, "HasManagedKIShortcutGlyphs") &&
+          Has(independentSpace, "FindCompactAsync") &&
+          !Has(independentSpace, "DetectManagedWorldHudTemplates") &&
+          !Has(independentSpace, "HasManagedKEntryFieldHudVisual") &&
+          !Has(independentSpace, "DetectManagedWorldHudKeys") &&
+          Has(glyphs, "get_Width") &&
+          Has(glyphs, "get_Height"),
+        "K/I/Space uses independent lower fixed key glyphs, exact-position Space OCR and 800x1000");
+    Check(Has(finalK, "ClassifyManagedProductionSceneAsync") &&
+          Has(finalK, "HasManagedKEntryBlockingModal") &&
+          Has(finalK, "HasFixedProcessingHubVisual") &&
+          Has(finalK, "HasVisibleFacilityPanelWithoutEntryProof") &&
+          Has(finalK, "HasManagedSceneReceiptResultVisual") &&
+          !Has(finalK, "DetectManagedWorldHudTemplates") &&
+          !Has(finalK, "HasManagedKEntryFieldHudVisual") &&
+          !Has(finalK, "HasManagedKISpaceFieldHudAsync"),
+        "final K guard reuses SAME classified K/I/Space proof exactly once, without stale route");
+    Check(Has(enter, "TrySelectManagedFoodCraftingTabAsync") &&
+          Has(enter, "WaitForManagedFacilityExitAsync") &&
+          Has(enter, "RequireManagedIdleAsync"),
+        "existing food-menu and post-Esc managed safety transitions remain intact");
     var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
     Check(Has(enter, "TrySelectManagedProcessingTabAsync") &&
           Has(enter, "WaitForManagedProcessingNavigationReadyAsync") &&
@@ -1140,7 +1146,7 @@ try
                 "DetectManagedWorldHudKeys") &&
               Has(ScreenCalls("EnterFacilityCoreAsync", 3), "WaitForManagedFacilityExitAsync") &&
               Has(ScreenCalls("EnterFacilityCoreAsync", 3), "RequireManagedIdleAsync") &&
-              Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryFieldHudVisual"),
+              Has(ScreenCalls("VerifyManagedKFrameAsync", 2), "ClassifyManagedProductionSceneAsync"),
             "shortcut proof reaches exit observation, CLI and final input guards");
         Check(screen.GetMethod("HasManagedBlueMinimapRingVisual", all) is null &&
               screen.GetMethod("HasManagedKEntryNonGoldFieldHudVisual", all) is null,
@@ -1171,6 +1177,11 @@ try
                   !PixelGate("HasManagedKEntryFieldHudVisual", noI) &&
                   !PixelGate("HasManagedKEntryFieldHudVisual", noUpper),
                 "missing independent shortcut anchors remain blocked: " + file);
+            Check(PixelGate("HasManagedKIShortcutGlyphs", original) &&
+                  PixelGate("HasManagedKIShortcutGlyphs", noUpper) &&
+                  !PixelGate("HasManagedKIShortcutGlyphs", noK) &&
+                  !PixelGate("HasManagedKIShortcutGlyphs", noI),
+                "F9 K/I exact lower glyphs survive Home/End/ESC removal, but never missing K/I: " + file);
         }
         using var wrongSize = new Bitmap(799, 1000);
         using var empty = BlackFrame();
