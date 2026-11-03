@@ -4,6 +4,20 @@ try
 {
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
+// Integrated bag-weight and bottle-lack holds must persist per-lane only.
+var holdMethod = typeof(MultiAlteringBatchStore).GetMethod(
+    "CanPersistMaterialHold",
+    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+    ?? throw new Exception("missing material hold persistence guard");
+bool CanPersistHold(string facility, MaterialSupplyHold evidence) =>
+    (bool)(holdMethod.Invoke(null, new object[] { facility, evidence }) ?? false);
+Check(CanPersistHold("금속 가공 시설", new("가방 공간", 1, 0, "bag_capacity_90pct")) &&
+      CanPersistHold("식재료 가공 시설", new("빈 병", 1, 0, "missing_empty_bottle")) &&
+      !CanPersistHold("금속 가공 시설", new("가방 공간", 1, 0, "unverified_bag")) &&
+      !CanPersistHold("금속 가공 시설", new("가방 공간", 1, 1, "bag_capacity_90pct")) &&
+      !CanPersistHold("금속 가공 시설", new("빈 병", 1, 1, "missing_empty_bottle")),
+    "only exact weight and empty-bottle lane holds are durable");
+
 // 2026-10-27: retry is a navigation action, never batch-registration proof.
 for (int clicks = 0; clicks <= 3; clicks++)
 foreach (bool oldHub in new[] { false, true })
@@ -3979,6 +3993,25 @@ await riceResolver.PreGatherKnownShortagesAsync(leatherPreflightEvidence, defaul
 Check(riceWorld.Gathered.Count == preLeatherGatherCount &&
       riceWorld.FieldExitCalls == preLeatherFieldExits,
     "global pre-gather bypasses leather without touching the game screen");
+// The real well uses pre-purchased empty bottles. A zero-bottle inventory
+// must HOLD the food item before any travel/gathering input. Buying a bottle
+// later permits the old water gather and queue behavior to proceed.
+bool zeroBottleHeld = false;
+try
+{
+    await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
+}
+catch (MaterialSupplyHoldException hold)
+{
+    zeroBottleHeld = hold.Evidence.Item == "빈 병" &&
+        hold.Evidence.Required == 1 && hold.Evidence.Observed == 0 &&
+        hold.Evidence.Category == "missing_empty_bottle";
+}
+Check(zeroBottleHeld &&
+      riceWorld.FieldExitCalls == preLeatherFieldExits &&
+      riceWorld.Gathered.Count == preLeatherGatherCount,
+    "F9 well water shortage with zero empty bottles holds before field exit or gather");
+riceWorld.SetCount("빈 병", 1);
 await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
 Check(riceWorld.Count("물이 든 병") >= 68 &&
       riceWorld.Gathered.SequenceEqual(new[] { "물이 든 병" }) &&

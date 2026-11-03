@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "version": "V3.2.85",
+  "purpose": "reviewed_followup_fixes",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "지금 최신 업데이트 이후 올라온 깃허브 pr 확인해보고 검증하고 배포해",
+  "requestedAtKst": "2026-11-03",
+  "sourcePullRequest": 360,
+  "sourcePullRequests": [
+    354,
+    358,
+    359,
+    360,
+    361,
+    363
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "Exact V3.2.85 candidate commit 5fed35ed9c866e6a09967334fef8e5372d9ab4a9 passed full Windows production CI #41570785097. Integrated empty-bottle code also passed full Windows CI #41570093529; merged baseline passed #41569377616. Final main SHA must independently pass production CI before any public release. Real-game validation is still pending; rollback provided."
+}

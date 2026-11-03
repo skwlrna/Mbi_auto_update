@@ -6,6 +6,26 @@ int checks=0;
 void Check(bool ok,string label) { if(!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
 var log = new AppLog(Path.Combine(AppContext.BaseDirectory,"gathering-test.log"), 1000000);
 
+// A verified ESC->world empty-bottle HOLD releases only a proven idle
+// gathering work ticket; it never claims an output increase or lets an
+// uncertain attempt be replayed.
+var bottleFence = new LifeSkillWorkFence();
+var bottleTicket = bottleFence.Begin("gather:우유");
+bottleFence.ConfirmSafeGatheringDeferral(bottleTicket, 12, 12);
+var bottleAgain = bottleFence.Begin("gather:우유");
+bool invalidDeferral = false;
+try { bottleFence.ConfirmSafeGatheringDeferral(bottleAgain, 12, 11); }
+catch (InvalidOperationException) { invalidDeferral = true; }
+Check(invalidDeferral, "empty bottle cannot defer when inventory decreased");
+bottleFence.MarkUncertain(bottleAgain, "unverified_field");
+bool uncertainStillBlocked = false;
+try { bottleFence.Begin("gather:우유"); }
+catch (InvalidOperationException) { uncertainStillBlocked = true; }
+var bottleMetrics = bottleFence.OutcomeSnapshot().Single(x => x.Kind == LifeSkillWorkKind.Gathering);
+Check(uncertainStillBlocked && bottleMetrics.OutputVerified == 0 &&
+      bottleMetrics.Uncertain == 1 && bottleMetrics.InFlight == 0,
+    "safe empty-bottle deferral allows one future retry but never masks an uncertain attempt");
+
 var outcomeJournal = new LifeSkillRecoveryJournal();
 Check(outcomeJournal.OutcomeSnapshot().CompletedReadRecoveryRate is null,
     "V3.2.37 cannot invent a CLI read recovery rate without concluded attempts");

@@ -478,6 +478,15 @@ public sealed partial class MainForm
                                     "[다중가공][선행채집 보류] 채집 중 가방 무게 90% 도달 · " +
                                     "전체 작업 정지 대신 시설별 재료 검증으로 인계");
                             }
+                        catch (MaterialSupplyHoldException hold) when (
+                            hold.Evidence.Category == "missing_empty_bottle" &&
+                            hold.Evidence.Item == "빈 병")
+                        {
+                            // The pre-gather resolver observed a missing bottle
+                            // before input. Defer that plan to its lane; no purchase.
+                            _log.Write("[다중가공] 빈 병 0개 · 통합 선행채집 보류 · " +
+                                "다른 시설 계속 · 재고 재확인 전 자동 구매/채집 없음");
+                        }
                         }
                     }
                     _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 음식 보류 대상은 시설별 재확인");
@@ -771,6 +780,17 @@ public sealed partial class MainForm
                     Ui(() => _log.Write(
                         $"[다중가공][무게 보류 해제] {plan.DisplayName} · " +
                         $"가방 {capacity.FillPercent}% · 재료/제법 재검증"));
+                    return await InspectSupplyRouteAsync(plan, ct);
+                }
+                if (prior.Category == "missing_empty_bottle")
+                {
+                    long bottles = await managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "empty-bottle-hold-recheck",
+                        inner => rawAlteringData.ItemCountAsync("빈 병", inner), ct);
+                    if (bottles < 0)
+                        throw new InvalidDataException("빈 병 재고 수량이 음수입니다.");
+                    if (bottles == 0)
+                        return prior with { Observed = 0 };
                     return await InspectSupplyRouteAsync(plan, ct);
                 }
                 if (plan.FacilityName == "가죽 가공 시설")

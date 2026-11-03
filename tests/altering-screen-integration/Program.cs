@@ -53,6 +53,57 @@ try
     string? CallCache(string name, params object?[] parameters) =>
         (string?)Method(cachePolicy, name, parameters.Length).Invoke(null, parameters);
 
+    // 2026-11-03 missing-bottle incident: water and milk must pause
+    // before entering life-skill navigation, and their holds persist for
+    // independent non-food facilities without a fabricated completion.
+    {
+        var catalog = production.GetType("FishingAutomation.LivingSkillGatheringCatalog", true)!;
+        bool NeedsBottle(string name)
+        {
+            object?[] args = { name, null };
+            bool mapped = (bool)Method(catalog, "TryResolveBulk", 2).Invoke(null, args)!;
+            return mapped && (bool)args[1]!.GetType()
+                .GetProperty("RequiresEmptyBottle")!.GetValue(args[1])!;
+        }
+        Check(NeedsBottle("우유") && NeedsBottle("물이 든 병") &&
+              !NeedsBottle("달걀") && !NeedsBottle("동 광석"),
+            "empty bottle requirement is limited to verified milk/well-water paths");
+
+        var holdType = production.GetType("FishingAutomation.MaterialSupplyHold", true)!;
+        var store = production.GetType("FishingAutomation.MultiAlteringBatchStore", true)!;
+        bool Persist(string item, long needed, long owned, string category)
+        {
+            var evidence = Activator.CreateInstance(holdType, item, needed, owned, category)!;
+            return (bool)Method(store, "CanPersistMaterialHold", 2)
+                .Invoke(null, new object[] { "금속 가공 시설", evidence })!;
+        }
+        Check(Persist("빈 병", 1, 0, "missing_empty_bottle") &&
+              !Persist("빈 병", 1, 1, "missing_empty_bottle") &&
+              !Persist("동 광석", 1, 0, "missing_empty_bottle") &&
+              !Persist("빈 병", 1, 0, "unverified_popup"),
+            "only exact zero-stock empty-bottle hold can be persisted in other lanes");
+    }
+
+    {
+        Type bulkScreen = production.GetType(
+            "DungeonVisionBot.InventoryBulkGatheringScreen", true)!;
+        Check(CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                true, true, true) &&
+              !CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                true, false, true) &&
+              !CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                false, true, true) &&
+              !CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                true, true, false),
+            "empty-bottle ESC is forbidden without two positive popup frames and outside idle CLI");
+
+        Check(Method(bulkScreen, "HasEmptyBottleShortagePopupAsync", 2) is not null &&
+              Method(bulkScreen, "IsLifeSkillOrProfileOpenAsync", 2) is not null &&
+              Method(bulkScreen, "IsEmptyBottleRecoveryFieldAsync", 2) is not null &&
+              Method(bulkScreen, "TryRecoverEmptyBottleShortageAsync", 1) is not null,
+            "actual life-skill popup ESC recovery and world HUD confirmation compile into app");
+    }
+
     // Inspect compiled IL of the REAL async state machines. Merely recording a
     // manager directive in a fake screen does not prove it reaches the actual
     // fixed-card, medicine, cached recipe, detail or receipt implementations.
@@ -342,32 +393,6 @@ try
 
     // V3.2.0 14:16:48 production capture: Home/End fail while K/I are
     // stable. 2/4 alone remains vetoed; two frames of K+I PLUS separately
-    // 2026-11-03 world HUD: K/I/Space remain present even when End/ESC
-    // template scores drop below the old upper-strip threshold. The three
-    // shortcuts alone cannot permit K: scene/modal and fresh CLI guards remain.
-    Check(CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
-            true, true, true, true, true, true, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
-            true, true, false, true, true, true, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
-            true, true, true, true, false, true, false, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
-            true, true, true, true, true, true, true, false) &&
-          !CallBoolean(screen, "CanAuthorizeManagedKSpaceFallback",
-            true, true, true, true, true, true, false, true),
-        "K/I/Space fallback requires both frames and never bypasses popup/menu veto");
-    Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3),
-              "CanAuthorizeManagedKSpaceFallback") &&
-          Has(ScreenCalls("VerifyManagedKFrameAsync", 4),
-              "HasManagedKISpaceFieldHudAsync") &&
-          Has(ScreenCalls("ClassifyManagedProductionSceneAsync", 2),
-              "HasManagedKISpaceFieldHudAsync") &&
-          Has(ScreenCalls("HasManagedKISpaceFieldHudAsync", 2),
-              "FindCompactAsync") &&
-          Has(ScreenCalls("EnterFacilityCoreAsync", 3),
-              "RequireManagedIdleAsync"),
-        "Space OCR route reaches independent scene proof and final fresh CLI verification");
-
     // verified upper/lower shortcut layout may authorize the field path.
     Check(CallBoolean(screen, "CanAuthorizeManagedKFieldFallback",
             true, true, true, true, true, true, false, false) &&

@@ -877,6 +877,22 @@ internal sealed class AlteringAutomation
                                 // must unwind through their dependency owner.
                                 throw await IsolateEmptyMaterialHoldAsync(plan, hold, ct);
                             }
+                            catch (MaterialSupplyHoldException hold)
+                                when (hold.Evidence.Category == "missing_empty_bottle" &&
+                                      hold.Evidence.Item == "빈 병" &&
+                                      hold.Evidence.Observed == 0)
+                            {
+                                // The UI recovery already proved ESC->world and
+                                // no gathering remains active. Nonetheless, a
+                                // coordinator lane may be held only AFTER any
+                                // existing main jobs finish and are safely
+                                // received, with ZERO remaining facility jobs.
+                                // Do not turn this into an uncertain registration
+                                // or a fabricated terminal recipe success.
+                                Log?.Invoke($"[자동 가공][빈 병 부족] {plan.DisplayName} · " +
+                                    "일반 필드 복귀 확인 · 기존 등록 작업 정산 후 해당 시설만 보류");
+                                throw await IsolateEmptyMaterialHoldAsync(plan, hold, ct);
+                            }
 
                             recipes = await _data.RecipesAsync(ct);
                             selected = recipes.Where(x => x.DisplayName == plan.DisplayName).ToArray();

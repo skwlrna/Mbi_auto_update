@@ -286,6 +286,30 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             $"[재료 해결] 필드 복귀 확인 · 중간관리자 현장확정 해제 · {reason}");
     }
 
+    // Verified 2026-11-03 incident: milk and well-water life skills require
+    // empty bottles bought beforehand. Check fresh CLI stock BEFORE any
+    // gathering navigation; never buy, wait for a missing bottle popup, or
+    // claim a completed material without a verified inventory gain.
+    private async Task RequireEmptyBottleForMaterialsAsync(
+        IEnumerable<string> materials, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!materials.Any(name =>
+                LivingSkillGatheringCatalog.TryResolveBulk(name, out var source) &&
+                source.RequiresEmptyBottle))
+            return;
+
+        long bottles = await _gathering.ItemCountAsync("빈 병", ct);
+        if (bottles < 0)
+            throw new InvalidDataException("빈 병 재고 CLI 수량이 음수입니다.");
+        if (bottles == 0)
+        {
+            Log?.Invoke("[재료 해결] 빈 병 0개 · 해당 품목만 보류 · 자동 구매 없음 · 다른 시설 진행");
+            throw new MaterialSupplyHoldException(new MaterialSupplyHold(
+                "빈 병", 1, 0, "missing_empty_bottle"));
+        }
+    }
+
     public async Task ResolveAsync(
         AlteringPlan parentPlan,
         AlteringRecipe blockedRecipe,
@@ -317,6 +341,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
         // later rather than inventing recipe data.
         var multiGather = await BuildMultiGatheringPlanAsync(
             parentPlan, blockedRecipe, remainingWorks, ct);
+        await RequireEmptyBottleForMaterialsAsync(
+            multiGather.Select(x => x.DisplayName), ct);
         if (multiGather.Count > 0)
         {
             if (_alteringScreen is not IAlteringFieldExitScreen fieldExit)
@@ -382,6 +408,8 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             request.Plan.Validate();
 
         var multiGather = await BuildMultiGatheringPlanAsync(eligible, ct);
+        await RequireEmptyBottleForMaterialsAsync(
+            multiGather.Select(x => x.DisplayName), ct);
         if (multiGather.Count == 0)
         {
             Log?.Invoke(
@@ -460,6 +488,9 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
                 if (sourceRecipe is null)
                     throw new InvalidOperationException(
                         $"{itemName}은 직접 채집 재료입니다. 제작에서는 제작 퀘스트 채집 경로를 사용해야 합니다.");
+
+                await RequireEmptyBottleForMaterialsAsync(
+                    new[] { itemName }, ct);
 
                 if (_alteringScreen is not IAlteringFieldExitScreen fieldExit)
                     throw new InvalidOperationException(
