@@ -25,6 +25,30 @@ internal readonly record struct GatheringWeightSnapshot(decimal Current, decimal
     internal bool MustStop => Current >= Maximum * GatheringWeightPolicy.SafetyFraction;
 }
 
+// Read-only, per-facility hold: weight is expressed in tenths of a percent
+// (90.0% = 900) to preserve the original 90% boundary without inventing item
+// weights. It is NOT a material, registration ticket or inventory authority.
+internal static class GatheringWeightLaneHoldPolicy
+{
+    internal const string Category = "gathering_bag_capacity";
+    internal const string Item = "가방 무게";
+    internal const long ThresholdTenths = 900;
+
+    internal static MaterialSupplyHold Create(GatheringWeightSnapshot weight)
+    {
+        if (!weight.MustStop)
+            throw new InvalidOperationException("90% 미만 가방 무게로 보류를 만들 수 없습니다.");
+        long observed = checked((long)Math.Floor(weight.FillPercent * 10m));
+        return new MaterialSupplyHold(Item, ThresholdTenths,
+            Math.Max(ThresholdTenths, observed), Category);
+    }
+
+    internal static bool IsHold(MaterialSupplyHold evidence)
+        => evidence.Category == Category &&
+           evidence.Item == Item && evidence.Required == ThresholdTenths &&
+           evidence.Observed >= ThresholdTenths && evidence.Observed <= 1000;
+}
+
 internal sealed class GatheringBagCapacityException : InvalidOperationException
 {
     internal long RemainingQuantity { get; }
