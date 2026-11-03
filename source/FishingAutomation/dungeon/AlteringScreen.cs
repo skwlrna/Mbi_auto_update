@@ -1043,6 +1043,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         bool world = HasManagedKEntryFieldHudVisual(frame) &&
             (DetectManagedWorldHudTemplates(frame).Matched >= 2 ||
              DetectManagedWorldHudKeys(frame).Found);
+        // The three lower world shortcuts K / I / Space are always visible in
+        // ordinary fields, including the 07:35 false-negative frame. Dungeon
+        // can share those shortcuts: this is visual evidence ONLY; a fresh
+        // NotInDungeon and safe-idle CLI gate remains required before any K.
+        if (!world && !hub && !panel && !food &&
+            !HasManagedKEntryBlockingModal(frame))
+            world = await HasManagedKISpaceFieldHudAsync(frame, ct);
         bool armor = false;
         if (!hub && !panel && !world && !food &&
             !HasManagedKEntryBlockingModal(frame))
@@ -1381,6 +1388,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     var started = Stopwatch.StartNew();
                     var previousHud = DetectManagedWorldHudTemplates(frame);
                     bool previousField = HasManagedKEntryFieldHudVisual(frame);
+                    bool previousSpace = !previousField &&
+                        await HasManagedKISpaceFieldHudAsync(frame, ct);
+                    previousField |= previousSpace;
                     bool NeedsKeyOcr((int Matched, string Scores, bool KFound, bool IFound, bool HomeFound, bool EndFound) hud, bool field)
                         => hud.Matched < 3 && !(field && (hud.KFound && hud.IFound || hud.HomeFound && hud.EndFound));
                     var previousKeys = await FindManagedWorldHudKeysAsync(frame, NeedsKeyOcr(previousHud, previousField), ct);
@@ -1392,6 +1402,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         using var freshField = Capture(ct);
                         var currentHud = DetectManagedWorldHudTemplates(freshField);
                         bool currentField = HasManagedKEntryFieldHudVisual(freshField);
+                        bool currentSpace = !currentField &&
+                            await HasManagedKISpaceFieldHudAsync(freshField, ct);
+                        currentField |= currentSpace;
                         var currentKeys = await FindManagedWorldHudKeysAsync(freshField, NeedsKeyOcr(currentHud, currentField), ct);
                         samples++;
                         bool actualModal = HasManagedKEntryBlockingModal(freshField);
@@ -1404,6 +1417,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             $"HUD={previousHud.Matched}/4 → {currentHud.Matched}/4 · " +
                             $"이전={previousHud.Scores} · 현재={currentHud.Scores} · " +
                             $"필드독립증거={previousField}→{currentField} · " +
+                            $"Space={previousSpace}→{currentSpace} · " +
                             $"K/I={previousHud.KFound}/{previousHud.IFound}→{currentHud.KFound}/{currentHud.IFound} · " +
                             $"단축키={previousKeys.Scores}→{currentKeys.Scores} · " +
                             $"팝업={actualModal} · 가공메뉴={unexpectedMenu} · " +
@@ -1440,13 +1454,23 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 previousHud.HomeFound, previousHud.EndFound,
                                 currentHud.HomeFound, currentHud.EndFound,
                                 previousField, currentField, actualModal, unexpectedMenu);
-                        bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed);
+                        bool spaceAuthorized = CanAuthorizeManagedKSpaceFallback(
+                            previousHud.KFound, previousHud.IFound, previousSpace,
+                            currentHud.KFound, currentHud.IFound, currentSpace,
+                            actualModal, unexpectedMenu);
+                        // Space OCR has four bounded scale passes. Permit its
+                        // corroborated two-frame route a slightly longer read-only
+                        // verification window without extending legacy routes.
+                        bool withinLimit = IsManagedKReentryWithinLimit(started.Elapsed) ||
+                            (spaceAuthorized && started.Elapsed < TimeSpan.FromSeconds(9));
                         bool keysAuthorized = previousKeys.IsConsecutiveWith(currentKeys) &&
                             previousField && currentField && !actualModal && !unexpectedMenu;
                         if (previousField && currentField &&
-                            (templateAuthorized || fieldAuthorized || homeEndAuthorized || keysAuthorized) && withinLimit)
+                            (templateAuthorized || fieldAuthorized || homeEndAuthorized ||
+                             keysAuthorized || spaceAuthorized) && withinLimit)
                         {
-                            string route = templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
+                            string route = spaceAuthorized ? "K/I/Space" :
+                                templateAuthorized ? "templates" : fieldAuthorized ? "K/I" :
                                 homeEndAuthorized ? "Home/End" : "key-labels";
                             verifyManagedK = last => VerifyManagedKFrameAsync(last, route, currentKeys, ct);
                             Log?.Invoke($"[자동 가공] K 화면 인증 · {route} · 실제 연속 2프레임 · CLI 후 입력 프레임 재검증");
@@ -1459,6 +1483,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                                 "3초 재관찰 후 입력 없이 정지 · HUD/단축키/팝업 진단 참조");
                         previousHud = currentHud;
                         previousField = currentField;
+                        previousSpace = currentSpace;
                         previousKeys = currentKeys;
                     }
                     if (menuAppeared)
@@ -2639,6 +2664,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             $"글자 Home={home.Score:F3},End={end.Score:F3},ESC={escape.Score:F3}");
     }
 
+    private async Task<bool> HasManagedKISpaceFieldHudAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        var lower = DetectManagedWorldHudTemplates(frame);
+        if (!lower.KFound || !lower.IFound)
+            return false;
+        // Space sits on the bottom-center round action control. Restrict OCR
+        // to the key pill; the same word in quests/chat cannot qualify.
+        var spaceArea = new Rectangle(396, 882, 66, 43);
+        var space = await _ui.FindCompactAsync(frame, spaceArea, "Space", ct);
+        return space is not null &&
+            spaceArea.Contains(space.Value.Bounds);
+    }
+
     private async Task<ManagedWorldHudKeys> FindManagedWorldHudKeysAsync(Bitmap frame, bool allowOcr, CancellationToken ct)
     {
         var glyphs = DetectManagedWorldHudKeys(frame);
@@ -2675,6 +2715,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 await ReadManagedWorldHudKeysAsync(frame, ct);
             return HasManagedKEntryFieldHudVisual(frame) && expectedKeys.IsConsecutiveWith(keys);
         }
+        // Recheck the SAME final frame after the final CLI safe-idle response.
+        // Never carry forward a positive Space OCR from the earlier frames.
+        if (route == "K/I/Space")
+            return await HasManagedKISpaceFieldHudAsync(frame, ct);
         var hud = DetectManagedWorldHudTemplates(frame);
         return route switch
         {
@@ -2759,6 +2803,17 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         => !popupVisible && !processingMenuVisible &&
            previousK && previousI && currentK && currentI &&
            previousField && currentField;
+
+    // K/I are confirmed by the existing world HUD templates; Space must be
+    // read in the actual center-bottom shortcut pill on TWO fresh frames.
+    // This route never bypasses the fresh CLI/scene/modal/input checks.
+    internal static bool CanAuthorizeManagedKSpaceFallback(
+        bool previousK, bool previousI, bool previousSpace,
+        bool currentK, bool currentI, bool currentSpace,
+        bool popupVisible, bool processingMenuVisible)
+        => previousK && previousI && previousSpace &&
+           currentK && currentI && currentSpace &&
+           !popupVisible && !processingMenuVisible;
 
     // Independent visual fallback for the 2026-10-20 production failure:
     // matching just two HUD icons never suffices; both Home and End and the
