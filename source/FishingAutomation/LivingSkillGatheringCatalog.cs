@@ -4,7 +4,8 @@ internal sealed record LivingSkillGatheringSource(
     string Category,
     string TargetName,
     string TemplateKey,
-    bool BulkSupported = true);
+    bool BulkSupported = true,
+    bool RequiresEmptyBottle = false);
 
 internal static class LivingSkillGatheringCatalog
 {
@@ -26,8 +27,8 @@ internal static class LivingSkillGatheringCatalog
             // 일상 채집
             ["달걀"] = Source("일상 채집", "둥지"),
             ["거미줄"] = Source("일상 채집", "거미줄"),
-            ["물이 든 병"] = Source("일상 채집", "우물"),
-            ["우유"] = Source("일상 채집", "젖소"),
+            ["물이 든 병"] = Source("일상 채집", "우물", requiresEmptyBottle: true),
+            ["우유"] = Source("일상 채집", "젖소", requiresEmptyBottle: true),
             ["사과"] = Source("일상 채집", "사과 나무"),
             ["찻잎"] = Source("일상 채집", "차나무"),
             ["고급 거미줄"] = Source("일상 채집", "거미줄 뭉치"),
@@ -127,8 +128,10 @@ internal static class LivingSkillGatheringCatalog
     internal static bool IsQuestOnlyMaterial(string materialName)
         => QuestOnlyMaterials.Contains((materialName ?? "").Trim());
 
-    private static LivingSkillGatheringSource Source(string category, string target)
-        => new(category, target, TemplateKey(category, target));
+    private static LivingSkillGatheringSource Source(
+        string category, string target, bool requiresEmptyBottle = false)
+        => new(category, target, TemplateKey(category, target),
+            RequiresEmptyBottle: requiresEmptyBottle);
 
     private static string TemplateKey(string category, string target)
         => string.Concat(category, "-", target)
