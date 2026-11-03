@@ -557,7 +557,9 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             poll++;
 
             var activity = await _data.ActivityAsync(ct);
-            if (_requiresEmptyBottle && (poll == 1 || poll % 3 == 0))
+            if (_requiresEmptyBottle &&
+                (poll == 1 || poll % 3 == 0 ||
+                 !GatheringSafetyPolicy.IsSafeField(activity)))
                 await TryRecoverEmptyBottleShortageAsync(ct);
             if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
@@ -907,17 +909,20 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         bool sawActive = false;
         bool sawGain = false;
         int stableIdle = 0;
+        TimeSpan lastBottleProbe = TimeSpan.FromMinutes(-1);
 
         while (true)
         {
             ct.ThrowIfCancellationRequested();
             var activity = await _data.ActivityAsync(ct);
             if (_requiresEmptyBottle &&
-                (!IsOwnedLifeSkillActivity(activity) ||
-                 !GatheringSafetyPolicy.IsSafeField(activity)) &&
-                (watch.Elapsed.TotalSeconds < 2 ||
-                 ((int)watch.Elapsed.TotalSeconds % 5 == 0)))
+                (!GatheringSafetyPolicy.IsSafeField(activity) ||
+                 (!IsOwnedLifeSkillActivity(activity) &&
+                  watch.Elapsed - lastBottleProbe >= TimeSpan.FromSeconds(4))))
+            {
+                lastBottleProbe = watch.Elapsed;
                 await TryRecoverEmptyBottleShortageAsync(ct);
+            }
             if (!GatheringSafetyPolicy.IsSafeField(activity))
                 throw new InvalidOperationException(
                     "생활 스킬 100회 채집 중 사망·대화·던전 등 진행 불가 상태가 확인되어 정지합니다.");
