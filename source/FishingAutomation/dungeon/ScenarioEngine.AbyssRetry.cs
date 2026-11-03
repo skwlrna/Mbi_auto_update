@@ -459,11 +459,33 @@ internal sealed partial class ScenarioEngine
         int gone = 0;
         int recruitmentFrames = 0;
         bool recruitmentConfirmed = false;
+        bool competitionConfirmationClicked = false;
         Log?.Invoke("[어비스] 재입장 대기 · 모집/로딩 시간 제한 없음 · 추가 클릭 없이 던전 내부 확인까지 대기");
         while (true)
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
+
+            // A retry can lead to a one-button "경쟁 미션 완료" panel.
+            // Verify its independent visual + OCR evidence on two fresh frames
+            // and click its explicit confirmation ONCE, then resume observation.
+            if (!competitionConfirmationClicked &&
+                await TryAcknowledgeRetryCompetitionMissionAsync(frame, ct))
+            {
+                competitionConfirmationClicked = true;
+                gone = 0;
+                recruitmentFrames = 0;
+                continue;
+            }
+            if (competitionConfirmationClicked &&
+                AbyssMissionCompletePolicy.HasVisualEvidence(frame))
+            {
+                // Do not click again while its dismissal is unconfirmed.
+                gone = 0;
+                await Task.Delay(Math.Max(300, _settings.PollIntervalMs), ct);
+                continue;
+            }
+
             // Check the retry label itself so a single missing companion label cannot authorize transition.
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
             bool recruiting = !retry.Found && await HasAbyssRecruitmentEvidenceAsync(frame, ct);
