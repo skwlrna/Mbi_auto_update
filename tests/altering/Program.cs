@@ -3979,6 +3979,25 @@ await riceResolver.PreGatherKnownShortagesAsync(leatherPreflightEvidence, defaul
 Check(riceWorld.Gathered.Count == preLeatherGatherCount &&
       riceWorld.FieldExitCalls == preLeatherFieldExits,
     "global pre-gather bypasses leather without touching the game screen");
+// The real well uses pre-purchased empty bottles. A zero-bottle inventory
+// must HOLD the food item before any travel/gathering input. Buying a bottle
+// later permits the old water gather and queue behavior to proceed.
+bool zeroBottleHeld = false;
+try
+{
+    await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
+}
+catch (MaterialSupplyHoldException hold)
+{
+    zeroBottleHeld = hold.Evidence.Item == "빈 병" &&
+        hold.Evidence.Required == 1 && hold.Evidence.Observed == 0 &&
+        hold.Evidence.Category == "missing_empty_bottle";
+}
+Check(zeroBottleHeld &&
+      riceWorld.FieldExitCalls == preLeatherFieldExits &&
+      riceWorld.Gathered.Count == preLeatherGatherCount,
+    "F9 well water shortage with zero empty bottles holds before field exit or gather");
+riceWorld.SetCount("빈 병", 1);
 await riceResolver.PreGatherKnownShortagesAsync(riceRequests, default);
 Check(riceWorld.Count("물이 든 병") >= 68 &&
       riceWorld.Gathered.SequenceEqual(new[] { "물이 든 병" }) &&

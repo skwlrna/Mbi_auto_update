@@ -216,11 +216,11 @@ internal sealed record LifeSkillWorkOutcomeMetrics(
 internal sealed record LifeSkillWorkTicket(string Key, long Attempt);
 internal sealed class LifeSkillWorkFence
 {
-    private enum Phase { InFlight, Verified, Uncertain }
+    private enum Phase { InFlight, Verified, Uncertain, SafelyDeferred }
     private sealed record Entry(long Attempt, Phase State);
     private sealed class Counts
     {
-        internal long Started, OutputVerified, BatchCallbackVerified, Uncertain;
+        internal long Started, OutputVerified, BatchCallbackVerified, Uncertain, SafelyDeferred;
     }
     private readonly Dictionary<LifeSkillWorkKind, Counts> _counts = new();
     private static LifeSkillWorkKind KindFor(string key) =>
@@ -253,7 +253,7 @@ internal sealed class LifeSkillWorkFence
                 long output = counts?.OutputVerified ?? 0;
                 long batch = counts?.BatchCallbackVerified ?? 0;
                 long uncertain = counts?.Uncertain ?? 0;
-                long pending = Math.Max(0, started - output - batch - uncertain);
+                long pending = Math.Max(0, started - output - batch - uncertain - (counts?.SafelyDeferred ?? 0));
                 long concluded = output + uncertain;
                 return new LifeSkillWorkOutcomeMetrics(
                     kind, started, output, batch, uncertain, pending,
@@ -338,6 +338,30 @@ internal sealed class LifeSkillWorkFence
                 counts.OutputVerified++;
         }
         Log?.Invoke($"[중간관리자][작업 검증] {ticket.Key} · {evidence}");
+    }
+
+    // Only for a verified material hold AFTER the UI was safely dismissed to
+    // world, activity/Stop were rechecked inactive, and two fresh item counts
+    // agreed. This is not output completion; it releases the key for a later
+    // stock-based retry while keeping actual inventory as the only authority.
+    internal void ConfirmSafeGatheringDeferral(
+        LifeSkillWorkTicket ticket, long before, long after)
+    {
+        if (KindFor(ticket.Key) != LifeSkillWorkKind.Gathering ||
+            before < 0 || after < before)
+            throw new InvalidOperationException(
+                "채집 작업 보류 근거가 불충분하여 작업 키를 해제하지 않습니다.");
+        lock (_gate)
+        {
+            if (!_entries.TryGetValue(ticket.Key, out var entry) ||
+                entry.Attempt != ticket.Attempt || entry.State != Phase.InFlight)
+                throw new InvalidOperationException(
+                    "채집 보류 시 이전/미확정 작업 키를 해제하지 않습니다.");
+            _entries[ticket.Key] = entry with { State = Phase.SafelyDeferred };
+            ForKind(LifeSkillWorkKind.Gathering).SafelyDeferred++;
+        }
+        Log?.Invoke($"[중간관리자][채집 보류] {ticket.Key} · 빈 병 부족/필드 복귀/동작 종료와 " +
+            $"실재고 {before}→{after} 확인 · 완료 처리 아님 · 잔여 수량은 다음 실행 시 재계산");
     }
 
     internal void MarkUncertain(LifeSkillWorkTicket ticket, string category)

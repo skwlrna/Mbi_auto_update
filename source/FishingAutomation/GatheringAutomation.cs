@@ -38,6 +38,17 @@ internal interface IGatheringStopVisualProbe
     Task<bool> IsStopButtonVisibleAsync(CancellationToken ct);
 }
 
+// Emitted only when the exact empty-bottle 0/1 dialog was verified, ESC
+// returned to a positively verified world field, and CLI had no activity.
+// The gathering fence still independently checks fresh inventory/Stop before
+// allowing other F9 facilities to continue.
+internal sealed class RecoveredEmptyBottleGatheringHoldException :
+    MaterialSupplyHoldException
+{
+    internal RecoveredEmptyBottleGatheringHoldException()
+        : base(new MaterialSupplyHold("빈 병", 1, 0, "missing_empty_bottle")) { }
+}
+
 internal sealed class GatheringAutomation
 {
     private readonly IGatheringData _data;
@@ -173,6 +184,56 @@ internal sealed class GatheringAutomation
                     throw new InvalidOperationException("일정 시간 채집 수량이 증가하지 않아 추가 조작 없이 정지합니다.");
                 await _delay(TimeSpan.FromSeconds(2), ct);
             }
+        }
+        catch (RecoveredEmptyBottleGatheringHoldException hold)
+        {
+            // Returning from the menu alone is not proof that gathering did
+            // not start. Independently verify field, no running activity/Stop,
+            // and stable fresh stock BEFORE releasing the non-idempotent ticket.
+            failure = hold;
+            bool safelyDeferred = false;
+            if (workTicket is not null && _screen is IGatheringStopVisualProbe stopProbe)
+            {
+                try
+                {
+                    var activity = await ReadGatheringAsync(
+                        "empty-bottle-deferral-activity", _data.ActivityAsync, ct);
+                    long observed = await ReadGatheringCountAsync(plan.DisplayName, ct);
+                    await _delay(TimeSpan.FromMilliseconds(180), ct);
+                    long confirmed = await ReadGatheringCountAsync(plan.DisplayName, ct);
+                    bool stopVisible = await stopProbe.IsStopButtonVisibleAsync(ct);
+                    safelyDeferred =
+                        GatheringSafetyPolicy.IsSafeField(activity) &&
+                        !activity.IsGathering && !activity.IsFishing &&
+                        !activity.IsAutoTraveling && !stopVisible &&
+                        observed >= baseline && observed == confirmed;
+                    if (safelyDeferred)
+                    {
+                        _workFence.ConfirmSafeGatheringDeferral(
+                            workTicket, baseline, confirmed);
+                        Gained = confirmed - baseline;
+                        Log?.Invoke($"[자동 채집][빈 병 부족] {plan.DisplayName} · " +
+                            $"실재고 +{Gained} 확인, 완료 처리 없이 해당 품목 보류 · 다른 시설 진행");
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception verificationFailure)
+                {
+                    Log?.Invoke("[자동 채집][빈 병 부족] 보류 안전 검증 실패: " +
+                        verificationFailure.Message);
+                }
+            }
+            if (!safelyDeferred)
+            {
+                if (workTicket is not null)
+                    _workFence.MarkUncertain(workTicket, "empty_bottle_exit_unconfirmed");
+                _managerState?.RecordUncertainAction(LifeSkillStage.Gathering,
+                    "empty_bottle_unconfirmed");
+                throw new InvalidOperationException(
+                    "빈 병 부족 안내에서 ESC 복귀 후 채집/재고/Stop 재검증 실패 · " +
+                    "작업 미확정이므로 다른 입력 없이 정지합니다.", hold);
+            }
+            throw;
         }
         catch(Exception ex)
         {

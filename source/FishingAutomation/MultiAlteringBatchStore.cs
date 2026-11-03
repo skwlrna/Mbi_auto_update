@@ -596,7 +596,11 @@ internal sealed class MultiAlteringBatchStore : IDisposable
 
     private static bool CanPersistMaterialHold(string facility, MaterialSupplyHold evidence)
         => evidence.Required > 0 && evidence.Observed >= 0 &&
-           (facility == "식재료 가공 시설" && evidence.Observed < evidence.Required ||
+           (// Exact, read-only missing empty bottle proof may hold ANY independent
+            // facility. This does not confer registration or purchase authority.
+            evidence.Category == "missing_empty_bottle" &&
+            evidence.Item == "빈 병" && evidence.Required == 1 && evidence.Observed == 0 ||
+            facility == "식재료 가공 시설" && evidence.Observed < evidence.Required ||
             facility == "가죽 가공 시설" &&
             LeatherRawMaterialPolicy.IsExternalRaw(evidence.Item) &&
             evidence.Category == "leather_recipe_inventory_mismatch");
