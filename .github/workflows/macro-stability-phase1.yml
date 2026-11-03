@@ -1,0 +1,70 @@
+name: Macro Stability Phase 1 - Offline Gate
+
+# PR-only gate: no executable publication, updater invocation, native input,
+# game process, real screen capture, or self-hosted runner.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'source/FishingAutomation/MacroRuntimeStability.cs'
+      - 'source/FishingAutomation/MainForm.cs'
+      - 'tests/stability-phase1/**'
+      - 'tools/validation/**'
+      - '.github/workflows/macro-stability-phase1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    name: Pure stability regression - Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Deterministic simulated crafting, multi-altering, Abyss
+        run: dotnet run --project tests/stability-phase1/StabilityPhase1.csproj -c Release
+
+  windows:
+    name: Windows application build and input regressions
+    needs: deterministic
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile production app and watchdog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+          dotnet build source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Watchdog build failed' }
+      - name: Deterministic stability tests on Windows
+        shell: pwsh
+        run: |
+          dotnet run --project tests/stability-phase1/StabilityPhase1.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Stability regressions failed' }
+      - name: Read-only Windows process observer smoke (synthetic data)
+        shell: pwsh
+        run: ./tests/stability-phase1/Test-WindowsObservation.ps1
+      - name: Existing crafting/altering/input safety checks
+        shell: pwsh
+        run: |
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Crafting regressions failed' }
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Altering regressions failed' }
+          dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Input safety regressions failed' }

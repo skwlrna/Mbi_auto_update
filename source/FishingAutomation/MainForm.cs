@@ -16,6 +16,7 @@ public sealed partial class MainForm : Form
     private readonly RuntimeErrorUploader _errorUploader;
     private readonly WatchdogClient _watchdog;
     private readonly SchedulerRunMonitor _schedulerMonitor = new();
+    private readonly MacroStabilitySupervisor _stability = new(emit: MacroStabilityJournal.Append);
     private DateTime _lastFishingProgressAt = DateTime.Now;
     private bool _fishingStallAlerted;
     private string _lastFishingStatus = "준비";
@@ -159,6 +160,7 @@ public sealed partial class MainForm : Form
         _log.Line += s => Ui(() =>
         {
             _schedulerMonitor.ObserveLog(s);
+            _stability.ObserveActivity(s);
             _logBox.AppendText(s + Environment.NewLine);
             if (_logBox.TextLength > 35000) _logBox.Text = _logBox.Text[^22000..];
             _logBox.SelectionStart = _logBox.TextLength;
@@ -209,6 +211,19 @@ public sealed partial class MainForm : Form
         _uiTimer.Tick += (_, _) =>
         {
             _watchdog.Touch();
+            // Passive supervisor: top-level mode ownership, local activity
+            // watchdog, and bounded diagnostic recovery only. No game input.
+            MacroStableMode visibleMode = _schedulerRunning
+                ? MacroStableMode.Scheduler
+                : _multiAlteringRunning
+                    ? MacroStableMode.MultiAltering
+                    : MacroStabilitySupervisor.FromUi(_activeMode ?? "");
+            bool stabilityBusy = _schedulerRunning || _multiAlteringRunning ||
+                visibleMode != MacroStableMode.None ||
+                (_starting && _stability.Owner != MacroStableMode.None);
+            _stability.ObserveRuntime(visibleMode, stabilityBusy);
+            if (_stability.Tick())
+                _log.Write("[안정화] 15분 활동 로그 정체 감지 · 현재 작업의 실제 완료 여부 미확정 · 입력 재실행 없음");
             // The UI heartbeat and sub-worker processing watchdog already exist.
             // This is advisory only: no automatic restart or F10 on quiet work.
             if (_schedulerMonitor.Observe(TimeSpan.FromMinutes(15)))
@@ -356,6 +371,16 @@ public sealed partial class MainForm : Form
             // before invoking any macro-specific inputs or async automation.
             SetStatus($"{DisplayModeName(mode)} 시작 요청 접수 · 설정 확인 중", Blue);
             if (!RunAutomationStartPreflight(mode)) return;
+            // A second UI start cannot steal an unfinished runtime lease,
+            // including the short gap between async setup and worker startup.
+            var stableMode = MacroStabilitySupervisor.FromUi(mode);
+            if (stableMode != MacroStableMode.None && !_stability.TryBegin(stableMode))
+            {
+                const string reason = "시작 차단: 이전 가공/제작/어비스 작업 정리가 아직 끝나지 않았습니다.";
+                _log.Write("[안정화] " + reason);
+                SetStatus(reason, Color.DarkOrange);
+                return;
+            }
             if (mode == "낚시") StartFishing();
             else if (mode == "던전") ObserveStartTask(StartScenarioAsync("던전", "dungeon"), mode);
             else if (mode == "페카 심층") ObserveStartTask(StartScenarioAsync("페카 심층", "dungeon"), mode);
@@ -367,6 +392,7 @@ public sealed partial class MainForm : Form
         }
         catch (Exception ex)
         {
+            _stability.AbortUnstarted();
             string reason = "시작 차단: " + ex.Message;
             _log.Write("[UI] " + reason);
             SetStatus(reason, Color.Salmon);
@@ -638,6 +664,7 @@ public sealed partial class MainForm : Form
 
     private void StopSelected()
     {
+        _stability.RequestStop();
         if (_starting) _cancelStart = true;
         if (_schedulerRunning && _schedulerCts is { IsCancellationRequested: false })
         {
@@ -671,6 +698,7 @@ public sealed partial class MainForm : Form
 
     private void StopAll()
     {
+        _stability.RequestStop();
         _cancelStart = true;
         _schedulerMonitor.RequestStop();
         if (_schedulerCts is { IsCancellationRequested: false }) _schedulerCts.Cancel();
