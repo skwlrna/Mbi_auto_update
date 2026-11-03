@@ -494,7 +494,24 @@ try
           Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedKEntryBlockingModal") &&
           Has(ScreenCalls("VerifyManagedKFrameAsync", 4), "HasManagedFoodCraftingNavigationVisual"),
         "real managed entry routes food first and validates the same final input capture");
-    var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
+    // 2026-11-03 17:13 V3.2.85: actual field screen passed first
+    // 3/4 HUD proof but failed the final K boundary. Do not reintroduce
+    // the legacy outside-K icon as a prerequisite for the independent
+    // upper/lower-shortcut + Space OCR fallback. The final capture must
+    // still reclassify as world and veto every menu/modal.
+    var independentSpace = ScreenCalls("HasManagedKISpaceFieldHudAsync", 2);
+    var finalK = ScreenCalls("VerifyManagedKFrameAsync", 4);
+    Check(Has(independentSpace, "HasManagedKEntryFieldHudVisual") &&
+          Has(independentSpace, "FindCompactAsync") &&
+          !Has(independentSpace, "DetectManagedWorldHudTemplates") &&
+          Has(finalK, "ClassifyManagedProductionSceneAsync") &&
+          Has(finalK, "HasManagedKISpaceFieldHudAsync") &&
+          Has(finalK, "HasManagedKEntryBlockingModal") &&
+          Has(finalK, "HasFixedProcessingHubVisual") &&
+          Has(enter, "TapVerifiedFreshAsync") &&
+          Has(enter, "RequireManagedIdleAsync"),
+        "17:13 K/I/Space final-frame route: independent glyph proof + fresh Space; scene/modal/CLI gate preserved");
+        var managedTab = ScreenCalls("TrySelectManagedProcessingTabAsync", 4);
     Check(Has(enter, "TrySelectManagedProcessingTabAsync") &&
           Has(enter, "WaitForManagedProcessingNavigationReadyAsync") &&
           Has(managedTab, "HasManagedProcessingBottomTabVisual") &&
