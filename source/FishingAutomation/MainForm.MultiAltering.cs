@@ -443,7 +443,22 @@ public sealed partial class MainForm
                             $"분류={hold.Category} · 선행채집 제외 · 다른 시설 유지");
                     }
                     if (supported.Count > 0)
-                        await resolver.PreGatherKnownShortagesAsync(supported, token);
+                    {
+                        try
+                        {
+                            await resolver.PreGatherKnownShortagesAsync(supported, token);
+                        }
+                        catch (MaterialSupplyHoldException hold) when (
+                            hold.Evidence.Category == "missing_empty_bottle" &&
+                            hold.Evidence.Item == "빈 병")
+                        {
+                            // The resolver checked stock before any material
+                            // gathering input. The global preflight is optional;
+                            // defer the missing-bottle plans to per-lane holds.
+                            _log.Write("[다중가공] 빈 병 0개 · 통합 선행채집 생략 · " +
+                                "품목별 재검증으로 넘기고 다른 시설 계속 · 자동 구매 없음");
+                        }
+                    }
                     _log.Write("[다중가공] F9 전체 품목 선행채집 종료 · 음식 보류 대상은 시설별 재확인");
                 }
             }
@@ -702,6 +717,20 @@ public sealed partial class MainForm
             async Task<MaterialSupplyHold?> RecheckSupplyHoldAsync(
                 AlteringPlan plan, MaterialSupplyHold prior, CancellationToken ct)
             {
+                if (prior.Category == "missing_empty_bottle")
+                {
+                    // Recheck a real inventory count, never release a hold
+                    // solely because 30 seconds elapsed. Material acquisition
+                    // and recipe identity are validated again on the next run.
+                    long bottles = await managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "empty-bottle-hold-recheck",
+                        inner => rawAlteringData.ItemCountAsync("빈 병", inner), ct);
+                    if (bottles < 0)
+                        throw new InvalidDataException("빈 병 재고 수량이 음수입니다.");
+                    if (bottles == 0)
+                        return prior with { Observed = 0 };
+                    return await InspectSupplyRouteAsync(plan, ct);
+                }
                 if (plan.FacilityName == "가죽 가공 시설")
                 {
                     // A mismatch must re-read BOTH sources even if the bag is
