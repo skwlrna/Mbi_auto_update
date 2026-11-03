@@ -35,10 +35,10 @@ internal sealed class DailyInterruptionScreen
             var skipHits = skipLines.Where(x =>
                 IsAttendanceSkipLabel(x.ReadText ?? "") &&
                 skipArea.Contains(x.Center)).ToArray();
-            Point? skip = skipHits.Length == 1 ? skipHits[0].Center : null;
+            Point? attendanceSkip = skipHits.Length == 1 ? skipHits[0].Center : null;
             // Retain the attendance kind when the button OCR is uncertain;
             // recovery then refuses blind clicks, rather than advancing NPC.
-            return new(DailyInterruptionKind.Attendance, attendanceTitle, Skip: skip);
+            return new(DailyInterruptionKind.Attendance, attendanceTitle, Skip: attendanceSkip);
         }
 
         int tabsY = NoticeTabsRow(frame);
