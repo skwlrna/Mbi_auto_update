@@ -1,4 +1,10 @@
-name: Check V3 Production Engine
+name: Main Build CI (Release-Decoupled)
+
+# Intentionally NOT named "Check V3 Production Engine": historical published-version
+# release workflows listen for that old workflow_run name. Reusing it would start
+# dozens of retired publisher jobs after every successful main CI.
+# Keep the build-and-test job name unchanged for branch-protection compatibility.
+# See docs/LEGACY_RELEASE_EVENT_ISOLATION.md before restoring release triggers.
 
 on:
   workflow_dispatch:
