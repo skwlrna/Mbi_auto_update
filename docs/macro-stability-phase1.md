@@ -54,3 +54,69 @@ crafting/altering/input-safety regression suites.
 
 This branch is proposed as a reviewable PR. Do not merge or release based on
 mock tests alone; run a separate Windows UI/game validation first.
+
+
+## Windows PC supervised observation (separate from CI)
+
+This is an **operator-run, read-only** monitor for an already-running
+application. The GitHub-hosted CI runner never launches the game. Install a
+reviewed candidate on the owner's Windows PC only after the candidate has
+passed its safety gates; the draft PR is not a distributed release.
+
+Prerequisites:
+
+1. Keep a clean backup of the currently working program and local durable
+   batch records. Do not overwrite the normal installation with CI outputs.
+2. Open the approved candidate normally on Windows, then start the chosen
+   **existing** crafting, multi-altering or Abyss function manually.
+3. Open Windows Task Manager > Details and identify the running macro's **PID**.
+   Do not use the MacroWatchdog.exe PID.
+4. In a separate Windows PowerShell window, from the repository checkout, run:
+
+
+    powershell.exe -NoProfile -File .\tools\validation\Invoke-MacroStabilityObservation.ps1 -ProcessId 12345 -DurationMinutes 120
+
+   Replace 12345 with the real macro process PID. The script monitors the
+   process and does not start or stop it. If Windows cannot resolve the
+   executable directory, supply \`-ApplicationDir 'C:\path\to\installed\macro'\`.
+5. It creates a local report under
+   \`%LOCALAPPDATA%\MabiAuto\validation\observation-<PID>-<UTC>.json\`.
+   No automatic upload, app update, release, game input or screenshot occurs.
+
+Suggested manual validation order (not automatically executed):
+
+| Mode | Initial observation | Extended observation | Evidence to check manually |
+| --- | --- | --- | --- |
+| Crafting | 15-30 min | 120 min | UI selected recipe, verified output count, blocked materials, F10 stops safely |
+| Multi-altering | 15-30 min | 120 min | Each facility lane's work receipts against the durable ledger, F9/F10 sequence |
+| Abyss (no gimmicks) | 15-30 min | 120 min | Known screen state, permitted exits/re-entry, no phantom completion or input replay |
+
+A clean report says \`OBSERVATION_ONLY\`, never \`GAME_PASSED\`.
+\`REVIEW_REQUIRED\` means stop any ongoing mode **using its existing F10 control**,
+retain the existing ledger and review the local log. Do not re-register or
+reclaim uncertain work merely because the watchdog detected silence.
+
+The monitor checks only process lifetime, memory, presence/age of the UI
+heartbeat, and (if available) new event *codes* written during the window.
+It does not read the game, inspect items, identify a character, count crafts,
+send key/mouse commands, or make network requests. A quiet, healthy heartbeat
+proves only that the UI timer is active; it does not prove actual progression.
+
+### Windows self-test without any game
+
+
+    pwsh -NoProfile -File .\tests\stability-phase1\Test-WindowsObservation.ps1
+
+The self-test observes its own PowerShell process with a synthetic heartbeat
+and confirms normal, stale-heartbeat and missing-heartbeat outcomes. GitHub
+Actions runs this test on a hosted Windows runner in the isolated PR gate.
+
+### Known blind spots
+
+- The local event journal may rotate during extended sessions. The report
+  aggregates only the latest 4096 event lines within its monitoring window.
+- The read-only tool does not have permission to resume an interrupted process.
+- Per-facility, output, receipt and Abyss completion correctness must still be
+  confirmed by the existing product-specific evidence and operator review.
+- The observer cannot detect every input collision or game hang. Distinguish a
+  responsive UI from confirmed game progression.
