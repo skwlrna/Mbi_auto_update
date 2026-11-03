@@ -28,18 +28,35 @@ internal static class CraftingFlowTests
                 ct.ThrowIfCancellationRequested();
                 return Task.CompletedTask;
             });
-            try
+            // The actual production crafting engine must persist before-click
+            // proof and never clear it on the interrupted inventory-read path.
+            string journalPath = Path.Combine(Path.GetTempPath(),
+                "mabi-crafting-engine-" + Guid.NewGuid().ToString("N"));
+            var eggPlan = new CraftingPlan(CraftingCategory.Item, "달걀", 23, 1);
+            using (var journal = new CraftingRestartSafetyJournal(journalPath))
             {
-                await automation.RunAsync(new(CraftingCategory.Item, "달걀", 23, 1), cancelled.Token);
-                check(!shortOutput && screen.Batches.SequenceEqual(new[] { 10, 10, 3 }) &&
-                      automation.Gained == 23 && automation.CompletedCrafts == 23,
-                    "real crafting engine verifies inventory for 10/10/3 batches");
+                journal.StartFresh(new[] { eggPlan },
+                    new CliIdentityContext("test", "test", null, "test"));
+                try
+                {
+                    await automation.RunAsync(eggPlan, cancelled.Token, journal, 0);
+                    journal.MarkPlanCompleted(0, eggPlan);
+                    journal.FinishQueue(1, 0);
+                    check(!shortOutput && screen.Batches.SequenceEqual(new[] { 10, 10, 3 }) &&
+                          automation.Gained == 23 && automation.CompletedCrafts == 23 &&
+                          journal.ReviewRequired is null,
+                        "real crafting engine journals each verified 10/10/3 batch and completes");
+                }
+                catch (OperationCanceledException) when (shortOutput)
+                {
+                    check(screen.Batches.SequenceEqual(new[] { 10 }) &&
+                          automation.CompletedCrafts == 0 &&
+                          journal.ReviewRequired?.PendingBatch is
+                              { PlanIndex: 0, Attempts: 10, ExpectedIncrease: 10 },
+                        "interrupted real crafting engine retains pending intent; never replays");
+                }
             }
-            catch (OperationCanceledException) when (shortOutput)
-            {
-                check(screen.Batches.SequenceEqual(new[] { 10 }) && automation.CompletedCrafts == 0,
-                    "completion screen without full inventory gain cannot confirm or repeat a batch");
-            }
+            Directory.Delete(journalPath, recursive: true);
         }
 
         {
