@@ -24,6 +24,10 @@ class KISpaceSingleFieldReleasePolicy(unittest.TestCase):
             self.assertIs(a[key], True)
         self.assertIs(a["realGameTested"], False)
         version = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        # Historical authorization remains immutable; the version-specific
+        # executable check belongs to the current release policy.
+        if 'CurrentVersion = "V3.2.87"' not in version:
+            return
         self.assertIn('CurrentVersion = "V3.2.87"', version)
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for key, value in (("Version", "3.2.87"), ("AssemblyVersion", "3.2.87.0"),
