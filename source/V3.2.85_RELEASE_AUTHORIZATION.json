@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "version": "V3.2.85",
+  "purpose": "post_v3284_verified_fixes",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "지금 최신 업데이트 이후 올라온 깃허브 pr 확인해보고 검증하고 배포해",
+  "requestedAtKst": "2026-11-03",
+  "sourcePullRequest": 364,
+  "sourcePullRequests": [
+    354,
+    358,
+    359,
+    361,
+    363,
+    364
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_release",
+  "note": "PRs #354 #358 #359 #361 #363 had successful Windows CI, PR #360 CI passed but its head conflicted; PR #364 integrates it without overwriting #359/#358. Publish ONLY after integrated PR #364 and exact main SHA full CI succeeds. Actual game input acceptance remains unverified; rollback retained."
+}
