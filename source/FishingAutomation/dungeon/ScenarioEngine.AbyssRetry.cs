@@ -460,10 +460,25 @@ internal sealed partial class ScenarioEngine
         int gone = 0;
         int recruitmentFrames = 0;
         bool recruitmentConfirmed = false;
+        var passiveWait = new AbyssPassiveWaitAdvisory();
         Log?.Invoke("[어비스] 재입장 대기 · 모집/로딩 시간 제한 없음 · 추가 클릭 없이 던전 내부 확인까지 대기");
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            // Time spent waiting never grants input, completion or timeout
+            // authority. Notify just once per continuous observed wait.
+            var passiveWaitKind = recruitmentConfirmed
+                ? AbyssPassiveWaitKind.Recruiting
+                : AbyssPassiveWaitKind.UnconfirmedLoading;
+            if (passiveWait.Observe(passiveWaitKind) is TimeSpan quietFor)
+            {
+                string reason = passiveWaitKind == AbyssPassiveWaitKind.Recruiting
+                    ? "파티 모집 확인 상태"
+                    : "재입장 로딩/화면 미확정";
+                Log?.Invoke($"[어비스][장기 대기 알림] {reason} · " +
+                    $"{quietFor.TotalMinutes:0}분 이상 대기 · 기존 무기한 대기/F10 취소 유지 · " +
+                    "추가 클릭/재입장/입력권 이전 없음");
+            }
             using var frame = await CaptureGameWindowAsync(ct);
             // The verified retry click may lead to a separate competition
             // completion screen with one full-width 확인 button. Handle it

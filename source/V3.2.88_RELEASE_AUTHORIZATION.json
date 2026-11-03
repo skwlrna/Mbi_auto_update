@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.88",
+  "purpose": "single_bundled_stability_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "한번에 업데이트 하지",
+  "requestedAtKst": "2026-11-04",
+  "sourcePullRequest": 376,
+  "sourcePullRequests": [
+    376
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_unverified_release",
+  "note": "One bundled official update, not multiple incremental releases. Only the exact merged main commit with successful full Windows CI, dedicated tests, smoke, SHA256 and rollback is eligible. Real game not executed. Open F9 facility incident #316 remains unverified without new live evidence; old Abyss false-positive issue #210 has paired-evidence protections."
+}

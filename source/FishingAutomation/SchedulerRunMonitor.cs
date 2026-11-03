@@ -161,8 +161,19 @@ public sealed class SchedulerRunMonitor
                               line.Contains("[어비스]", StringComparison.Ordinal),
                 _ => false
             };
-            // Activity evidence, not verified game progress. Exclude obvious errors.
-            if (!relevant || line.Contains("오류", StringComparison.Ordinal) ||
+            // Activity evidence is NOT verified game progress. Repeated safe
+            // wait/OCR/retry status messages cannot reset a quiet warning.
+            // The engine's confirmed progress and other logs still use the
+            // original monitor path; no input, retry or timeout policy changes.
+            bool progresslessDiagnostic =
+                line.Contains("[장기 대기 알림]", StringComparison.Ordinal) ||
+                line.Contains("[OCR 장기 대기 알림]", StringComparison.Ordinal) ||
+                line.Contains("[순환 재시도]", StringComparison.Ordinal) ||
+                line.Contains("[OCR 보류]", StringComparison.Ordinal) ||
+                line.Contains("모집/로딩 시간 제한 없음", StringComparison.Ordinal) ||
+                line.Contains("파티 모집 대기", StringComparison.Ordinal);
+            if (!relevant || progresslessDiagnostic ||
+                line.Contains("오류", StringComparison.Ordinal) ||
                 line.Contains("안전 정지", StringComparison.Ordinal)) return;
             DateTimeOffset now = _clock();
             _activityAt = now;
