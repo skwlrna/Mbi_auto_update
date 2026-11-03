@@ -23,6 +23,24 @@ internal sealed class DailyInterruptionScreen
             await Text(frame, new(12, 30, 330, 70), "오늘의 스텔라 픽", ct))
             return new(DailyInterruptionKind.StellaPick, new(12, 30, 330, 70), stellaClose);
 
+        // 2026-11-03 live incident: attendance is overlaid with the NPC greeting.
+        // Its own top-right skip closes BOTH; handle it before greeting detection.
+        // Never mistake a generic NPC "건너뛰기" for the attendance control.
+        var attendanceTitle = new Rectangle(16, 35, 350, 64);
+        if (await Text(frame, attendanceTitle, "매일매일 행운 출석", ct))
+        {
+            var skipArea = new Rectangle(667, 38, 129, 52);
+            var skipLines = await _readLines(frame, skipArea, 3, ct)
+                .ConfigureAwait(false);
+            var skipHits = skipLines.Where(x =>
+                IsAttendanceSkipLabel(x.ReadText ?? "") &&
+                skipArea.Contains(x.Center)).ToArray();
+            Point? skip = skipHits.Length == 1 ? skipHits[0].Center : null;
+            // Retain the attendance kind when the button OCR is uncertain;
+            // recovery then refuses blind clicks, rather than advancing NPC.
+            return new(DailyInterruptionKind.Attendance, attendanceTitle, Skip: skip);
+        }
+
         int tabsY = NoticeTabsRow(frame);
         if (tabsY >= 0)
         {
@@ -70,6 +88,9 @@ internal sealed class DailyInterruptionScreen
     private async Task<bool> Text(Bitmap frame, Rectangle area, string text, CancellationToken ct)
         => (await _readLines(frame, area, 2, ct).ConfigureAwait(false))
             .Any(x => FuzzyText.ContainsApprox(x.ReadText ?? "", text, 0));
+
+    internal static bool IsAttendanceSkipLabel(string text)
+        => FuzzyText.Normalize(text) == "출석부건너뛰기";
 
     internal static bool IsNpcSkipLabel(string text)
     {
