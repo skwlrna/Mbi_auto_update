@@ -84,6 +84,26 @@ try
             "only exact zero-stock empty-bottle hold can be persisted in other lanes");
     }
 
+    {
+        Type bulkScreen = production.GetType(
+            "DungeonVisionBot.InventoryBulkGatheringScreen", true)!;
+        Check(CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                true, true, true) &&
+              !CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                true, false, true) &&
+              !CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                false, true, true) &&
+              !CallBoolean(bulkScreen, "CanExitEmptyBottlePopup",
+                true, true, false),
+            "empty-bottle ESC is forbidden without two positive popup frames and outside idle CLI");
+
+        Check(Method(bulkScreen, "HasEmptyBottleShortagePopupAsync", 2) is not null &&
+              Method(bulkScreen, "IsLifeSkillOrProfileOpenAsync", 2) is not null &&
+              Method(bulkScreen, "IsEmptyBottleRecoveryFieldAsync", 2) is not null &&
+              Method(bulkScreen, "TryRecoverEmptyBottleShortageAsync", 1) is not null,
+            "actual life-skill popup ESC recovery and world HUD confirmation compile into app");
+    }
+
     // Inspect compiled IL of the REAL async state machines. Merely recording a
     // manager directive in a fake screen does not prove it reaches the actual
     // fixed-card, medicine, cached recipe, detail or receipt implementations.
