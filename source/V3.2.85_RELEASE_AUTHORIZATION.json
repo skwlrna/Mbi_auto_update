@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "version": "V3.2.85",
+  "purpose": "reviewed_followup_fixes",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "지금 최신 업데이트 이후 올라온 깃허브 pr 확인해보고 검증하고 배포해",
+  "requestedAtKst": "2026-11-03",
+  "sourcePullRequest": 360,
+  "sourcePullRequests": [
+    354,
+    358,
+    359,
+    360,
+    361,
+    363
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionPassed": false,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_unverified_release",
+  "note": "Six reviewed PRs were examined. Offline combined CI for the integrated empty-bottle fix and the release candidate is pending at candidate creation. This flag must be changed only after passing. Live game input behavior remains unverified. Exact main CI, Windows compile, binary smoke, checksum, and rollback are mandatory."
+}
