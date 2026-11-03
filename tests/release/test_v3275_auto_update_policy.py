@@ -121,6 +121,27 @@ class V3275ReleaseSafety(unittest.TestCase):
             authorization = json.loads((ROOT / 'source/V3.2.84_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
             self.assertEqual(authorization['sourcePullRequest'], 353)
             self.assertEqual(authorization['request'], '배포해')
+        elif 'CurrentVersion = "V3.2.85"' in current:
+            for tag, version in [('Version', '3.2.85'), ('AssemblyVersion', '3.2.85.0'), ('FileVersion', '3.2.85.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            release_workflow = ROOT / '.github/workflows/release-v3285-auto-update.yml'
+            self.assertTrue(release_workflow.exists())
+            release_text = release_workflow.read_text(encoding='utf-8')
+            for marker in (
+                'workflow_run.conclusion == \'success\'',
+                'CI_HEAD_SHA', 'main changed since CI; abort release',
+                'ROLLBACK_PREVIOUS.cmd', 'Get-FileHash $zip -Algorithm SHA256',
+                'MabiAuto_V3.2.85_Windows_Lite.zip.sha256',
+                'gh release create V3.2.85',
+                'gh release edit V3.2.85 --draft=false',
+            ):
+                self.assertIn(marker, release_text)
+            authorization = json.loads((ROOT / 'source/V3.2.85_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(authorization['sourcePullRequest'], 364)
+            self.assertEqual(authorization['sourcePullRequests'], [354, 358, 359, 361, 363, 364])
+            self.assertEqual(authorization['request'], '지금 최신 업데이트 이후 올라온 깃허브 pr 확인해보고 검증하고 배포해')
+            self.assertIs(authorization['realGameTested'], False)
+            self.assertIs(authorization['mainCiRequired'], True)
         else:
             self.assertIn('CurrentVersion = "V3.2.79"', current)
             for tag, version in [('Version', '3.2.79'), ('AssemblyVersion', '3.2.79.0'), ('FileVersion', '3.2.79.0')]:
