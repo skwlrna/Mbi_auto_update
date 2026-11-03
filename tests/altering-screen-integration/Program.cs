@@ -33,6 +33,20 @@ try
         Console.WriteLine("PASS L2: " + label);
     }
 
+    // K/I/Space is a BOUNDED supplemental route. It requires positive
+    // evidence on two captures and never bypasses the popup/menu veto.
+    Check(CallBoolean(screen, "CanAuthorizeManagedKISpaceFallback",
+            true, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFallback",
+            true, false, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFallback",
+            false, true, false, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFallback",
+            true, true, true, false) &&
+          !CallBoolean(screen, "CanAuthorizeManagedKISpaceFallback",
+            true, true, false, true),
+        "K/I/Space two-frame proof preserves popup/menu veto");
+
     // New 35-case compiled F9 scene/action regression suite.
     SceneArbiterRegression.Run(Check);
 
@@ -1025,6 +1039,22 @@ try
     // six-card processing screenshot contains 3 independent low-saturation
     // caption regions across the bottom K tabs. OCR of the static "가공"
     // caption is avoided ONLY when this nav structure is stable twice.
+    // Real 800x1000 world screenshot: the fixed central shortcut is
+    // rendered as a small English Space label, not text elsewhere in chat.
+    {
+        var ocrType = production.GetType("DungeonVisionBot.OcrRecognizer", true)!;
+        object ocr = Activator.CreateInstance(ocrType)!;
+        var recognize = Method(ocrType, "FindCompactLabelAsync", 4);
+        using var world = new Bitmap(Path.Combine("tests", "altering-screen-integration",
+            "managed-field-fixtures", "field-workshop-20261031-070147.png"));
+        var task = (Task)recognize.Invoke(ocr, new object[] {
+            world, new Rectangle(396, 879, 79, 48), "Space", CancellationToken.None })!;
+        await task;
+        object result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+        bool found = (bool)result.GetType().GetProperty("Found")!.GetValue(result)!;
+        Check(found, "live field fixture central Space OCR available for K/I/Space fallback");
+    }
+
     // Historical F9 HUD incidents: compare actual snapshots and masked
     // minimaps. Shortcut geometry must work across day/night HUD layouts.
     // These detectors alone never issue keys: managed K requires TWO frames,
