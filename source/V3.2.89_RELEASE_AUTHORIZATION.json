@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.89",
+  "purpose": "gather_stop_handoff_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "계속 진행해서 업데이트 배포해",
+  "requestedAtKst": "2026-11-05",
+  "sourcePullRequest": 377,
+  "sourcePullRequests": [
+    377
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_unverified_release",
+  "note": "Publish only after PR #377 is reviewed/merged and full PR + exact main SHA CI pass; no live-game test claimed. Release Windows Lite ZIP plus checksum/source/rollback. No installation into running game. Must preserve no-space-on-unverified-CLI state and final idle/StopUI-absent/inventory proof."
+}

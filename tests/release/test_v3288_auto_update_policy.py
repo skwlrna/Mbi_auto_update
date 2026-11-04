@@ -22,6 +22,10 @@ class V3288SingleReleaseSafety(unittest.TestCase):
             self.assertIs(auth[key], True)
         self.assertIs(auth["realGameTested"], False)
         current = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        # Historical one-shot release stays immutable; only the active release
+        # policy checks the executable's current version.
+        if 'CurrentVersion = "V3.2.88"' not in current:
+            return
         self.assertIn('CurrentVersion = "V3.2.88"', current)
         csproj = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for field, value in (("Version", "3.2.88"), ("AssemblyVersion", "3.2.88.0"),

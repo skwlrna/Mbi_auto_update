@@ -199,6 +199,29 @@ class V3275ReleaseSafety(unittest.TestCase):
             self.assertEqual(authorization['request'], '진행해')
             self.assertIs(authorization['realGameTested'], False)
             self.assertIs(authorization['mainCiRequired'], True)
+        elif 'CurrentVersion = "V3.2.89"' in current:
+            # Historical V3.2.75 publication contract remains unchanged. The
+            # newest one-shot publisher owns the current binary version gate.
+            for tag, version in [('Version', '3.2.89'),
+                                 ('AssemblyVersion', '3.2.89.0'),
+                                 ('FileVersion', '3.2.89.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            release = ROOT / '.github/workflows/release-v3289-auto-update.yml'
+            self.assertTrue(release.exists())
+            w = release.read_text(encoding='utf-8')
+            for token in ('No successful production CI for current main SHA',
+                          'main changed since CI; abort release',
+                          'MabiAuto_V3.2.89_Windows_Lite.zip.sha256',
+                          'gh release create V3.2.89',
+                          'gh release edit V3.2.89 --draft=false',
+                          'Stop/UI CLI safe handoff and regression evidence missing'):
+                self.assertIn(token, w)
+            authorization = json.loads(
+                (ROOT / 'source/V3.2.89_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(authorization['sourcePullRequest'], 377)
+            self.assertEqual(authorization['request'], '계속 진행해서 업데이트 배포해')
+            self.assertIs(authorization['realGameTested'], False)
+            self.assertIs(authorization['mainCiRequired'], True)
         else:
             self.assertIn('CurrentVersion = "V3.2.79"', current)
             for tag, version in [('Version', '3.2.79'), ('AssemblyVersion', '3.2.79.0'), ('FileVersion', '3.2.79.0')]:
