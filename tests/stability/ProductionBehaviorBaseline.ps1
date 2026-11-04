@@ -314,7 +314,14 @@ Match-Forbidden $lane 'TapFresh|ClickFresh|DragFresh|SendInput|InterceptionInput
 
 # 3) 13:14 real-world regression: target quantity cannot hand off while a real Stop UI remains.
 Match-Required $stopPolicy '!isGathering.*!isAutoTraveling.*!isFishing.*!stopButtonVisible' 'life-skill stop requires idle CLI plus no visible Stop UI'
-Match-Forbidden $stopPolicy 'MainButtonState' 'life-skill post-Space policy does not trust stale MainButtonState'
+# MainButtonState is permitted only for PRE-input Space authorization;
+# the post-Space COMPLETION policy must still ignore a stale CLI Stop.
+$stopCompletionOffset = $stopPolicy.IndexOf('internal static bool IsStoppedAfterSpace(')
+Require ($stopCompletionOffset -ge 0) 'post-Space stop completion policy exists'
+$stopCompletion = $stopPolicy.Substring($stopCompletionOffset)
+Match-Forbidden $stopCompletion 'MainButtonState' 'life-skill post-Space policy does not trust stale MainButtonState'
+Match-Required $stopPolicy 'mainButtonState == "Stop"' 'pre-Space stop input requires an explicit CLI Stop'
+Match-Required $bulk 'LifeSkillStopPolicy\.DecideStopInput' 'production Stop uses the verified UI/CLI input policy'
 Match-Required $gathering 'IGatheringStopVisualProbe' 'next material start supports a read-only visual stop probe'
 Match-Required $gathering 'await probe\.IsStopButtonVisibleAsync\(ct\)' 'stale CLI Stop is visually checked before the next material'
 
@@ -328,6 +335,8 @@ Match-Required $confirmStop 'LifeSkillStopPolicy\.IsStoppedAfterSpace' 'post-Spa
 Match-Required $confirmStop 'bool retriedStop = false' 'stop retry remains bounded'
 Match-Required $confirmStop '!retriedStop.*stableVisibleStop >= 2' 'second Space requires persistent visible Stop evidence'
 Match-Required $confirmStop 'retriedStop = true' 'guarded stop retry can happen at most once'
+Match-Required $confirmStop 'if \(await TryStopWithVerifiedEvidenceAsync\(ct\)\)' 'a refused Space does not consume the one guarded retry'
+Match-Required $gatherTests '2026-11-05 576/576' 'real 576/576 CLI-Stop mismatch is covered by executable policy regression'
 Match-Required $confirmStop '다음 재료로 넘어가지 않습니다' 'unconfirmed stop blocks the next material'
 Match-Required $gatherTests '13:14 regression' '13:14 live failure remains an executable regression case'
 Match-Required $gatherTests 'visible Stop UI must not authorize the next material' 'visible Stop handoff rejection remains tested'
