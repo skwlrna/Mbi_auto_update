@@ -197,6 +197,30 @@ Check(LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, false),
     "post-Space completion ignores stale MainButtonState ONLY when Stop UI is absent");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(staleStopButton, true),
     "stale CLI stop with visible Stop UI must not authorize the next material");
+
+// Incident 2026-11-05 01:35:59: 576/576 water bottles obtained, but the
+// onscreen Stop control temporarily disagreed with CLI MainButtonState.
+// This is a no-input WAIT, not a terminal exception or permission to advance.
+var transientStopMismatch = staleStopButton with { MainButtonState = "Compass" };
+Check(LifeSkillStopPolicy.DecideStopInput(true, transientStopMismatch.MainButtonState) ==
+      LifeSkillStopInputDecision.AwaitCliStop,
+    "2026-11-05 576/576 Stop UI + CLI Compass defers Space rather than failing immediately");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(transientStopMismatch, true),
+    "2026-11-05 visible Stop while CLI idle must not allow the next F9 batch");
+Check(LifeSkillStopPolicy.DecideStopInput(true, staleStopButton.MainButtonState) ==
+      LifeSkillStopInputDecision.VerifiedStop,
+    "CLI Stop becoming ready with visible Stop allows only a freshly reverified stop attempt");
+Check(LifeSkillStopPolicy.DecideStopInput(false, "Stop") ==
+      LifeSkillStopInputDecision.NoVisibleStop,
+    "stale CLI Stop without a visible Stop button must never send Space");
+Check(LifeSkillStopPolicy.DecideStopInput(true, null) ==
+      LifeSkillStopInputDecision.AwaitCliStop,
+    "missing CLI MainButton cannot authorize a stop input");
+Check(LifeSkillStopPolicy.IsStoppedAfterSpace(transientStopMismatch, false),
+    "2026-11-05 final idle field with absent Stop UI allows inventory verification");
+Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(
+        transientStopMismatch with { IsGathering = true }, false),
+    "even after Stop UI disappears, active CLI gathering blocks F9 continuation");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false, false),
     "post-Space completion rejects active gathering");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false, false),
