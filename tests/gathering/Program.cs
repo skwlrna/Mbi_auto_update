@@ -219,7 +219,7 @@ Check(LifeSkillStopPolicy.DecideStopInput(true, null) ==
 Check(LifeSkillStopPolicy.IsStoppedAfterSpace(transientStopMismatch, false),
     "2026-11-05 final idle field with absent Stop UI allows inventory verification");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(
-        transientStopMismatch with { IsGathering = true }, false),
+        transientStopMismatch with { MainButtonState = "Stop", LastRunningInteractionType = "Gathering" }, false),
     "even after Stop UI disappears, active CLI gathering blocks F9 continuation");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(true, false, false, false),
     "post-Space completion rejects active gathering");
