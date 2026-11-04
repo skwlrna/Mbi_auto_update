@@ -1096,9 +1096,13 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 {
                     Log?.Invoke(
                         $"[대량 채집] 정지 UI 지속 감지 · {displayName} · 안전 재확인 후 Space 1회 재시도");
-                    await StopAsync(ct);
-                    retriedStop = true;
-                    stableVisibleStop = 0;
+                    if (await TryStopWithVerifiedEvidenceAsync(ct))
+                    {
+                        retriedStop = true;
+                        stableVisibleStop = 0;
+                    }
+                    // A refused input is NOT a consumed retry. Continue bounded
+                    // observation until the UI/CLI agree or the timeout fails closed.
                 }
             }
             await Task.Delay(500, ct);
@@ -1334,44 +1338,63 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
 
     public async Task StopAsync(CancellationToken ct)
     {
+        _ = await TryStopWithVerifiedEvidenceAsync(ct);
+    }
+
+    // The caller may encounter a temporary CLI/UI mismatch at exactly the
+    // target-count boundary. Never press Space without matching fresh evidence,
+    // but keep observing: a later verified stop or idle field can resolve it.
+    // Return true ONLY after a guarded Space input was actually sent.
+    private async Task<bool> TryStopWithVerifiedEvidenceAsync(CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
         var state = await _data.ActivityAsync(ct);
         if (!GatheringSafetyPolicy.IsSafeField(state))
             throw new InvalidOperationException("정지 전 안전하지 않은 필드 상태입니다.");
 
-        // Do not return merely because CLI Gathering/Travel/Fishing is false.
-        // This was the real-world failure at 13:14 on 2026-10-07.
         using var frame = Capture(ct);
-        if (!GatheringVision.HasStopButton(frame))
+        var initial = LifeSkillStopPolicy.DecideStopInput(
+            GatheringVision.HasStopButton(frame), state.MainButtonState);
+        if (initial == LifeSkillStopInputDecision.NoVisibleStop)
         {
             Log?.Invoke(
                 $"[대량 채집] 정지 버튼 화면 미검출 · MainButton={state.MainButtonState}, " +
                 $"Gathering={state.IsGathering}, AutoPlaying={state.IsAutoPlaying} · 종료 재확인");
-            return;
+            return false;
+        }
+        if (initial == LifeSkillStopInputDecision.AwaitCliStop)
+        {
+            Log?.Invoke(
+                $"[대량 채집] Stop UI/CLI 일시 불일치 · MainButton={state.MainButtonState} · " +
+                "Space 입력 보류, 채집 종료 확인 루프에서 재검증");
+            return false;
         }
 
-        if (state.MainButtonState != "Stop")
-            throw Fail(frame,
-                "정지 버튼은 보이지만 CLI Stop 상태가 아니므로 Space를 누르지 않습니다.");
-
-        // The control and the CLI must still agree on a second, fresh frame
-        // immediately before any keyboard input.
+        // The control and CLI must agree again on a fresh frame immediately
+        // before input; even a brief disagreement is not Space permission.
         await Task.Delay(200, ct);
         var fresh = await _data.ActivityAsync(ct);
         if (!GatheringSafetyPolicy.IsSafeField(fresh))
             throw new InvalidOperationException("정지 입력 직전 안전하지 않은 필드 상태입니다.");
         using var confirmFrame = Capture(ct);
-        if (!GatheringVision.HasStopButton(confirmFrame))
+        var confirmation = LifeSkillStopPolicy.DecideStopInput(
+            GatheringVision.HasStopButton(confirmFrame), fresh.MainButtonState);
+        if (confirmation == LifeSkillStopInputDecision.NoVisibleStop)
         {
             Log?.Invoke("[대량 채집] 정지 버튼이 재확인 중 사라져 Space 입력 생략 · 종료 확인 대기");
-            return;
+            return false;
         }
-        if (fresh.MainButtonState != "Stop")
-            throw Fail(confirmFrame,
-                "정지 버튼 재확인 중 CLI Stop 상태가 변하여 Space 입력을 보류합니다.");
+        if (confirmation == LifeSkillStopInputDecision.AwaitCliStop)
+        {
+            Log?.Invoke(
+                $"[대량 채집] 정지 입력 직전 Stop UI/CLI 불일치 · MainButton={fresh.MainButtonState} · " +
+                "Space 입력 보류, 종료 재검증");
+            return false;
+        }
 
         _ui.TapFresh(0x39, ct);
         Log?.Invoke("[대량 채집] 화면 Stop 버튼+CLI 2회 확인 후 Space 정지 입력 전송");
+        return true;
     }
 
     private InvalidOperationException Fail(Bitmap frame, string message)
