@@ -15,7 +15,8 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    # Pin a stable Windows runner for Korean OCR Features-on-Demand.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -463,6 +464,7 @@ jobs:
       # Shipping this transfer fix requires Korean OCR against the actual
       # incident capture in the same main CI that authorizes public releases.
       - name: Install Korean OCR for actual material transfer incident test
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
