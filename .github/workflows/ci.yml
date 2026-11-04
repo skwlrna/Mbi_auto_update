@@ -15,7 +15,8 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: windows-latest
+    # Pin a stable Windows runner for Korean OCR Features-on-Demand.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -463,6 +464,7 @@ jobs:
       # Shipping this transfer fix requires Korean OCR against the actual
       # incident capture in the same main CI that authorizes public releases.
       - name: Install Korean OCR for actual material transfer incident test
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -1132,7 +1134,13 @@ jobs:
           if ($stopPolicy -notmatch '!activity\.IsGathering' -and $stopPolicy -notmatch '!isGathering') { throw 'post-Space policy must require gathering ended' }
           if ($stopPolicy -notmatch '!activity\.IsAutoTraveling' -and $stopPolicy -notmatch '!isAutoTraveling') { throw 'post-Space policy must require travel ended' }
           if ($stopPolicy -notmatch '!activity\.IsFishing' -and $stopPolicy -notmatch '!isFishing') { throw 'post-Space policy must require fishing ended' }
-          if ($stopPolicy -match 'MainButtonState') { throw 'post-Space policy must ignore stale main-button state' }
+          # The newer PRE-Space decision checks CLI MainButtonState. Only the
+          # POST-Space completion predicate must ignore its stale Stop value.
+          $completionOffset = $stopPolicy.IndexOf('internal static bool IsStoppedAfterSpace(')
+          if ($completionOffset -lt 0) { throw 'post-Space completion function missing' }
+          $completionPolicy = $stopPolicy.Substring($completionOffset)
+          if ($completionPolicy -match 'MainButtonState') { throw 'post-Space policy must ignore stale main-button state' }
+          if ($stopPolicy -notmatch 'mainButtonState == "Stop"') { throw 'pre-Space input must still require CLI Stop' }
           $lifeLayout = Get-Content source/FishingAutomation/LifeSkillListLayout.cs -Raw
           if ($bulkScreen -notmatch 'LifeSkillListLayout\.TryFixedRowPoint') { throw 'fixed one-page life-skill row policy is not wired' }
           if ($bulkScreen -notmatch 'LifeSkillListLayout\.SafeDragStart' -or
