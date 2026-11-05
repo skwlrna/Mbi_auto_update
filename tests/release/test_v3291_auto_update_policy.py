@@ -144,15 +144,14 @@ class V3291SingleReleaseSafety(unittest.TestCase):
         self.assertIn("재조회 상태=구조 정상", managed)
         self.assertIn("입력 차단 유지", managed)
         self.assertIn("ExceptionDispatchInfo.Capture", wing)
-        current = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
-        if 'CurrentVersion = "V3.2.91"' in current:
-            # Retain exact historical incident regression only for the shipped
-            # V3.2.91 binary. Later releases may explicitly resolve this key.
-            self.assertIn("2026-11-05 missing IsReviving treated as safe", regression)
+        # Historical release tests can run in the pre-bump fix PR, where the
+        # updater still reports V3.2.91. Check the safety contract actually
+        # under test, not the yet-to-be-bumped executable version.
+        if "2026-11-05 missing IsReviving treated as safe" in regression:
             self.assertIn("no raw CLI values, account fields or Boolean values reach public logs", regression)
         else:
-            # Preserve privacy and schema diagnosis as the follow-up version
-            # treats ONLY IsReviving as optional; unsafe states still stop.
+            # The follow-up intentionally accepts only missing IsReviving;
+            # verify the replacement executable regressions and privacy fence.
             self.assertIn("missing IsReviving remains null/unknown", regression)
             self.assertIn("bounded schema diagnostic never exposes account keys or values", regression)
             self.assertIn("combat still prevents F9 input", regression)
