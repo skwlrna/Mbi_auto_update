@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.93",
+  "purpose": "post_update_herb_bottom_row_ocr_compatibility_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "수정하고 배포해",
+  "requestedAtKst": "2026-11-05",
+  "sourcePullRequest": 385,
+  "sourcePullRequests": [
+    385
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_herb_screen_fix_release",
+  "note": "On V3.2.92 real 800x1000 herb screen the selected 산뜻 버섯 text and icon appear around y930, outside the old y845 OCR crop. Expand ONLY the list search ROI to y980; exact two-frame OCR+same-row icon+geometry remain mandatory before any click. No guess-click, no CLI/movement/scheduling changes. PR #385. After exact merged-main CI, Windows smoke, ZIP checksum and rollback, publish user-authorized V3.2.93; no live V3.2.93 verification yet."
+}
