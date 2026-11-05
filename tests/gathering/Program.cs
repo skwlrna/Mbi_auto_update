@@ -202,6 +202,62 @@ Check(GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
         "get_activity", new(0, validActivityPayload, ""))).IsSafeField,
     "unchanged complete get_activity schema remains accepted");
 
+// 2026-11-05 18:21 post-update incident: $.IsReviving is missing.
+// A complete, value-free schema fingerprint must distinguish missing from a
+// hypothetical rename without accepting the replacement as safety evidence.
+var postUpdateShape = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+postUpdateShape.Remove("IsReviving");
+postUpdateShape["IsResurrecting"] = true; // hypothesis only; NOT a mapped alias
+postUpdateShape["PlayerAuthToken"] = "PRIVATE_DO_NOT_LOG";
+postUpdateShape["IsCharacterName"] = "PRIVATE_DO_NOT_LOG";
+postUpdateShape["Odd\\nSecretKey"] = "PRIVATE_DO_NOT_LOG";
+var incidentResponse = MabinogiMobileCli.Parse(
+    "get_activity", new(0, postUpdateShape.ToJsonString(), ""));
+Check(incidentResponse.Success, "schema regression reproduces connected CLI status");
+try
+{
+    _ = GatheringQueries.ParseActivity(incidentResponse);
+    throw new Exception("2026-11-05 missing IsReviving treated as safe");
+}
+catch (InvalidDataException ex)
+{
+    Check(ex.Message.Contains("$.IsReviving", StringComparison.Ordinal) &&
+          ex.Message.Contains("get_activity 구조(값 제외)", StringComparison.Ordinal) &&
+          ex.Message.Contains("IsDead:Boolean", StringComparison.Ordinal) &&
+          ex.Message.Contains("IsReviving:missing", StringComparison.Ordinal) &&
+          ex.Message.Contains("IsResurrecting:Boolean", StringComparison.Ordinal) &&
+          ex.Message.Contains("Mode{", StringComparison.Ordinal) &&
+          ex.Message.Contains("Interaction{", StringComparison.Ordinal),
+        "2026-11-05 schema mismatch reports present/missing field types and candidate name");
+    Check(!ex.Message.Contains("PRIVATE_DO_NOT_LOG", StringComparison.Ordinal) &&
+          !ex.Message.Contains("PlayerAuthToken", StringComparison.Ordinal) &&
+          !ex.Message.Contains("IsCharacterName", StringComparison.Ordinal) &&
+          !ex.Message.Contains("Odd", StringComparison.Ordinal) &&
+          !ex.Message.Contains("IsResurrecting:True", StringComparison.Ordinal),
+        "no raw CLI values, account fields or Boolean values reach public logs");
+    Check(ex.InnerException is InvalidDataException,
+        "structured failure preserves original missing-field exception");
+}
+var incidentSecond = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+incidentSecond["IsReviving"] = "false";
+CheckRejectedActivity(incidentSecond.ToJsonString(), "$.IsReviving",
+    "post-update string-typed IsReviving also fails closed");
+var incidentNested = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+incidentNested["Mode"]!.AsObject().Remove("MainButtonState");
+try
+{
+    _ = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+        "get_activity", new(0, incidentNested.ToJsonString(), "")));
+    throw new Exception("missing nested status falsely allowed");
+}
+catch (InvalidDataException ex)
+{
+    Check(ex.Message.Contains("$.Mode.MainButtonState", StringComparison.Ordinal) &&
+          ex.Message.Contains("MainButtonState:missing", StringComparison.Ordinal),
+        "nested status mismatch also emits safe bounded structure");
+}
+
+
 Check(await loadingData.ItemCountAsync("철 광석", default) == 42 && itemRejects == 3,
     "gathering retries transient get_items loading rejection");
 Check((await loadingData.WeightAsync(default)).Maximum == 100 && weightRejects == 3,
