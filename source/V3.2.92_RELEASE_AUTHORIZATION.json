@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.92",
+  "purpose": "post_update_optional_reviving_compatibility_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "수정하고 배포해",
+  "requestedAtKst": "2026-11-05",
+  "sourcePullRequest": 383,
+  "sourcePullRequests": [
+    383
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_compatibility_release",
+  "note": "User expressly approved removing ONLY IsReviving from required get_activity properties after observed missing field in V3.2.91. Missing is nullable/unknown, not false; all other fields and gameplay input protections unchanged. Source fix PR #383. No live game proof yet. Publish only after exact main SHA CI, Windows binary smoke, ZIP SHA256 and rollback. The test-only Windows scheduler tolerance has no runtime effect."
+}
