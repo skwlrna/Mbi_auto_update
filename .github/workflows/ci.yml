@@ -510,6 +510,12 @@ jobs:
             throw 'Korean OCR is required before releasing V3.2.65'
           }
 
+      - name: Herb bottom-row OCR incident and safety regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/herb-row/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Herb row OCR regressions failed' }
+
       # L2 exercises compiled production AlteringScreen methods, not only FakeWorld.
       - name: Real altering screen authority regressions (L2)
         shell: pwsh
