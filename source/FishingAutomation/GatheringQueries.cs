@@ -161,7 +161,18 @@ internal static class GatheringQueries
         }.Select(group =>
         {
             root.TryGetProperty(group.Item1, out var nested);
-            return group.Item1 + "{" + Expected(nested, group.Item2) + "}";
+            var nestedCandidates = nested.ValueKind == JsonValueKind.Object
+                ? nested.EnumerateObject()
+                    .Where(p => !group.Item2.Contains(p.Name, StringComparer.Ordinal) &&
+                                IsSafeActivitySchemaCandidate(p.Name))
+                    .OrderBy(p => p.Name, StringComparer.Ordinal)
+                    .Take(6)
+                    .Select(p => p.Name + ":" + Kind(p.Value))
+                    .ToArray()
+                : Array.Empty<string>();
+            return group.Item1 + "{" + Expected(nested, group.Item2) + "}" +
+                   (nestedCandidates.Length == 0 ? "" :
+                       "+후보[" + string.Join(",", nestedCandidates) + "]");
         }));
 
         // Only restricted generic state-field names are shown as *candidates*,
