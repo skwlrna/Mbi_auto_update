@@ -22,7 +22,11 @@ class V3292SingleReleaseSafety(unittest.TestCase):
             self.assertIs(auth[key], True)
         self.assertIs(auth["realGameTested"], False)
         current = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
-        # Active V3.2.92 publisher must match the actual updater binary.
+        # V3.2.92 has shipped. Preserve its release authorization and
+        # package proofs but do not force a newer Windows binary to report
+        # the old V3.2.92 updater version.
+        if 'CurrentVersion = "V3.2.92"' not in current:
+            return
         self.assertIn('CurrentVersion = "V3.2.92"', current)
         csproj = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for field, value in (("Version", "3.2.92"), ("AssemblyVersion", "3.2.92.0"),
