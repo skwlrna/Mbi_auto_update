@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.94",
+  "purpose": "herb_native_color_row_ocr_revalidation_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "pr 387 배포해",
+  "requestedAtKst": "2026-11-05",
+  "sourcePullRequest": 387,
+  "sourcePullRequests": [
+    387
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_verified_herb_native_color_ocr_release",
+  "note": "PR #387 fixes real V3.2.93 incident (2026-11-05 21:18:37 KST): target 산뜻 버섯 was already inside y145..980 ROI, but full-list thresholded OCR returned no match. Native-color OCR fallback and observed-row exact retry are used, while unique exact name, same-row icon and two fresh stable frames still gate clicks. CI exercises herb-row regressions and production UI. No live-game proof yet; exact main CI, Windows smoke, checksums and rollback are required before release."
+}
