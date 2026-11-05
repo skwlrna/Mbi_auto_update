@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.91",
+  "purpose": "post_update_activity_contract_shape_diagnostic_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "진행하고 배포까지 해",
+  "requestedAtKst": "2026-11-05",
+  "sourcePullRequest": 381,
+  "sourcePullRequests": [
+    381
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_schema_diagnostic_release",
+  "note": "User approved release of PR #381. This is a diagnostic-only update; no live CLI activity field alias has been verified, so no missing IsReviving field is defaulted to false or ignored. Require exact merged-main SHA CI, Windows build and smoke, checksummed Lite ZIP/source/rollback; never force-update running game. No raw values/account identity in auto-log."
+}

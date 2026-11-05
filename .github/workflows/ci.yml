@@ -154,6 +154,13 @@ jobs:
           python -m unittest discover -s tests/release -p 'test_v3290_auto_update_policy.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'V3.2.90 release policy failed; do not publish' }
 
+      - name: V3.2.91 post-update activity contract diagnostic official release policy
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/release -p 'test_v3291_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.91 release policy failed; do not publish' }
+
       - name: V3.2.87 F9 K-I-Space single-field release policy
         shell: pwsh
         run: |
