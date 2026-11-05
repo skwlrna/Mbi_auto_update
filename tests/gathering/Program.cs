@@ -291,6 +291,28 @@ Check(await loadingData.ItemCountAsync("철 광석", default) == 42 && itemRejec
     "gathering retries transient get_items loading rejection");
 Check((await loadingData.WeightAsync(default)).Maximum == 100 && weightRejects == 3,
     "gathering retries transient get_inventory loading rejection");
+// V3.2.92 2026-11-05 20:31 real 800x1000 herb screenshot:
+// 산뜻 버섯 exact row label/icon near (280,930) were invisible to the
+// previous y=145..845 OCR crop. Expand ONLY the verified search area;
+// scanning is not permission to click a hardcoded last-row coordinate.
+var herbSearchRoi = LifeSkillListLayout.VerifiedListSearchRoi;
+Check(herbSearchRoi == new System.Drawing.Rectangle(150, 145, 630, 835) &&
+      herbSearchRoi.Contains(new System.Drawing.Point(280, 930)) &&
+      herbSearchRoi.Contains(new System.Drawing.Point(280, 955)) &&
+      !new System.Drawing.Rectangle(150,145,630,700).Contains(new System.Drawing.Point(280,930)),
+    "2026-11-05 20:31 산뜻 버섯 bottom-row OCR included; legacy y845 crop excluded it");
+Check(!herbSearchRoi.Contains(new System.Drawing.Point(280, 990)) &&
+      !herbSearchRoi.Contains(new System.Drawing.Point(130, 930)) &&
+      !LifeSkillListLayout.TryFixedRowPoint("약초 채집", "산뜻 버섯", out _) &&
+      !LifeSkillListLayout.NeverScroll("약초 채집"),
+    "herb bottom-row still uses bounded scroll and exact OCR not guessed coordinates");
+Check(GatheringNavigationPolicy.IsStableFirstRow(
+        new System.Drawing.Rectangle(264,925,115,28),
+        new System.Drawing.Rectangle(267,927,115,28)) &&
+      !GatheringNavigationPolicy.IsStableFirstRow(
+        new System.Drawing.Rectangle(264,925,115,28),
+        new System.Drawing.Rectangle(267,825,115,28)),
+    "bottom-row requires two stable independent text boxes, not a shifted adjacent row");
 Check(GatheringNavigationPolicy.IsStableFirstRow(
         new System.Drawing.Rectangle(176,620,465,66),
         new System.Drawing.Rectangle(181,624,465,66)),
