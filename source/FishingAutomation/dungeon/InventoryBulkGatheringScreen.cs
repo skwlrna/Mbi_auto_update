@@ -825,6 +825,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                     listRoi,
                     source.TargetName,
                     ct);
+                Log?.Invoke($"[대량 채집][행 안정성] first={first.Value.Bounds} second={second?.Bounds} " +
+                    $"stable={second is not null && GatheringNavigationPolicy.IsStableFirstRow(first.Value.Bounds, second.Value.Bounds)}");
                 if (second is not null &&
                     GatheringNavigationPolicy.IsStableFirstRow(first.Value.Bounds, second.Value.Bounds) &&
                     HasRowIconVisual(fresh, second.Value.Bounds))
@@ -839,7 +841,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             // At this point no two-frame verified target is present.
             // Never click a row based on OCR alone or on a guessed y=930.
             if (page + 1 >= maxPages)
+            {
+                Log?.Invoke($"[대량 채집][행 판정] {source.TargetName} · 쪽 {page + 1}/{maxPages} · 인증 실패 · 클릭 없음 · 안전 정지");
                 break;
+            }
 
             Log?.Invoke(
                 $"[대량 채집][행 탐색] {source.Category}/{source.TargetName}" +
@@ -875,37 +880,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             return compact.Found ? compact : null;
         }
 
-        return await FindUniqueAsync(frame, roi, targetName, ct);
+        return await LifeSkillRowRecognition.FindAsync(_ui.Ocr, frame, roi, targetName, ct, text => Log?.Invoke(text));
     }
 
-    private static bool HasRowIconVisual(Bitmap frame, Rectangle textBounds)
-    {
-        // The screenshots show a distinct gatherable icon immediately to the left
-        // of each OCR name. The actual template crops are version-dependent, so the
-        // safe in-code second signal is that this same-row icon cell contains
-        // non-flat colored/edge detail on both fresh frames.
-        int top = Math.Max(0, textBounds.Top - 30);
-        int bottom = Math.Min(frame.Height, textBounds.Bottom + 30);
-        int right = Math.Max(1, textBounds.Left - 8);
-        int left = Math.Max(0, right - 115);
-        if (right - left < 30 || bottom - top < 30)
-            return false;
-
-        int min = 255, max = 0, saturated = 0, sampled = 0;
-        for (int y = top; y < bottom; y += 4)
-        for (int x = left; x < right; x += 4)
-        {
-            Color p = frame.GetPixel(x, y);
-            int bright = (p.R + p.G + p.B) / 3;
-            min = Math.Min(min, bright);
-            max = Math.Max(max, bright);
-            if (Math.Max(p.R, Math.Max(p.G, p.B)) - Math.Min(p.R, Math.Min(p.G, p.B)) >= 28)
-                saturated++;
-            sampled++;
-        }
-
-        return sampled > 0 && max - min >= 32 && saturated * 100 >= sampled * 3;
-    }
+    private bool HasRowIconVisual(Bitmap frame, Rectangle textBounds)
+        => LifeSkillRowRecognition.HasIcon(frame, textBounds, text => Log?.Invoke(text));
 
     private async Task<bool> WaitForLifeSkillHundredStopOrTargetAsync(
         string displayName,
