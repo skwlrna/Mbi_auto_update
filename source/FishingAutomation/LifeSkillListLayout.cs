@@ -4,6 +4,13 @@ namespace FishingAutomation;
 
 internal static class LifeSkillListLayout
 {
+    // 2026-11-05 20:31 live 800x1000 herb-gathering screenshot:
+    // 산뜻 버섯 is visible near y=930 (bottom card ~978), but the old
+    // OCR ROI ended at y=845. Keep x within the actual list and stop above
+    // the bottom edge. This is an OCR-only area, NEVER a guessed click target.
+    internal static readonly Rectangle VerifiedListSearchRoi =
+        new(150, 145, 630, 835); // y = [145, 980)
+
     internal static readonly Point SafeDragStart = new(580, 760);
     internal static readonly Point SafeDragEnd = new(580, 350);
 
