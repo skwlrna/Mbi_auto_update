@@ -49,8 +49,12 @@ internal static class Program
         Check(StrictLootPolicy.IsUnambiguousWinner("winner",frameA,frameB,frameC),"strict loot clear winner accepted");
         frameC["other"]=icon with {Score=.88};
         Check(!StrictLootPolicy.IsUnambiguousWinner("winner",frameA,frameB,frameC),"strict loot ambiguous similar icon rejected");
+        // The Windows task scheduler can complete Task.Delay a few timer ticks
+        // before the Stopwatch's exact 5000 ms mark. Keep the shipped request
+        // at 5000 ms; allow bounded timer granularity only in this test.
+        Check(RetryClickDelay.Milliseconds==5000,"production retry request remains exactly 5000ms");
         var clock=Stopwatch.StartNew();await RetryClickDelay.WaitAsync(default);
-        Check(clock.ElapsedMilliseconds>=4995,"retry cannot proceed immediately (five second wait)");
+        Check(clock.ElapsedMilliseconds>=4900,"retry cannot proceed immediately (five second wait, 100ms Windows clock tolerance)");
         using var cts=new CancellationTokenSource(40);bool reachedClick=false,cancelled=false;
         try{await RetryClickDelay.WaitAsync(cts.Token);reachedClick=true;}catch(OperationCanceledException){cancelled=true;}
         Check(cancelled&&!reachedClick,"stop during retry delay prevents continuation");
