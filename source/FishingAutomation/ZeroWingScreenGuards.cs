@@ -171,9 +171,9 @@ internal sealed class ZeroWingAlteringScreen : IAlteringScreen, IAlteringCoordin
         {
             if (actionFailure is not null)
                 throw new AggregateException(actionFailure, verificationFailure);
-            throw verificationFailure;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(verificationFailure).Throw();
         }
-        if (actionFailure is not null) throw actionFailure;
+        if (actionFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(actionFailure).Throw();
         return result;
     }
 
@@ -221,9 +221,9 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen, IGatheringStop
         if (verificationFailure is not null)
         {
             if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
-            throw verificationFailure;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(verificationFailure).Throw();
         }
-        if (actionFailure is not null) throw actionFailure;
+        if (actionFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(actionFailure).Throw();
     }
 
     public async Task StopAsync(CancellationToken ct)
@@ -246,9 +246,9 @@ internal sealed class ZeroWingGatheringScreen : IGatheringScreen, IGatheringStop
         if (verificationFailure is not null)
         {
             if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
-            throw verificationFailure;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(verificationFailure).Throw();
         }
-        if (actionFailure is not null) throw actionFailure;
+        if (actionFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(actionFailure).Throw();
     }
 
     private async Task<Exception?> VerifyAfterActionAsync(string action, decimal baseline)
@@ -341,9 +341,9 @@ internal sealed class ZeroWingCraftingScreen : ICraftingScreen
         if (verificationFailure is not null)
         {
             if (actionFailure is not null) throw new AggregateException(actionFailure, verificationFailure);
-            throw verificationFailure;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(verificationFailure).Throw();
         }
-        if (actionFailure is not null) throw actionFailure;
+        if (actionFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(actionFailure).Throw();
     }
 
     public void Dispose() => _inner.Dispose();
