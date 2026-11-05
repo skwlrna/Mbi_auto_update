@@ -2140,7 +2140,46 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         {
             var response = await _cli.GetActivityAsync(ct);
             if (response.Success)
-                activity = GatheringQueries.ParseActivity(response);
+            {
+                try
+                {
+                    activity = GatheringQueries.ParseActivity(response);
+                }
+                catch (InvalidDataException ex) when (
+                    ex.Message.StartsWith("get_activity ", StringComparison.Ordinal))
+                {
+                    // A successful transport is not a valid activity contract.
+                    // Diagnose a possibly transient post-update schema change
+                    // with ONE additional read-only CLI query. Even if the
+                    // second result is valid, do not authorize K/Space/receive
+                    // on this attempt: the first pre-input proof was unsafe.
+                    Log?.Invoke("[자동 가공][CLI 구조검증] 최초 응답 불일치" +
+                        " · 동일 입력 경계에서 입력 없이 1회만 재조회");
+                    await Task.Delay(200, ct);
+                    var second = await _cli.GetActivityAsync(ct);
+                    if (second.Success)
+                    {
+                        try
+                        {
+                            _ = GatheringQueries.ParseActivity(second);
+                            Log?.Invoke("[자동 가공][CLI 구조검증] 재조회 상태=구조 정상" +
+                                " · 최초 불일치가 있어 입력 차단 유지");
+                        }
+                        catch (InvalidDataException secondFailure)
+                        {
+                            Log?.Invoke("[자동 가공][CLI 구조검증] 재조회 상태=구조 불일치" +
+                                " · " + secondFailure.Message +
+                                " · 입력 차단 유지");
+                        }
+                    }
+                    else
+                    {
+                        Log?.Invoke("[자동 가공][CLI 구조검증] 재조회 상태=연결/응답 불확실" +
+                            " · 입력 차단 유지");
+                    }
+                    throw;
+                }
+            }
         }
 
         if (activity is not null &&
