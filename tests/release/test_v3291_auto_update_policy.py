@@ -144,8 +144,18 @@ class V3291SingleReleaseSafety(unittest.TestCase):
         self.assertIn("재조회 상태=구조 정상", managed)
         self.assertIn("입력 차단 유지", managed)
         self.assertIn("ExceptionDispatchInfo.Capture", wing)
-        self.assertIn("2026-11-05 missing IsReviving treated as safe", regression)
-        self.assertIn("no raw CLI values, account fields or Boolean values reach public logs", regression)
+        # Historical release tests can run in the pre-bump fix PR, where the
+        # updater still reports V3.2.91. Check the safety contract actually
+        # under test, not the yet-to-be-bumped executable version.
+        if "2026-11-05 missing IsReviving treated as safe" in regression:
+            self.assertIn("no raw CLI values, account fields or Boolean values reach public logs", regression)
+        else:
+            # The follow-up intentionally accepts only missing IsReviving;
+            # verify the replacement executable regressions and privacy fence.
+            self.assertIn("missing IsReviving remains null/unknown", regression)
+            self.assertIn("bounded schema diagnostic never exposes account keys or values", regression)
+            self.assertIn("combat still prevents F9 input", regression)
+            self.assertIn("death remains unsafe", regression)
         self.assertIn("F9 never authorizes input on inconsistent activity", stability)
         self.assertIn("activity contract schema-only diagnosis or fail-closed regression missing", publisher)
 

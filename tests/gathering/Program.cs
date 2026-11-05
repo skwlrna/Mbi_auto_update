@@ -202,45 +202,71 @@ Check(GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
         "get_activity", new(0, validActivityPayload, ""))).IsSafeField,
     "unchanged complete get_activity schema remains accepted");
 
-// 2026-11-05 18:21 post-update incident: $.IsReviving is missing.
-// A complete, value-free schema fingerprint must distinguish missing from a
-// hypothetical rename without accepting the replacement as safety evidence.
+// 2026-11-05 game update: IsReviving was entirely absent in four
+// get_activity samples. Only THIS flag is now optional; no missing values
+// become false. The F9 managed predicate already ignores stale IsReviving.
 var postUpdateShape = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
 postUpdateShape.Remove("IsReviving");
-postUpdateShape["IsResurrecting"] = true; // hypothesis only; NOT a mapped alias
-postUpdateShape["Mode"]!.AsObject()["IsReviving"] = true; // possible nested relocation, not trusted
+postUpdateShape["IsResurrecting"] = true; // unverified alias is never used
+postUpdateShape["Mode"]!.AsObject()["IsReviving"] = true; // unverified relocation
 postUpdateShape["PlayerAuthToken"] = "PRIVATE_DO_NOT_LOG";
 postUpdateShape["IsCharacterName"] = "PRIVATE_DO_NOT_LOG";
 postUpdateShape["Odd\\nSecretKey"] = "PRIVATE_DO_NOT_LOG";
 var incidentResponse = MabinogiMobileCli.Parse(
     "get_activity", new(0, postUpdateShape.ToJsonString(), ""));
-Check(incidentResponse.Success, "schema regression reproduces connected CLI status");
-try
+Check(incidentResponse.Success, "2026-11-05 real post-update shape has connected CLI status");
+var postUpdateActivity = GatheringQueries.ParseActivity(incidentResponse);
+Check(postUpdateActivity.IsReviving is null &&
+      !postUpdateActivity.IsDead && !postUpdateActivity.IsInCombat,
+    "missing IsReviving remains null/unknown, never falsely set to false");
+Check(GatheringSafetyPolicy.IsSafeField(postUpdateActivity) &&
+      AlteringTravelActivityPolicy.IsManagedSafeIdle(postUpdateActivity),
+    "F9 can use other verified status fields without IsReviving");
+using (var schemaJson = System.Text.Json.JsonDocument.Parse(postUpdateShape.ToJsonString()))
 {
-    _ = GatheringQueries.ParseActivity(incidentResponse);
-    throw new Exception("2026-11-05 missing IsReviving treated as safe");
+    var shape = GatheringQueries.DescribeActivitySchema(schemaJson.RootElement);
+    Check(shape.Contains("IsReviving:missing", StringComparison.Ordinal) &&
+          shape.Contains("IsDead:Boolean", StringComparison.Ordinal) &&
+          shape.Contains("IsResurrecting:Boolean", StringComparison.Ordinal) &&
+          shape.Contains("+후보[IsReviving:Boolean]", StringComparison.Ordinal) &&
+          shape.Contains("Interaction{", StringComparison.Ordinal),
+        "diagnostic still distinguishes optional absent field without guessing aliases");
+    Check(!shape.Contains("PRIVATE_DO_NOT_LOG", StringComparison.Ordinal) &&
+          !shape.Contains("PlayerAuthToken", StringComparison.Ordinal) &&
+          !shape.Contains("IsCharacterName", StringComparison.Ordinal) &&
+          !shape.Contains("Odd", StringComparison.Ordinal),
+        "bounded schema diagnostic never exposes account keys or values");
 }
-catch (InvalidDataException ex)
-{
-    Check(ex.Message.Contains("$.IsReviving", StringComparison.Ordinal) &&
-          ex.Message.Contains("get_activity 구조(값 제외)", StringComparison.Ordinal) &&
-          ex.Message.Contains("IsDead:Boolean", StringComparison.Ordinal) &&
-          ex.Message.Contains("IsReviving:missing", StringComparison.Ordinal) &&
-          ex.Message.Contains("IsResurrecting:Boolean", StringComparison.Ordinal) &&
-          ex.Message.Contains("Mode{", StringComparison.Ordinal) &&
-          ex.Message.Contains("+후보[IsReviving:Boolean]", StringComparison.Ordinal) &&
-          ex.Message.Contains("Mode{", StringComparison.Ordinal) &&
-          ex.Message.Contains("Interaction{", StringComparison.Ordinal),
-        "2026-11-05 schema mismatch reports present/missing field types and candidate name");
-    Check(!ex.Message.Contains("PRIVATE_DO_NOT_LOG", StringComparison.Ordinal) &&
-          !ex.Message.Contains("PlayerAuthToken", StringComparison.Ordinal) &&
-          !ex.Message.Contains("IsCharacterName", StringComparison.Ordinal) &&
-          !ex.Message.Contains("Odd", StringComparison.Ordinal) &&
-          !ex.Message.Contains("IsResurrecting:True", StringComparison.Ordinal),
-        "no raw CLI values, account fields or Boolean values reach public logs");
-    Check(ex.InnerException is InvalidDataException,
-        "structured failure preserves original missing-field exception");
-}
+var revivingTrue = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+revivingTrue["IsReviving"] = true;
+var observedReviving = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+    "get_activity", new(0, revivingTrue.ToJsonString(), "")));
+Check(observedReviving.IsReviving is true && !observedReviving.IsSafeField,
+    "when IsReviving is present and true the known value is preserved");
+var observedFalse = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+    "get_activity", new(0, validActivityPayload, "")));
+Check(observedFalse.IsReviving is false,
+    "when IsReviving is present and false the known value is preserved");
+var combatDuringGathering = System.Text.Json.Nodes.JsonNode.Parse(postUpdateShape.ToJsonString())!.AsObject();
+combatDuringGathering["IsInCombat"] = true;
+var combat = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+    "get_activity", new(0, combatDuringGathering.ToJsonString(), "")));
+Check(GatheringSafetyPolicy.ShouldWaitForCombat(combat) &&
+      !AlteringTravelActivityPolicy.IsManagedSafeIdle(combat),
+    "combat still prevents F9 input and makes gathering wait");
+var deadWithoutReviving = System.Text.Json.Nodes.JsonNode.Parse(postUpdateShape.ToJsonString())!.AsObject();
+deadWithoutReviving["IsDead"] = true;
+var dead = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+    "get_activity", new(0, deadWithoutReviving.ToJsonString(), "")));
+Check(!GatheringSafetyPolicy.IsSafeField(dead) &&
+      !AlteringTravelActivityPolicy.IsManagedSafeIdle(dead),
+    "death remains unsafe even when IsReviving is missing");
+var travelingWithoutReviving = System.Text.Json.Nodes.JsonNode.Parse(postUpdateShape.ToJsonString())!.AsObject();
+travelingWithoutReviving["IsAutoTraveling"] = true;
+var moving = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+    "get_activity", new(0, travelingWithoutReviving.ToJsonString(), "")));
+Check(!AlteringTravelActivityPolicy.IsManagedSafeIdle(moving),
+    "auto travel still blocks F9 managed input when IsReviving is missing");
 var incidentSecond = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
 incidentSecond["IsReviving"] = "false";
 CheckRejectedActivity(incidentSecond.ToJsonString(), "$.IsReviving",
