@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.90",
+  "purpose": "post_update_activity_schema_diagnostic_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "배포 까지 계속 진행해",
+  "requestedAtKst": "2026-11-05",
+  "sourcePullRequest": 379,
+  "sourcePullRequests": [
+    379
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_diagnostic_release",
+  "note": "Approved user-requested release of PR #379 diagnostic and fail-closed schema validation. Not a proven fix for unknown game/CLI protocol changes. Require PR CI and exact main SHA CI, zip/checksum/source/rollback and no forced update of a running game. No raw activity payloads/account or file paths in public logs."
+}
