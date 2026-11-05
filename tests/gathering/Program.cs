@@ -208,6 +208,7 @@ Check(GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
 var postUpdateShape = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
 postUpdateShape.Remove("IsReviving");
 postUpdateShape["IsResurrecting"] = true; // hypothesis only; NOT a mapped alias
+postUpdateShape["Mode"]!.AsObject()["IsReviving"] = true; // possible nested relocation, not trusted
 postUpdateShape["PlayerAuthToken"] = "PRIVATE_DO_NOT_LOG";
 postUpdateShape["IsCharacterName"] = "PRIVATE_DO_NOT_LOG";
 postUpdateShape["Odd\\nSecretKey"] = "PRIVATE_DO_NOT_LOG";
@@ -226,6 +227,8 @@ catch (InvalidDataException ex)
           ex.Message.Contains("IsDead:Boolean", StringComparison.Ordinal) &&
           ex.Message.Contains("IsReviving:missing", StringComparison.Ordinal) &&
           ex.Message.Contains("IsResurrecting:Boolean", StringComparison.Ordinal) &&
+          ex.Message.Contains("Mode{", StringComparison.Ordinal) &&
+          ex.Message.Contains("+후보[IsReviving:Boolean]", StringComparison.Ordinal) &&
           ex.Message.Contains("Mode{", StringComparison.Ordinal) &&
           ex.Message.Contains("Interaction{", StringComparison.Ordinal),
         "2026-11-05 schema mismatch reports present/missing field types and candidate name");
