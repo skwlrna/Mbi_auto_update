@@ -521,4 +521,20 @@ Match-Required $managedIdle '\r?\n                    throw;' 'F9 preserves the 
 Match-Forbidden $zeroWing 'throw (actionFailure|verificationFailure);' 'zero-wing guard never resets original exception stack'
 Require ([regex]::Matches($zeroWing, 'ExceptionDispatchInfo.Capture\(').Count -ge 8) 'zero-wing wrapper preserves all four action and four verification exception stacks'
 
+# 2026-11-05 20:31 V3.2.92 screenshot: 산뜻 버섯 target OCR row at
+# y~930 below old y=845 search bound. Search is not an input authority.
+$lifeList=Read-Source 'source/FishingAutomation/LifeSkillListLayout.cs'
+$bulkLifeScreen=Read-Source 'source/FishingAutomation/dungeon/InventoryBulkGatheringScreen.cs'
+$gatherTest=Read-Source 'tests/gathering/Program.cs'
+Match-Required $lifeList 'VerifiedListSearchRoi' 'gathering bottom row search has explicit verified geometry'
+Match-Required $lifeList 'new\(150, 145, 630, 835\)' 'search extends below y930 but ends at y980'
+Match-Required $bulkLifeScreen 'var listRoi = LifeSkillListLayout.VerifiedListSearchRoi;' 'real OCR uses expanded ROI'
+Match-Forbidden $bulkLifeScreen 'var listRoi = new Rectangle\(150, 145, 630, 700\)' 'old y845 cutoff must not be restored'
+Match-Required $bulkLifeScreen 'FindStableLifeSkillRowAsync\(source, ct\)' 'dynamic verified row remains mandatory before click'
+Match-Required $bulkLifeScreen 'GatheringNavigationPolicy.IsStableFirstRow\(first.Value.Bounds, second.Value.Bounds\)' 'two independent row positions must agree'
+Match-Required $bulkLifeScreen 'HasRowIconVisual\(fresh, second.Value.Bounds\)' 'second image matched icon remains mandatory'
+Match-Required $bulkLifeScreen 'if \(row is null\)' 'missing verified target fails closed'
+Match-Required $gatherTest '산뜻 버섯 bottom-row OCR included' 'actual screenshot coordinate regression stays locked'
+Match-Required $gatherTest 'herb bottom-row still uses bounded scroll' 'no guessed herb fixed coordinate'
+
 Write-Host "PASS $checks stable production behavior locks"

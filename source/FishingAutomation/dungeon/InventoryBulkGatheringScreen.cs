@@ -793,7 +793,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
         // 추수는 현재 확인된 밀/옥수수/콩/쌀/귀리가 첫 화면 한 페이지에 모두 보인다.
         // 불필요한 드래그는 행 위치를 흔들 수 있으므로 추수는 첫 화면만 검사한다.
         // 다른 카테고리는 기존처럼 목록 영역만 제한적으로 스크롤한다.
-        var listRoi = new Rectangle(150, 145, 630, 700);
+        // Last 2026-11-05 V3.2.92 failure screenshot shows 산뜻 버섯 at
+        // y~930. The old y<845 ROI excluded that plainly visible last row.
+        // Search the expanded actual list region; TWO independent exact OCR
+        // + same-row icon + stable geometry confirmations still gate clicking.
+        var listRoi = LifeSkillListLayout.VerifiedListSearchRoi;
         int maxPages = LifeSkillListLayout.NeverScroll(source.Category) ? 1 : 9;
 
         for (int page = 0; page < maxPages; page++)
@@ -832,8 +836,15 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 }
             }
 
+            // At this point no two-frame verified target is present.
+            // Never click a row based on OCR alone or on a guessed y=930.
             if (page + 1 >= maxPages)
                 break;
+
+            Log?.Invoke(
+                $"[대량 채집][행 탐색] {source.Category}/{source.TargetName}" +
+                $" · 쪽 {page + 1}/{maxPages} 인증 실패 · 제한 스크롤 후 다시 확인" +
+                $" · OCR y={listRoi.Top}..{listRoi.Bottom}");
 
             using (var frame = Capture(ct))
             {
