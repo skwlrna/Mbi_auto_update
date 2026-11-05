@@ -995,6 +995,23 @@ public sealed partial class MainForm
             _logExpanded = true;
             ApplyLogVisibility();
             _log.Write("[다중가공] 오류: " + ex.Message);
+            // Runtime log uploads can be public: record type + method-only stack
+            // (no local paths, raw CLI payloads, account or character values).
+            // A missing get_activity field now carries its exact schema path
+            // in the exception message, even without debug symbols.
+            var failureFrames =
+                new System.Diagnostics.StackTrace(ex, false).GetFrames()
+                ?? Array.Empty<System.Diagnostics.StackFrame>();
+            string failureMethods = string.Join(" <- ", failureFrames.Take(8).Select(frame =>
+            {
+                var method = frame.GetMethod();
+                return method is null ? "unknown" :
+                    (method.DeclaringType?.FullName ?? "unknown") + "." + method.Name;
+            }));
+            _log.Write("[다중가공][예외 진단] 유형=" + ex.GetType().FullName +
+                " · 호출=" + (failureMethods.Length == 0 ? "미제공" : failureMethods) +
+                (ex.InnerException is null ? "" :
+                    " · 내부유형=" + ex.InnerException.GetType().FullName));
             var recoveryDecision = LifeSkillRecoveryDecisionPolicy.ForIncident(ex);
             managerState?.RecordIncident(LifeSkillStage.Altering, ex);
             _log.Write("[다중가공][복구 판단] 분류=" + recoveryDecision.Category +
