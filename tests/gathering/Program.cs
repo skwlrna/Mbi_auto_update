@@ -130,7 +130,7 @@ var loadingCli = new MabinogiMobileCli(log, true, (command, ct) =>
         if (activityRejects <= 2)
             return Task.FromResult(new CliProcessOutput(0, "{\"status\":\"rejected\",\"reason\":\"loading\"}", ""));
         return Task.FromResult(new CliProcessOutput(0,
-            validActivityPayload, ""));;
+            validActivityPayload, ""));
     }
     if (command == "get_items")
     {
