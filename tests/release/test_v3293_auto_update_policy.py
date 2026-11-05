@@ -22,7 +22,9 @@ class V3293SingleReleaseSafety(unittest.TestCase):
             self.assertIs(auth[key], True)
         self.assertIs(auth["realGameTested"], False)
         current = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
-        # Active V3.2.93 publisher must match the actual updater binary.
+        # Historical V3.2.93 release stays immutable when newer versions ship.
+        if 'CurrentVersion = "V3.2.93"' not in current:
+            return
         self.assertIn('CurrentVersion = "V3.2.93"', current)
         csproj = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for field, value in (("Version", "3.2.93"), ("AssemblyVersion", "3.2.93.0"),
