@@ -116,8 +116,10 @@ catch(InvalidOperationException) { checks++; }
 try { GatheringQueries.ParseWeight(MabinogiMobileCli.Parse("get_inventory",new(0,"{\"CurrentInventoryWeightAsDecimal\":1,\"MaxInventoryWeightAsDecimal\":0}",""))); throw new Exception("unknown capacity accepted"); }
 catch(InvalidDataException) { Check(true,"unavailable bag capacity never treated as empty bag"); }
 try { GatheringQueries.ParseActivity(MabinogiMobileCli.Parse("get_activity",new(0,"{}",""))); throw new Exception("missing activity accepted"); }
-catch(KeyNotFoundException) { Check(true,"missing activity cannot authorize screen input"); }
+catch(InvalidDataException ex) { Check(ex.Message.Contains("$.Interaction", StringComparison.Ordinal), "missing activity fails closed with exact $.Interaction path"); }
 
+// Exact safe-idle CLI fixture is also used for post-update schema regressions.
+string validActivityPayload = "{\"IsDead\":false,\"IsReviving\":false,\"IsInCombat\":false,\"IsAutoPlaying\":false,\"IsAutoTraveling\":false,\"IsDialoguePlaying\":false,\"IsWaitingForSelection\":false,\"Dungeon\":{\"State\":\"NotInDungeon\"},\"Battlefield\":{\"IsInBattleField\":false},\"Tutorial\":{\"IsPlaying\":false},\"Scenario\":{\"IsInScenario\":false},\"Performance\":{\"IsPlaying\":false},\"Mode\":{\"IsPlayingMiniGame\":false,\"IsHousingEditMode\":false,\"MainButtonState\":\"Compass\"},\"Interaction\":{\"HasTarget\":false,\"AvailableInteractionType\":\"None\",\"LastRunningInteractionType\":\"None\"}}";
 int activityRejects = 0, itemRejects = 0, weightRejects = 0;
 var loadingCli = new MabinogiMobileCli(log, true, (command, ct) =>
 {
@@ -128,7 +130,7 @@ var loadingCli = new MabinogiMobileCli(log, true, (command, ct) =>
         if (activityRejects <= 2)
             return Task.FromResult(new CliProcessOutput(0, "{\"status\":\"rejected\",\"reason\":\"loading\"}", ""));
         return Task.FromResult(new CliProcessOutput(0,
-            "{\"IsDead\":false,\"IsReviving\":false,\"IsInCombat\":false,\"IsAutoPlaying\":false,\"IsAutoTraveling\":false,\"IsDialoguePlaying\":false,\"IsWaitingForSelection\":false,\"Dungeon\":{\"State\":\"NotInDungeon\"},\"Battlefield\":{\"IsInBattleField\":false},\"Tutorial\":{\"IsPlaying\":false},\"Scenario\":{\"IsInScenario\":false},\"Performance\":{\"IsPlaying\":false},\"Mode\":{\"IsPlayingMiniGame\":false,\"IsHousingEditMode\":false,\"MainButtonState\":\"Compass\"},\"Interaction\":{\"HasTarget\":false,\"AvailableInteractionType\":\"None\",\"LastRunningInteractionType\":\"None\"}}", ""));
+            validActivityPayload, ""));
     }
     if (command == "get_items")
     {
@@ -151,6 +153,55 @@ var loadingCli = new MabinogiMobileCli(log, true, (command, ct) =>
 var loadingData = new GatheringCliData(loadingCli);
 Check((await loadingData.ActivityAsync(default)).IsSafeField && activityRejects == 3,
     "gathering retries transient get_activity loading rejection");
+
+// 2026-11-05 16:57 V3.2.89: a successful get_activity transport can still
+// return an incomplete schema. Do not infer false/idle, leak raw values or
+// authorize a K/Space input. Report the exact missing field path.
+void CheckRejectedActivity(string json, string schemaPath, string label)
+{
+    try
+    {
+        _ = GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+            "get_activity", new(0, json, "")));
+        throw new Exception("incomplete or changed activity schema accepted: " + label);
+    }
+    catch (InvalidDataException ex)
+    {
+        Check(ex.Message.Contains(schemaPath, StringComparison.Ordinal) &&
+              ex.Message.Contains("입력 차단", StringComparison.Ordinal) &&
+              !ex.Message.Contains("HID\\", StringComparison.Ordinal),
+            label + " (field path only; no payload)");
+    }
+}
+var activityWithoutMode = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+activityWithoutMode.Remove("Mode");
+CheckRejectedActivity(activityWithoutMode.ToJsonString(), "$.Mode",
+    "post-update missing Mode cannot authorize managed K");
+var activityWithoutInteraction = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+activityWithoutInteraction.Remove("Interaction");
+CheckRejectedActivity(activityWithoutInteraction.ToJsonString(), "$.Interaction",
+    "post-update missing Interaction cannot be treated as idle");
+var activityWithoutButton = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+activityWithoutButton["Mode"]!.AsObject().Remove("MainButtonState");
+CheckRejectedActivity(activityWithoutButton.ToJsonString(), "$.Mode.MainButtonState",
+    "post-update missing nested main-button state is diagnosed");
+var activityWithoutDungeon = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+activityWithoutDungeon["Dungeon"]!.AsObject().Remove("State");
+CheckRejectedActivity(activityWithoutDungeon.ToJsonString(), "$.Dungeon.State",
+    "post-update missing nested dungeon state fails closed");
+var activityWrongCombatType = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+activityWrongCombatType["IsInCombat"] = "false";
+CheckRejectedActivity(activityWrongCombatType.ToJsonString(), "$.IsInCombat",
+    "post-update changed Boolean to text fails closed");
+var activityWithoutRunningAction = System.Text.Json.Nodes.JsonNode.Parse(validActivityPayload)!.AsObject();
+activityWithoutRunningAction["Interaction"]!.AsObject().Remove("LastRunningInteractionType");
+CheckRejectedActivity(activityWithoutRunningAction.ToJsonString(),
+    "$.Interaction.LastRunningInteractionType",
+    "missing running interaction cannot authorize action");
+Check(GatheringQueries.ParseActivity(MabinogiMobileCli.Parse(
+        "get_activity", new(0, validActivityPayload, ""))).IsSafeField,
+    "unchanged complete get_activity schema remains accepted");
+
 Check(await loadingData.ItemCountAsync("철 광석", default) == 42 && itemRejects == 3,
     "gathering retries transient get_items loading rejection");
 Check((await loadingData.WeightAsync(default)).Maximum == 100 && weightRejects == 3,

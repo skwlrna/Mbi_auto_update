@@ -76,16 +76,77 @@ internal static class GatheringQueries
 
     internal static GatheringActivity ParseActivity(MabinogiCliResult response)
     {
+        // The effective root is response.body when present. After a game/CLI
+        // update, a missing or mistyped activity field is UNKNOWN state, not
+        // idle/false. Identify the exact schema path without logging any raw
+        // account, character, or packet values. Callers must fail closed.
         var r = Data(response);
-        var interaction = r.GetProperty("Interaction");
-        var mode = r.GetProperty("Mode");
-        return new(Bool(r,"IsDead"), Bool(r,"IsReviving"), Bool(r,"IsInCombat"),
-            Bool(r,"IsAutoPlaying"), Bool(r,"IsAutoTraveling"), Bool(r,"IsDialoguePlaying"), Bool(r,"IsWaitingForSelection"),
-            Text(r.GetProperty("Dungeon"),"State"), Bool(r.GetProperty("Battlefield"),"IsInBattleField"),
-            Bool(r.GetProperty("Tutorial"),"IsPlaying"), Bool(r.GetProperty("Scenario"),"IsInScenario"),
-            Bool(r.GetProperty("Performance"),"IsPlaying"), Bool(mode,"IsPlayingMiniGame"), Bool(mode,"IsHousingEditMode"),
-            Text(mode,"MainButtonState"), Bool(interaction,"HasTarget"),
-            Text(interaction,"AvailableInteractionType"), Text(interaction,"LastRunningInteractionType"));
+        var interaction = ActivityRequired(r, "Interaction", "$");
+        var mode = ActivityRequired(r, "Mode", "$");
+        var dungeon = ActivityRequired(r, "Dungeon", "$");
+        var battlefield = ActivityRequired(r, "Battlefield", "$");
+        var tutorial = ActivityRequired(r, "Tutorial", "$");
+        var scenario = ActivityRequired(r, "Scenario", "$");
+        var performance = ActivityRequired(r, "Performance", "$");
+        return new(
+            ActivityBool(r, "IsDead", "$"),
+            ActivityBool(r, "IsReviving", "$"),
+            ActivityBool(r, "IsInCombat", "$"),
+            ActivityBool(r, "IsAutoPlaying", "$"),
+            ActivityBool(r, "IsAutoTraveling", "$"),
+            ActivityBool(r, "IsDialoguePlaying", "$"),
+            ActivityBool(r, "IsWaitingForSelection", "$"),
+            ActivityText(dungeon, "State", "$.Dungeon"),
+            ActivityBool(battlefield, "IsInBattleField", "$.Battlefield"),
+            ActivityBool(tutorial, "IsPlaying", "$.Tutorial"),
+            ActivityBool(scenario, "IsInScenario", "$.Scenario"),
+            ActivityBool(performance, "IsPlaying", "$.Performance"),
+            ActivityBool(mode, "IsPlayingMiniGame", "$.Mode"),
+            ActivityBool(mode, "IsHousingEditMode", "$.Mode"),
+            ActivityText(mode, "MainButtonState", "$.Mode"),
+            ActivityBool(interaction, "HasTarget", "$.Interaction"),
+            ActivityText(interaction, "AvailableInteractionType", "$.Interaction"),
+            ActivityText(interaction, "LastRunningInteractionType", "$.Interaction"));
+    }
+
+    private static JsonElement ActivityRequired(JsonElement parent, string key, string parentPath)
+    {
+        string field = parentPath + "." + key;
+        if (parent.ValueKind != JsonValueKind.Object ||
+            !parent.TryGetProperty(key, out var value))
+            throw new InvalidDataException(
+                "get_activity 필수 필드 누락: " + field +
+                " · CLI 응답 구조 미확정, 게임 입력 차단");
+        return value;
+    }
+
+    private static bool ActivityBool(JsonElement parent, string key, string parentPath)
+    {
+        var value = ActivityRequired(parent, key, parentPath);
+        if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new InvalidDataException(
+                "get_activity 필드 유형 불일치: " + parentPath + "." + key +
+                " · 필요=Boolean · 실제=" + value.ValueKind +
+                " · 게임 입력 차단");
+        return value.GetBoolean();
+    }
+
+    private static string ActivityText(JsonElement parent, string key, string parentPath)
+    {
+        var value = ActivityRequired(parent, key, parentPath);
+        string field = parentPath + "." + key;
+        if (value.ValueKind != JsonValueKind.String)
+            throw new InvalidDataException(
+                "get_activity 필드 유형 불일치: " + field +
+                " · 필요=String · 실제=" + value.ValueKind +
+                " · 게임 입력 차단");
+        string? text = value.GetString();
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 512 ||
+            text.Any(char.IsControl))
+            throw new InvalidDataException(
+                "get_activity 필드 값 불확실: " + field +
+                " · 값 기록 없이 게임 입력 차단");
+        return text;
     }
 
     internal static (decimal Current, decimal Maximum) ParseWeight(MabinogiCliResult response)
