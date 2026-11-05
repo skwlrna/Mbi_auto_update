@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace FishingAutomation;
 
 internal sealed record GatherableItem(string DisplayName, bool ToolOk);
-internal sealed record GatheringActivity(bool IsDead, bool IsReviving, bool IsInCombat,
+internal sealed record GatheringActivity(bool IsDead, bool? IsReviving, bool IsInCombat,
     bool IsAutoPlaying, bool IsAutoTraveling, bool IsDialoguePlaying, bool IsWaitingForSelection,
     string DungeonState, bool IsInBattlefield, bool IsPlayingTutorial, bool IsInScenario,
     bool IsPlayingPerformance, bool IsPlayingMiniGame, bool IsHousingEditMode,
@@ -11,7 +11,9 @@ internal sealed record GatheringActivity(bool IsDead, bool IsReviving, bool IsIn
 {
     internal bool IsGathering => MainButtonState == "Stop" && LastRunningInteractionType == "Gathering" && !IsAutoTraveling;
     internal bool IsFishing => MainButtonState is "Fishing" or "FishingPull";
-    internal bool IsSafeField => !IsDead && !IsReviving && !IsInCombat &&
+    // A missing, no-longer-supplied IsReviving is unknown, not false.
+    // Genuine IsReviving=true remains unsafe for callers using this predicate.
+    internal bool IsSafeField => !IsDead && IsReviving != true && !IsInCombat &&
         !IsDialoguePlaying && !IsWaitingForSelection && DungeonState == "NotInDungeon" &&
         !IsPlayingTutorial && !IsInScenario && !IsPlayingPerformance &&
         !IsPlayingMiniGame && !IsHousingEditMode;
@@ -90,7 +92,7 @@ internal static class GatheringQueries
             var performance = ActivityRequired(r, "Performance", "$");
             return new(
                 ActivityBool(r, "IsDead", "$"),
-                ActivityBool(r, "IsReviving", "$"),
+                ActivityOptionalBool(r, "IsReviving", "$"),
                 ActivityBool(r, "IsInCombat", "$"),
                 ActivityBool(r, "IsAutoPlaying", "$"),
                 ActivityBool(r, "IsAutoTraveling", "$"),
@@ -219,6 +221,17 @@ internal static class GatheringQueries
                 "get_activity 필수 필드 누락: " + field +
                 " · CLI 응답 구조 미확정, 게임 입력 차단");
         return value;
+    }
+
+    // The live 2026-11-05 get_activity schema omits ONLY IsReviving.
+    // Missing != false: retain unknown/null, and validate its Boolean type
+    // if the server does provide it. All other status fields stay mandatory.
+    private static bool? ActivityOptionalBool(JsonElement parent, string key, string parentPath)
+    {
+        if (parent.ValueKind == JsonValueKind.Object &&
+            !parent.TryGetProperty(key, out _))
+            return null;
+        return ActivityBool(parent, key, parentPath);
     }
 
     private static bool ActivityBool(JsonElement parent, string key, string parentPath)
