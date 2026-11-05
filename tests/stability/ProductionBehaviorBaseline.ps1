@@ -499,4 +499,21 @@ Match-Required $fieldExit '일반 필드 2프레임 확인' 'processing UI exit 
 Match-Required $fieldExit 'TapFresh\(0x01, ct\)' 'processing UI exit unwinds with Escape'
 Match-Forbidden $fieldExit 'TapFresh\(0x39' 'processing UI exit never presses Space'
 
+# 2026-11-05 game-update CLI activity drift: observe schema, never infer
+# a missing IsReviving flag as false, and preserve first failure site.
+$activityParser = Read-Source 'source/FishingAutomation/GatheringQueries.cs'
+Match-Required $activityParser 'get_activity 구조\(값 제외\)' 'post-update activity failure emits value-free shape'
+Match-Required $activityParser 'IsSafeActivitySchemaCandidate' 'unknown schema key names have strict allowlisting'
+Match-Required $activityParser 'IsReviving' 'reviving status remains safety-critical'
+Match-Required $activityParser '추가상태키후보' 'possible renamed state fields are evidence, not aliases'
+Match-Required $activityParser 'throw new InvalidDataException' 'missing critical activity fails closed'
+Match-Forbidden $activityParser 'IsReviving.*\?\? false' 'missing reviving flag never defaults to false'
+$managedIdle = Method-Block $alter 'private async Task RequireManagedIdleAsync\(' '\r?\n    private async Task RequireManagedTravelPopupReadyAsync' 'F9 managed CLI idle guard'
+Match-Required $managedIdle 'var second = await _cli.GetActivityAsync\(ct\)' 'F9 rechecks invalid activity using read-only CLI only'
+Match-Required $managedIdle '재조회 상태=구조 정상' 'one valid recheck does not erase first unsafe observation'
+Match-Required $managedIdle '입력 차단 유지' 'F9 never authorizes input on inconsistent activity'
+Match-Required $managedIdle '\r?\n                    throw;' 'F9 preserves the original schema failure'
+Match-Forbidden $zeroWing 'throw (actionFailure|verificationFailure);' 'zero-wing guard never resets original exception stack'
+Require ([regex]::Matches($zeroWing, 'ExceptionDispatchInfo.Capture\(').Count -ge 8) 'zero-wing wrapper preserves all four action and four verification exception stacks'
+
 Write-Host "PASS $checks stable production behavior locks"
