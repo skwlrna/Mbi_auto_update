@@ -44,6 +44,10 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
     private readonly Func<AlteringPlan, CancellationToken, Task>? _beforeReceipt;
     private readonly Func<AlteringPlan, CancellationToken, Task>? _afterReceipt;
     private readonly bool _yieldBusyFacilityToParent;
+    private sealed record SuspendedRequest(
+        AlteringPlan Plan, long Baseline, int Required,
+        IAlteringSupplyResolver Resolver, int? Minimum);
+    private SuspendedRequest? _suspended;
 
     internal event Action<string>? Log;
 
@@ -79,7 +83,52 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             throw new ArgumentOutOfRangeException(nameof(boundaryIdleThreshold));
     }
 
+    // A child may have seven verified, still-running jobs and a retained
+    // lease. Resume that exact durable request BEFORE the parent attempts
+    // any same-facility main registration or receipt.
+    internal Task ResumeSuspendedAsync(string facilityName, CancellationToken ct)
+    {
+        if (_suspended is not { } request ||
+            !string.Equals(request.Plan.FacilityName, facilityName, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"중간재료 {facilityName} 이어받기 요청과 실제 대기 작업이 불일치합니다 · 입력 없이 정지");
+        return RunAsync(request.Plan, request.Baseline, request.Required,
+            request.Resolver, ct, request.Minimum);
+    }
+
     public async Task RunAsync(
+        AlteringPlan requestedPlan,
+        long requestBaselineQuantity,
+        int requiredAdditionalQuantity,
+        IAlteringSupplyResolver resolver,
+        CancellationToken ct,
+        int? minimumAdditionalQuantity = null)
+    {
+        if (_yieldBusyFacilityToParent && _suspended is { } pending &&
+            (pending.Plan != requestedPlan ||
+             pending.Baseline != requestBaselineQuantity ||
+             pending.Required != requiredAdditionalQuantity ||
+             pending.Minimum != minimumAdditionalQuantity))
+            throw new IntermediateFacilityBusyException(pending.Plan.FacilityName);
+
+        try
+        {
+            await RunCoreAsync(requestedPlan, requestBaselineQuantity,
+                requiredAdditionalQuantity, resolver, ct, minimumAdditionalQuantity);
+            if (_yieldBusyFacilityToParent)
+                _suspended = null;
+        }
+        catch (IntermediateFacilityBusyException)
+        {
+            if (_yieldBusyFacilityToParent)
+                _suspended ??= new SuspendedRequest(
+                    requestedPlan, requestBaselineQuantity,
+                    requiredAdditionalQuantity, resolver, minimumAdditionalQuantity);
+            throw;
+        }
+    }
+
+    private async Task RunCoreAsync(
         AlteringPlan requestedPlan,
         long requestBaselineQuantity,
         int requiredAdditionalQuantity,
