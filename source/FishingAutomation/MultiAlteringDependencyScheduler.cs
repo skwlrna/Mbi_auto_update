@@ -97,13 +97,30 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         string dependencyDir = Path.Combine(_sessionDirectory, "dependencies");
         var store = new AlteringSessionStore(
             AlteringSessionStore.MultiPlanPath(dependencyDir, requestedPlan));
+        string ownerKey = $"{requestedPlan.DisplayName}#{requestedPlan.RecipeOrdinal}";
+        bool resumingOwnedBatch = _yieldBusyFacilityToParent &&
+            _laneState?.IsActiveIntermediateOwner(requestedPlan.FacilityName, ownerKey) == true;
+        // Cooperative suspension is permitted only for one top-level child
+        // lease. Nested intermediate owners cannot be reconstructed safely.
+        if (resumingOwnedBatch &&
+            _laneState!.Snapshot(requestedPlan.FacilityName).IntermediateDepth != 1)
+            throw new InvalidOperationException(
+                "중첩 중간재료 작업의 자동 복귀는 지원되지 않습니다 · 소유권 보존 후 정지");
 
         Log?.Invoke(
             $"[중간재료 스케줄] 요청 · {requestedPlan.DisplayName} 추가 {requiredAdditionalQuantity:N0}개 · " +
             $"{requestedPlan.FacilityName.Replace(" 시설", "")} 시설 배치에 통합");
 
-        var boundaryWorks = await WaitForFacilityBatchBoundaryAsync(
-            requestedPlan, ct, allowCooperativeYield: true);
+        // A previously queued child already owns its lane. Re-collecting its
+        // completed jobs here as an unrelated 'existing batch' would violate
+        // its durable receipt ledger and orphan the retained lease.
+        var boundaryWorks = resumingOwnedBatch
+            ? Array.Empty<AlteringWork>()
+            : await WaitForFacilityBatchBoundaryAsync(
+                requestedPlan, ct, allowCooperativeYield: true);
+        if (resumingOwnedBatch)
+            Log?.Invoke($"[중간재료 스케줄] {requestedPlan.FacilityName} 등록된 자식 배치 이어받기 · " +
+                "기존 소유권/세션 유지 · 신규 등록 전 CLI 장부 재검증");
         if (boundaryWorks.Length > 0)
         {
             Log?.Invoke(
@@ -184,24 +201,37 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                 $"{requestedPlan.OutputName} 중간재료 남은 수량이 안전 범위를 넘었습니다: {remainingLong:N0}");
 
         var plan = requestedPlan with { TargetQuantity = (int)remainingLong };
+        // A resumed lease MUST have the exact saved job identity. Mismatched
+        // quantities cannot delete/recreate a journal while work is queued.
+        var saved = store.Load();
+        if (resumingOwnedBatch &&
+            (saved is null || !saved.MatchesPlan(plan) ||
+             !saved.MatchesIdentity(_identity)))
+            throw new InvalidOperationException(
+                "중간재료 이어하기 소유권과 저장 장부가 일치하지 않습니다 · 새 등록 없이 정지");
 
         var emptyCheck = await _data.WorksAsync(ct);
         var emptyFacilityCheck = emptyCheck
             .Where(x => x.FacilityName == plan.FacilityName)
             .ToArray();
-        if (emptyFacilityCheck.Length > 0)
-            throw new InvalidOperationException(
-                $"{plan.FacilityName} 중간재료 배치 시작 직전에 다른 작업이 생겨 시설 소유권을 확보하지 못했습니다.");
-
-        string ownerKey = $"{plan.DisplayName}#{plan.RecipeOrdinal}";
-        _laneState?.AcquireIntermediate(
-            plan.FacilityName,
-            emptyFacilityCheck,
-            ownerKey);
+        if (resumingOwnedBatch)
+        {
+            // Count or identity conflicts still fail closed via shared lane
+            // observations and the immutable child session journal.
+            _laneState!.AssertAccess(plan.FacilityName, FacilityLaneOwner.Intermediate);
+            _laneState.Observe(plan.FacilityName, emptyFacilityCheck, allowShrink: false);
+        }
+        else
+        {
+            if (emptyFacilityCheck.Length > 0)
+                throw new InvalidOperationException(
+                    $"{plan.FacilityName} 중간재료 배치 시작 직전에 다른 작업이 생겨 시설 소유권을 확보하지 못했습니다.");
+            _laneState?.AcquireIntermediate(
+                plan.FacilityName, emptyFacilityCheck, ownerKey);
+        }
 
         Directory.CreateDirectory(dependencyDir);
 
-        var saved = store.Load();
         AlteringSessionState session;
         if (saved is not null &&
             saved.MatchesPlan(plan) &&
@@ -252,7 +282,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
         var coordinator = new MultiAlteringCoordinator(
             _laneState,
-            FacilityLaneOwner.Intermediate);
+            FacilityLaneOwner.Intermediate,
+            yieldIntermediateActiveBatch: _yieldBusyFacilityToParent);
         coordinator.Log += text => Log?.Invoke(text);
 
         Log?.Invoke(
