@@ -595,6 +595,7 @@ internal sealed class MultiAlteringCoordinator
     private readonly bool _fillInitialVacancies;
     private readonly bool _deferOtherLanesWhileQueueFull;
     private readonly bool _optimizeFacilityOrder;
+    private readonly bool _spreadInitialVacantLanes;
 
     internal event Action<string>? Log;
     internal MultiAlteringFacilityBottleneckTracker Bottlenecks { get; }
@@ -609,7 +610,8 @@ internal sealed class MultiAlteringCoordinator
         Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null,
         bool fillInitialVacancies = false,
         bool deferOtherLanesWhileQueueFull = false,
-        bool optimizeFacilityOrder = false)
+        bool optimizeFacilityOrder = false,
+        bool spreadInitialVacantLanes = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
@@ -621,6 +623,7 @@ internal sealed class MultiAlteringCoordinator
         _fillInitialVacancies = fillInitialVacancies;
         _deferOtherLanesWhileQueueFull = deferOtherLanesWhileQueueFull;
         _optimizeFacilityOrder = optimizeFacilityOrder;
+        _spreadInitialVacantLanes = spreadInitialVacantLanes;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -699,6 +702,15 @@ internal sealed class MultiAlteringCoordinator
         string? lastOptimizedOrder = null;
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
+        // Avoid filling a first empty facility to 7/7 before other independent
+        // facilities get even one verified registration. A global CLI queue_full
+        // can mask still-empty medicine/food recipes after the first lane fills.
+        // This affects first-start ordering only; no receipt or input guard changes.
+        var initialVacantSeedPending = new HashSet<string>(
+            orderedFacilities.Where(f => _spreadInitialVacantLanes &&
+                orderedFacilities.Length > 1 && _laneState is not null &&
+                _laneState.Snapshot(f).InitialObservedWorks == 0),
+            StringComparer.Ordinal);
         var startupVacancies = new HashSet<string>(
             orderedFacilities.Where(f => _fillInitialVacancies &&
                 _laneState is not null &&
@@ -885,6 +897,30 @@ internal sealed class MultiAlteringCoordinator
             }
             var facilityOrder = Efficiency.Order(orderedFacilities,
                 _optimizeFacilityOrder);
+            if (initialVacantSeedPending.Count > 0 && readRecipes is not null)
+            {
+                // Read-only order preference, not action authorization: first
+                // service already finished full batches, then currently proven
+                // craftable empty lanes, then other lanes. All selections still
+                // pass the unchanged per-recipe and onsite input checks.
+                var initialRecipes = await readRecipes(ct);
+                int SeedPriority(string facility)
+                {
+                    var local = works.Where(x => x.FacilityName == facility).ToArray();
+                    if (local.Length > 0 && local.All(x => x.IsCompleted)) return 0;
+                    if (!initialVacantSeedPending.Contains(facility)) return 3;
+                    int index = FindNextPendingIndex(facility);
+                    if (index < 0) return 3;
+                    var plan = plansByFacility[facility][index];
+                    var selected = initialRecipes.Where(x =>
+                        x.DisplayName == plan.DisplayName).ToArray();
+                    bool positive = selected.Length >= plan.RecipeOrdinal &&
+                        selected[plan.RecipeOrdinal - 1].ProducedPerWork == plan.ProducedPerWork &&
+                        selected[plan.RecipeOrdinal - 1].Alterable;
+                    return positive ? 1 : 2;
+                }
+                facilityOrder = facilityOrder.OrderBy(SeedPriority).ToArray();
+            }
             if (_optimizeFacilityOrder)
             {
                 string signature = string.Join(" -> ", facilityOrder);
@@ -1312,6 +1348,17 @@ internal sealed class MultiAlteringCoordinator
                                 "남은 품목은 이미 전량 등록되었거나 현재 슬롯 상태를 기다리는 중");
                             break;
                         }
+                    }
+                    // Only during the initial empty-lane pass, one completed
+                    // manager attempt per lane prevents a seven-slot wood/metal
+                    // batch from hiding an independent medicine recipe globally.
+                    // Existing slot-wise durable registration evidence still
+                    // determines what was actually registered.
+                    if (initialVacantSeedPending.Remove(facility))
+                    {
+                        Log?.Invoke($"[다중가공] 초기 독립 시설 분산 · {facility} 첫 처리 확인 · " +
+                            "다른 빈 시설에 우선 처리권 양도 · 이후 7칸 묶음 정책 유지");
+                        break;
                     }
                 }
 
