@@ -825,7 +825,8 @@ public sealed partial class MainForm
                 restoreCompleted: batchStore.FinishedPlans,
                 fillInitialVacancies: true,
                 deferOtherLanesWhileQueueFull: queueFullAtStart,
-                optimizeFacilityOrder: true);
+                optimizeFacilityOrder: true,
+                spreadInitialVacantLanes: true);
             facilityBottlenecks = coordinator.Bottlenecks;
             facilityEfficiency = coordinator.Efficiency;
             facilityReadQuarantine = coordinator.ReadQuarantine;
