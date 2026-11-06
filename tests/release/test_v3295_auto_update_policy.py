@@ -14,7 +14,7 @@ class V3295SingleReleaseSafety(unittest.TestCase):
         self.assertEqual(auth["version"], "V3.2.95")
         self.assertEqual(auth["purpose"], "medicine_first_recipe_card_coordinate_correction_release")
         self.assertEqual(auth["approvedBy"], "user_direct_request_in_chat")
-        self.assertEqual(auth["request"], "배포해")
+        self.assertEqual(auth["request"], "진행해")
         self.assertEqual(auth["sourcePullRequest"], 389)
         self.assertEqual(auth["sourcePullRequests"], [389])
         for key in ("offlineRegressionRequired", "mainCiRequired", "rollbackProvided",
