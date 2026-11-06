@@ -4215,7 +4215,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     // V3.2.97: managed receipt reuse is a promise about the last proven location,
     // NOT permission to navigate from an unknown screen. Observe the exact facility
-    // with two fresh frames before any EnterFacilityAsync branch can press K/Esc.
+    // with two fresh frames and uncached exact-title OCR before any EnterFacilityAsync
+    // branch can press K/Esc.
     // A failure deliberately leaves the parent journal/CLI unchanged.
     private async Task RequireManagedReceiptReuseOnsiteAsync(
         AlteringPlan plan, CancellationToken ct)
@@ -4229,7 +4230,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             using var frame = Capture(ct);
             bool structure = HasVerifiedFacilityEntryScreen(frame);
             bool exactFacility = structure &&
-                await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+                await _ui.Ocr.FindAlteringFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
             bool blocked = HasManagedKEntryBlockingModal(frame) ||
                            HasBottomConfirmationModal(frame) ||
                            await IsFacilityTravelDialogAsync(frame, ct);
@@ -4244,7 +4245,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     "수령 현장 재사용 최종 활동 확인", ct);
                 using var latest = Capture(ct);
                 bool finalFacility = HasVerifiedFacilityEntryScreen(latest) &&
-                    await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null &&
+                    await _ui.Ocr.FindAlteringFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null &&
                     !HasManagedKEntryBlockingModal(latest) &&
                     !HasBottomConfirmationModal(latest) &&
                     !await IsFacilityTravelDialogAsync(latest, ct);
@@ -4264,7 +4265,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
         using var failed = Capture(ct);
         bool structureAtFailure = HasVerifiedFacilityEntryScreen(failed);
-        bool headerAtFailure = await FindFacilityHeaderAsync(
+        bool headerAtFailure = await _ui.Ocr.FindAlteringFacilityHeaderAsync(
             failed, plan.ScreenTitle, ct) is not null;
         bool panelAtFailure = HasVisibleFacilityPanelWithoutEntryProof(failed);
         bool hubAtFailure = HasFixedProcessingHubVisual(failed);
