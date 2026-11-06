@@ -1,5 +1,16 @@
 namespace FishingAutomation;
 
+// Cooperative pause issued BEFORE this dependency scheduler acquires any facility
+// lease, registers a job, or receives work. A parent F9 manager can service
+// unrelated facilities and retry only after fresh CLI evidence.
+internal sealed class IntermediateFacilityBusyException : Exception
+{
+    internal string FacilityName { get; }
+    internal IntermediateFacilityBusyException(string facilityName)
+        : base("중간재료 시설의 기존 배치가 아직 완료되지 않았습니다: " + facilityName)
+        => FacilityName = facilityName;
+}
+
 internal interface IAlteringDependencyScheduler
 {
     Task RunAsync(
@@ -32,6 +43,7 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
     private readonly TimeSpan _boundaryIdleThreshold;
     private readonly Func<AlteringPlan, CancellationToken, Task>? _beforeReceipt;
     private readonly Func<AlteringPlan, CancellationToken, Task>? _afterReceipt;
+    private readonly bool _yieldBusyFacilityToParent;
 
     internal event Action<string>? Log;
 
@@ -47,7 +59,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         Func<DateTimeOffset>? boundaryNow = null,
         TimeSpan? boundaryIdleThreshold = null,
         Func<AlteringPlan, CancellationToken, Task>? beforeReceipt = null,
-        Func<AlteringPlan, CancellationToken, Task>? afterReceipt = null)
+        Func<AlteringPlan, CancellationToken, Task>? afterReceipt = null,
+        bool yieldBusyFacilityToParent = false)
     {
         _data = data;
         _screen = screen;
@@ -61,6 +74,7 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         _boundaryIdleThreshold = boundaryIdleThreshold ?? TimeSpan.FromMinutes(2);
         _beforeReceipt = beforeReceipt;
         _afterReceipt = afterReceipt;
+        _yieldBusyFacilityToParent = yieldBusyFacilityToParent;
         if (_boundaryIdleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(boundaryIdleThreshold));
     }
@@ -88,7 +102,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             $"[중간재료 스케줄] 요청 · {requestedPlan.DisplayName} 추가 {requiredAdditionalQuantity:N0}개 · " +
             $"{requestedPlan.FacilityName.Replace(" 시설", "")} 시설 배치에 통합");
 
-        var boundaryWorks = await WaitForFacilityBatchBoundaryAsync(requestedPlan, ct);
+        var boundaryWorks = await WaitForFacilityBatchBoundaryAsync(
+            requestedPlan, ct, allowCooperativeYield: true);
         if (boundaryWorks.Length > 0)
         {
             Log?.Invoke(
@@ -344,7 +359,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
     private async Task<AlteringWork[]> WaitForFacilityBatchBoundaryAsync(
         AlteringPlan plan,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool allowCooperativeYield = false)
     {
         // F06: this boundary runs while the parent Coordinator is awaited and
         // cannot execute its own watchdog. Reuse exactly its progress policy.
@@ -365,6 +381,16 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             if (facilityWorks.Length == 0 ||
                 facilityWorks.All(x => x.IsCompleted))
                 return facilityWorks;
+
+            // Only the first entry boundary may yield, before acquiring the
+            // intermediate owner lease or touching the processing screen.
+            // Drain-on-hold paths retain their original blocking/watchdog logic.
+            if (allowCooperativeYield && _yieldBusyFacilityToParent)
+            {
+                Log?.Invoke($"[중간재료 스케줄] {plan.FacilityName} 기존 배치 진행 중 · " +
+                    "중간재료 작업 미등록 · 상위 F9에 제어권 반환 · 독립 시설 계속");
+                throw new IntermediateFacilityBusyException(plan.FacilityName);
+            }
 
             try
             {
