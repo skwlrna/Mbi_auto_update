@@ -1285,6 +1285,53 @@ using (var cancelAfterWait = new CancellationTokenSource())
 Check(unexpectedSecondaryRegistration == 0,
     "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
 
+// V3.2.96: new F9 runs seed independent vacant facilities before one lane
+// fills seven slots and masks other recipes behind global queue_full.
+var initialSeedWood = new AlteringPlan("목재 가공 시설", "상급 목재", 9, 3, false);
+var initialSeedMedicine = new AlteringPlan("약품 가공 시설", "산뜻 버섯 진액", 10, 5, false);
+var seededWorks = new List<AlteringWork>();
+var seededLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
+var seededAttempts = new List<string>();
+using (var stopInitialSeed = new CancellationTokenSource())
+{
+    var scheduler = new MultiAlteringCoordinator(
+        seededLaneState, spreadInitialVacantLanes: true);
+    try
+    {
+        await scheduler.RunAsync(
+            new[] { initialSeedWood, initialSeedMedicine },
+            (plan, _, token) =>
+            {
+                seededAttempts.Add(plan.FacilityName);
+                if (plan.FacilityName == initialSeedMedicine.FacilityName)
+                {
+                    stopInitialSeed.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                seededLaneState.NoteRegistration(plan, FacilityLaneOwner.Main, 1);
+                seededWorks.Add(new AlteringWork(plan.DisplayName, plan.FacilityName,
+                    "InProgress", false, 1200L));
+                return Task.FromResult(false);
+            },
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(seededWorks.ToArray()),
+            (_, token) => { stopInitialSeed.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+            stopInitialSeed.Token,
+            readRecipes: _ => Task.FromResult<IReadOnlyList<AlteringRecipe>>(new[]
+            {
+                new AlteringRecipe(initialSeedWood.DisplayName, true, 3, null,
+                    Array.Empty<AlteringIngredient>(), initialSeedWood.FacilityName),
+                new AlteringRecipe(initialSeedMedicine.DisplayName, true, 5, null,
+                    Array.Empty<AlteringIngredient>(), initialSeedMedicine.FacilityName)
+            }));
+    }
+    catch (OperationCanceledException) when (stopInitialSeed.IsCancellationRequested) { }
+}
+Check(seededAttempts.SequenceEqual(new[] {
+          initialSeedWood.FacilityName, initialSeedMedicine.FacilityName }) &&
+      seededWorks.Count == 1 &&
+      seededLaneState.Snapshot(initialSeedWood.FacilityName).MainRegisteredWorks == 1,
+    "F9 initial lane spread gives medicine a turn before filling seven wood jobs");
+
 // V3.2.96: an existing full intermediate facility must not trap the sole F9
 // loop. The blocked parent yields before input, while independent medicine
 // is still given its guarded manager turn.
