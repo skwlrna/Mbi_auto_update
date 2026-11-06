@@ -1285,6 +1285,47 @@ using (var cancelAfterWait = new CancellationTokenSource())
 Check(unexpectedSecondaryRegistration == 0,
     "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
 
+// V3.2.96: an existing full intermediate facility must not trap the sole F9
+// loop. The blocked parent yields before input, while independent medicine
+// is still given its guarded manager turn.
+var independentMedicinePlan = new AlteringPlan("약품 가공 시설", "산뜻 버섯 진액", 10, 5, false);
+var waitingRicePlan = new AlteringPlan("식재료 가공 시설", "밥", 9, 3, false);
+var busyIntermediateWorks = Enumerable.Range(0, 7).Select(_ =>
+    new AlteringWork("물에 불린 쌀", "식재료 가공 시설",
+        "InProgress", false, 240L)).ToArray();
+int waitingParentTurns = 0, medicineTurns = 0;
+var yieldingParent = new AlteringPlan("목재 가공 시설", "상급 목재", 9, 3, false);
+using (var stopAfterIndependentLane = new CancellationTokenSource())
+{
+    var multiLaneScheduler = new MultiAlteringCoordinator();
+    var laneLogs = new List<string>();
+    multiLaneScheduler.Log += laneLogs.Add;
+    try
+    {
+        await multiLaneScheduler.RunAsync(
+            new[] { yieldingParent, independentMedicinePlan },
+            (item, _, token) =>
+            {
+                if (item.FacilityName == yieldingParent.FacilityName)
+                {
+                    waitingParentTurns++;
+                    throw new IntermediateFacilityBusyException("식재료 가공 시설");
+                }
+                medicineTurns++;
+                stopAfterIndependentLane.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(false);
+            },
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(busyIntermediateWorks),
+            (_, token) => { stopAfterIndependentLane.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+            stopAfterIndependentLane.Token);
+    }
+    catch (OperationCanceledException) when (stopAfterIndependentLane.IsCancellationRequested) { }
+    Check(waitingParentTurns == 1 && medicineTurns == 1 &&
+          laneLogs.Any(x => x.Contains("이 시설만 보류", StringComparison.Ordinal)),
+        "F9 intermediate batch wait yields before inputs, permitting independent medicine turn");
+}
+
 // 2026-10-18 live log: metal and cloth both 7/7 while food is not
 // filled. The old startup queue_full flag permanently skipped the food
 // facility despite positive fresh readiness; 43+ minutes of wait logs ensued.
