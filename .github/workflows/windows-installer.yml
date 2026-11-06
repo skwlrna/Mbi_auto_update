@@ -1,0 +1,156 @@
+name: Build and verify Mabi Auto Windows installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'installer/**'
+      - '.github/workflows/windows-installer.yml'
+  pull_request:
+    paths:
+      - 'installer/**'
+      - '.github/workflows/windows-installer.yml'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing verified Windows Lite release tag'
+        required: true
+        default: 'V3.2.95'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify official Windows release ZIP SHA256
+        id: meta
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag=if($env:RELEASE_TAG){$env:RELEASE_TAG}else{'V3.2.95'}
+          if($tag -notmatch '^V[0-9]+\.[0-9]+\.[0-9]+$'){throw 'Invalid release tag'}
+          $zipName='MabiAuto_'+$tag+'_Windows_Lite.zip'
+          $checksum=$zipName+'.sha256'
+          New-Item -ItemType Directory -Path build\download,build\package -Force | Out-Null
+          gh release download $tag --repo $env:REPOSITORY --pattern $zipName --pattern $checksum --dir build\download
+          if($LASTEXITCODE -ne 0){throw 'Release download failed'}
+          $expected=(Get-Content (Join-Path 'build\download' $checksum) -Raw).Trim().Split(' ')[0].ToLowerInvariant()
+          $actual=(Get-FileHash (Join-Path 'build\download' $zipName) -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($expected -notmatch '^[a-f0-9]{64}$' -or $actual -ne $expected){throw 'Released ZIP SHA256 mismatch'}
+          Expand-Archive -LiteralPath (Join-Path 'build\download' $zipName) -DestinationPath build\package
+          foreach($required in @('release\FishingAutomation.exe','release\MacroWatchdog.exe',
+             'release\interception.dll','release\config.json','release\notification.json',
+             'release\templates','release\abyss\config','release\dungeon\config',
+             'START.cmd','tools\ApplyUpdate.ps1')) {
+            if(-not(Test-Path -LiteralPath (Join-Path 'build\package' $required))){throw "Missing release component: $required"}
+          }
+          $version=$tag.Substring(1)
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host "Verified release: $zipName, SHA256 $actual"
+      - name: Stage support scripts and check PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Path build\package\support -Force | Out-Null
+          foreach($script in @('Backup-MabiAuto.ps1','Restore-MabiAuto.ps1','Check-Prerequisites.ps1')) {
+            $source=Join-Path 'installer' $script
+            Copy-Item $source (Join-Path 'build\package\support' $script) -Force
+            [ScriptBlock]::Create((Get-Content $source -Raw)) | Out-Null
+          }
+          Copy-Item source\tools\InstallInterception.ps1 build\package\support\InstallInterception.ps1 -Force
+          Copy-Item installer\BACKUP_SETTINGS.cmd build\package\BACKUP_SETTINGS.cmd -Force
+          Copy-Item installer\RESTORE_SETTINGS.cmd build\package\RESTORE_SETTINGS.cmd -Force
+          [ScriptBlock]::Create((Get-Content source\tools\InstallInterception.ps1 -Raw)) | Out-Null
+      - name: Install build-only Inno Setup compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $compiler=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
+          if(-not(Test-Path $compiler)) {
+            choco install innosetup --yes --no-progress
+            if($LASTEXITCODE -ne 0){throw 'Inno Setup build dependency failed'}
+          }
+          if(-not(Test-Path $compiler)){throw 'Inno Setup compiler not found'}
+          "ISCC=$compiler" >> $env:GITHUB_ENV
+      - name: Compile Setup.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Path build\out -Force | Out-Null
+          $root=(Resolve-Path build\package).Path
+          $out=(Resolve-Path build\out).Path
+          & $env:ISCC "/DSourceRoot=$root" "/DAppVersion=$env:VERSION" "/DOutputFolder=$out" installer\MabiAuto.iss
+          if($LASTEXITCODE -ne 0){throw 'Inno Setup compile failed'}
+          $setup=Join-Path $out ('MabiAuto_Setup_V'+$env:VERSION+'.exe')
+          if(-not(Test-Path $setup) -or (Get-Item $setup).Length -lt 1000000){throw 'Installer missing or too small'}
+          "SETUP=$setup" >> $env:GITHUB_ENV
+      - name: Silent install and backup/restore credential-redaction smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $install=Join-Path $env:RUNNER_TEMP 'MabiAuto_Installer_Test'
+          $args=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/DIR='+$install))
+          $p=Start-Process -FilePath $env:SETUP -ArgumentList $args -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Setup failed with exit code $($p.ExitCode)"}
+          foreach($required in @('release\FishingAutomation.exe','release\MacroWatchdog.exe',
+             'release\config.json','release\notification.json','release\interception.dll',
+             'support\Backup-MabiAuto.ps1','support\Restore-MabiAuto.ps1',
+             'BACKUP_SETTINGS.cmd','RESTORE_SETTINGS.cmd','tools\ApplyUpdate.ps1')) {
+            if(-not(Test-Path -LiteralPath (Join-Path $install $required))){throw "Installed file missing: $required"}
+          }
+          & (Join-Path $install 'support\Check-Prerequisites.ps1') -InstallRoot $install
+          if(-not $?){throw 'Prerequisite script failed'}
+          $notice=Join-Path $install 'release\notification.json'
+          '{"Enabled":true,"BotToken":"CI_TEST_SECRET","ChatId":"1234","RemoteControlEnabled":true}' | Set-Content -LiteralPath $notice -Encoding UTF8
+          $backup=Join-Path $env:RUNNER_TEMP 'MabiAuto_backup_smoke.zip'
+          & (Join-Path $install 'support\Backup-MabiAuto.ps1') -InstallRoot $install -OutputPath $backup
+          if(-not $? -or -not(Test-Path $backup)){throw 'Backup did not complete'}
+          '{"Enabled":false,"BotToken":"","ChatId":"","RemoteControlEnabled":false}' | Set-Content -LiteralPath $notice -Encoding UTF8
+          & (Join-Path $install 'support\Restore-MabiAuto.ps1') -InstallRoot $install -BackupPath $backup -NoPrompt
+          if(-not $?){throw 'Restore did not complete'}
+          $restored=Get-Content -LiteralPath $notice -Raw | ConvertFrom-Json
+          if($restored.Enabled -or $restored.BotToken -or $restored.ChatId -or $restored.RemoteControlEnabled) {
+            throw 'Credential redaction failed'
+          }
+      - name: Upload setup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MabiAuto-Setup-V${{ steps.meta.outputs.version }}
+          path: ${{ env.SETUP }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: package
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MabiAuto-Setup-V${{ needs.package.outputs.version }}
+      - name: Attach installer to the matching verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          if [ -z "$tag" ]; then tag="V3.2.95"; fi
+          test -s "MabiAuto_Setup_V$VERSION.exe"
+          gh release upload "$tag" "MabiAuto_Setup_V$VERSION.exe" --repo "$REPOSITORY" --clobber
+          echo "Published MabiAuto_Setup_V$VERSION.exe to $tag"
