@@ -37,6 +37,9 @@ class V3296LaneYieldRelease(unittest.TestCase):
                     "allowCooperativeYield: true", "throw new IntermediateFacilityBusyException"):
             self.assertIn(key, dependency)
         self.assertIn("waitingForDependency", coordinator)
+        self.assertIn("initialVacantSeedPending", coordinator)
+        self.assertIn("spreadInitialVacantLanes: true", parent)
+        self.assertIn("F9 initial lane spread gives medicine a turn", altering)
         self.assertIn("catch (IntermediateFacilityBusyException dependencyBusy)", coordinator)
         self.assertIn("AssertAccess(facility, _laneOwner)", coordinator)
         self.assertIn("allowShrink: false", coordinator)
