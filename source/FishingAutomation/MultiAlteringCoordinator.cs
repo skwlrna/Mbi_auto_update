@@ -687,6 +687,9 @@ internal sealed class MultiAlteringCoordinator
         // repeating an identical line every 30-second observation cycle.
         var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
+        // A parent plan awaiting a different facility's existing batch must
+        // not monopolize the sole F9 coordinator input loop.
+        var waitingForDependency = new Dictionary<string, string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         var longWaitAdvisories = new MultiAlteringLongWaitAdvisoryTracker(_now);
         var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
@@ -783,6 +786,20 @@ internal sealed class MultiAlteringCoordinator
                 }
                 var observed = works.Where(x => x.FacilityName == facility).ToArray();
                 Bottlenecks.ObserveWorks(facility, observed);
+                bool waitingForForeignBatch = waitingForDependency.TryGetValue(
+                    facility, out string? dependencyFacility);
+                if (waitingForForeignBatch &&
+                    !works.Any(x => x.FacilityName == dependencyFacility && !x.IsCompleted))
+                {
+                    // A fresh CLI read confirms the blocking facility reached
+                    // a complete/empty batch boundary. Retry through the usual
+                    // recipe, lease, journal, receipt and screen guards.
+                    waitingForDependency.Remove(facility);
+                    idleWatchdog.ConfirmManagerProgress(facility);
+                    waitingForForeignBatch = false;
+                    Log?.Invoke($"[다중가공] {facility} 중간재료 시설 {dependencyFacility} 경계 확인 · " +
+                        "이전 등록 재사용 금지 · 정상 검증 경로로 재진입");
+                }
 
                 // Distinguish material-supply holds from safe CLI-read quarantine.
                 // Stable reason identity prevents a fresh stock count from
@@ -821,7 +838,8 @@ internal sealed class MultiAlteringCoordinator
                     // An all-completed lane needs one guarded manager turn for
                     // receipt. Do not reset its original stall deadline here.
                     idleWatchdog.Observe(facility, observed,
-                        deferTimeout: observed.Length > 0 && observed.All(x => x.IsCompleted));
+                        deferTimeout: waitingForForeignBatch ||
+                        observed.Length > 0 && observed.All(x => x.IsCompleted));
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -864,6 +882,10 @@ internal sealed class MultiAlteringCoordinator
             {
                 ct.ThrowIfCancellationRequested();
                 if (PendingCount(facility) == 0)
+                    continue;
+                // Parent registration can wait for its dependency's existing
+                // work without blocking independent medicine/metal/wood lanes.
+                if (waitingForDependency.ContainsKey(facility))
                     continue;
 
                 if (held.TryGetValue(facility, out var waiting))
@@ -1148,6 +1170,32 @@ internal sealed class MultiAlteringCoordinator
                     try
                     {
                         planCompleted = await runBatch(plan, 1, ct);
+                    }
+                    catch (IntermediateFacilityBusyException dependencyBusy)
+                    {
+                        // The dependent scheduler yielded before owning or
+                        // touching its queue. This is not a failed registration.
+                        // Re-read and validate the parent lane before serving
+                        // another facility; no speculative receipt or replay.
+                        var afterYield = await readWorks(ct);
+                        _laneState?.AssertAccess(facility, _laneOwner);
+                        _laneState?.Observe(facility,
+                            afterYield.Where(x => x.FacilityName == facility).ToArray(),
+                            allowShrink: false);
+                        works = afterYield;
+                        if (afterYield.Any(x =>
+                            x.FacilityName == dependencyBusy.FacilityName && !x.IsCompleted))
+                        {
+                            waitingForDependency[facility] = dependencyBusy.FacilityName;
+                            Log?.Invoke($"[다중가공] {facility}의 중간재료 {dependencyBusy.FacilityName} " +
+                                "작업 진행 중 · 이 시설만 보류 · 다른 시설 등록/수령 계속");
+                        }
+                        else
+                        {
+                            Log?.Invoke($"[다중가공] {facility} 중간재료 완료 경계 새로 감지 · " +
+                                "다음 순회에서 정상 재검증");
+                        }
+                        break;
                     }
                     catch (DrainedMaterialSupplyHoldException hold)
                         when (recheckUnavailableRoute is not null &&
