@@ -221,6 +221,20 @@ try
     Check(!Has(fixedRecipe, "TravelToFacilityAsync"),
         "real fixed-card retry cannot authorize its own facility movement");
 
+    // 2026-11-06 00:42 KST real screenshot: medicine first result is the
+    // upper-left x=162..275/y=330..493 card, not the crafting y=613 card.
+    Type recipeLayout = production.GetType("FishingAutomation.AlteringRecipeLayout", true)!;
+    Type craftingLayout = production.GetType("FishingAutomation.CraftingHubLayout", true)!;
+    Point medicineFirstResult = (Point)recipeLayout.GetField(
+        "ProcessingSearchFirstResultPoint", all)!.GetValue(null)!;
+    Point craftingFirstResult = (Point)craftingLayout.GetProperty(
+        "ProductFirstResultPoint", all)!.GetValue(null)!;
+    Check(medicineFirstResult == new Point(218, 412) &&
+          craftingFirstResult == new Point(218, 613) &&
+          medicineFirstResult != craftingFirstResult &&
+          CallBoolean(recipeLayout, "IsSafeMedicineSearchGeometry"),
+        "2026-11-06 medicine first search result uses observed card center; crafting unchanged");
+
     var medicine = ScreenCalls("TrySelectMedicineRecipeBySearchAsync", 3);
     Check(Has(medicine, "ShouldVetoRecipeMoveButton") &&
           Has(medicine, "HasBottomConfirmationModal") &&

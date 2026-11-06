@@ -2286,13 +2286,14 @@ Check(!AlteringRecipeLayout.IsFixedFacility("약품 가공 시설") &&
       AlteringRecipeLayout.ProcessingSearchIconPoint == new System.Drawing.Point(30, 118) &&
       AlteringRecipeLayout.ProcessingSearchInputPoint == CraftingHubLayout.ProductSearchInputPoint &&
       AlteringRecipeLayout.ProcessingSearchInputPoint == new System.Drawing.Point(400, 862) &&
-      AlteringRecipeLayout.ProcessingSearchFirstResultPoint == CraftingHubLayout.ProductFirstResultPoint &&
-      AlteringRecipeLayout.ProcessingSearchFirstResultPoint == new System.Drawing.Point(218, 613) &&
+      AlteringRecipeLayout.ProcessingSearchFirstResultPoint == new System.Drawing.Point(218, 412) &&
+      CraftingHubLayout.ProductFirstResultPoint == new System.Drawing.Point(218, 613) &&
+      AlteringRecipeLayout.ProcessingSearchFirstResultPoint != CraftingHubLayout.ProductFirstResultPoint &&
       AlteringRecipeLayout.ProcessingSearchDialogArea == CraftingHubLayout.ProductSearchDialogArea &&
       AlteringRecipeLayout.ProcessingSearchResultArea == CraftingHubLayout.ProductSearchResultArea &&
       AlteringRecipeLayout.ProcessingSearchOpenChangeRatio == CraftingHubLayout.SearchDialogOpenChangeRatio &&
       AlteringRecipeLayout.ProcessingSearchResultChangeRatio == CraftingHubLayout.SearchResultChangeRatio,
-    "medicine search exactly matches food crafting coordinates and evidence thresholds");
+    "medicine search shares food dialog geometry but uses its observed first-card location");
 Check(AlteringFacilityLayout.IsSafeMoveGeometry() &&
       AlteringFacilityLayout.MoveButtonPoint == new System.Drawing.Point(85, 235) &&
       AlteringFacilityLayout.MoveButtonVisualArea == new System.Drawing.Rectangle(15, 205, 155, 65) &&
