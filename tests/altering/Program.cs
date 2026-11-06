@@ -1285,6 +1285,29 @@ using (var cancelAfterWait = new CancellationTokenSource())
 Check(unexpectedSecondaryRegistration == 0,
     "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
 
+// V3.2.97: receipt at a manager-confirmed facility must certify the CURRENT
+// screen, not treat an old lease as permission to send a fresh K/Space.
+Check(AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+        targetFacilityHeader: true, facilityPanel: true,
+        blockingModal: false, processingHub: false, foodMenu: false),
+    "F9 receipt preflight accepts target named facility and its panel only");
+Check(!AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+        targetFacilityHeader: false, facilityPanel: true,
+        blockingModal: false, processingHub: false, foodMenu: false) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+        targetFacilityHeader: true, facilityPanel: false,
+        blockingModal: false, processingHub: false, foodMenu: false) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+        targetFacilityHeader: true, facilityPanel: true,
+        blockingModal: true, processingHub: false, foodMenu: false) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+        targetFacilityHeader: true, facilityPanel: true,
+        blockingModal: false, processingHub: true, foodMenu: false) &&
+      !AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+        targetFacilityHeader: true, facilityPanel: true,
+        blockingModal: false, processingHub: false, foodMenu: true),
+    "F9 receipt preflight rejects stale lease, partial panel, modal and foreign menus");
+
 // V3.2.96: new F9 runs seed independent vacant facilities before one lane
 // fills seven slots and masks other recipes behind global queue_full.
 var initialSeedWood = new AlteringPlan("목재 가공 시설", "상급 목재", 9, 3, false);

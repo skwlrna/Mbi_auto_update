@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.97",
+  "purpose": "managed_receipt_current_onsite_preflight_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "수정하고 배포해",
+  "requestedAtKst": "2026-11-06",
+  "sourcePullRequest": 393,
+  "sourcePullRequests": [
+    393
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_managed_receipt_preflight_fix",
+  "note": "V3.2.94 incident at 06:18:19 KST: reused metal receipt entered generic facility navigation before verifying reuse and failed all K/I/Space frames. V3.2.97 preflights two new named facility+panel frames and CLI nontravel before any input; on mismatch, fail closed with no implicit K/travel/receipt or retry. Records per-glyph failure diagnostics. Screenshot's actual scene and real-game success remain unverified."
+}

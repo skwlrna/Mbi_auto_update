@@ -10,6 +10,14 @@ internal static class AlteringFacilityTravelConfirmPolicy
     internal static bool IsManagedTravelWithinLimit(TimeSpan elapsed)
         => elapsed >= TimeSpan.Zero && elapsed < ManagedTravelTimeout;
 
+    // Managed receipt Reuse is a hint from the coordinator, never proof of
+    // the current screen. No generic K/Move/Space is authorized by this rule.
+    internal static bool IsManagedReceiptOnsiteFrame(
+        bool targetFacilityHeader, bool facilityPanel,
+        bool blockingModal, bool processingHub, bool foodMenu)
+        => targetFacilityHeader && facilityPanel &&
+           !blockingModal && !processingHub && !foodMenu;
+
     internal const int RequiredOnsiteStableFrames = 7;
     internal const int MaxTravelConfirmationSpaces = 2;
     internal static readonly TimeSpan RequiredOnsiteStableDuration = TimeSpan.FromSeconds(3);

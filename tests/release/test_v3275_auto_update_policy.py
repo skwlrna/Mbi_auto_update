@@ -352,6 +352,24 @@ class V3275ReleaseSafety(unittest.TestCase):
             self.assertEqual(authorization['request'], '진행해')
             self.assertIs(authorization['realGameTested'], False)
             self.assertIs(authorization['mainCiRequired'], True)
+        elif 'CurrentVersion = "V3.2.97"' in current:
+            for tag, version in [('Version', '3.2.97'),
+                                 ('AssemblyVersion', '3.2.97.0'),
+                                 ('FileVersion', '3.2.97.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            workflow = (ROOT / '.github/workflows/release-v3297-auto-update.yml').read_text(encoding='utf-8')
+            for token in ('No successful production CI for current main SHA',
+                          'main changed since CI; abort release',
+                          'MabiAuto_V3.2.97_Windows_Lite.zip.sha256',
+                          'gh release create V3.2.97',
+                          'gh release edit V3.2.97 --draft=false'):
+                self.assertIn(token, workflow)
+            authorization = json.loads(
+                (ROOT / 'source/V3.2.97_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(authorization['sourcePullRequest'], 393)
+            self.assertEqual(authorization['request'], '수정하고 배포해')
+            self.assertIs(authorization['realGameTested'], False)
+            self.assertIs(authorization['mainCiRequired'], True)
         elif 'CurrentVersion = "V3.2.96"' in current:
             # Next authorized version must satisfy the same immutable
             # main-SHA CI release contract, not masquerade as V3.2.79.
