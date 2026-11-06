@@ -303,6 +303,17 @@ internal sealed class FacilityLaneState
                 : "메인 다중가공 사용 가능"));
     }
 
+    // A yielded F9 dependency may retain its exact intermediate lease while
+    // the parent services another facility. Never resume a different owner.
+    internal bool IsActiveIntermediateOwner(string facilityName, string ownerKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerKey);
+        var owners = GetLane(facilityName).IntermediateOwners;
+        return owners.Count > 0 &&
+               string.Equals(owners[^1], ownerKey, StringComparison.Ordinal);
+    }
+
     internal FacilityLaneSnapshot Snapshot(string facilityName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(facilityName);
