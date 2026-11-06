@@ -4213,6 +4213,75 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return false;
     }
 
+    // V3.2.97: managed receipt reuse is a promise about the last proven location,
+    // NOT permission to navigate from an unknown screen. Observe the exact facility
+    // with two fresh frames before any EnterFacilityAsync branch can press K/Esc.
+    // A failure deliberately leaves the parent journal/CLI unchanged.
+    private async Task RequireManagedReceiptReuseOnsiteAsync(
+        AlteringPlan plan, CancellationToken ct)
+    {
+        var watch = Stopwatch.StartNew();
+        int stableFrames = 0;
+        int samples = 0;
+        while (watch.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+            bool structure = HasVerifiedFacilityEntryScreen(frame);
+            bool exactFacility = structure &&
+                await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+            bool blocked = HasManagedKEntryBlockingModal(frame) ||
+                           HasBottomConfirmationModal(frame) ||
+                           await IsFacilityTravelDialogAsync(frame, ct);
+            stableFrames = exactFacility && !blocked ? stableFrames + 1 : 0;
+            samples++;
+
+            if (stableFrames >= 2)
+            {
+                // Never infer safe idle or presence from an earlier coordinator label.
+                await RequireManagedIdleAsync(plan,
+                    AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite,
+                    "수령 현장 재사용 최종 활동 확인", ct);
+                using var latest = Capture(ct);
+                bool finalFacility = HasVerifiedFacilityEntryScreen(latest) &&
+                    await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null &&
+                    !HasManagedKEntryBlockingModal(latest) &&
+                    !HasBottomConfirmationModal(latest) &&
+                    !await IsFacilityTravelDialogAsync(latest, ct);
+                bool? traveling = await TryAutoTravelingAsync(ct);
+                if (AlteringReceiptPolicy.CanReuseManagedReceiptOnsite(
+                        stableFrames, finalFacility, traveling))
+                {
+                    Log?.Invoke($"[자동 가공] F9 수령 재사용 현장 인증 · {plan.ScreenTitle} · " +
+                        $"정확 시설 2프레임+최종 새 프레임+CLI 비이동 · 관찰 {samples}회 · " +
+                        "K/Esc/이동 입력 0회");
+                    return;
+                }
+                stableFrames = 0;
+            }
+            await Task.Delay(180, ct);
+        }
+
+        using var failed = Capture(ct);
+        bool structureAtFailure = HasVerifiedFacilityEntryScreen(failed);
+        bool headerAtFailure = await FindFacilityHeaderAsync(
+            failed, plan.ScreenTitle, ct) is not null;
+        bool panelAtFailure = HasVisibleFacilityPanelWithoutEntryProof(failed);
+        bool hubAtFailure = HasFixedProcessingHubVisual(failed);
+        bool kiAtFailure = HasManagedKIShortcutGlyphs(failed);
+        bool spaceAtFailure = await HasManagedKISpaceFieldHudAsync(failed, ct);
+        bool modalAtFailure = HasManagedKEntryBlockingModal(failed) ||
+                              HasBottomConfirmationModal(failed);
+        Log?.Invoke($"[자동 가공][수령 재사용 진단] 목표={plan.ScreenTitle} · " +
+            $"전체시설={structureAtFailure} · 목표제목={headerAtFailure} · " +
+            $"시설패널={panelAtFailure} · 허브={hubAtFailure} · " +
+            $"K/I={kiAtFailure} · K/I/Space={spaceAtFailure} · " +
+            $"팝업={modalAtFailure} · 현장연속2프레임=실패 · 입력 0회");
+        Fail(failed,
+            "중간관리자 수령 재사용 지시와 실제 목표 시설 화면 2프레임 인증 불일치 · " +
+            "현장 권한 무효 · K/Esc/이동/수령 Space 입력 없이 정지");
+    }
+
     public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)
         => CollectAsync(plan, AlteringFacilityEntryDirective.Automatic, ct);
 
@@ -4233,7 +4302,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (directive != AlteringFacilityEntryDirective.Automatic)
             _confirmedOnsiteFacility = null;
 
-        await EnterFacilityAsync(plan, ct, directive);
+        // Reuse must prove the target on-screen BEFORE any generic navigation.
+        // The generic entry helper can otherwise misclassify a receipt transition
+        // as unknown world and wait 9s for K/I/Space before failing.
+        if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
+            await RequireManagedReceiptReuseOnsiteAsync(plan, ct);
+        else
+            await EnterFacilityAsync(plan, ct, directive);
 
         if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
         {
