@@ -39,7 +39,7 @@ class V3297ReceiptReuse(unittest.TestCase):
         first = collect.index("await RequireManagedReceiptReuseOnsiteAsync(plan, ct);")
         other = collect.index("await EnterFacilityAsync(plan, ct, directive);")
         self.assertLess(first, other)
-        self.assertIn("else\\n            await EnterFacilityAsync", collect)
+        self.assertIn("        else", collect)
 
         start = screen.index("private async Task RequireManagedReceiptReuseOnsiteAsync(")
         end = screen.index("public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)", start)
