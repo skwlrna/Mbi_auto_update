@@ -4032,6 +4032,52 @@ Check(cooperativeYielded && cooperativeBoundaryWorld.Queued.Count == 0 &&
       (await cooperativeBoundaryWorld.WorksAsync(default)).Count == 1,
     "F9 yielding dependency boundary never registers, receives, or leases during an unfinished foreign batch");
 
+// V3.2.96: after seven child registrations the inner coordinator must
+// yield without losing its durable session or lease; a second F9 turn resumes
+// that exact child, receives all seven once, and cannot register twice.
+var queuedChildPlan = new AlteringPlan("금속 가공 시설", "철괴", 21, 3, false);
+var queuedChildWorld = new FakeWorld(queuedChildPlan) { Freeze = true };
+var queuedChildLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var queuedChildDirectory = Path.Combine(
+    Path.GetTempPath(), "mabi-cooperative-resume-" + Guid.NewGuid().ToString("N"));
+var queuedChildScheduler = new MultiAlteringDependencyScheduler(
+    queuedChildWorld, queuedChildWorld, testIdentity, queuedChildDirectory,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: queuedChildLane,
+    yieldBusyFacilityToParent: true);
+bool queuedChildSuspended = false;
+try
+{
+    await queuedChildScheduler.RunAsync(
+        queuedChildPlan, 0, 21, frozenBoundaryResolver, default);
+}
+catch (IntermediateFacilityBusyException ex)
+{
+    queuedChildSuspended = ex.FacilityName == queuedChildPlan.FacilityName;
+}
+var queuedChildState = queuedChildLane.Snapshot(queuedChildPlan.FacilityName);
+Check(queuedChildSuspended && queuedChildWorld.QueueCalls == 7 &&
+      queuedChildWorld.CollectionCount == 0 &&
+      queuedChildState.IntermediateLease &&
+      queuedChildState.IntermediateDepth == 1 &&
+      queuedChildState.IntermediateRegisteredWorks == 7 &&
+      (await queuedChildWorld.WorksAsync(default)).Count == 7,
+    "F9 queued 7-slot child yields before receiving, retains exact intermediate owner and registration ledger");
+
+queuedChildWorld.CompleteAllQueued();
+await queuedChildScheduler.RunAsync(
+    queuedChildPlan, 0, 21, frozenBoundaryResolver, default);
+var queuedChildCompleted = queuedChildLane.Snapshot(queuedChildPlan.FacilityName);
+Check(queuedChildWorld.QueueCalls == 7 &&
+      queuedChildWorld.CollectionCount == 1 &&
+      queuedChildWorld.Owned == 21 &&
+      (await queuedChildWorld.WorksAsync(default)).Count == 0 &&
+      !queuedChildCompleted.IntermediateLease &&
+      queuedChildCompleted.IntermediateRegisteredWorks == 7,
+    "F9 completed child batch resumes with existing journal, collects all once, and never duplicates registration");
+if (Directory.Exists(queuedChildDirectory))
+    Directory.Delete(queuedChildDirectory, recursive: true);
+
 var nestedProductionWorld = new RecursiveProductionWorld
 {
     NestedSameFacilityChain = true
@@ -5378,6 +5424,11 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         return Task.FromResult(RecoveryObservation);
     }
     internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
+    internal void CompleteAllQueued()
+    {
+        for (int i = 0; i < _works.Count; i++)
+            _works[i] = _works[i] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+    }
     internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
     internal void AddForeignFacilityWork(string displayName, bool isCompleted)
         => _works.Add(new(
