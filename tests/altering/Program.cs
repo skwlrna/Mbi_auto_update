@@ -2812,6 +2812,50 @@ Check(loadedSession is not null && loadedSession.MatchesPlan(plan) &&
     "altering session persists plan, identity, baseline, internal consumption credit, progress, and recursive stage");
 sessionStore.Delete();
 Check(!File.Exists(sessionPath), "completed session cleanup removes persisted resume state");
+
+// V3.2.97: 2026-11-06 22:29:37. The intermediate child owns its queued
+// jobs across a cooperative F9 yield. A fresh inventory read may change the
+// computed remaining amount, but cannot replace the saved child target.
+// Example: requested +30 from baseline 0, prior facility receipts +6;
+// checkpoint targets +24 (8 works), then independent stock increases again.
+var retainedChildRequest = new AlteringPlan(
+    "식재료 가공 시설", "물에 불린 쌀", 30, 3, false);
+var retainedChildPlan = retainedChildRequest with { TargetQuantity = 24 };
+var retainedChildSession = AlteringSessionState.Create(
+    retainedChildPlan, testIdentity, baseline: 6, initialExistingWorks: 0) with
+{
+    QueuedWorks = 7,
+    ReceiptTrackingEnabled = true
+};
+var restoredChild = MultiAlteringDependencyScheduler.RestoreOwnedResumePlan(
+    retainedChildRequest, 0, 30, retainedChildSession, testIdentity);
+Check(restoredChild.TargetQuantity == 24 && restoredChild.RequiredWorks == 8 &&
+      retainedChildSession.QueuedWorks == 7 && retainedChildSession.TargetQuantity == 24,
+    "V3.2.97 resumed owned child keeps its immutable target and seven queued jobs even when live stock changes");
+bool retainedResumeRejects(AlteringSessionState? checkpoint,
+    AlteringPlan request, long baseline, int required, CliIdentityContext currentIdentity)
+{
+    try
+    {
+        _ = MultiAlteringDependencyScheduler.RestoreOwnedResumePlan(
+            request, baseline, required, checkpoint, currentIdentity);
+        return false;
+    }
+    catch (InvalidOperationException) { return true; }
+}
+Check(retainedResumeRejects(null, retainedChildRequest, 0, 30, testIdentity) &&
+      retainedResumeRejects(retainedChildSession with { TargetQuantity = 20 },
+          retainedChildRequest, 0, 30, testIdentity) &&
+      retainedResumeRejects(retainedChildSession with { BaselineQuantity = 7 },
+          retainedChildRequest, 0, 30, testIdentity) &&
+      retainedResumeRejects(retainedChildSession with { RecipeOrdinal = 2 },
+          retainedChildRequest, 0, 30, testIdentity) &&
+      retainedResumeRejects(retainedChildSession,
+          retainedChildRequest with { ProducedPerWork = 5 }, 0, 30, testIdentity) &&
+      retainedResumeRejects(retainedChildSession, retainedChildRequest, 0, 30,
+          new CliIdentityContext("different", "테스트", "account-1", "서버A")),
+    "V3.2.97 missing/altered journal, wrong request baseline, recipe and identity all fail closed");
+
 string multiKeyDir = Path.Combine(Path.GetTempPath(), "mabi-multi-key-test");
 string stablePathA = AlteringSessionStore.MultiPlanPath(multiKeyDir, plan);
 string stablePathARepeat = AlteringSessionStore.MultiPlanPath(multiKeyDir, plan);
