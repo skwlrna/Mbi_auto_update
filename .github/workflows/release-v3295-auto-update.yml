@@ -48,7 +48,7 @@ jobs:
              $a.approvedBy -ne 'user_direct_request_in_chat' -or
              $a.realGameTested -ne $false -or $a.rollbackProvided -ne $true -or
              $a.mainCiRequired -ne $true -or
-             $a.request -ne '배포해'){
+             $a.request -ne '진행해'){
             throw 'V3.2.95 release authorization mismatch'
           }
           foreach($needed in @(
