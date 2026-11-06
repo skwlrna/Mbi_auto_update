@@ -1437,9 +1437,25 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             break;
                         }
                         if (watch.Elapsed >= limit)
+                        {
+                            // Diagnostics only, never a weaker K permission.
+                            // One missing glyph or Space OCR is now separately
+                            // observable in the incident log.
+                            var (kGlyph, iGlyph) = DetectManagedKIShortcutGlyphs(freshField);
+                            var spaceRegion = new Rectangle(396, 882, 66, 43);
+                            var spaceHit = await _ui.FindCompactAsync(
+                                freshField, spaceRegion, "Space", ct);
+                            bool spaceGlyph = spaceHit is not null &&
+                                              spaceRegion.Contains(spaceHit.Value.Bounds);
+                            Log?.Invoke($"[자동 가공][K 화면 인증 실패 진단] " +
+                                $"K={kGlyph} · I={iGlyph} · Space={spaceGlyph} · " +
+                                $"기존 필드 인증={previousField}→{currentField} · " +
+                                $"팝업={actualModal} · 메뉴={unexpectedMenu} · " +
+                                $"결과창={receiptResult} · 추가 입력 0회");
                             Fail(freshField,
                                 "관리 가공 K/I/Space 연속 2프레임 인증 실패 · " +
                                 "9초 재관찰 후 입력 없이 정지");
+                        }
                         previousField = currentField;
                     }
                     if (menuAppeared)
@@ -2683,15 +2699,21 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // This is visual evidence only, not an input authorization. The two
     // real key-pill glyphs must both match their distinct fixed positions.
     // Home/End/ESC and the legacy 3-of-4 outside HUD templates are excluded.
-    internal static bool HasManagedKIShortcutGlyphs(Bitmap frame)
+    private static (bool K, bool I) DetectManagedKIShortcutGlyphs(Bitmap frame)
     {
         if (frame.Width != 800 || frame.Height != 1000)
-            return false;
+            return (false, false);
         var matcher = new TemplateMatcher(AppContext.BaseDirectory);
         bool Key(Rectangle roi, string name) => matcher.FindBrightGlyphMultiScale(
             frame, roi, "abyss/templates/" + name, 0.90, 0.95, 1.05, 0.05).Found;
-        return Key(new Rectangle(50, 905, 40, 40), "managed_k_key.png") &&
-               Key(new Rectangle(755, 905, 45, 40), "managed_i_key.png");
+        return (Key(new Rectangle(50, 905, 40, 40), "managed_k_key.png"),
+                Key(new Rectangle(755, 905, 45, 40), "managed_i_key.png"));
+    }
+
+    internal static bool HasManagedKIShortcutGlyphs(Bitmap frame)
+    {
+        var (k, i) = DetectManagedKIShortcutGlyphs(frame);
+        return k && i;
     }
 
     private async Task<bool> HasManagedKISpaceFieldHudAsync(Bitmap frame, CancellationToken ct)
@@ -4222,6 +4244,67 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         CancellationToken ct)
         => CollectAsyncAtBoundary(plan, directive, _ => Task.CompletedTask, ct);
 
+    // V3.2.97: A coordinator's onsite lease is not proof of the CURRENT UI.
+    // A managed receipt must never fall into the generic unknown-scene K path
+    // before validating the claimed onsite facility. This preflight sends NO
+    // keys, clicks, receipt Space, travel, or queue commands.
+    private async Task VerifyManagedReceiptReuseOnsiteAsync(
+        AlteringPlan plan, CancellationToken ct)
+    {
+        const int maxObservations = 12;
+        int stable = 0;
+        string lastEvidence = "관찰 없음";
+        for (int i = 0; i < maxObservations; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using (var frame = Capture(ct))
+            {
+                bool targetHeader =
+                    await FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct) is not null;
+                bool facilityPanel = HasFacilityPanelStructureVisual(frame);
+                bool blockingModal = HasManagedKEntryBlockingModal(frame) ||
+                                     HasBottomConfirmationModal(frame) ||
+                                     HasManagedSceneReceiptResultVisual(frame);
+                bool hub = HasFixedProcessingHubVisual(frame);
+                bool food = HasManagedFoodCraftingNavigationVisual(frame);
+                // The named facility AND independent panel geometry must both
+                // persist; a stale lease, one OCR hit or generic gray move pill
+                // is insufficient for a receipt. World-title false positives
+                // are separately vetoed by FindFacilityHeaderAsync.
+                bool onsite = targetHeader && facilityPanel && !blockingModal &&
+                              !hub && !food;
+                stable = onsite ? stable + 1 : 0;
+                lastEvidence = $"시설명={targetHeader} · 시설구조={facilityPanel} · " +
+                    $"팝업={blockingModal} · 허브={hub} · 음식메뉴={food} · 연속={stable}";
+                if (stable >= 2)
+                {
+                    // Read-only CLI activity must independently confirm that
+                    // the character is not travelling before receipt proceeds.
+                    bool? autoTravel = await TryAutoTravelingAsync(ct);
+                    if (autoTravel == false)
+                    {
+                        Log?.Invoke($"[자동 가공][수령 현장 인증] {plan.ScreenTitle} · " +
+                            "신규 2프레임 시설명/구조 + CLI 비이동 확인 · " +
+                            "K/Esc/이동/Space 입력 0회");
+                        return;
+                    }
+                    lastEvidence += $" · CLI AutoTraveling={autoTravel?.ToString() ?? "조회불가"}";
+                    break;
+                }
+            }
+            if (i + 1 < maxObservations)
+                await Task.Delay(180, ct);
+        }
+
+        // A mismatch is returned to the coordinator. Never secretly convert
+        // Reuse into FreshMoveRequired or guess K after a receipt boundary.
+        string reason = $"중간관리자 수령 현장 재사용 불일치 · {plan.ScreenTitle} · " +
+            $"{lastEvidence} · K/이동/수령 입력 없이 중단";
+        Log?.Invoke("[자동 가공][수령 현장 인증 실패] " + reason);
+        throw new AlteringCoordinatorFacilityMismatchException(
+            plan.FacilityName, reason, new InvalidOperationException(reason));
+    }
+
     public async Task<bool> CollectAsyncAtBoundary(
         AlteringPlan plan,
         AlteringFacilityEntryDirective directive,
@@ -4233,7 +4316,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (directive != AlteringFacilityEntryDirective.Automatic)
             _confirmedOnsiteFacility = null;
 
-        await EnterFacilityAsync(plan, ct, directive);
+        // Reuse is already a coordinator-approved physical location claim.
+        // Confirm its CURRENT visual/CLI evidence before any generic entry
+        // routine (which otherwise waits nine seconds for K/I/Space and fails
+        // on a facility/reward-transition screen). Fresh/Automatic keep the
+        // existing explicit navigation path unchanged.
+        if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
+            await VerifyManagedReceiptReuseOnsiteAsync(plan, ct);
+        else
+            await EnterFacilityAsync(plan, ct, directive);
 
         if (directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite)
         {
