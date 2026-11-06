@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "version": "V3.2.97",
+  "purpose": "f9_verified_managed_receipt_reuse_navigation_fix",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "수정하고 배포해",
+  "continuation": "계속 진행해",
+  "requestedAtKst": "2026-11-06",
+  "sourcePullRequest": 394,
+  "sourcePullRequests": [
+    394
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_receipt_reuse_guard",
+  "note": "The most recent uploaded V3.2.94 incident stopped before receive Space at 06:18:19 after ReuseCoordinatorConfirmedOnsite entered generic EnterFacilityAsync, leading to unknown-screen K/I/Space 9-second failure. Source changes require exact target facility for two fresh frames, safe activity, new final frame before skipping generic navigation. No K/Esc/travel/receipt Space on ambiguous screens. The private screenshot was not directly decoded; real-game success is unverified. Package must pass exact SHA CI and rollback requirements."
+}
