@@ -691,6 +691,9 @@ internal sealed class MultiAlteringCoordinator
         // not monopolize the sole F9 coordinator input loop.
         var waitingForDependency = new Dictionary<string, string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
+        // Independently monitor a blocked child facility even when that
+        // facility is NOT in the user's selected F9 plans.
+        var dependencyWaitWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         var longWaitAdvisories = new MultiAlteringLongWaitAdvisoryTracker(_now);
         var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
         string? lastOptimizedOrder = null;
@@ -788,6 +791,21 @@ internal sealed class MultiAlteringCoordinator
                 Bottlenecks.ObserveWorks(facility, observed);
                 bool waitingForForeignBatch = waitingForDependency.TryGetValue(
                     facility, out string? dependencyFacility);
+                if (waitingForForeignBatch)
+                {
+                    // Cooperative yielding cannot become an unbounded blind
+                    // wait. Reuse the exact CLI progress/stall policy for the
+                    // prerequisite lane, including a non-selected facility.
+                    var dependencyWorks = works.Where(x =>
+                        x.FacilityName == dependencyFacility).ToArray();
+                    try { dependencyWaitWatchdog.Observe(dependencyFacility!, dependencyWorks); }
+                    catch (InvalidOperationException)
+                    {
+                        _laneState?.InvalidateOnsite(
+                            "중간재료 시설 정체 · " + dependencyFacility + " · 입력 없이 정지");
+                        throw;
+                    }
+                }
                 if (waitingForForeignBatch &&
                     !works.Any(x => x.FacilityName == dependencyFacility && !x.IsCompleted))
                 {
