@@ -965,7 +965,9 @@ public sealed partial class MainForm
                     RefreshProductionDashboard();
                     // Respect existing notifier configuration. No screenshot or error upload.
                     _ = _notifier.SendAlertAsync("다중가공 장기 보류", message, false);
-                })), token);
+                }),
+                resumeDeferredIntermediate: (parentPlan, facility, coordinatorCt) =>
+                    dependencyScheduler.ResumeSuspendedAsync(facility, coordinatorCt)), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
