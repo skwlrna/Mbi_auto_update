@@ -647,7 +647,8 @@ internal sealed class MultiAlteringCoordinator
         Action<AlteringPlan>? clearMaterialHold = null,
         Func<AlteringPlan, CancellationToken, Task>? verifySafePreInputRead = null,
         Action<MultiAlteringReadQuarantineSnapshot>? reportReadQuarantine = null,
-        Action<string>? reportLongWaitAdvisory = null)
+        Action<string>? reportLongWaitAdvisory = null,
+        Func<AlteringPlan, string, CancellationToken, Task>? resumeDeferredIntermediate = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -791,6 +792,7 @@ internal sealed class MultiAlteringCoordinator
             ct.ThrowIfCancellationRequested();
             var works = await readWorks(ct);
             bool acted = false;
+            bool justResumedDependency = false;
 
             // Persist per-facility evidence across all 1-slot RunBatch returns.
             // Never reset just because the scheduler went around another loop.
@@ -824,14 +826,45 @@ internal sealed class MultiAlteringCoordinator
                 if (waitingForForeignBatch &&
                     !works.Any(x => x.FacilityName == dependencyFacility && !x.IsCompleted))
                 {
-                    // A fresh CLI read confirms the blocking facility reached
-                    // a complete/empty batch boundary. Retry through the usual
-                    // recipe, lease, journal, receipt and screen guards.
-                    waitingForDependency.Remove(facility);
-                    idleWatchdog.ConfirmManagerProgress(facility);
-                    waitingForForeignBatch = false;
-                    Log?.Invoke($"[다중가공] {facility} 중간재료 시설 {dependencyFacility} 경계 확인 · " +
-                        "이전 등록 재사용 금지 · 정상 검증 경로로 재진입");
+                    // The dependency may still OWN this facility, even when
+                    // every ticket is completed. Never let the main recipe
+                    // collect its child's receipts or bypass ownership. Resume
+                    // the exact suspended child first using its saved ledger.
+                    if (resumeDeferredIntermediate is null)
+                        throw new InvalidOperationException(
+                            $"중간재료 {dependencyFacility} 이어받기 경로 없음 · 수령/등록 없이 정지");
+                    int parentIndex = FindNextPendingIndex(facility);
+                    if (parentIndex < 0)
+                        throw new InvalidOperationException(
+                            $"중간재료 {dependencyFacility} 부모 품목이 없어 이어받기 차단");
+                    Log?.Invoke($"[다중가공] {facility} 중간재료 {dependencyFacility} 경계 확인 · " +
+                        "메인 시설 입력 전에 자식 작업장부/수령부터 재검증");
+                    try
+                    {
+                        await resumeDeferredIntermediate(
+                            plansByFacility[facility][parentIndex],
+                            dependencyFacility!, ct);
+                        if (_laneState?.Snapshot(dependencyFacility!).IntermediateLease == true)
+                            throw new InvalidOperationException(
+                                $"중간재료 {dependencyFacility} 이어받기 완료 주장 후에도 소유권이 남아 있습니다");
+                        waitingForDependency.Remove(facility);
+                        idleWatchdog.ConfirmManagerProgress(facility);
+                        Log?.Invoke($"[다중가공] {facility} 중간재료 정상 수령 및 소유권 반환 · " +
+                            "메인 재료/제법/화면 전체 재검증 후 등록");
+                    }
+                    catch (IntermediateFacilityBusyException stillBusy)
+                    {
+                        // A confirmed child re-fill may queue another 7-slot
+                        // batch. Keep the parent deferred; do not mistake that
+                        // fresh child registration for the parent input.
+                        waitingForDependency[facility] = stillBusy.FacilityName;
+                        Log?.Invoke($"[다중가공] {facility} 자식 배치 추가 등록/진행 · " +
+                            "소유권 유지 · 다른 독립 시설 계속");
+                    }
+                    // Receipt or child registration changed the CLI queue:
+                    // discard this entire old snapshot and restart the manager.
+                    justResumedDependency = true;
+                    break;
                 }
 
                 // Distinguish material-supply holds from safe CLI-read quarantine.
@@ -886,6 +919,9 @@ internal sealed class MultiAlteringCoordinator
                     throw;
                 }
             }
+
+            if (justResumedDependency)
+                continue;
 
             // Performance-based ordering changes ONLY which independent lane
             // receives a turn first. Same-facility recipe order is fixed, and
