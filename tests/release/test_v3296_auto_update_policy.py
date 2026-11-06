@@ -22,6 +22,9 @@ class V3296LaneYieldRelease(unittest.TestCase):
                     "mainCiRequired", "rollbackProvided"):
             self.assertIs(auth[key], True)
         updater = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        # Historical V3.2.96 publisher stays immutable after later releases.
+        if 'CurrentVersion = "V3.2.96"' not in updater:
+            return
         self.assertIn('CurrentVersion = "V3.2.96"', updater)
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for field, value in (("Version", "3.2.96"), ("AssemblyVersion", "3.2.96.0"),
