@@ -240,7 +240,8 @@ public sealed partial class MainForm
                 internalConsumptionObserver: consumptionLedger,
                 beforeReceipt: (receiptPlan, receiptToken) =>
                     batchStore.BeginReceiptWithEvidenceAsync(receiptPlan, rawAlteringData, receiptToken),
-                afterReceipt: ConfirmBatchReceiptAsync);
+                afterReceipt: ConfirmBatchReceiptAsync,
+                yieldBusyFacilityToParent: true);
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData,
                 gatheringData,
@@ -892,6 +893,15 @@ public sealed partial class MainForm
                         alteringWorkFence.ConfirmBatchReturn(
                             workTicket, registered, finished);
                         return finished;
+                    }
+                    catch (IntermediateFacilityBusyException)
+                        when (automation.ConfirmedRegistrationsThisRun == registrationsBefore)
+                    {
+                        // The dependent lane has not been leased, collected or
+                        // registered. The parent ticket is NOT an uncertain input.
+                        // Preserve durable session state and allow another F9 lane.
+                        alteringWorkFence.ConfirmBatchReturn(workTicket, 0, false);
+                        throw;
                     }
                     catch (DrainedMaterialSupplyHoldException hold)
                         when (hold.FacilityName == plan.FacilityName &&
