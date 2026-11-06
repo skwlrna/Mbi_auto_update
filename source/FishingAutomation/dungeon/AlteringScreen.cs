@@ -4271,8 +4271,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 // persist; a stale lease, one OCR hit or generic gray move pill
                 // is insufficient for a receipt. World-title false positives
                 // are separately vetoed by FindFacilityHeaderAsync.
-                bool onsite = targetHeader && facilityPanel && !blockingModal &&
-                              !hub && !food;
+                bool onsite = AlteringFacilityTravelConfirmPolicy.IsManagedReceiptOnsiteFrame(
+                    targetHeader, facilityPanel, blockingModal, hub, food);
                 stable = onsite ? stable + 1 : 0;
                 lastEvidence = $"시설명={targetHeader} · 시설구조={facilityPanel} · " +
                     $"팝업={blockingModal} · 허브={hub} · 음식메뉴={food} · 연속={stable}";
