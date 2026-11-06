@@ -1271,7 +1271,17 @@ internal sealed class MultiAlteringCoordinator
                         // Re-read and validate the parent lane before serving
                         // another facility; no speculative receipt or replay.
                         var afterYield = await readWorks(ct);
-                        _laneState?.AssertAccess(facility, _laneOwner);
+                        // Rice and soaked-rice share the SAME food facility.
+                        // The child may now own its seven-slot queue. We may
+                        // OBSERVE that queue, but must never assert MAIN input
+                        // access until the suspended child has been received
+                        // and released by the exact dependency callback.
+                        bool childOwnsParentLane =
+                            string.Equals(facility, dependencyBusy.FacilityName,
+                                StringComparison.Ordinal) &&
+                            _laneState?.Snapshot(facility).IntermediateLease == true;
+                        if (!childOwnsParentLane)
+                            _laneState?.AssertAccess(facility, _laneOwner);
                         _laneState?.Observe(facility,
                             afterYield.Where(x => x.FacilityName == facility).ToArray(),
                             allowShrink: false);
