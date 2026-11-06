@@ -575,17 +575,21 @@ jobs:
             if($fixedLayout -notmatch $point){throw "user-confirmed processing fixed coordinate missing: $point"}
           }
           if($fixedLayout -notmatch '"최상급 목재", 2\).*new\(340, 756\)'){throw 'duplicate wood recipe ordinal coordinate missing'}
-          # Food crafting owns search geometry; medicine must share ALL seven values.
+          # Medicine shares search dialog and evidence but has an independently observed first card.
           foreach($part in @(
             'ProcessingSearchIconPoint = CraftingHubLayout\.ProductSearchIconPoint',
             'ProcessingSearchDialogArea = CraftingHubLayout\.ProductSearchDialogArea',
             'ProcessingSearchInputPoint = CraftingHubLayout\.ProductSearchInputPoint',
             'ProcessingSearchResultArea = CraftingHubLayout\.ProductSearchResultArea',
-            'ProcessingSearchFirstResultPoint = CraftingHubLayout\.ProductFirstResultPoint',
+            'ProcessingSearchFirstResultPoint = new\(218, 412\)',
             'ProcessingSearchOpenChangeRatio = CraftingHubLayout\.SearchDialogOpenChangeRatio',
             'ProcessingSearchResultChangeRatio = CraftingHubLayout\.SearchResultChangeRatio'
           )){
             if($fixedLayout -notmatch $part){throw "medicine search diverged from food crafting: $part"}
+          }
+          $craftLayout = Get-Content source/FishingAutomation/CraftingHubLayout.cs -Raw
+          if($craftLayout -notmatch 'ProductFirstResultPoint\s*=> new\(218, 613\)') {
+            throw 'food crafting first result (218,613) must remain unchanged'
           }
           if($selectRecipe -notmatch 'TrySelectFixedRecipeAsync' -or
              $selectRecipe -notmatch 'TrySelectMedicineRecipeBySearchAsync'){throw 'fixed processing / medicine search routes missing'}
