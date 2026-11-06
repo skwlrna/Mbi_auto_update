@@ -1841,6 +1841,17 @@ Check(!AlteringTravelActivityPolicy.IsManagedSafeIdle(
                             LastRunningInteractionType = "Gathering" }),
     "F9 old auto-travel: gathering or fishing never authorizes facility inputs");
 
+// V3.2.97 metal receipt incident: onsite reuse may not enter the generic
+// K/I/Space navigation path without fresh 2-frame target-facility proof.
+Check(AlteringReceiptPolicy.CanReuseManagedReceiptOnsite(2, true, false),
+    "V3.2.97 managed receipt can reuse the exact two-frame on-site facility");
+Check(!AlteringReceiptPolicy.CanReuseManagedReceiptOnsite(1, true, false) &&
+      !AlteringReceiptPolicy.CanReuseManagedReceiptOnsite(2, false, false) &&
+      !AlteringReceiptPolicy.CanReuseManagedReceiptOnsite(2, true, true) &&
+      !AlteringReceiptPolicy.CanReuseManagedReceiptOnsite(2, true, null),
+    "V3.2.97 managed receipt blocks stale, ambiguous, traveling or unknown onsite proof");
+// The source-level release policy also asserts that reuse preflight precedes
+// EnterFacilityAsync in CollectAsyncAtBoundary.
 // Existing F9 travel and receipt safety regressions follow unchanged.
 // V3.1.76: F9 long-distance facility travel expires by elapsed time,
  // not 120 UI/CLI poll iterations. No extension on loading or confirmation.
