@@ -1373,6 +1373,78 @@ using (var stopAfterIndependentLane = new CancellationTokenSource())
         "F9 intermediate batch wait yields before inputs, permitting independent medicine turn");
 }
 
+// V3.2.96: rice and its child share the SAME food facility. Even when
+// all seven child tickets have finished, main may not enter until the exact
+// dependency was collected and its retained lease released.
+var sameLaneRice = new AlteringPlan("식재료 가공 시설", "밥", 9, 3, false);
+var sameLaneRiceChild = new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 21, 3, false);
+var sameLaneOwner = "물에 불린 쌀#1";
+var sameLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
+var sameLaneJobs = new List<AlteringWork>();
+int sameLaneChildReceipts = 0, sameLaneMainTurns = 0;
+bool sameLaneBeforeResumptionBlocked = true, sameLaneChildCompleted = false;
+using (var finishSameLane = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(sameLaneState).RunAsync(
+            new[] { sameLaneRice },
+            (p, _, token) =>
+            {
+                if (sameLaneJobs.Count == 0 && sameLaneChildReceipts == 0)
+                {
+                    sameLaneState.AcquireIntermediate(
+                        sameLaneRiceChild.FacilityName, Array.Empty<AlteringWork>(), sameLaneOwner);
+                    sameLaneState.NoteRegistration(
+                        sameLaneRiceChild, FacilityLaneOwner.Intermediate, 7);
+                    sameLaneJobs.AddRange(Enumerable.Range(0, 7).Select(_ =>
+                        new AlteringWork("물에 불린 쌀", sameLaneRice.FacilityName,
+                            "InProgress", false, 200)));
+                    throw new IntermediateFacilityBusyException(sameLaneRice.FacilityName);
+                }
+                if (sameLaneChildReceipts != 1)
+                    throw new InvalidOperationException("main began before child receipt");
+                sameLaneBeforeResumptionBlocked = false;
+                sameLaneMainTurns++;
+                finishSameLane.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(false);
+            },
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(sameLaneJobs.ToArray()),
+            (_, token) =>
+            {
+                if (sameLaneJobs.Count == 7 && !sameLaneChildCompleted)
+                {
+                    sameLaneChildCompleted = true;
+                    for (int i = 0; i < sameLaneJobs.Count; i++)
+                        sameLaneJobs[i] = sameLaneJobs[i] with {
+                            State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+                }
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            finishSameLane.Token,
+            resumeDeferredIntermediate: (parent, childFacility, token) =>
+            {
+                if (parent != sameLaneRice || childFacility != sameLaneRice.FacilityName ||
+                    !sameLaneJobs.All(x => x.IsCompleted))
+                    throw new InvalidOperationException("invalid dependency callback");
+                sameLaneState.Observe(childFacility, sameLaneJobs, allowShrink: false);
+                sameLaneJobs.Clear(); // Simulate one verified all-at-once receipt.
+                sameLaneState.Observe(childFacility, sameLaneJobs, allowShrink: true);
+                sameLaneState.ReleaseIntermediate(childFacility, sameLaneJobs, sameLaneOwner);
+                sameLaneChildReceipts++;
+                return Task.CompletedTask;
+            });
+    }
+    catch (OperationCanceledException) when (finishSameLane.IsCancellationRequested) { }
+}
+Check(sameLaneMainTurns == 1 &&
+      sameLaneChildReceipts == 1 && !sameLaneBeforeResumptionBlocked &&
+      !sameLaneState.Snapshot(sameLaneRice.FacilityName).IntermediateLease &&
+      sameLaneState.Snapshot(sameLaneRice.FacilityName).IntermediateRegisteredWorks == 7,
+    "F9 rice parent resumes only after same-lane child seven-ticket guarded receipt and ownership return");
+
 // 2026-10-18 live log: metal and cloth both 7/7 while food is not
 // filled. The old startup queue_full flag permanently skipped the food
 // facility despite positive fresh readiness; 43+ minutes of wait logs ensued.
