@@ -595,6 +595,7 @@ internal sealed class MultiAlteringCoordinator
     private readonly bool _fillInitialVacancies;
     private readonly bool _deferOtherLanesWhileQueueFull;
     private readonly bool _optimizeFacilityOrder;
+    private readonly bool _yieldIntermediateActiveBatch;
     private readonly bool _spreadInitialVacantLanes;
 
     internal event Action<string>? Log;
@@ -611,7 +612,8 @@ internal sealed class MultiAlteringCoordinator
         bool fillInitialVacancies = false,
         bool deferOtherLanesWhileQueueFull = false,
         bool optimizeFacilityOrder = false,
-        bool spreadInitialVacantLanes = false)
+        bool spreadInitialVacantLanes = false,
+        bool yieldIntermediateActiveBatch = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
@@ -624,6 +626,7 @@ internal sealed class MultiAlteringCoordinator
         _deferOtherLanesWhileQueueFull = deferOtherLanesWhileQueueFull;
         _optimizeFacilityOrder = optimizeFacilityOrder;
         _spreadInitialVacantLanes = spreadInitialVacantLanes;
+        _yieldIntermediateActiveBatch = yieldIntermediateActiveBatch;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -1414,6 +1417,24 @@ internal sealed class MultiAlteringCoordinator
             Log?.Invoke(
                 $"[다중가공] 병렬 대기 · 진행/대기 {runningSlots}건 · 완료 누적 {completedSlots}건 · " +
                 $"다음 확인 약 {Math.Clamp(waitSeconds, 1, 30)}초 · 배치 전체 완료 전 이동 없음");
+
+            // Cooperative child scheduler may yield AFTER real registrations,
+            // but only at this read-only idle boundary. The lease and durable
+            // child session remain intact for the next verified parent pass.
+            // Nested (depth > 1) recipes retain the original blocking path:
+            // yielding them could orphan a stacked parent/child lease.
+            if (_yieldIntermediateActiveBatch &&
+                _laneOwner == FacilityLaneOwner.Intermediate &&
+                orderedFacilities.Length == 1 &&
+                _laneState is not null &&
+                _laneState.Snapshot(orderedFacilities[0]) is var lease &&
+                lease.IntermediateLease && lease.IntermediateDepth == 1 &&
+                active.Length > 0 && active.Any(x => !x.IsCompleted))
+            {
+                Log?.Invoke($"[중간재료 스케줄] {orderedFacilities[0]} 등록된 배치 진행 중 · " +
+                    "소유권/작업장부 유지 · 상위 F9에 입력권 반환");
+                throw new IntermediateFacilityBusyException(orderedFacilities[0]);
+            }
 
             // No crafting, receipt, or movement is in flight here. This callback
             // owns all input until the abyss has EXITED to the verified outside HUD.
