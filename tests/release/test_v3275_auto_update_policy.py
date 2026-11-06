@@ -349,7 +349,7 @@ class V3275ReleaseSafety(unittest.TestCase):
             authorization = json.loads(
                 (ROOT / 'source/V3.2.95_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
             self.assertEqual(authorization['sourcePullRequest'], 389)
-            self.assertEqual(authorization['request'], '배포해')
+            self.assertEqual(authorization['request'], '진행해')
             self.assertIs(authorization['realGameTested'], False)
             self.assertIs(authorization['mainCiRequired'], True)
         else:
