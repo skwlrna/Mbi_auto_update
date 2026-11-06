@@ -2712,6 +2712,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     internal static bool HasManagedKIShortcutGlyphs(Bitmap frame)
     {
+        // Preserve the independent 800x1000 safety gate at this public
+        // glyph-check boundary as well as in the diagnostic helper.
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
         var (k, i) = DetectManagedKIShortcutGlyphs(frame);
         return k && i;
     }
