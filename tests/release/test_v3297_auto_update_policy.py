@@ -45,7 +45,7 @@ class V3297ReceiptReuse(unittest.TestCase):
         end = screen.index("public Task<bool> CollectAsync(AlteringPlan plan, CancellationToken ct)", start)
         preflight = screen[start:end]
         for token in ("HasVerifiedFacilityEntryScreen(frame)",
-                      "FindFacilityHeaderAsync(frame, plan.ScreenTitle, ct)",
+                      "_ui.Ocr.FindAlteringFacilityHeaderAsync(frame, plan.ScreenTitle, ct)",
                       "stableFrames >= 2", "RequireManagedIdleAsync",
                       "HasVerifiedFacilityEntryScreen(latest)",
                       "TryAutoTravelingAsync(ct)",
