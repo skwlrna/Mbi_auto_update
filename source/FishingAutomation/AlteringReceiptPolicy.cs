@@ -3,6 +3,18 @@ namespace FishingAutomation;
 internal static class AlteringReceiptPolicy
 {
 
+    // A coordinator's previous onsite label alone does not authorize receiving
+    // or even entering a generic navigation flow. Require two NEW positive
+    // facility observations, an independent final capture and known nontravel.
+    internal static bool CanReuseManagedReceiptOnsite(
+        int consecutiveFacilityFrames,
+        bool finalFacilityVerified,
+        bool? autoTraveling)
+        => consecutiveFacilityFrames >= 2 &&
+           finalFacilityVerified &&
+           autoTraveling == false;
+
+
     // After a receipt path has already sent the one-shot facility move input,
     // the broad teal detector is no longer authoritative by itself. The 04:05
     // V3.1.50 live failure showed the on-site screen can still contain enough teal

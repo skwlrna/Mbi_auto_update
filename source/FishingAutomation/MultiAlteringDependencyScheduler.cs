@@ -49,6 +49,37 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         IAlteringSupplyResolver Resolver, int? Minimum);
     private SuspendedRequest? _suspended;
 
+    // The live inventory is NOT an ownership or receipt journal. Once this
+    // scheduler has lent the lane back to F9, resume the original child target
+    // from its durable checkpoint instead of recalculating TargetQuantity from
+    // a possibly changed inventory balance. Verify the original request that
+    // created the checkpoint, not merely its recipe name.
+    internal static AlteringPlan RestoreOwnedResumePlan(
+        AlteringPlan requestedPlan,
+        long requestBaselineQuantity,
+        int requiredAdditionalQuantity,
+        AlteringSessionState? saved,
+        CliIdentityContext identity)
+    {
+        const string mismatch =
+            "중간재료 이어하기 소유권과 저장 장부가 일치하지 않습니다 · 새 등록 없이 정지";
+        if (saved is null || !saved.MatchesIdentity(identity) ||
+            saved.TargetQuantity <= 0 ||
+            saved.TargetQuantity > requiredAdditionalQuantity ||
+            saved.BaselineQuantity < requestBaselineQuantity ||
+            saved.BaselineQuantity - requestBaselineQuantity !=
+                (long)requiredAdditionalQuantity - saved.TargetQuantity)
+            throw new InvalidOperationException(mismatch);
+
+        var retained = requestedPlan with { TargetQuantity = saved.TargetQuantity };
+        // MatchesPlan also validates the recipe ordinal, produced-per-work,
+        // required work count and facility identity. No session is rewritten.
+        if (!saved.MatchesPlan(retained))
+            throw new InvalidOperationException(mismatch);
+
+        return retained;
+    }
+
     internal event Action<string>? Log;
 
     internal MultiAlteringDependencyScheduler(
@@ -221,7 +252,10 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
         long alreadyGained = current - requestBaselineQuantity;
         long remainingLong = Math.Max(0, requiredAdditionalQuantity - alreadyGained);
-        if (remainingLong == 0)
+        // An actively owned child may have finished its queue while its
+        // receipt is still pending. Never discard that lease/checkpoint just
+        // because an independent live inventory delta reached the request.
+        if (remainingLong == 0 && !resumingOwnedBatch)
         {
             // The whole request was satisfied by receiving the existing facility
             // batch. No new dependency is needed; a checkpoint left by a prior
@@ -249,15 +283,18 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             throw new InvalidOperationException(
                 $"{requestedPlan.OutputName} 중간재료 남은 수량이 안전 범위를 넘었습니다: {remainingLong:N0}");
 
-        var plan = requestedPlan with { TargetQuantity = (int)remainingLong };
-        // A resumed lease MUST have the exact saved job identity. Mismatched
-        // quantities cannot delete/recreate a journal while work is queued.
+        // Read the checkpoint BEFORE deriving the child plan. Inventory
+        // changes during a cooperative yield cannot mutate its original
+        // target or delete/recreate the session while child jobs exist.
         var saved = store.Load();
-        if (resumingOwnedBatch &&
-            (saved is null || !saved.MatchesPlan(plan) ||
-             !saved.MatchesIdentity(_identity)))
-            throw new InvalidOperationException(
-                "중간재료 이어하기 소유권과 저장 장부가 일치하지 않습니다 · 새 등록 없이 정지");
+        var plan = resumingOwnedBatch
+            ? RestoreOwnedResumePlan(requestedPlan, requestBaselineQuantity,
+                requiredAdditionalQuantity, saved, _identity)
+            : requestedPlan with { TargetQuantity = (int)remainingLong };
+        if (resumingOwnedBatch && remainingLong != plan.TargetQuantity)
+            Log?.Invoke(
+                $"[중간재료 스케줄] 이어하기 재고 변동 관찰 · 현재 계산 {remainingLong:N0}개 / " +
+                $"저장 목표 {plan.TargetQuantity:N0}개 · 등록/수령은 기존 장부로만 검증");
 
         var emptyCheck = await _data.WorksAsync(ct);
         var emptyFacilityCheck = emptyCheck
