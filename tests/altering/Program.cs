@@ -3956,6 +3956,35 @@ Check(frozenBoundaryStopped &&
           AlteringFacilityEntryDirective.FreshMoveRequired,
     "F06 stalled intermediate boundary stops without input and invalidates onsite proof");
 
+// V3.2.96: cooperative boundary must issue NO registration/receipt or lease.
+// It only replaces the initial read-only wait for F9 parent dependencies.
+var cooperativeBoundaryWorld = new RecursiveProductionWorld();
+cooperativeBoundaryWorld.AddExternalWork(
+    "물에 불린 쌀", "식재료 가공 시설", "InProgress",
+    isCompleted: false, remainingSeconds: 7200);
+var cooperativeLane = new FacilityLaneState(
+    await cooperativeBoundaryWorld.WorksAsync(default));
+var cooperativeBoundary = new MultiAlteringDependencyScheduler(
+    cooperativeBoundaryWorld, cooperativeBoundaryWorld, testIdentity,
+    Path.Combine(Path.GetTempPath(), "mabi-f9-cooperative-" + Guid.NewGuid().ToString("N")),
+    verificationAttempts: 4, laneState: cooperativeLane,
+    yieldBusyFacilityToParent: true);
+bool cooperativeYielded = false;
+try
+{
+    await cooperativeBoundary.RunAsync(
+        new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 3, 3, false),
+        0, 3, frozenBoundaryResolver, default);
+}
+catch (IntermediateFacilityBusyException ex)
+{
+    cooperativeYielded = ex.FacilityName == "식재료 가공 시설";
+}
+Check(cooperativeYielded && cooperativeBoundaryWorld.Queued.Count == 0 &&
+      !cooperativeLane.Snapshot("식재료 가공 시설").IntermediateLease &&
+      (await cooperativeBoundaryWorld.WorksAsync(default)).Count == 1,
+    "F9 yielding dependency boundary never registers, receives, or leases during an unfinished foreign batch");
+
 var nestedProductionWorld = new RecursiveProductionWorld
 {
     NestedSameFacilityChain = true
