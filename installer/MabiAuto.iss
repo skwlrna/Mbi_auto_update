@@ -53,4 +53,5 @@ Name: "desktopicon"; Description: "Create desktop shortcut"; GroupDescription: "
 ; Driver installation is opt-in, requires YES and reboot.
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\support\Check-Prerequisites.ps1"" -InstallRoot ""{app}"""; Description: "Check Korean OCR, Interception and game CLI"; Flags: postinstall skipifsilent unchecked
 Filename: "powershell.exe"; Parameters: "-NoProfile -NoExit -ExecutionPolicy Bypass -File ""{app}\support\InstallInterception.ps1"""; Description: "Install Interception driver (admin permission and reboot required)"; Flags: postinstall skipifsilent unchecked nowait
-Filename: "{app}\START.cmd"; Description: "Start Mabi Auto after prerequisites are installed"; Flags: postinstall skipifsilent unchecked nowait
+Filename: "powershell.exe"; Parameters: "-NoProfile -NoExit -ExecutionPolicy Bypass -File ""{app}\support\Check-Prerequisites.ps1"" -InstallRoot ""{app}"" -InstallKoreanOCR"; Description: "Install Korean Windows OCR if missing (internet/reboot may be required)"; Flags: postinstall skipifsilent unchecked nowait
+Filename: "{app}\START.cmd"; Description: "Start Mabi Auto after prerequisites are installed"; Flags: postinstall skipifsilent unchecked nowait shellexec
