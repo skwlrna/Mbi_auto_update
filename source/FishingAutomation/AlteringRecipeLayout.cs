@@ -4,13 +4,15 @@ namespace FishingAutomation;
 
 internal static class AlteringRecipeLayout
 {
-    // 약품 가공은 음식 제작 검색 UI를 그대로 사용한다.
-    // 이 좌표와 화면 변화 기준은 음식 제작의 정의를 공유하여 어긋나지 않게 한다.
+    // 검색창/입력칸/결과 검증 영역은 음식 제작 UI와 공유한다.
+    // 단, 검색 후 첫 품목 카드의 위치는 약품 가공 실화면에서 별도 확인했다.
     internal static readonly Point ProcessingSearchIconPoint = CraftingHubLayout.ProductSearchIconPoint;
     internal static readonly Rectangle ProcessingSearchDialogArea = CraftingHubLayout.ProductSearchDialogArea;
     internal static readonly Point ProcessingSearchInputPoint = CraftingHubLayout.ProductSearchInputPoint;
     internal static readonly Rectangle ProcessingSearchResultArea = CraftingHubLayout.ProductSearchResultArea;
-    internal static readonly Point ProcessingSearchFirstResultPoint = CraftingHubLayout.ProductFirstResultPoint;
+    // 2026-11-06 00:42 KST 오류 화면: 산뜻 버섯 진액 첫 카드 x=162..275, y=330..493.
+    // 음식 제작 좌표 (218,613)는 이 카드 아래 빈 영역이므로 공유하지 않는다.
+    internal static readonly Point ProcessingSearchFirstResultPoint = new(218, 412);
     internal const double ProcessingSearchOpenChangeRatio = CraftingHubLayout.SearchDialogOpenChangeRatio;
     internal const double ProcessingSearchResultChangeRatio = CraftingHubLayout.SearchResultChangeRatio;
 
