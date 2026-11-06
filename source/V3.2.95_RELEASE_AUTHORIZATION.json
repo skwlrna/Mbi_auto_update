@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.95",
+  "purpose": "medicine_first_recipe_card_coordinate_correction_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "배포해",
+  "requestedAtKst": "2026-11-06",
+  "sourcePullRequest": 389,
+  "sourcePullRequests": [
+    389
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_medicine_first_card_coordinate_fix",
+  "note": "PR #389 fixes V3.2.94 2026-11-06 00:42:56 KST medicine processing error: first result 산뜻 버섯 진액 occupies x=162..275/y=330..493, but shared food crafting result coordinate (218,613) clicked below it. Only medicine processing first card uses (218,412); food crafting retains (218,613); other facilities and metal receipt unchanged. Real-game success not yet tested. Main SHA CI, offline screen/crafting/altering tests, Windows smoke, zip checksum, and rollback required before public release."
+}
