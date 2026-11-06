@@ -1285,6 +1285,166 @@ using (var cancelAfterWait = new CancellationTokenSource())
 Check(unexpectedSecondaryRegistration == 0,
     "global queue_full waits for selected old seven-slot lane without attempting new registration at another facility");
 
+// V3.2.96: new F9 runs seed independent vacant facilities before one lane
+// fills seven slots and masks other recipes behind global queue_full.
+var initialSeedWood = new AlteringPlan("목재 가공 시설", "상급 목재", 9, 3, false);
+var initialSeedMedicine = new AlteringPlan("약품 가공 시설", "산뜻 버섯 진액", 10, 5, false);
+var seededWorks = new List<AlteringWork>();
+var seededLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
+var seededAttempts = new List<string>();
+using (var stopInitialSeed = new CancellationTokenSource())
+{
+    var scheduler = new MultiAlteringCoordinator(
+        seededLaneState, spreadInitialVacantLanes: true);
+    try
+    {
+        await scheduler.RunAsync(
+            new[] { initialSeedWood, initialSeedMedicine },
+            (plan, _, token) =>
+            {
+                seededAttempts.Add(plan.FacilityName);
+                if (plan.FacilityName == initialSeedMedicine.FacilityName)
+                {
+                    stopInitialSeed.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                seededLaneState.NoteRegistration(plan, FacilityLaneOwner.Main, 1);
+                seededWorks.Add(new AlteringWork(plan.DisplayName, plan.FacilityName,
+                    "InProgress", false, 1200L));
+                return Task.FromResult(false);
+            },
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(seededWorks.ToArray()),
+            (_, token) => { stopInitialSeed.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+            stopInitialSeed.Token,
+            readRecipes: _ => Task.FromResult<IReadOnlyList<AlteringRecipe>>(new[]
+            {
+                new AlteringRecipe(initialSeedWood.DisplayName, true, 3, null,
+                    Array.Empty<AlteringIngredient>(), initialSeedWood.FacilityName),
+                new AlteringRecipe(initialSeedMedicine.DisplayName, true, 5, null,
+                    Array.Empty<AlteringIngredient>(), initialSeedMedicine.FacilityName)
+            }));
+    }
+    catch (OperationCanceledException) when (stopInitialSeed.IsCancellationRequested) { }
+}
+Check(seededAttempts.SequenceEqual(new[] {
+          initialSeedWood.FacilityName, initialSeedMedicine.FacilityName }) &&
+      seededWorks.Count == 1 &&
+      seededLaneState.Snapshot(initialSeedWood.FacilityName).MainRegisteredWorks == 1,
+    "F9 initial lane spread gives medicine a turn before filling seven wood jobs");
+
+// V3.2.96: an existing full intermediate facility must not trap the sole F9
+// loop. The blocked parent yields before input, while independent medicine
+// is still given its guarded manager turn.
+var independentMedicinePlan = new AlteringPlan("약품 가공 시설", "산뜻 버섯 진액", 10, 5, false);
+var waitingRicePlan = new AlteringPlan("식재료 가공 시설", "밥", 9, 3, false);
+var busyIntermediateWorks = Enumerable.Range(0, 7).Select(_ =>
+    new AlteringWork("물에 불린 쌀", "식재료 가공 시설",
+        "InProgress", false, 240L)).ToArray();
+int waitingParentTurns = 0, medicineTurns = 0;
+var yieldingParent = new AlteringPlan("목재 가공 시설", "상급 목재", 9, 3, false);
+using (var stopAfterIndependentLane = new CancellationTokenSource())
+{
+    var multiLaneScheduler = new MultiAlteringCoordinator();
+    var laneLogs = new List<string>();
+    multiLaneScheduler.Log += laneLogs.Add;
+    try
+    {
+        await multiLaneScheduler.RunAsync(
+            new[] { yieldingParent, independentMedicinePlan },
+            (item, _, token) =>
+            {
+                if (item.FacilityName == yieldingParent.FacilityName)
+                {
+                    waitingParentTurns++;
+                    throw new IntermediateFacilityBusyException("식재료 가공 시설");
+                }
+                medicineTurns++;
+                stopAfterIndependentLane.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(false);
+            },
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(busyIntermediateWorks),
+            (_, token) => { stopAfterIndependentLane.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+            stopAfterIndependentLane.Token);
+    }
+    catch (OperationCanceledException) when (stopAfterIndependentLane.IsCancellationRequested) { }
+    Check(waitingParentTurns == 1 && medicineTurns == 1 &&
+          laneLogs.Any(x => x.Contains("이 시설만 보류", StringComparison.Ordinal)),
+        "F9 intermediate batch wait yields before inputs, permitting independent medicine turn");
+}
+
+// V3.2.96: rice and its child share the SAME food facility. Even when
+// all seven child tickets have finished, main may not enter until the exact
+// dependency was collected and its retained lease released.
+var sameLaneRice = new AlteringPlan("식재료 가공 시설", "밥", 9, 3, false);
+var sameLaneRiceChild = new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 21, 3, false);
+var sameLaneOwner = "물에 불린 쌀#1";
+var sameLaneState = new FacilityLaneState(Array.Empty<AlteringWork>());
+var sameLaneJobs = new List<AlteringWork>();
+int sameLaneChildReceipts = 0, sameLaneMainTurns = 0;
+bool sameLaneBeforeResumptionBlocked = true, sameLaneChildCompleted = false;
+using (var finishSameLane = new CancellationTokenSource())
+{
+    try
+    {
+        await new MultiAlteringCoordinator(sameLaneState).RunAsync(
+            new[] { sameLaneRice },
+            (p, _, token) =>
+            {
+                if (sameLaneJobs.Count == 0 && sameLaneChildReceipts == 0)
+                {
+                    sameLaneState.AcquireIntermediate(
+                        sameLaneRiceChild.FacilityName, Array.Empty<AlteringWork>(), sameLaneOwner);
+                    sameLaneState.NoteRegistration(
+                        sameLaneRiceChild, FacilityLaneOwner.Intermediate, 7);
+                    sameLaneJobs.AddRange(Enumerable.Range(0, 7).Select(_ =>
+                        new AlteringWork("물에 불린 쌀", sameLaneRice.FacilityName,
+                            "InProgress", false, 200)));
+                    throw new IntermediateFacilityBusyException(sameLaneRice.FacilityName);
+                }
+                if (sameLaneChildReceipts != 1)
+                    throw new InvalidOperationException("main began before child receipt");
+                sameLaneBeforeResumptionBlocked = false;
+                sameLaneMainTurns++;
+                finishSameLane.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(false);
+            },
+            _ => Task.FromResult<IReadOnlyList<AlteringWork>>(sameLaneJobs.ToArray()),
+            (_, token) =>
+            {
+                if (sameLaneJobs.Count == 7 && !sameLaneChildCompleted)
+                {
+                    sameLaneChildCompleted = true;
+                    for (int i = 0; i < sameLaneJobs.Count; i++)
+                        sameLaneJobs[i] = sameLaneJobs[i] with {
+                            State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+                }
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            },
+            finishSameLane.Token,
+            resumeDeferredIntermediate: (parent, childFacility, token) =>
+            {
+                if (parent != sameLaneRice || childFacility != sameLaneRice.FacilityName ||
+                    !sameLaneJobs.All(x => x.IsCompleted))
+                    throw new InvalidOperationException("invalid dependency callback");
+                sameLaneState.Observe(childFacility, sameLaneJobs, allowShrink: false);
+                sameLaneJobs.Clear(); // Simulate one verified all-at-once receipt.
+                sameLaneState.Observe(childFacility, sameLaneJobs, allowShrink: true);
+                sameLaneState.ReleaseIntermediate(childFacility, sameLaneJobs, sameLaneOwner);
+                sameLaneChildReceipts++;
+                return Task.CompletedTask;
+            });
+    }
+    catch (OperationCanceledException) when (finishSameLane.IsCancellationRequested) { }
+}
+Check(sameLaneMainTurns == 1 &&
+      sameLaneChildReceipts == 1 && !sameLaneBeforeResumptionBlocked &&
+      !sameLaneState.Snapshot(sameLaneRice.FacilityName).IntermediateLease &&
+      sameLaneState.Snapshot(sameLaneRice.FacilityName).IntermediateRegisteredWorks == 7,
+    "F9 rice parent resumes only after same-lane child seven-ticket guarded receipt and ownership return");
+
 // 2026-10-18 live log: metal and cloth both 7/7 while food is not
 // filled. The old startup queue_full flag permanently skipped the food
 // facility despite positive fresh readiness; 43+ minutes of wait logs ensued.
@@ -3915,6 +4075,81 @@ Check(frozenBoundaryStopped &&
           AlteringFacilityEntryDirective.FreshMoveRequired,
     "F06 stalled intermediate boundary stops without input and invalidates onsite proof");
 
+// V3.2.96: cooperative boundary must issue NO registration/receipt or lease.
+// It only replaces the initial read-only wait for F9 parent dependencies.
+var cooperativeBoundaryWorld = new RecursiveProductionWorld();
+cooperativeBoundaryWorld.AddExternalWork(
+    "물에 불린 쌀", "식재료 가공 시설", "InProgress",
+    isCompleted: false, remainingSeconds: 7200);
+var cooperativeLane = new FacilityLaneState(
+    await cooperativeBoundaryWorld.WorksAsync(default));
+var cooperativeBoundary = new MultiAlteringDependencyScheduler(
+    cooperativeBoundaryWorld, cooperativeBoundaryWorld, testIdentity,
+    Path.Combine(Path.GetTempPath(), "mabi-f9-cooperative-" + Guid.NewGuid().ToString("N")),
+    verificationAttempts: 4, laneState: cooperativeLane,
+    yieldBusyFacilityToParent: true);
+bool cooperativeYielded = false;
+try
+{
+    await cooperativeBoundary.RunAsync(
+        new AlteringPlan("식재료 가공 시설", "물에 불린 쌀", 3, 3, false),
+        0, 3, frozenBoundaryResolver, default);
+}
+catch (IntermediateFacilityBusyException ex)
+{
+    cooperativeYielded = ex.FacilityName == "식재료 가공 시설";
+}
+Check(cooperativeYielded && cooperativeBoundaryWorld.Queued.Count == 0 &&
+      !cooperativeLane.Snapshot("식재료 가공 시설").IntermediateLease &&
+      (await cooperativeBoundaryWorld.WorksAsync(default)).Count == 1,
+    "F9 yielding dependency boundary never registers, receives, or leases during an unfinished foreign batch");
+
+// V3.2.96: after seven child registrations the inner coordinator must
+// yield without losing its durable session or lease; a second F9 turn resumes
+// that exact child, receives all seven once, and cannot register twice.
+var queuedChildPlan = new AlteringPlan("금속 가공 시설", "철괴", 21, 3, false);
+var queuedChildWorld = new FakeWorld(queuedChildPlan) { Freeze = true };
+var queuedChildLane = new FacilityLaneState(Array.Empty<AlteringWork>());
+var queuedChildDirectory = Path.Combine(
+    Path.GetTempPath(), "mabi-cooperative-resume-" + Guid.NewGuid().ToString("N"));
+var queuedChildScheduler = new MultiAlteringDependencyScheduler(
+    queuedChildWorld, queuedChildWorld, testIdentity, queuedChildDirectory,
+    (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; },
+    verificationAttempts: 4, laneState: queuedChildLane,
+    yieldBusyFacilityToParent: true);
+bool queuedChildSuspended = false;
+try
+{
+    await queuedChildScheduler.RunAsync(
+        queuedChildPlan, 0, 21, frozenBoundaryResolver, default);
+}
+catch (IntermediateFacilityBusyException ex)
+{
+    queuedChildSuspended = ex.FacilityName == queuedChildPlan.FacilityName;
+}
+var queuedChildState = queuedChildLane.Snapshot(queuedChildPlan.FacilityName);
+Check(queuedChildSuspended && queuedChildWorld.QueueCalls == 7 &&
+      queuedChildWorld.CollectionCount == 0 &&
+      queuedChildState.IntermediateLease &&
+      queuedChildState.IntermediateDepth == 1 &&
+      queuedChildState.IntermediateRegisteredWorks == 7 &&
+      (await queuedChildWorld.WorksAsync(default)).Count == 7,
+    "F9 queued 7-slot child yields before receiving, retains exact intermediate owner and registration ledger");
+
+queuedChildWorld.CompleteAllQueued();
+await queuedChildScheduler.RunAsync(
+    queuedChildPlan, 0, 21, frozenBoundaryResolver, default);
+var queuedChildCompleted = queuedChildLane.Snapshot(queuedChildPlan.FacilityName);
+Check(queuedChildWorld.QueueCalls == 7 &&
+      queuedChildWorld.CollectionCount == 1 &&
+      queuedChildWorld.Owned == 21 &&
+      (await queuedChildWorld.WorksAsync(default)).Count == 0 &&
+      !queuedChildCompleted.IntermediateLease &&
+      queuedChildCompleted.IntermediateRegisteredWorks == 7,
+    "F9 completed child batch resumes with existing journal, collects all once, and never duplicates registration");
+if (Directory.Exists(queuedChildDirectory))
+    Directory.Delete(queuedChildDirectory, recursive: true);
+
 var nestedProductionWorld = new RecursiveProductionWorld
 {
     NestedSameFacilityChain = true
@@ -5261,6 +5496,11 @@ internal sealed class FakeWorld : IAlteringData, IAlteringScreen, IAlteringCoord
         return Task.FromResult(RecoveryObservation);
     }
     internal void AddPending(bool waitingOnly = false) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, waitingOnly ? "NotStarted" : "InProgress", false, 5)); }
+    internal void CompleteAllQueued()
+    {
+        for (int i = 0; i < _works.Count; i++)
+            _works[i] = _works[i] with { State = "Completed", IsCompleted = true, RemainingSeconds = 0 };
+    }
     internal void AddCompleted(int count) { ExistingRemaining++; _works.Add(new(_plan.OutputName, _plan.FacilityName, "Completed", true, 0)); }
     internal void AddForeignFacilityWork(string displayName, bool isCompleted)
         => _works.Add(new(

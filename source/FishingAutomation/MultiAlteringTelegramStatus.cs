@@ -43,7 +43,8 @@ internal static class MultiAlteringTelegramStatus
         MultiAlteringTelegramSnapshot snapshot,
         IReadOnlyList<AlteringWork>? liveWorks,
         DateTimeOffset checkedAt,
-        string? cliError)
+        string? cliError,
+        IReadOnlyList<AlteringRecipe>? liveRecipes = null)
     {
         var plans = snapshot.Items;
         var lines = new List<string>
@@ -64,6 +65,29 @@ internal static class MultiAlteringTelegramStatus
             if (!string.IsNullOrWhiteSpace(item.MaterialState) &&
                 item.MaterialState != "대기")
                 lines.Add($"  재료/진행: {Short(item.MaterialState, 85)}");
+            // A selected facility can be empty while global CLI queue_full
+            // masks its recipe. This is observation only: NEVER infer that
+            // a 0/7 queue authorizes game input or a recipe is craftable.
+            if (liveRecipes is not null)
+            {
+                var matches = liveRecipes.Where(r =>
+                    string.Equals(r.DisplayName, item.DisplayName, StringComparison.Ordinal) &&
+                    AlteringFacilityResolver.Resolve(r) == item.FacilityName).ToArray();
+                if (matches.Length == 1)
+                {
+                    var recipe = matches[0];
+                    string reason = recipe.Alterable ? "가공 가능" :
+                        $"가공 불가 · Reason={Short(recipe.Reason ?? "unknown", 50)}" +
+                        (recipe.MissingIngredients.Count > 0
+                            ? $" · 부족 재료 항목 {recipe.MissingIngredients.Count}개"
+                            : " · 부족 재료 미확인");
+                    lines.Add($"  제법 CLI(조회 시점): {reason}");
+                }
+                else if (matches.Length == 0)
+                    lines.Add("  제법 CLI(조회 시점): 선택 제법 미조회");
+                else
+                    lines.Add("  제법 CLI(조회 시점): 중복 이름 제법 · 순번 검증 필요");
+            }
         }
 
         if (liveWorks is null)

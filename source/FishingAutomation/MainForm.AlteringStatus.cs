@@ -157,7 +157,19 @@ public sealed partial class MainForm
         {
             issue = "CLI 응답 파싱 또는 조회 실패";
         }
-        return MultiAlteringTelegramStatus.Format(snapshot, works, observedAt, issue);
+        // Observe recipe refusal reasons independently of queue occupancy.
+        // The CLI read is read-only and never authorizes input from /status.
+        IReadOnlyList<AlteringRecipe>? recipes = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            var response = await _cli.GetAlterableItemsAsync(timeout.Token)
+                .ConfigureAwait(false);
+            if (response.Success)
+                recipes = AlteringQueries.ParseRecipes(response);
+        }
+        catch (Exception) { /* CLI recipe evidence unavailable; do not guess. */ }
+        return MultiAlteringTelegramStatus.Format(snapshot, works, observedAt, issue, recipes);
     }
 
     private string GetAlteringRemoteStatus()

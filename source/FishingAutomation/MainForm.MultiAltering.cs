@@ -240,7 +240,8 @@ public sealed partial class MainForm
                 internalConsumptionObserver: consumptionLedger,
                 beforeReceipt: (receiptPlan, receiptToken) =>
                     batchStore.BeginReceiptWithEvidenceAsync(receiptPlan, rawAlteringData, receiptToken),
-                afterReceipt: ConfirmBatchReceiptAsync);
+                afterReceipt: ConfirmBatchReceiptAsync,
+                yieldBusyFacilityToParent: true);
             var resolver = new RecursiveAlteringSupplyResolver(
                 rawAlteringData,
                 gatheringData,
@@ -824,7 +825,8 @@ public sealed partial class MainForm
                 restoreCompleted: batchStore.FinishedPlans,
                 fillInitialVacancies: true,
                 deferOtherLanesWhileQueueFull: queueFullAtStart,
-                optimizeFacilityOrder: true);
+                optimizeFacilityOrder: true,
+                spreadInitialVacantLanes: true);
             facilityBottlenecks = coordinator.Bottlenecks;
             facilityEfficiency = coordinator.Efficiency;
             facilityReadQuarantine = coordinator.ReadQuarantine;
@@ -893,6 +895,15 @@ public sealed partial class MainForm
                             workTicket, registered, finished);
                         return finished;
                     }
+                    catch (IntermediateFacilityBusyException)
+                        when (automation.ConfirmedRegistrationsThisRun == registrationsBefore)
+                    {
+                        // The dependent lane has not been leased, collected or
+                        // registered. The parent ticket is NOT an uncertain input.
+                        // Preserve durable session state and allow another F9 lane.
+                        alteringWorkFence.ConfirmBatchReturn(workTicket, 0, false);
+                        throw;
+                    }
                     catch (DrainedMaterialSupplyHoldException hold)
                         when (hold.FacilityName == plan.FacilityName &&
                               automation.ConfirmedRegistrationsThisRun == registrationsBefore)
@@ -954,7 +965,9 @@ public sealed partial class MainForm
                     RefreshProductionDashboard();
                     // Respect existing notifier configuration. No screenshot or error upload.
                     _ = _notifier.SendAlertAsync("다중가공 장기 보류", message, false);
-                })), token);
+                }),
+                resumeDeferredIntermediate: (parentPlan, facility, coordinatorCt) =>
+                    dependencyScheduler.ResumeSuspendedAsync(facility, coordinatorCt)), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;

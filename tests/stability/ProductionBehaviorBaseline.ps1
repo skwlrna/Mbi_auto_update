@@ -62,10 +62,13 @@ Match-Required $multiAlter '배치 전체 완료 전 이동 없음' 'partial slo
 # across slot-wise RunBatch returns, not reset the watch with every loop.
 Match-Required $multiAlter 'class MultiAlteringWaitWatchdog' 'multi coordinator keeps per-facility idle history'
 Match-Required $multiAlter 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' 'whole multi run shares a single watchdog across batches'
-# The V3.2.19 wood-completed fix is intentionally more specific than
-# an unconditional call: only an ALL-completed lane may defer pre-manager
-# timeout, with the original deadline checked again after no verified progress.
-Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, observed,\s*deferTimeout: observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)' 'only a full completed lane may defer timeout for a manager receipt opportunity'
+# The V3.2.19 wood-completed timeout exception remains; V3.2.96 adds
+# a distinct cooperative wait ONLY while an independently watched foreign
+# intermediate facility has confirmed active CLI work (no parent input).
+Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, observed,\s*deferTimeout: waitingForForeignBatch \|\|\s*observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)' 'only completed parent lanes or independently monitored prerequisite waits may defer receipt timeout'
+Match-Required $multiAlter 'var dependencyWaitWatchdog = new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' 'cooperative intermediate wait owns a separate unchanged-stall deadline'
+Match-Required $multiAlter 'dependencyWaitWatchdog\.Observe\(dependencyFacility!, dependencyWorks\)' 'foreign dependency has live CLI watchdog even if not a selected F9 facility'
+Match-Required $multiAlter '중간재료 시설 정체' 'foreign dependency stall invalidates onsite proof and stops without input'
 Match-Required $multiAlter 'if \(idle < _threshold \|\| deferTimeout\)' 'watchdog deferral preserves rather than resets its original deadline'
 Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, afterFacilityWorks\)' 'manager no-op rechecks the same timeout before further processing'
 Match-Required $multiAlter 'if \(works.Count == 0\)' 'empty facility stays idle and clears stale watchdog history'

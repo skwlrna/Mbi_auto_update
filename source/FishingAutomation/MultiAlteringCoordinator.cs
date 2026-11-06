@@ -595,6 +595,8 @@ internal sealed class MultiAlteringCoordinator
     private readonly bool _fillInitialVacancies;
     private readonly bool _deferOtherLanesWhileQueueFull;
     private readonly bool _optimizeFacilityOrder;
+    private readonly bool _yieldIntermediateActiveBatch;
+    private readonly bool _spreadInitialVacantLanes;
 
     internal event Action<string>? Log;
     internal MultiAlteringFacilityBottleneckTracker Bottlenecks { get; }
@@ -609,7 +611,9 @@ internal sealed class MultiAlteringCoordinator
         Func<IReadOnlyList<AlteringPlan>, IReadOnlyList<AlteringPlan>>? restoreCompleted = null,
         bool fillInitialVacancies = false,
         bool deferOtherLanesWhileQueueFull = false,
-        bool optimizeFacilityOrder = false)
+        bool optimizeFacilityOrder = false,
+        bool spreadInitialVacantLanes = false,
+        bool yieldIntermediateActiveBatch = false)
     {
         _laneState = laneState;
         _laneOwner = laneOwner;
@@ -621,6 +625,8 @@ internal sealed class MultiAlteringCoordinator
         _fillInitialVacancies = fillInitialVacancies;
         _deferOtherLanesWhileQueueFull = deferOtherLanesWhileQueueFull;
         _optimizeFacilityOrder = optimizeFacilityOrder;
+        _spreadInitialVacantLanes = spreadInitialVacantLanes;
+        _yieldIntermediateActiveBatch = yieldIntermediateActiveBatch;
         if (_idleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(idleThreshold));
     }
@@ -641,7 +647,8 @@ internal sealed class MultiAlteringCoordinator
         Action<AlteringPlan>? clearMaterialHold = null,
         Func<AlteringPlan, CancellationToken, Task>? verifySafePreInputRead = null,
         Action<MultiAlteringReadQuarantineSnapshot>? reportReadQuarantine = null,
-        Action<string>? reportLongWaitAdvisory = null)
+        Action<string>? reportLongWaitAdvisory = null,
+        Func<AlteringPlan, string, CancellationToken, Task>? resumeDeferredIntermediate = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -687,12 +694,27 @@ internal sealed class MultiAlteringCoordinator
         // repeating an identical line every 30-second observation cycle.
         var globalQueueBlocked = new Dictionary<string, string>(StringComparer.Ordinal);
         var globalQueueUnblocked = new HashSet<string>(StringComparer.Ordinal);
+        // A parent plan awaiting a different facility's existing batch must
+        // not monopolize the sole F9 coordinator input loop.
+        var waitingForDependency = new Dictionary<string, string>(StringComparer.Ordinal);
         var idleWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
+        // Independently monitor a blocked child facility even when that
+        // facility is NOT in the user's selected F9 plans.
+        var dependencyWaitWatchdog = new MultiAlteringWaitWatchdog(_idleThreshold, _now);
         var longWaitAdvisories = new MultiAlteringLongWaitAdvisoryTracker(_now);
         var deferrals = new MultiAlteringLaneDeferralTracker(_idleThreshold, _now);
         string? lastOptimizedOrder = null;
         // Only the explicit new-F9 mode gets one initial pass into vacant
         // slots already occupied by old game jobs. Ordinary batching is unchanged.
+        // Avoid filling a first empty facility to 7/7 before other independent
+        // facilities get even one verified registration. A global CLI queue_full
+        // can mask still-empty medicine/food recipes after the first lane fills.
+        // This affects first-start ordering only; no receipt or input guard changes.
+        var initialVacantSeedPending = new HashSet<string>(
+            orderedFacilities.Where(f => _spreadInitialVacantLanes &&
+                orderedFacilities.Length > 1 && _laneState is not null &&
+                _laneState.Snapshot(f).InitialObservedWorks == 0),
+            StringComparer.Ordinal);
         var startupVacancies = new HashSet<string>(
             orderedFacilities.Where(f => _fillInitialVacancies &&
                 _laneState is not null &&
@@ -770,6 +792,7 @@ internal sealed class MultiAlteringCoordinator
             ct.ThrowIfCancellationRequested();
             var works = await readWorks(ct);
             bool acted = false;
+            bool justResumedDependency = false;
 
             // Persist per-facility evidence across all 1-slot RunBatch returns.
             // Never reset just because the scheduler went around another loop.
@@ -783,6 +806,66 @@ internal sealed class MultiAlteringCoordinator
                 }
                 var observed = works.Where(x => x.FacilityName == facility).ToArray();
                 Bottlenecks.ObserveWorks(facility, observed);
+                bool waitingForForeignBatch = waitingForDependency.TryGetValue(
+                    facility, out string? dependencyFacility);
+                if (waitingForForeignBatch)
+                {
+                    // Cooperative yielding cannot become an unbounded blind
+                    // wait. Reuse the exact CLI progress/stall policy for the
+                    // prerequisite lane, including a non-selected facility.
+                    var dependencyWorks = works.Where(x =>
+                        x.FacilityName == dependencyFacility).ToArray();
+                    try { dependencyWaitWatchdog.Observe(dependencyFacility!, dependencyWorks); }
+                    catch (InvalidOperationException)
+                    {
+                        _laneState?.InvalidateOnsite(
+                            "중간재료 시설 정체 · " + dependencyFacility + " · 입력 없이 정지");
+                        throw;
+                    }
+                }
+                if (waitingForForeignBatch &&
+                    !works.Any(x => x.FacilityName == dependencyFacility && !x.IsCompleted))
+                {
+                    // The dependency may still OWN this facility, even when
+                    // every ticket is completed. Never let the main recipe
+                    // collect its child's receipts or bypass ownership. Resume
+                    // the exact suspended child first using its saved ledger.
+                    if (resumeDeferredIntermediate is null)
+                        throw new InvalidOperationException(
+                            $"중간재료 {dependencyFacility} 이어받기 경로 없음 · 수령/등록 없이 정지");
+                    int parentIndex = FindNextPendingIndex(facility);
+                    if (parentIndex < 0)
+                        throw new InvalidOperationException(
+                            $"중간재료 {dependencyFacility} 부모 품목이 없어 이어받기 차단");
+                    Log?.Invoke($"[다중가공] {facility} 중간재료 {dependencyFacility} 경계 확인 · " +
+                        "메인 시설 입력 전에 자식 작업장부/수령부터 재검증");
+                    try
+                    {
+                        await resumeDeferredIntermediate(
+                            plansByFacility[facility][parentIndex],
+                            dependencyFacility!, ct);
+                        if (_laneState?.Snapshot(dependencyFacility!).IntermediateLease == true)
+                            throw new InvalidOperationException(
+                                $"중간재료 {dependencyFacility} 이어받기 완료 주장 후에도 소유권이 남아 있습니다");
+                        waitingForDependency.Remove(facility);
+                        idleWatchdog.ConfirmManagerProgress(facility);
+                        Log?.Invoke($"[다중가공] {facility} 중간재료 정상 수령 및 소유권 반환 · " +
+                            "메인 재료/제법/화면 전체 재검증 후 등록");
+                    }
+                    catch (IntermediateFacilityBusyException stillBusy)
+                    {
+                        // A confirmed child re-fill may queue another 7-slot
+                        // batch. Keep the parent deferred; do not mistake that
+                        // fresh child registration for the parent input.
+                        waitingForDependency[facility] = stillBusy.FacilityName;
+                        Log?.Invoke($"[다중가공] {facility} 자식 배치 추가 등록/진행 · " +
+                            "소유권 유지 · 다른 독립 시설 계속");
+                    }
+                    // Receipt or child registration changed the CLI queue:
+                    // discard this entire old snapshot and restart the manager.
+                    justResumedDependency = true;
+                    break;
+                }
 
                 // Distinguish material-supply holds from safe CLI-read quarantine.
                 // Stable reason identity prevents a fresh stock count from
@@ -821,7 +904,8 @@ internal sealed class MultiAlteringCoordinator
                     // An all-completed lane needs one guarded manager turn for
                     // receipt. Do not reset its original stall deadline here.
                     idleWatchdog.Observe(facility, observed,
-                        deferTimeout: observed.Length > 0 && observed.All(x => x.IsCompleted));
+                        deferTimeout: waitingForForeignBatch ||
+                        observed.Length > 0 && observed.All(x => x.IsCompleted));
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -836,6 +920,9 @@ internal sealed class MultiAlteringCoordinator
                 }
             }
 
+            if (justResumedDependency)
+                continue;
+
             // Performance-based ordering changes ONLY which independent lane
             // receives a turn first. Same-facility recipe order is fixed, and
             // all existing receipt/registration guards still run afterward.
@@ -849,6 +936,30 @@ internal sealed class MultiAlteringCoordinator
             }
             var facilityOrder = Efficiency.Order(orderedFacilities,
                 _optimizeFacilityOrder);
+            if (initialVacantSeedPending.Count > 0 && readRecipes is not null)
+            {
+                // Read-only order preference, not action authorization: first
+                // service already finished full batches, then currently proven
+                // craftable empty lanes, then other lanes. All selections still
+                // pass the unchanged per-recipe and onsite input checks.
+                var initialRecipes = await readRecipes(ct);
+                int SeedPriority(string facility)
+                {
+                    var local = works.Where(x => x.FacilityName == facility).ToArray();
+                    if (local.Length > 0 && local.All(x => x.IsCompleted)) return 0;
+                    if (!initialVacantSeedPending.Contains(facility)) return 3;
+                    int index = FindNextPendingIndex(facility);
+                    if (index < 0) return 3;
+                    var plan = plansByFacility[facility][index];
+                    var selected = initialRecipes.Where(x =>
+                        x.DisplayName == plan.DisplayName).ToArray();
+                    bool positive = selected.Length >= plan.RecipeOrdinal &&
+                        selected[plan.RecipeOrdinal - 1].ProducedPerWork == plan.ProducedPerWork &&
+                        selected[plan.RecipeOrdinal - 1].Alterable;
+                    return positive ? 1 : 2;
+                }
+                facilityOrder = facilityOrder.OrderBy(SeedPriority).ToArray();
+            }
             if (_optimizeFacilityOrder)
             {
                 string signature = string.Join(" -> ", facilityOrder);
@@ -864,6 +975,10 @@ internal sealed class MultiAlteringCoordinator
             {
                 ct.ThrowIfCancellationRequested();
                 if (PendingCount(facility) == 0)
+                    continue;
+                // Parent registration can wait for its dependency's existing
+                // work without blocking independent medicine/metal/wood lanes.
+                if (waitingForDependency.ContainsKey(facility))
                     continue;
 
                 if (held.TryGetValue(facility, out var waiting))
@@ -1149,6 +1264,42 @@ internal sealed class MultiAlteringCoordinator
                     {
                         planCompleted = await runBatch(plan, 1, ct);
                     }
+                    catch (IntermediateFacilityBusyException dependencyBusy)
+                    {
+                        // The dependent scheduler yielded before owning or
+                        // touching its queue. This is not a failed registration.
+                        // Re-read and validate the parent lane before serving
+                        // another facility; no speculative receipt or replay.
+                        var afterYield = await readWorks(ct);
+                        // Rice and soaked-rice share the SAME food facility.
+                        // The child may now own its seven-slot queue. We may
+                        // OBSERVE that queue, but must never assert MAIN input
+                        // access until the suspended child has been received
+                        // and released by the exact dependency callback.
+                        bool childOwnsParentLane =
+                            string.Equals(facility, dependencyBusy.FacilityName,
+                                StringComparison.Ordinal) &&
+                            _laneState?.Snapshot(facility).IntermediateLease == true;
+                        if (!childOwnsParentLane)
+                            _laneState?.AssertAccess(facility, _laneOwner);
+                        _laneState?.Observe(facility,
+                            afterYield.Where(x => x.FacilityName == facility).ToArray(),
+                            allowShrink: false);
+                        works = afterYield;
+                        if (afterYield.Any(x =>
+                            x.FacilityName == dependencyBusy.FacilityName && !x.IsCompleted))
+                        {
+                            waitingForDependency[facility] = dependencyBusy.FacilityName;
+                            Log?.Invoke($"[다중가공] {facility}의 중간재료 {dependencyBusy.FacilityName} " +
+                                "작업 진행 중 · 이 시설만 보류 · 다른 시설 등록/수령 계속");
+                        }
+                        else
+                        {
+                            Log?.Invoke($"[다중가공] {facility} 중간재료 완료 경계 새로 감지 · " +
+                                "다음 순회에서 정상 재검증");
+                        }
+                        break;
+                    }
                     catch (DrainedMaterialSupplyHoldException hold)
                         when (recheckUnavailableRoute is not null &&
                               hold.FacilityName == facility)
@@ -1247,6 +1398,17 @@ internal sealed class MultiAlteringCoordinator
                             break;
                         }
                     }
+                    // Only during the initial empty-lane pass, one completed
+                    // manager attempt per lane prevents a seven-slot wood/metal
+                    // batch from hiding an independent medicine recipe globally.
+                    // Existing slot-wise durable registration evidence still
+                    // determines what was actually registered.
+                    if (initialVacantSeedPending.Remove(facility))
+                    {
+                        Log?.Invoke($"[다중가공] 초기 독립 시설 분산 · {facility} 첫 처리 확인 · " +
+                            "다른 빈 시설에 우선 처리권 양도 · 이후 7칸 묶음 정책 유지");
+                        break;
+                    }
                 }
 
                 // Never revisit a partially completed batch to top up slots
@@ -1301,6 +1463,24 @@ internal sealed class MultiAlteringCoordinator
             Log?.Invoke(
                 $"[다중가공] 병렬 대기 · 진행/대기 {runningSlots}건 · 완료 누적 {completedSlots}건 · " +
                 $"다음 확인 약 {Math.Clamp(waitSeconds, 1, 30)}초 · 배치 전체 완료 전 이동 없음");
+
+            // Cooperative child scheduler may yield AFTER real registrations,
+            // but only at this read-only idle boundary. The lease and durable
+            // child session remain intact for the next verified parent pass.
+            // Nested (depth > 1) recipes retain the original blocking path:
+            // yielding them could orphan a stacked parent/child lease.
+            if (_yieldIntermediateActiveBatch &&
+                _laneOwner == FacilityLaneOwner.Intermediate &&
+                orderedFacilities.Length == 1 &&
+                _laneState is not null &&
+                _laneState.Snapshot(orderedFacilities[0]) is var lease &&
+                lease.IntermediateLease && lease.IntermediateDepth == 1 &&
+                active.Length > 0 && active.Any(x => !x.IsCompleted))
+            {
+                Log?.Invoke($"[중간재료 스케줄] {orderedFacilities[0]} 등록된 배치 진행 중 · " +
+                    "소유권/작업장부 유지 · 상위 F9에 입력권 반환");
+                throw new IntermediateFacilityBusyException(orderedFacilities[0]);
+            }
 
             // No crafting, receipt, or movement is in flight here. This callback
             // owns all input until the abyss has EXITED to the verified outside HUD.

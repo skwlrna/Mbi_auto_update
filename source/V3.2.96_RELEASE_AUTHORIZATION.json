@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "version": "V3.2.96",
+  "purpose": "f9_cooperative_independent_facility_wait_release",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "수정하고 배포해",
+  "requestedAtKst": "2026-11-06",
+  "sourcePullRequest": 392,
+  "sourcePullRequests": [
+    392
+  ],
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_f9_independent_lane_fix",
+  "note": "User reported medicine 0/7 with wood and food active and metal 7/7 completed, but runtime status was F9 coordinator parallel wait and did not establish the exact CLI recipe refusal. Release fixes an independently verified scheduling hazard: recursive intermediate batch boundaries can block the sole parent coordinator; before any lease or new registration they now yield, allowing other independent facilities to proceed through existing guards. Read-only Telegram recipe reasons added. queue_full with no positive fresh readiness still blocks registration; no unsafe bypass. Real-game effect still requires verification."
+}

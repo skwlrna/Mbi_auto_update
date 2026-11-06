@@ -1,5 +1,16 @@
 namespace FishingAutomation;
 
+// Cooperative pause issued BEFORE this dependency scheduler acquires any facility
+// lease, registers a job, or receives work. A parent F9 manager can service
+// unrelated facilities and retry only after fresh CLI evidence.
+internal sealed class IntermediateFacilityBusyException : Exception
+{
+    internal string FacilityName { get; }
+    internal IntermediateFacilityBusyException(string facilityName)
+        : base("중간재료 시설의 기존 배치가 아직 완료되지 않았습니다: " + facilityName)
+        => FacilityName = facilityName;
+}
+
 internal interface IAlteringDependencyScheduler
 {
     Task RunAsync(
@@ -32,6 +43,11 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
     private readonly TimeSpan _boundaryIdleThreshold;
     private readonly Func<AlteringPlan, CancellationToken, Task>? _beforeReceipt;
     private readonly Func<AlteringPlan, CancellationToken, Task>? _afterReceipt;
+    private readonly bool _yieldBusyFacilityToParent;
+    private sealed record SuspendedRequest(
+        AlteringPlan Plan, long Baseline, int Required,
+        IAlteringSupplyResolver Resolver, int? Minimum);
+    private SuspendedRequest? _suspended;
 
     internal event Action<string>? Log;
 
@@ -47,7 +63,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         Func<DateTimeOffset>? boundaryNow = null,
         TimeSpan? boundaryIdleThreshold = null,
         Func<AlteringPlan, CancellationToken, Task>? beforeReceipt = null,
-        Func<AlteringPlan, CancellationToken, Task>? afterReceipt = null)
+        Func<AlteringPlan, CancellationToken, Task>? afterReceipt = null,
+        bool yieldBusyFacilityToParent = false)
     {
         _data = data;
         _screen = screen;
@@ -61,11 +78,57 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         _boundaryIdleThreshold = boundaryIdleThreshold ?? TimeSpan.FromMinutes(2);
         _beforeReceipt = beforeReceipt;
         _afterReceipt = afterReceipt;
+        _yieldBusyFacilityToParent = yieldBusyFacilityToParent;
         if (_boundaryIdleThreshold <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(boundaryIdleThreshold));
     }
 
+    // A child may have seven verified, still-running jobs and a retained
+    // lease. Resume that exact durable request BEFORE the parent attempts
+    // any same-facility main registration or receipt.
+    internal Task ResumeSuspendedAsync(string facilityName, CancellationToken ct)
+    {
+        if (_suspended is not { } request ||
+            !string.Equals(request.Plan.FacilityName, facilityName, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"중간재료 {facilityName} 이어받기 요청과 실제 대기 작업이 불일치합니다 · 입력 없이 정지");
+        return RunAsync(request.Plan, request.Baseline, request.Required,
+            request.Resolver, ct, request.Minimum);
+    }
+
     public async Task RunAsync(
+        AlteringPlan requestedPlan,
+        long requestBaselineQuantity,
+        int requiredAdditionalQuantity,
+        IAlteringSupplyResolver resolver,
+        CancellationToken ct,
+        int? minimumAdditionalQuantity = null)
+    {
+        if (_yieldBusyFacilityToParent && _suspended is { } pending &&
+            (pending.Plan != requestedPlan ||
+             pending.Baseline != requestBaselineQuantity ||
+             pending.Required != requiredAdditionalQuantity ||
+             pending.Minimum != minimumAdditionalQuantity))
+            throw new IntermediateFacilityBusyException(pending.Plan.FacilityName);
+
+        try
+        {
+            await RunCoreAsync(requestedPlan, requestBaselineQuantity,
+                requiredAdditionalQuantity, resolver, ct, minimumAdditionalQuantity);
+            if (_yieldBusyFacilityToParent)
+                _suspended = null;
+        }
+        catch (IntermediateFacilityBusyException)
+        {
+            if (_yieldBusyFacilityToParent)
+                _suspended ??= new SuspendedRequest(
+                    requestedPlan, requestBaselineQuantity,
+                    requiredAdditionalQuantity, resolver, minimumAdditionalQuantity);
+            throw;
+        }
+    }
+
+    private async Task RunCoreAsync(
         AlteringPlan requestedPlan,
         long requestBaselineQuantity,
         int requiredAdditionalQuantity,
@@ -83,12 +146,30 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
         string dependencyDir = Path.Combine(_sessionDirectory, "dependencies");
         var store = new AlteringSessionStore(
             AlteringSessionStore.MultiPlanPath(dependencyDir, requestedPlan));
+        string ownerKey = $"{requestedPlan.DisplayName}#{requestedPlan.RecipeOrdinal}";
+        bool resumingOwnedBatch = _yieldBusyFacilityToParent &&
+            _laneState?.IsActiveIntermediateOwner(requestedPlan.FacilityName, ownerKey) == true;
+        // Cooperative suspension is permitted only for one top-level child
+        // lease. Nested intermediate owners cannot be reconstructed safely.
+        if (resumingOwnedBatch &&
+            _laneState!.Snapshot(requestedPlan.FacilityName).IntermediateDepth != 1)
+            throw new InvalidOperationException(
+                "중첩 중간재료 작업의 자동 복귀는 지원되지 않습니다 · 소유권 보존 후 정지");
 
         Log?.Invoke(
             $"[중간재료 스케줄] 요청 · {requestedPlan.DisplayName} 추가 {requiredAdditionalQuantity:N0}개 · " +
             $"{requestedPlan.FacilityName.Replace(" 시설", "")} 시설 배치에 통합");
 
-        var boundaryWorks = await WaitForFacilityBatchBoundaryAsync(requestedPlan, ct);
+        // A previously queued child already owns its lane. Re-collecting its
+        // completed jobs here as an unrelated 'existing batch' would violate
+        // its durable receipt ledger and orphan the retained lease.
+        var boundaryWorks = resumingOwnedBatch
+            ? Array.Empty<AlteringWork>()
+            : await WaitForFacilityBatchBoundaryAsync(
+                requestedPlan, ct, allowCooperativeYield: true);
+        if (resumingOwnedBatch)
+            Log?.Invoke($"[중간재료 스케줄] {requestedPlan.FacilityName} 등록된 자식 배치 이어받기 · " +
+                "기존 소유권/세션 유지 · 신규 등록 전 CLI 장부 재검증");
         if (boundaryWorks.Length > 0)
         {
             Log?.Invoke(
@@ -169,24 +250,37 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
                 $"{requestedPlan.OutputName} 중간재료 남은 수량이 안전 범위를 넘었습니다: {remainingLong:N0}");
 
         var plan = requestedPlan with { TargetQuantity = (int)remainingLong };
+        // A resumed lease MUST have the exact saved job identity. Mismatched
+        // quantities cannot delete/recreate a journal while work is queued.
+        var saved = store.Load();
+        if (resumingOwnedBatch &&
+            (saved is null || !saved.MatchesPlan(plan) ||
+             !saved.MatchesIdentity(_identity)))
+            throw new InvalidOperationException(
+                "중간재료 이어하기 소유권과 저장 장부가 일치하지 않습니다 · 새 등록 없이 정지");
 
         var emptyCheck = await _data.WorksAsync(ct);
         var emptyFacilityCheck = emptyCheck
             .Where(x => x.FacilityName == plan.FacilityName)
             .ToArray();
-        if (emptyFacilityCheck.Length > 0)
-            throw new InvalidOperationException(
-                $"{plan.FacilityName} 중간재료 배치 시작 직전에 다른 작업이 생겨 시설 소유권을 확보하지 못했습니다.");
-
-        string ownerKey = $"{plan.DisplayName}#{plan.RecipeOrdinal}";
-        _laneState?.AcquireIntermediate(
-            plan.FacilityName,
-            emptyFacilityCheck,
-            ownerKey);
+        if (resumingOwnedBatch)
+        {
+            // Count or identity conflicts still fail closed via shared lane
+            // observations and the immutable child session journal.
+            _laneState!.AssertAccess(plan.FacilityName, FacilityLaneOwner.Intermediate);
+            _laneState.Observe(plan.FacilityName, emptyFacilityCheck, allowShrink: false);
+        }
+        else
+        {
+            if (emptyFacilityCheck.Length > 0)
+                throw new InvalidOperationException(
+                    $"{plan.FacilityName} 중간재료 배치 시작 직전에 다른 작업이 생겨 시설 소유권을 확보하지 못했습니다.");
+            _laneState?.AcquireIntermediate(
+                plan.FacilityName, emptyFacilityCheck, ownerKey);
+        }
 
         Directory.CreateDirectory(dependencyDir);
 
-        var saved = store.Load();
         AlteringSessionState session;
         if (saved is not null &&
             saved.MatchesPlan(plan) &&
@@ -237,7 +331,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
         var coordinator = new MultiAlteringCoordinator(
             _laneState,
-            FacilityLaneOwner.Intermediate);
+            FacilityLaneOwner.Intermediate,
+            yieldIntermediateActiveBatch: _yieldBusyFacilityToParent);
         coordinator.Log += text => Log?.Invoke(text);
 
         Log?.Invoke(
@@ -344,7 +439,8 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
 
     private async Task<AlteringWork[]> WaitForFacilityBatchBoundaryAsync(
         AlteringPlan plan,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool allowCooperativeYield = false)
     {
         // F06: this boundary runs while the parent Coordinator is awaited and
         // cannot execute its own watchdog. Reuse exactly its progress policy.
@@ -365,6 +461,16 @@ internal sealed class MultiAlteringDependencyScheduler : IAlteringDependencySche
             if (facilityWorks.Length == 0 ||
                 facilityWorks.All(x => x.IsCompleted))
                 return facilityWorks;
+
+            // Only the first entry boundary may yield, before acquiring the
+            // intermediate owner lease or touching the processing screen.
+            // Drain-on-hold paths retain their original blocking/watchdog logic.
+            if (allowCooperativeYield && _yieldBusyFacilityToParent)
+            {
+                Log?.Invoke($"[중간재료 스케줄] {plan.FacilityName} 기존 배치 진행 중 · " +
+                    "중간재료 작업 미등록 · 상위 F9에 제어권 반환 · 독립 시설 계속");
+                throw new IntermediateFacilityBusyException(plan.FacilityName);
+            }
 
             try
             {
