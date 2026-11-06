@@ -4,6 +4,11 @@ namespace FishingAutomation;
 
 internal static class GatheringNavigationPolicy
 {
+    // Stop is a generic control and may remain stale without any running activity.
+    // It cannot prove that the nearest-location click started travel/gathering.
+    internal static bool HasStartedLifeSkillTravel(GatheringActivity activity)
+        => activity.IsAutoTraveling || activity.IsGathering || activity.IsFishing;
+
     internal static bool IsStableFirstRow(Rectangle first, Rectangle second)
     {
         if (first.Width <= 0 || first.Height <= 0 || second.Width <= 0 || second.Height <= 0)
