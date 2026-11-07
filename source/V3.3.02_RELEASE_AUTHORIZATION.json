@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.3.02",
+  "purpose": "managed_facility_arrival_strict_popup_detection",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정후 배포해 / 배포해 / 진행해",
+  "requestedAtKst": "2026-11-08",
+  "sourcePullRequest": 401,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_facility_arrival_fix",
+  "note": "PR #401 strict managed popup detection in travel arrival initial and final checks. Retain safety guards. Real-game acceptance pending."
+}
