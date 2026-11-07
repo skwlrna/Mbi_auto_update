@@ -59,7 +59,12 @@ class RetirementReleaseContract(unittest.TestCase):
         workflow = release_path.read_text(encoding="utf-8")
         expected = 'CurrentVersion = "V' + version + '"'
         self.assertIn(expected, updater)
-        self.assertIn("<Version>" + version + "</Version>", project)
+        # The public tag may carry a leading zero (V3.3.00), while the
+        # valid .NET assembly/product version canonicalizes it to 3.3.0.
+        proj_ver = re.search(r"<Version>(\d+\.\d+\.\d+)</Version>", project)
+        self.assertIsNotNone(proj_ver)
+        self.assertEqual(tuple(map(int, version.split("."))),
+                         tuple(map(int, proj_ver.group(1).split("."))))
         self.assertIn("if(-not $u.Contains('" + expected + "'))", workflow)
         self.assertIn("MabiAuto_V" + version + "_Windows_Lite.zip.sha256", workflow)
         # Retain the historical V3.2.66 guard and assets without pinning
