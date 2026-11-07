@@ -189,6 +189,15 @@ jobs:
           python -m unittest discover -s tests/release -p 'test_v3295_auto_update_policy.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'V3.2.95 release policy failed; do not publish' }
 
+      - name: V3.2.98 F07 medicine exact identity retry and release policy
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/release -p 'test_v3298_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.98 F07 release policy failed; do not publish' }
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'V3.2.98 F07 retry regressions failed; do not publish' }
+
       - name: V3.2.97 F9 managed receipt reuse and release policy
         shell: pwsh
         run: |
@@ -691,7 +700,8 @@ jobs:
           # the independent managed two-frame exact-identity gate, AND a final
           # new screenshot's detail/recipe/button/remote checks before ClickFresh.
           if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -lt 4 -or
-              $queue -notmatch 'VerifyTwoFreshObservationsAsync' -or
+              ($queue -notmatch 'VerifyTwoFreshObservationsAsync' -and
+               $queue -notmatch 'VerifyTwoFreshObservationsWithRetriesAsync') -or
               $queue -notmatch 'FindRecipeAsync\(fresh, plan, token\)' -or
               $queue -notmatch 'FindRecipeAsync\(immediate, plan, ct\)' -or
               $queue -notmatch 'TryFindFreeProcessButtonVisual\(immediate, out Point liveCenter\)' -or

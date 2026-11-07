@@ -23,6 +23,9 @@ class V3297ReceiptReuse(unittest.TestCase):
                       "rollbackProvided", "mainCiRequired"):
             self.assertIs(auth[field], True)
         updater = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        # Historical publisher remains immutable after later versions.
+        if 'CurrentVersion = "V3.2.97"' not in updater:
+            return
         self.assertIn('CurrentVersion = "V3.2.97"', updater)
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
         for tag, version in (("Version", "3.2.97"), ("AssemblyVersion", "3.2.97.0"),

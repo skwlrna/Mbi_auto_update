@@ -40,6 +40,33 @@ internal static class AlteringRecipeIdentityPolicy
         => Math.Abs(observedX - expectedX) <= 180 &&
            Math.Abs(observedY - expectedY) <= 65;
 
+    // V3.2.98 F07: an intermittent OCR/capture miss must not terminate an
+    // otherwise valid managed processing request after one pair. Each attempt
+    // still requires TWO fresh positives; no single-frame or stale proof may
+    // authorize a click. The caller resets pair-local geometry for each attempt.
+    internal static async Task<bool> VerifyTwoFreshObservationsWithRetriesAsync(
+        Func<int, CancellationToken, Task<bool>> observeExpectedDetail,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        int maxAttempts,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(observeExpectedDetail);
+        ArgumentNullException.ThrowIfNull(delay);
+        if (maxAttempts < 1 || maxAttempts > 3)
+            throw new ArgumentOutOfRangeException(nameof(maxAttempts));
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await VerifyTwoFreshObservationsAsync(
+                    token => observeExpectedDetail(attempt, token), delay, ct))
+                return true;
+            if (attempt < maxAttempts)
+                await delay(TimeSpan.FromMilliseconds(350), ct);
+        }
+        return false;
+    }
+
     internal static async Task<bool> VerifyTwoFreshObservationsAsync(
         Func<CancellationToken, Task<bool>> observeExpectedDetail,
         Func<TimeSpan, CancellationToken, Task> delay,
