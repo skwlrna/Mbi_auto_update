@@ -312,9 +312,9 @@ try
         "medicine now rejects recent-tag unfiltered results using two visual frames without OCR search authority");
 
     var filterReuse = Method(screen, "CanReuseMedicineFilter", 3);
-    var directiveType = filterReuse.GetParameters()[0].ParameterType;
+    var filterDirectiveType = filterReuse.GetParameters()[0].ParameterType;
     bool Reuse(string directive, string? oldKey, string newKey) =>
-        (bool)filterReuse.Invoke(null, new object?[] { Enum.Parse(directiveType, directive), oldKey, newKey })!;
+        (bool)filterReuse.Invoke(null, new object?[] { Enum.Parse(filterDirectiveType, directive), oldKey, newKey })!;
     Check(Reuse("ReuseCoordinatorConfirmedOnsite", "medicine:item:1", "medicine:item:1") &&
           !Reuse("FreshMoveRequired", "medicine:item:1", "medicine:item:1") &&
           !Reuse("Automatic", "medicine:item:1", "medicine:item:1") &&
