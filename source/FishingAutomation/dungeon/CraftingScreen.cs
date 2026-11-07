@@ -1394,6 +1394,36 @@ internal sealed class CraftingScreen : ICraftingScreen
         await Task.Delay(300, ct);
     }
 
+    // V3.3.00: OCR-independent crafting-station button proof. Sample only
+    // the fixed action capsule area. A single green pixel is not evidence;
+    // require a wide, tall cyan/green body on the full 800x1000 client.
+    // The caller also verifies that the old recipe-detail frame transitioned,
+    // two fresh frames agree, and CLI reports a safe non-traveling state.
+    internal static bool HasCraftReadyActionVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        var roi = CraftActionButtonArea;
+        int action = 0;
+        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
+        for (int y = roi.Top + 6; y < roi.Bottom - 6; y += 2)
+        for (int x = roi.Left + 6; x < roi.Right - 6; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            // Cyan/teal/green action background, excluding near-white text
+            // and grey modal backgrounds.
+            bool colored = p.G >= 95 && p.B >= 65 && p.R <= 165 &&
+                           p.G >= p.R + 22 && p.B >= p.R + 4;
+            if (!colored) continue;
+            action++;
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y);
+            maxY = Math.Max(maxY, y);
+        }
+        return action >= 120 && maxX - minX >= 140 && maxY - minY >= 22;
+    }
+
     // V3.3.00: the final '제작하기' text OCR is no longer a mandatory
     // permit. Prefer a fixed action-body visual + demonstrably changed
     // detail frame. Retain OCR only as an OPTIONAL fallback when visual
@@ -1403,7 +1433,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         bool changedFromProduct = _craftReadyPreTravel is not null &&
             ProductionUiRuntime.MeasureVisualChangeRatio(
                 _craftReadyPreTravel, frame, CraftingHubLayout.ProductDetailPanelArea) >= 0.12;
-        if (changedFromProduct && CraftingHubLayout.HasCraftReadyActionVisual(frame))
+        if (changedFromProduct && HasCraftReadyActionVisual(frame))
             return true;
 
         // OCR may still provide positive evidence; an OCR miss is NOT a veto
