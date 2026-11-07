@@ -3504,7 +3504,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             bool managedFreshArrival =
                 directive == AlteringFacilityEntryDirective.FreshMoveRequired && moveClickSent;
             bool popupVisible =
-                HasFacilityTravelConfirmationVisual(frame) || HasBottomConfirmationModal(frame);
+                directive == AlteringFacilityEntryDirective.Automatic
+                    ? HasFacilityTravelConfirmationVisual(frame) || HasBottomConfirmationModal(frame)
+                    : HasManagedFacilityTravelConfirmationVisual(frame);
             // No PRE-click label/color recognition required. Only observed
             // post-click change in the exact same fixed button rectangle.
             bool instantArrival = managedFreshArrival &&
@@ -3605,7 +3607,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     using var finalFrame = Capture(ct);
                     bool finalPopupVisible =
                         moveClickSent &&
-                        HasFacilityTravelConfirmationVisual(finalFrame);
+                        (directive == AlteringFacilityEntryDirective.Automatic
+                            ? HasFacilityTravelConfirmationVisual(finalFrame)
+                            : HasManagedFacilityTravelConfirmationVisual(finalFrame));
                     bool finalFacilityVisible = HasFixedFacilityHeaderVisual(finalFrame) ||
                         await FindFacilityHeaderAsync(finalFrame, plan.ScreenTitle, ct) is not null;
                     bool finalMoveVisible = false;
@@ -3643,7 +3647,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             moveClickSent, finalMoveRegionChange,
                             finalFacilityVisible, HasOnsiteCloseButtonVisual(finalFrame),
                             finalMoveVisible, finalActivity?.IsAutoTraveling,
-                            finalPopupVisible || HasBottomConfirmationModal(finalFrame));
+                            finalPopupVisible ||
+                            (directive == AlteringFacilityEntryDirective.Automatic &&
+                             HasBottomConfirmationModal(finalFrame)));
                     bool finalArrivalObservation = managedFreshArrival
                         ? AlteringFacilityTravelConfirmPolicy.IsManagedFreshArrivalObservation(
                             finalFacilityVisible, finalActivity?.IsAutoTraveling,
