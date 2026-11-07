@@ -292,9 +292,9 @@ try
           !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonAbsent) &&
           !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonTiny) &&
           !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", wrongSize) &&
-          Has(ScreenCalls("HasTwoFreshCraftReadyFramesAsync", 2), "HasCraftReadyActionVisual") &&
-          Has(ScreenCalls("FinishDirectCraftAsync", 3), "HasTwoFreshCraftReadyFramesAsync") &&
-          Has(ScreenCalls("ReturnToStationAndCraftAsync", 3), "HasTwoFreshCraftReadyFramesAsync"),
+          Has(Calls(Method(craftingScreen, "HasTwoFreshCraftReadyFramesAsync", 2)), "HasCraftReadyActionVisual") &&
+          Has(Calls(Method(craftingScreen, "FinishDirectCraftAsync", 3)), "HasTwoFreshCraftReadyFramesAsync") &&
+          Has(Calls(Method(craftingScreen, "ReturnToStationAndCraftAsync", 3)), "HasTwoFreshCraftReadyFramesAsync"),
         "V3.3.00 food/item action uses fresh pixel proof without mandatory 제작하기 OCR");
 
     var medicine = ScreenCalls("TrySelectMedicineRecipeBySearchAsync", 3);
