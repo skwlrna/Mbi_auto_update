@@ -1777,7 +1777,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 Fail(next, "같은 약품 검색 결과 유지 상태를 확인하지 못해 재검색 없이 정지합니다.");
             }
             await RequireManagedIdleAsync(plan, directive, "유지된 약품 결과 선택 직전", ct);
-            _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
+            await _ui.ClickVerifiedFreshAsync(AlteringRecipeLayout.ProcessingSearchFirstResultPoint,
+                async latest => string.Equals(_medicineFilterKey, RecipeCacheKey(plan), StringComparison.Ordinal) &&
+                    await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null &&
+                    HasSingleMedicineSearchResultVisual(latest, out _, out _) &&
+                    !IsMedicineSearchApplyPopupVisible(latest) && !HasBottomConfirmationModal(latest) &&
+                    !AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+                        directive, HasFacilityMoveButtonVisual(latest)), ct);
             await Task.Delay(550, ct);
             using var detail = Capture(ct);
             if (!await IsRecipeDetailStructureAsync(detail, ct))

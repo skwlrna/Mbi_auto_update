@@ -59,6 +59,20 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
                   "HandleOptionalMaterialTransferPromptAsync"):
             self.assertIn(x, queue)
 
+    def test_consecutive_filter_reuse_and_replacement(self):
+        code = read("source/FishingAutomation/dungeon/AlteringScreen.cs")
+        search = code.split("private async Task<bool> TrySelectMedicineRecipeBySearchAsync")[1].split("private async Task SelectRecipeAsync")[0]
+        reuse = search.split('if (string.Equals(_medicineFilterKey')[1].split('_medicineFilterKey = null;\n        await RequireManagedIdleAsync')[0]
+        self.assertIn("ClickVerifiedFreshAsync", reuse)
+        self.assertIn("HasSingleMedicineSearchResultVisual", reuse)
+        self.assertIn("return true;", reuse)
+        self.assertNotIn("ProcessingSearchIconPoint", reuse)
+        self.assertNotIn("ReplaceTextFresh", reuse)
+        self.assertIn("_ui.ReplaceTextFresh(plan.DisplayName, ct)", search)
+        self.assertIn("CanReuseMedicineFilter(directive, _medicineFilterKey, RecipeCacheKey(plan))", code)
+        runtime = read("source/FishingAutomation/dungeon/ProductionUiRuntime.cs")
+        self.assertIn("_input.ReplaceText(text, ct)", runtime)
+
     def test_food_and_item_station_ready_has_no_text_ocr_hard_gate(self):
         code = read("source/FishingAutomation/dungeon/CraftingScreen.cs")
         return_path = code.split("public async Task ReturnToStationAndCraftAsync")[1].split(
