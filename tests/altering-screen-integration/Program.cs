@@ -275,6 +275,35 @@ try
             "medicine cannot click results while green Apply popup remains visible");
     }
 
+    // V3.3.00: food/item crafting can recognize the fixed cyan/green
+    // '제작하기' action body without relying on a successful text OCR.
+    using (var ready = new Bitmap(800, 1000))
+    using (var grey = new Bitmap(800, 1000))
+    using (var narrow = new Bitmap(800, 1000))
+    {
+        using (var g = Graphics.FromImage(ready))
+        {
+            g.Clear(Color.FromArgb(22, 24, 30));
+            using var teal = new SolidBrush(Color.FromArgb(32, 155, 130));
+            g.FillRectangle(teal, 411, 922, 195, 53);
+        }
+        using (var g = Graphics.FromImage(grey))
+        {
+            g.Clear(Color.FromArgb(22, 24, 30));
+            g.FillRectangle(Brushes.Gray, 411, 922, 195, 53);
+        }
+        using (var g = Graphics.FromImage(narrow))
+        {
+            g.Clear(Color.Black);
+            using var teal = new SolidBrush(Color.FromArgb(32, 155, 130));
+            g.FillRectangle(teal, 488, 937, 12, 12);
+        }
+        Check(CallBoolean(craftingLayout, "HasCraftReadyActionVisual", ready) &&
+              !CallBoolean(craftingLayout, "HasCraftReadyActionVisual", grey) &&
+              !CallBoolean(craftingLayout, "HasCraftReadyActionVisual", narrow),
+            "V3.3.00 crafting final button uses wide visual capsule, rejects grey/isolated false positive");
+    }
+
     var medicine = ScreenCalls("TrySelectMedicineRecipeBySearchAsync", 3);
     Check(Has(medicine, "ShouldVetoRecipeMoveButton") &&
           Has(medicine, "HasBottomConfirmationModal") &&
