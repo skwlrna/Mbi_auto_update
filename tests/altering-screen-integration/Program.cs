@@ -277,11 +277,11 @@ try
 
     // V3.3.00: food/item crafting can recognize the fixed cyan/green
     // '제작하기' action body without relying on a successful text OCR.
-    using (var ready = new Bitmap(800, 1000))
+    using (var craftReadyVisual = new Bitmap(800, 1000))
     using (var grey = new Bitmap(800, 1000))
     using (var narrow = new Bitmap(800, 1000))
     {
-        using (var g = Graphics.FromImage(ready))
+        using (var g = Graphics.FromImage(craftReadyVisual))
         {
             g.Clear(Color.FromArgb(22, 24, 30));
             using var teal = new SolidBrush(Color.FromArgb(32, 155, 130));
@@ -298,7 +298,7 @@ try
             using var teal = new SolidBrush(Color.FromArgb(32, 155, 130));
             g.FillRectangle(teal, 488, 937, 12, 12);
         }
-        Check(CallBoolean(craftingLayout, "HasCraftReadyActionVisual", ready) &&
+        Check(CallBoolean(craftingLayout, "HasCraftReadyActionVisual", craftReadyVisual) &&
               !CallBoolean(craftingLayout, "HasCraftReadyActionVisual", grey) &&
               !CallBoolean(craftingLayout, "HasCraftReadyActionVisual", narrow),
             "V3.3.00 crafting final button uses wide visual capsule, rejects grey/isolated false positive");
