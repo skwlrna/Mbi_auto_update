@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "version": "V3.3.00",
+  "purpose": "medicine_f07_redundant_ocr_removal_and_crafting_ready_visual",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "이번 수정안 정리해봐 / 음식은? / 수정하고 배포해",
+  "requestedAtKst": "2026-11-07",
+  "sourcePullRequest": 398,
+  "sourcePullRequests": [
+    398
+  ],
+  "incidentAtKst": "2026-11-07 14:31:46",
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_f07_crafting_visual",
+  "note": "V3.2.99 medicine search Enter and exact single-card, detail and free-button confirmed; F07 text OCR independently returned false in three first frames. Scope confirmed medicine selection to current recipe, reuse that evidence without re-reading identical name in managed F07/N01; retain remote/free-button/geometry/CLI 2-frame and fresh click gates. Food/item crafting final Space accepts stable 2-frame visual button + changed recipe detail frame + safe CLI; optional positive OCR fallback only; no unsupervised fallback Space. Live V3.3.00 verification pending; pre-release CI, rollback required."
+}
