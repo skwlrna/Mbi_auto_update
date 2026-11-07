@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "version": "V3.2.98",
+  "purpose": "f07_bounded_fresh_recipe_identity_retry",
+  "approvedBy": "user_direct_request_in_chat",
+  "request": "수정하고 배포해",
+  "requestedAtKst": "2026-11-07",
+  "sourcePullRequest": 395,
+  "sourcePullRequests": [
+    395
+  ],
+  "incidentAtKst": "2026-11-07 03:45:52",
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_f07_safe_retry",
+  "note": "Reported F07 managed medicine processing stopped at recipe detail for 산뜻 버섯 진액. Failure was 2-frame identity/free-button confirmation; the exact failed subcheck cannot be inferred from the screenshot alone. Add bounded read-only fresh-pair retries and diagnostics without allowing any unverified click. Real-game success has not been proven; automatic public release requires exact-main-SHA CI, verified Windows ZIP SHA256, rollback, and smoke test."
+}
