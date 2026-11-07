@@ -64,7 +64,7 @@ jobs:
           python -m unittest discover -s tests/release -p 'test_v3298_auto_update_policy.py' -v
           if($LASTEXITCODE-ne0){throw 'V3.2.98 release policy failed'}
 
-      - name: Require V3.2.98 managed receipt on-site proof
+      - name: Require legacy V3.2.97 managed receipt on-site proof
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -90,7 +90,7 @@ jobs:
           }
           if($policy -notmatch 'consecutiveFacilityFrames >= 2' -or
              $policy -notmatch 'autoTraveling == false' -or
-             $test -notmatch 'V3.2.98 managed receipt blocks stale'){
+             $test -notmatch 'V3.2.97 managed receipt blocks stale'){
             throw 'F9 receipt reuse regression policy missing'
           }
           $env:PYTHONUTF8='1'
