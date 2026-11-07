@@ -5,6 +5,36 @@ try
 int checks = 0;
 void Check(bool ok, string label) { if (!ok) throw new Exception(label); checks++; Console.WriteLine("PASS " + label); }
 
+// V3.2.98 F07: two positives are still mandatory, but a transient
+// medicine-detail OCR miss may recover on a later read-only pair.
+int f07Observed = 0;
+int f07Delays = 0;
+bool f07Recovered = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsWithRetriesAsync(
+    (attempt, _) =>
+    {
+        f07Observed++;
+        return Task.FromResult(attempt >= 2);
+    },
+    (_, _) => { f07Delays++; return Task.CompletedTask; },
+    3, CancellationToken.None);
+Check(f07Recovered && f07Observed == 3 && f07Delays == 2,
+    "F07 transient first-pair OCR miss recovers only after two fresh valid frames");
+bool[] f07Alternating = { true, false, true, false, true, false };
+int f07AlternatingIndex = 0;
+bool f07UnsafePass = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsWithRetriesAsync(
+    (_, _) => Task.FromResult(f07Alternating[f07AlternatingIndex++]),
+    (_, _) => Task.CompletedTask,
+    3, CancellationToken.None);
+Check(!f07UnsafePass && f07AlternatingIndex == 6,
+    "F07 alternating single-frame positives never authorize processing");
+int f07HardFailures = 0;
+bool f07Stopped = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsWithRetriesAsync(
+    (_, _) => { f07HardFailures++; return Task.FromResult(false); },
+    (_, _) => Task.CompletedTask,
+    3, CancellationToken.None);
+Check(!f07Stopped && f07HardFailures == 3,
+    "F07 permanent mismatch stops after three bounded attempts without input");
+
 // An advisory is not a progress checkpoint and may never authorize input.
 DateTimeOffset holdAdvisoryNow = new(2026, 11, 3, 0, 0, 0, TimeSpan.Zero);
 var holdAdvisory = new MultiAlteringLongWaitAdvisoryTracker(() => holdAdvisoryNow);
