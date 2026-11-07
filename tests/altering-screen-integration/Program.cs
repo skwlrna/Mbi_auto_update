@@ -257,7 +257,8 @@ try
           Has(medicine, "RequireManagedIdleAsync") &&
           Has(selection, "RequireManagedIdleAsync"),
         "managed registration paths require a fresh CLI-safe activity guard before input");
-    Check(Has(queue, "VerifyTwoFreshObservationsAsync") &&
+    Check((Has(queue, "VerifyTwoFreshObservationsAsync") ||
+           Has(queue, "VerifyTwoFreshObservationsWithRetriesAsync")) &&
           Has(queue, "RequireManagedIdleAsync"),
         "managed real QueueAsync wires independent title verification before UI input");
     var n01Calls = queue.ToList();
