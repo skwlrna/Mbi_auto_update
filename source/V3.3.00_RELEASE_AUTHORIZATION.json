@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "version": "V3.3.00",
+  "purpose": "medicine_verified_search_no_duplicate_title_ocr_and_crafting_visual_ready",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "이번 수정안 정리해봐 / 음식은? / 수정하고 배포해 / 진행해",
+  "requestedAtKst": "2026-11-07",
+  "sourcePullRequest": 399,
+  "incidentAtKst": "2026-11-07 14:31:46",
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_f07_medicine_crafting_ready",
+  "note": "V3.2.99 live medicine search and single-card selection succeeded, F07 duplicate title OCR failed three times despite visible correct detail and free button. Replace only redundant selected medicine title OCR while preserving remote/free-action/CLI gates. Food/item ready button text OCR is replaced with two-frame and immediate pixel proof; actual post-release gameplay acceptance remains pending."
+}

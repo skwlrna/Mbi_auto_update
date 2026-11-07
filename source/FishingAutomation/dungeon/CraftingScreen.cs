@@ -12,6 +12,9 @@ internal sealed class CraftingScreen : ICraftingScreen
     private string? _activeCraftingRecipe;
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
+    // The original detail screen must visibly transition before the same
+    // bottom-right teal area may authorize Space at the actual station.
+    private Bitmap? _directCraftBeforeTravel;
     private CraftingQuestDeficit? _lastSingleQuestDeficit;
     // Per quest/batch only: no reuse across a freshly created quest.
     private string? _lastNamedDeficitRecipe;
@@ -55,6 +58,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             _questMaterialNameCatalog = null;
             _lastSingleQuestDeficit = null;
         }
+        _directCraftBeforeTravel?.Dispose();
+        _directCraftBeforeTravel = null;
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
         _lastNamedDeficitRecipe = null;
@@ -136,6 +141,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             _directCraftPendingName = plan.DisplayName;
             _directCraftPendingCount = craftCount;
 
+            _directCraftBeforeTravel?.Dispose();
+            _directCraftBeforeTravel = Capture(ct);
             _ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct);
             Log?.Invoke(
                 $"[제작] 재료 충분 · 제작하러 가기 · 고정좌표 " +
@@ -1384,6 +1391,59 @@ internal sealed class CraftingScreen : ICraftingScreen
         await Task.Delay(300, ct);
     }
 
+    // The user-confirmed crafting station action is at the fixed bottom-right
+    // button region. Reading tiny "제작하기" text is NOT the input authority:
+    // UI OCR sometimes misses it despite the button being present.
+    // Reject wrong resolution, gray/inactive controls, and partial color patches.
+    private static bool HasCraftReadyActionVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        Rectangle area = CraftingHubLayout.CraftActionButtonArea;
+        int sampled = 0, cyanGreen = 0;
+        int left = area.Right, top = area.Bottom;
+        int right = area.Left, bottom = area.Top;
+        for (int y = area.Top + 5; y < area.Bottom - 5; y += 3)
+        for (int x = area.Left + 5; x < area.Right - 5; x += 3)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            if (p.G < 105 || p.B < 70 || p.R > 145 ||
+                p.G < p.R + 25 || p.B < p.R + 5)
+                continue;
+            cyanGreen++;
+            left = Math.Min(left, x);
+            top = Math.Min(top, y);
+            right = Math.Max(right, x);
+            bottom = Math.Max(bottom, y);
+        }
+        return sampled > 0 && cyanGreen * 100 >= sampled * 18 &&
+               right - left >= 110 && bottom - top >= 24;
+    }
+
+    private bool HasCraftReadyWithStationTransition(Bitmap frame)
+    {
+        if (!HasCraftReadyActionVisual(frame))
+            return false;
+        // The initial detail also has a teal '제작하러 가기' button at this
+        // same coordinate. Do not treat it as the later '제작하기' button.
+        if (_directCraftBeforeTravel is not null &&
+            ProductionUiRuntime.MeasureVisualChangeRatio(
+                _directCraftBeforeTravel, frame,
+                CraftingHubLayout.ProductDetailPanelArea) < 0.15)
+            return false;
+        return true;
+    }
+
+    private async Task<bool> HasTwoFreshCraftReadyFramesAsync(Bitmap first, CancellationToken ct)
+    {
+        if (!HasCraftReadyWithStationTransition(first))
+            return false;
+        await Task.Delay(180, ct);
+        using var fresh = Capture(ct);
+        return HasCraftReadyWithStationTransition(fresh);
+    }
+
     public async Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
     {
         if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal) &&
@@ -1404,22 +1464,23 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct.ThrowIfCancellationRequested();
 
             using var frame = Capture(ct);
-            var craftReady = await FindUniqueAsync(
-                frame,
-                CraftingHubLayout.CraftActionButtonArea,
-                "제작하기",
-                ct);
+            bool craftReady = await HasTwoFreshCraftReadyFramesAsync(frame, ct);
 
-            if (craftReady is not null)
+            if (craftReady)
             {
                 long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
+                // An independent final capture guards against a disappeared
+                // popup after CLI reads. No stale bitmap can authorize Space.
+                using var immediate = Capture(ct);
+                if (!HasCraftReadyWithStationTransition(immediate))
+                    continue;
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 제작");
 
                 // The quest keeps the quantity selected when it was created.
                 // Do not touch the count controls again after the automatic return.
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
                 Log?.Invoke(
-                    $"[제작] 제작대 도착 · 제작창 자동 표시 확인 · 기존 {craftCount}회 유지 · " +
+                    $"[제작] 제작대 도착 · 제작 버튼 화면 픽셀 2프레임+최종 확인 · 기존 {craftCount}회 유지 · " +
                     $"수량 재설정 없음 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
 
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
@@ -1448,20 +1509,21 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct.ThrowIfCancellationRequested();
 
             using var frame = Capture(ct);
-            var craftReady = await FindUniqueAsync(
-                frame,
-                CraftingHubLayout.CraftActionButtonArea,
-                "제작하기",
-                ct);
+            bool craftReady = await HasTwoFreshCraftReadyFramesAsync(frame, ct);
 
-            if (craftReady is not null)
+            if (craftReady)
             {
                 long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
+                using var immediate = Capture(ct);
+                if (!HasCraftReadyWithStationTransition(immediate))
+                    continue;
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
                 _ui.TapFresh(0x39, ct); // Space = 제작하기
                 Log?.Invoke(
-                    $"[제작] 제작대 도착 · 제작하기 버튼 즉시 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                    $"[제작] 제작대 도착 · 제작하기 버튼 즉시 확인 · 화면 픽셀 2프레임+최종 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
+                _directCraftBeforeTravel?.Dispose();
+                _directCraftBeforeTravel = null;
                 _directCraftPendingName = null;
                 _directCraftPendingCount = 0;
                 return;

@@ -275,6 +275,28 @@ try
             "medicine cannot click results while green Apply popup remains visible");
     }
 
+    // V3.3.00: test the actual compiled crafting station pixel detector,
+    // including false-positive rejection before any Space input is authorized.
+    Type craftingScreen = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
+    using var craftButtonVisible = new Bitmap(800, 1000);
+    using (var g = Graphics.FromImage(craftButtonVisible))
+        g.FillRectangle(new SolidBrush(Color.FromArgb(34, 155, 130)),
+            new Rectangle(399, 927, 216, 46));
+    using var craftButtonAbsent = new Bitmap(800, 1000);
+    using var craftButtonTiny = new Bitmap(800, 1000);
+    using (var g = Graphics.FromImage(craftButtonTiny))
+        g.FillRectangle(new SolidBrush(Color.FromArgb(34, 155, 130)),
+            new Rectangle(490, 939, 20, 10));
+    using var craftWrongSize = new Bitmap(500, 700);
+    Check(CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonVisible) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonAbsent) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonTiny) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftWrongSize) &&
+          Has(Calls(Method(craftingScreen, "HasTwoFreshCraftReadyFramesAsync", 2)), "HasCraftReadyWithStationTransition") &&
+          Has(Calls(Method(craftingScreen, "FinishDirectCraftAsync", 3)), "HasTwoFreshCraftReadyFramesAsync") &&
+          Has(Calls(Method(craftingScreen, "ReturnToStationAndCraftAsync", 3)), "HasTwoFreshCraftReadyFramesAsync"),
+        "V3.3.00 food/item action uses fresh pixel proof without mandatory 제작하기 OCR");
+
     var medicine = ScreenCalls("TrySelectMedicineRecipeBySearchAsync", 3);
     Check(Has(medicine, "ShouldVetoRecipeMoveButton") &&
           Has(medicine, "HasBottomConfirmationModal") &&
@@ -288,6 +310,9 @@ try
           Has(medicine, "IsMedicineSearchApplyPopupVisible") &&
           !Has(medicine, "FindAlteringLabelsAsync"),
         "medicine now rejects recent-tag unfiltered results using two visual frames without OCR search authority");
+
+    Check(screen.GetField("_selectedMedicineSearchKey", all) is not null,
+        "V3.3.00 compiled F07 persists only current exact medicine search selection evidence");
 
     var queue = ScreenCalls("QueueAsync", 4);
     Check(Has(queue, "SelectRecipeAsync") && Has(queue, "TravelToFacilityAsync") &&

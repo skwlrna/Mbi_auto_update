@@ -22,6 +22,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private string? _postTravelProvenFacilityTitle;
     private bool _repeatOcrFreeRecipe;
     private string? _selectedFixedRecipeKey;
+    // Exact medicine search + two single-card frames + opened detail sheet.
+    // A managed registration can reuse this selection evidence instead of
+    // failing on a redundant and often-missed recipe-title OCR pass.
+    private string? _selectedMedicineSearchKey;
     // Every managed K, including the first, needs positive ordinary-field proof.
     // Unknown->K navigation must
     // positively match 3/4 HUD templates on two fresh frames, or
@@ -710,7 +714,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // original recipe ordinal + click coordinate. OCR is not an identity
         // gate for that known location, even on the first registration.
         if (_repeatOcrFreeRecipe ||
-            string.Equals(_selectedFixedRecipeKey, RecipeCacheKey(plan), StringComparison.Ordinal))
+            string.Equals(_selectedFixedRecipeKey, RecipeCacheKey(plan), StringComparison.Ordinal) ||
+            (string.Equals(plan.FacilityName, "약품 가공 시설", StringComparison.Ordinal) &&
+             string.Equals(_selectedMedicineSearchKey, RecipeCacheKey(plan), StringComparison.Ordinal)))
             return TryFindFreeProcessButtonVisual(frame, out _)
                 ? new DetectionResult(true, Popup, 1.0, plan.DisplayName)
                 : null;
@@ -746,10 +752,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<bool> IsRecipeDetailStructureAsync(Bitmap frame, CancellationToken ct)
     {
-        // Once this exact fixed-position recipe has been successfully registered,
-        // repeat observations use only the existing fixed free-button geometry.
-        // No '필요한 재료', action label or recipe OCR calls are made.
-        if (_repeatOcrFreeRecipe || _selectedFixedRecipeKey is not null)
+        // For a verified fixed recipe OR a medicine search proven by two
+        // single-result frames and a real detail sheet, all following managed
+        // observations use the fixed free-button visual. Do not OCR the title,
+        // materials label or action label a second time after that proof.
+        if (_repeatOcrFreeRecipe || _selectedFixedRecipeKey is not null ||
+            _selectedMedicineSearchKey is not null)
         {
             ct.ThrowIfCancellationRequested();
             return TryFindFreeProcessButtonVisual(frame, out _);
@@ -1830,6 +1838,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (!await IsRecipeDetailStructureAsync(popup, ct))
             Fail(popup, "약품 검색 첫 결과 클릭 후 품목 상세 구조를 확인하지 못했습니다.");
 
+        // This authorization is ONLY for the exact just-searched medicine item:
+        // Enter focus + applied filter + two first-only card frames + detail UI.
+        // The button/remote/fresh-pair/CLI safeguards still run in QueueAsync.
+        _selectedMedicineSearchKey = RecipeCacheKey(plan);
+        Log?.Invoke("[자동 가공] 약품 검색·단일 카드·상세 화면 확인 · F07 중복 제법명 OCR 생략");
+
         _stage.Move(ProductionStage.Detail, plan.DisplayName);
         Log?.Invoke($"[자동 가공] 약품 검색 완료 · {plan.DisplayName} · 제작과 동일한 검색 흐름");
         return true;
@@ -1841,6 +1855,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         CancellationToken ct)
     {
         await RequireManagedIdleAsync(plan, directive, "품목 선택 경로 진입", ct);
+        _selectedMedicineSearchKey = null; // previous item may never authorize another selection
         _stage.Move(ProductionStage.Search, plan.DisplayName);
         if (await TrySelectFixedRecipeAsync(plan, directive, ct))
             return;
@@ -2343,6 +2358,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // registration of this facility / exact fixed recipe in this run.
         _postTravelProvenFacilityTitle = null;
         _selectedFixedRecipeKey = null;
+        _selectedMedicineSearchKey = null;
         _repeatOcrFreeFacilityTitle =
             directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
             _verifiedFacilityTitles.Contains(plan.ScreenTitle)

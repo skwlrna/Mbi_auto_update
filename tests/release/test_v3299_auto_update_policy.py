@@ -18,10 +18,18 @@ class V3299RecentSearchPolicy(unittest.TestCase):
         self.assertFalse(a["realGameTested"])
         self.assertTrue(all(a[x] for x in ("mainCiRequired", "offlineRegressionRequired",
                                              "rollbackProvided", "postUpdateGameTestingPending")))
-        self.assertIn('CurrentVersion = "V3.2.99"', (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8"))
+        # Historical V3.2.99 policy continues to guard the Enter-search flow
+        # after a later version is built; never lock CI to a retired binary.
+        current=(ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
+        self.assertTrue(any(f'CurrentVersion = "{v}"' in current for v in ("V3.2.99", "V3.3.00")))
         proj=(ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        for tag,v in (("Version","3.2.99"),("AssemblyVersion","3.2.99.0"),("FileVersion","3.2.99.0")):
-            self.assertIn(f"<{tag}>{v}</{tag}>", proj)
+        for version,assembly in (("3.2.99","3.2.99.0"),("3.3.0","3.3.0.0")):
+            if f"<Version>{version}</Version>" in proj:
+                self.assertIn(f"<AssemblyVersion>{assembly}</AssemblyVersion>", proj)
+                self.assertIn(f"<FileVersion>{assembly}</FileVersion>", proj)
+                break
+        else:
+            self.fail("unexpected app version; historical release regression refuses it")
 
     def test_medicine_and_food_enter_focus_no_stale_click(self):
         med=(ROOT / "source/FishingAutomation/dungeon/AlteringScreen.cs").read_text(encoding="utf-8")

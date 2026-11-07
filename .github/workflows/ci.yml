@@ -101,11 +101,14 @@ jobs:
           $match = [regex]::Match($u, 'CurrentVersion = "(V[0-9]+\.[0-9]+\.[0-9]+)"')
           if (-not $match.Success) { throw 'version constant mismatch' }
           $version = $match.Groups[1].Value.Substring(1)
+          # GitHub tag V3.3.00 and Windows/MSBuild version 3.3.0 are the same
+          # numeric triplet. Never compare a zero-padded patch as raw text.
+          $numericVersion = (($version.Split('.') | ForEach-Object { [int]$_ }) -join '.')
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          foreach ($required in @("<Version>$version</Version>",
-                                   "<AssemblyVersion>$version.0</AssemblyVersion>",
-                                   "<FileVersion>$version.0</FileVersion>")) {
+          foreach ($required in @("<Version>$numericVersion</Version>",
+                                   "<AssemblyVersion>$numericVersion.0</AssemblyVersion>",
+                                   "<FileVersion>$numericVersion.0</FileVersion>")) {
             if (-not $p.Contains($required)) { throw 'project version mismatch' }
           }
           # Auto-repair was intentionally retired; keep it absent.
@@ -188,6 +191,15 @@ jobs:
           $env:PYTHONUTF8 = '1'
           python -m unittest discover -s tests/release -p 'test_v3295_auto_update_policy.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'V3.2.95 release policy failed; do not publish' }
+
+      - name: V3.3.00 medicine selection and food item craft-ready release policy
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8 = '1'
+          python -m unittest discover -s tests/release -p 'test_v3300_auto_update_policy.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.3.00 medicine/crafting release policy failed; do not publish' }
+          dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'V3.3.00 compiled crafting pixel regression failed; do not publish' }
 
       - name: V3.2.99 recent-search Enter focus and medicine single-card release policy
         shell: pwsh
