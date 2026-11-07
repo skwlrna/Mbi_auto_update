@@ -287,11 +287,11 @@ try
     using (var g = Graphics.FromImage(craftButtonTiny))
         g.FillRectangle(new SolidBrush(Color.FromArgb(34, 155, 130)),
             new Rectangle(490, 939, 20, 10));
-    using var wrongSize = new Bitmap(500, 700);
+    using var craftWrongSize = new Bitmap(500, 700);
     Check(CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonVisible) &&
           !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonAbsent) &&
           !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonTiny) &&
-          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", wrongSize) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftWrongSize) &&
           Has(Calls(Method(craftingScreen, "HasTwoFreshCraftReadyFramesAsync", 2)), "HasCraftReadyWithStationTransition") &&
           Has(Calls(Method(craftingScreen, "FinishDirectCraftAsync", 3)), "HasTwoFreshCraftReadyFramesAsync") &&
           Has(Calls(Method(craftingScreen, "ReturnToStationAndCraftAsync", 3)), "HasTwoFreshCraftReadyFramesAsync"),
