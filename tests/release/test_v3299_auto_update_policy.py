@@ -21,9 +21,9 @@ class V3299RecentSearchPolicy(unittest.TestCase):
         # Historical V3.2.99 policy continues to guard the Enter-search flow
         # after a later version is built; never lock CI to a retired binary.
         current=(ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
-        self.assertTrue(any(f'CurrentVersion = "{v}"' in current for v in ("V3.2.99", "V3.3.00")))
+        self.assertTrue(any(f'CurrentVersion = "{v}"' in current for v in ("V3.2.99", "V3.3.00", "V3.3.01")))
         proj=(ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        for version,assembly in (("3.2.99","3.2.99.0"),("3.3.0","3.3.0.0")):
+        for version,assembly in (("3.2.99","3.2.99.0"),("3.3.0","3.3.0.0"),("3.3.1","3.3.1.0")):
             if f"<Version>{version}</Version>" in proj:
                 self.assertIn(f"<AssemblyVersion>{assembly}</AssemblyVersion>", proj)
                 self.assertIn(f"<FileVersion>{assembly}</FileVersion>", proj)
@@ -38,7 +38,7 @@ class V3299RecentSearchPolicy(unittest.TestCase):
         f=food.split("private async Task SearchProductAsync(")[1].split("private async Task<bool> IsProductDetailStructureAsync(")[0]
         for code in (m,f):
             self.assertIn("_ui.TapFresh(0x1C, ct); // Enter: focus", code)
-            self.assertIn("_ui.PasteFresh(", code)
+            self.assertTrue("_ui.PasteFresh(" in code or "_ui.ReplaceTextFresh(" in code)
             self.assertIn("_ui.TapFresh(0x39, ct)", code)
         self.assertNotIn("ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint", m)
         self.assertNotIn("ClickFresh(CraftingHubLayout.ProductSearchInputPoint", f)

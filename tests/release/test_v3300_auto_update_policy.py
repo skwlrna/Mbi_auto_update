@@ -10,10 +10,10 @@ def read(path):
 
 class V3300ProductionReleaseSafety(unittest.TestCase):
     def test_version_and_real_game_state_are_explicit(self):
-        self.assertIn('CurrentVersion = "V3.3.00"', read("source/FishingAutomation/UpdateManager.cs"))
+        self.assertTrue(any(f'CurrentVersion = "{v}"' in read("source/FishingAutomation/UpdateManager.cs") for v in ("V3.3.00", "V3.3.01")))
         project = read("source/FishingAutomation/FishingAutomation.csproj")
-        for key, value in (("Version","3.3.0"), ("AssemblyVersion","3.3.0.0"),
-                           ("FileVersion","3.3.0.0")):
+        for key, value in (("Version","3.3.1"), ("AssemblyVersion","3.3.1.0"),
+                           ("FileVersion","3.3.1.0")):
             self.assertIn(f"<{key}>{value}</{key}>", project)
         auth = json.loads(read("source/V3.3.00_RELEASE_AUTHORIZATION.json"))
         self.assertEqual(auth["version"], "V3.3.00")
@@ -50,7 +50,7 @@ class V3300ProductionReleaseSafety(unittest.TestCase):
                   "_selectedMedicineSearchKey = RecipeCacheKey(plan)"):
             self.assertIn(x, search)
         self.assertLess(search.index("if (!await IsRecipeDetailStructureAsync(popup, ct))"),
-                        search.index("_selectedMedicineSearchKey = RecipeCacheKey(plan)"))
+                        search.rindex("_selectedMedicineSearchKey = RecipeCacheKey(plan)"))
         self.assertIn("_selectedMedicineSearchKey = null", queue)
         for x in ("VerifyTwoFreshObservationsWithRetriesAsync",
                   "DetectRemoteProcessStateAsync",

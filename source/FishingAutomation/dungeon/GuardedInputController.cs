@@ -118,6 +118,12 @@ internal sealed class GuardedInputController : IInputController
         using var held = InputLock.Enter(Gate, linked.Token, _timing.WaitingForLock);
         Verify(_window, linked.Token); _inner.PasteText(text, linked.Token);
     }
+    public void ReplaceText(string text, CancellationToken ct = default)
+    {
+        using var linked = InputCancellation(ct);
+        using var held = InputLock.Enter(Gate, linked.Token, _timing.WaitingForLock);
+        Verify(_window, linked.Token); _inner.ReplaceText(text, linked.Token);
+    }
     private static void CheckPoint(Point p)
     {
         if (p.X < 0 || p.Y < 0 || p.X >= 800 || p.Y >= 1000)

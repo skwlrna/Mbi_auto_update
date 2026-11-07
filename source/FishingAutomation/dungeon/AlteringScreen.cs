@@ -26,6 +26,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // A managed registration can reuse this selection evidence instead of
     // failing on a redundant and often-missed recipe-title OCR pass.
     private string? _selectedMedicineSearchKey;
+    private string? _medicineFilterKey;
     // Every managed K, including the first, needs positive ordinary-field proof.
     // Unknown->K navigation must
     // positively match 3/4 HUD templates on two fresh frames, or
@@ -58,6 +59,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             _confirmedOnsiteFacility = null;
             _postTravelProvenFacilityTitle = null;
             _repeatOcrFreeFacilityTitle = null;
+            _medicineFilterKey = null;
+            _selectedMedicineSearchKey = null;
             _cachedRecipeKey = null;
             _hasCachedRecipeCenter = false;
         };
@@ -1094,6 +1097,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         AlteringPlan plan, CancellationToken ct,
         AlteringFacilityEntryDirective directive = AlteringFacilityEntryDirective.Automatic)
     {
+        _medicineFilterKey = null;
         InvalidateForeignFacilityProof(plan.ScreenTitle);
         _stage.Move(ProductionStage.OpenHub, $"{plan.ScreenTitle} 진입");
         // Three ordinary navigation passes may end just after K has
@@ -1527,6 +1531,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Fail(failed, "선택한 가공 시설 화면을 3회 확인하지 못했습니다. 마지막 허브 재확인 1회도 성공하지 못했습니다.");
     }
 
+    internal static bool CanReuseMedicineFilter(
+        AlteringFacilityEntryDirective directive, string? previousKey, string requestedKey)
+        => directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
+           previousKey is not null && string.Equals(previousKey, requestedKey, StringComparison.Ordinal);
+
     private static string RecipeCacheKey(AlteringPlan plan)
         => $"{plan.FacilityName}\u001f{plan.DisplayName}\u001f{plan.RecipeOrdinal}";
 
@@ -1751,6 +1760,41 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             Fail(beforeSearch,
                 "약품 가공 설비로 이동 버튼이 남아 있어 원격 화면으로 판정했습니다. 검색 입력을 차단합니다.");
 
+        if (string.Equals(_medicineFilterKey, RecipeCacheKey(plan), StringComparison.Ordinal))
+        {
+            // The caller has returned to the same facility list. Reuse only
+            // this consecutive filter, after two new single-card observations.
+            bool first = HasSingleMedicineSearchResultVisual(beforeSearch, out _, out _) &&
+                !IsMedicineSearchApplyPopupVisible(beforeSearch);
+            await Task.Delay(180, ct);
+            using var next = Capture(ct);
+            bool second = await FindFacilityHeaderAsync(next, plan.ScreenTitle, ct) is not null &&
+                HasSingleMedicineSearchResultVisual(next, out _, out _) &&
+                !IsMedicineSearchApplyPopupVisible(next) && !HasBottomConfirmationModal(next);
+            if (!first || !second)
+            {
+                _medicineFilterKey = null;
+                Fail(next, "같은 약품 검색 결과 유지 상태를 확인하지 못해 재검색 없이 정지합니다.");
+            }
+            await RequireManagedIdleAsync(plan, directive, "유지된 약품 결과 선택 직전", ct);
+            await _ui.ClickVerifiedFreshAsync(AlteringRecipeLayout.ProcessingSearchFirstResultPoint,
+                async latest => string.Equals(_medicineFilterKey, RecipeCacheKey(plan), StringComparison.Ordinal) &&
+                    await FindFacilityHeaderAsync(latest, plan.ScreenTitle, ct) is not null &&
+                    HasSingleMedicineSearchResultVisual(latest, out _, out _) &&
+                    !IsMedicineSearchApplyPopupVisible(latest) && !HasBottomConfirmationModal(latest) &&
+                    !AlteringFacilityEntryPolicy.ShouldVetoRecipeMoveButton(
+                        directive, HasFacilityMoveButtonVisual(latest)), ct);
+            await Task.Delay(550, ct);
+            using var detail = Capture(ct);
+            if (!await IsRecipeDetailStructureAsync(detail, ct))
+                Fail(detail, "유지된 약품 결과 선택 후 상세 구조를 확인하지 못했습니다.");
+            _selectedMedicineSearchKey = RecipeCacheKey(plan);
+            _stage.Move(ProductionStage.Detail, plan.DisplayName);
+            Log?.Invoke($"[자동 가공] 같은 약품 결과 재사용 · {plan.DisplayName} · 재검색/검색어 입력 없음");
+            return true;
+        }
+
+        _medicineFilterKey = null;
         await RequireManagedIdleAsync(plan, directive, "약품 검색 열기 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchIconPoint, ct);
         Log?.Invoke(
@@ -1778,7 +1822,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         Log?.Invoke("[자동 가공] 약품 검색 입력칸 · Enter로 활성화 · 최근 검색어 고정좌표 클릭 금지");
         await Task.Delay(120, ct);
         await RequireManagedIdleAsync(plan, directive, "약품 검색어 붙여넣기 직전", ct);
-        _ui.PasteFresh(plan.DisplayName, ct);
+        _ui.ReplaceTextFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
         await RequireManagedIdleAsync(plan, directive, "약품 검색 Enter 직전", ct);
         _ui.TapFresh(0x1C, ct); // Enter
@@ -1842,6 +1886,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // Enter focus + applied filter + two first-only card frames + detail UI.
         // The button/remote/fresh-pair/CLI safeguards still run in QueueAsync.
         _selectedMedicineSearchKey = RecipeCacheKey(plan);
+        _medicineFilterKey = RecipeCacheKey(plan);
         Log?.Invoke("[자동 가공] 약품 검색·단일 카드·상세 화면 확인 · F07 중복 제법명 OCR 생략");
 
         _stage.Move(ProductionStage.Detail, plan.DisplayName);
@@ -2359,6 +2404,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         _postTravelProvenFacilityTitle = null;
         _selectedFixedRecipeKey = null;
         _selectedMedicineSearchKey = null;
+        if (!CanReuseMedicineFilter(directive, _medicineFilterKey, RecipeCacheKey(plan)))
+            _medicineFilterKey = null;
         _repeatOcrFreeFacilityTitle =
             directive == AlteringFacilityEntryDirective.ReuseCoordinatorConfirmedOnsite &&
             _verifiedFacilityTitles.Contains(plan.ScreenTitle)

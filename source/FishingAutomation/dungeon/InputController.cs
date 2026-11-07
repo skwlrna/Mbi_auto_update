@@ -53,6 +53,7 @@ internal sealed class InterceptionInput : IInputController, IInputTransport
         => _sequence.Drag(hwnd, startClientPoint, endClientPoint, durationMs, ct);
     public void TapScanCode(ushort scanCode, CancellationToken ct) => _sequence.Tap(scanCode, ct);
     public void PasteText(string text, CancellationToken ct) => _sequence.Paste(text, ct);
+    public void ReplaceText(string text, CancellationToken ct) => _sequence.Replace(text, ct);
 
     void IInputTransport.Move(Point point) => SendAbsolute(_mouseDevice, point.X, point.Y);
     void IInputTransport.MouseButton(bool down)

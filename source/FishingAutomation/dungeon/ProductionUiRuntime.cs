@@ -150,6 +150,13 @@ internal sealed class ProductionUiRuntime : IDisposable
         _evidence.Note("input", $"paste_length={text.Length}");
     }
 
+    internal void ReplaceTextFresh(string text, CancellationToken ct)
+    {
+        using var frame = Capture(ct);
+        _input.ReplaceText(text, ct);
+        _evidence.Note("input", $"replace_length={text.Length}");
+    }
+
     internal void ClickFresh(Point point, CancellationToken ct)
     {
         using var frame = Capture(ct);

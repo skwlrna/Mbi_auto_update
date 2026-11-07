@@ -182,6 +182,23 @@ static class Program
             f.Fake.Events.Clear(); f.Fake.Delays.Clear(); f.Input.PasteText("강철괴", f.Cts.Token);
             Check(f.Fake.Events.SequenceEqual(new[] { "clipboard", "KD:1D", "KD:2F", "KU:2F", "KU:1D" }) && f.Fake.Delays.SequenceEqual(new[] { 30, 30, 30, 80 }), "Normal Paste changed");
         });
+        Test("replace/select-all-before-paste", () =>
+        {
+            using var f = new Fixture();
+            f.Input.ReplaceText("산뜻 버섯 진액", f.Cts.Token);
+            Check(f.Fake.Events.SequenceEqual(new[] { "clipboard", "KD:1D", "KD:1E", "KU:1E", "KD:2F", "KU:2F", "KU:1D" }), "Replacement did not select all before paste");
+            Check(f.Fake.KeysHeld.Count == 0, "Replacement keys stuck");
+        });
+        foreach (string checkpoint in new[] { "KD:1D", "KD:1E", "KD:2F" })
+        {
+            Test("replace/cancel/" + checkpoint, () =>
+            {
+                using var f = new Fixture();
+                f.Fake.Hook = p => { if (p == checkpoint) f.Cts.Cancel(); };
+                Cancelled(() => f.Input.ReplaceText("산뜻 버섯 진액", f.Cts.Token));
+                Check(f.Fake.KeysHeld.Count == 0, "Cancelled replacement left key held");
+            });
+        }
         Test("normal/drag-delays-and-target", () =>
         {
             using var f = new Fixture(); f.Input.DragClientPoint(1, new Point(270, 330), new Point(520, 620), 800, f.Cts.Token);
@@ -351,6 +368,7 @@ static class Program
         public void DragClientPoint(nint hwnd, Point a, Point b, int ms, CancellationToken ct) => sequence.Drag(hwnd, a, b, ms, ct);
         public void TapScanCode(ushort code, CancellationToken ct) => sequence.Tap(code, ct);
         public void PasteText(string text, CancellationToken ct) => sequence.Paste(text, ct);
+        public void ReplaceText(string text, CancellationToken ct) => sequence.Replace(text, ct);
         public void Dispose() => sequence.Dispose(() => { });
     }
 #endif

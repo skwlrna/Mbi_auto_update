@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "version": "V3.3.01",
+  "purpose": "medicine_consecutive_filter_reuse_and_replace_text",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정하고 배포해",
+  "requestedAtKst": "2026-11-07",
+  "sourcePullRequest": 400,
+  "incidentAtKst": "2026-11-07 16:13:54",
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_medicine_search_fix",
+  "note": "Same medicine and consecutive onsite facility reuse retains the validated filter; two fresh single-result frames precede reselection. New searches replace the existing text using Ctrl+A/Ctrl+V. Production CLI/free-button/remote/modal safeguards remain. Actual game testing pending."
+}
