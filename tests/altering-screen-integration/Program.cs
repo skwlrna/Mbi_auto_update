@@ -275,6 +275,7 @@ try
             "medicine cannot click results while green Apply popup remains visible");
     }
 
+    Type craftScreenType = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
     // V3.3.00: food/item crafting can recognize the fixed cyan/green
     // '제작하기' action body without relying on a successful text OCR.
     using (var craftReadyVisual = new Bitmap(800, 1000))
@@ -298,9 +299,9 @@ try
             using var teal = new SolidBrush(Color.FromArgb(32, 155, 130));
             g.FillRectangle(teal, 488, 937, 12, 12);
         }
-        Check(CallBoolean(craftingLayout, "HasCraftReadyActionVisual", craftReadyVisual) &&
-              !CallBoolean(craftingLayout, "HasCraftReadyActionVisual", grey) &&
-              !CallBoolean(craftingLayout, "HasCraftReadyActionVisual", narrow),
+        Check(CallBoolean(craftScreenType, "HasCraftReadyActionVisual", craftReadyVisual) &&
+              !CallBoolean(craftScreenType, "HasCraftReadyActionVisual", grey) &&
+              !CallBoolean(craftScreenType, "HasCraftReadyActionVisual", narrow),
             "V3.3.00 crafting final button uses wide visual capsule, rejects grey/isolated false positive");
     }
 
