@@ -700,7 +700,8 @@ jobs:
           # the independent managed two-frame exact-identity gate, AND a final
           # new screenshot's detail/recipe/button/remote checks before ClickFresh.
           if ([regex]::Matches($queue, 'IsRecipeDetailStructureAsync').Count -lt 4 -or
-              $queue -notmatch 'VerifyTwoFreshObservationsAsync' -or
+              ($queue -notmatch 'VerifyTwoFreshObservationsAsync' -and
+               $queue -notmatch 'VerifyTwoFreshObservationsWithRetriesAsync') -or
               $queue -notmatch 'FindRecipeAsync\(fresh, plan, token\)' -or
               $queue -notmatch 'FindRecipeAsync\(immediate, plan, ct\)' -or
               $queue -notmatch 'TryFindFreeProcessButtonVisual\(immediate, out Point liveCenter\)' -or
