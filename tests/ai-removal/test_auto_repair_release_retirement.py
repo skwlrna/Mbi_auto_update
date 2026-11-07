@@ -61,7 +61,7 @@ class RetirementReleaseContract(unittest.TestCase):
         self.assertIn(expected, updater)
         # The public tag may carry a leading zero (V3.3.00), while the
         # valid .NET assembly/product version canonicalizes it to 3.3.0.
-        proj_ver = re.search(r"<Version>(\\d+\\.\\d+\\.\\d+)</Version>", project)
+        proj_ver = re.search(r"<Version>(\d+\.\d+\.\d+)</Version>", project)
         self.assertIsNotNone(proj_ver)
         self.assertEqual(tuple(map(int, version.split("."))),
                          tuple(map(int, proj_ver.group(1).split("."))))
