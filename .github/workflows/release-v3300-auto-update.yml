@@ -55,7 +55,7 @@ jobs:
              $craft -notmatch 'HasCraftReadyEvidenceAsync' -or
              $craft -notmatch 'TapVerifiedFreshAsync' -or
              $craft -notmatch 'GetActivityAsync\(ct\)' -or
-             $layout -notmatch 'HasCraftReadyActionVisual'){
+             $craft -notmatch 'HasCraftReadyActionVisual'){
             throw 'V3.3.00 medicine/current-selection or OCR-independent crafting safety missing'
           }
           $env:PYTHONUTF8='1'
