@@ -67,6 +67,36 @@ internal static class CraftingHubLayout
     internal static Rectangle CraftActionButtonArea
         => new(385, 910, 245, 80);
 
+    // V3.3.00: OCR-independent crafting-station button proof. Sample only
+    // the fixed action capsule area. A single green pixel is not evidence;
+    // require a wide, tall cyan/green body on the full 800x1000 client.
+    // The caller also verifies that the old recipe-detail frame transitioned,
+    // two fresh frames agree, and CLI reports a safe non-traveling state.
+    internal static bool HasCraftReadyActionVisual(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return false;
+        var roi = CraftActionButtonArea;
+        int action = 0;
+        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
+        for (int y = roi.Top + 6; y < roi.Bottom - 6; y += 2)
+        for (int x = roi.Left + 6; x < roi.Right - 6; x += 2)
+        {
+            Color p = frame.GetPixel(x, y);
+            // Cyan/teal/green action background, excluding near-white text
+            // and grey modal backgrounds.
+            bool colored = p.G >= 95 && p.B >= 65 && p.R <= 165 &&
+                           p.G >= p.R + 22 && p.B >= p.R + 4;
+            if (!colored) continue;
+            action++;
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y);
+            maxY = Math.Max(maxY, y);
+        }
+        return action >= 120 && maxX - minX >= 140 && maxY - minY >= 22;
+    }
+
     // Craft result popup uses a centered modal. Keep these intentionally broad:
     // completion text can shift slightly with product/result layout.
     internal static Rectangle CraftCompletionHeaderArea
