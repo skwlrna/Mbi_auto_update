@@ -56,6 +56,9 @@ class V3298F07ReleasePolicy(unittest.TestCase):
         wf = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("- '.github/workflows/release-v3298-auto-update.yml'", wf)
         self.assertIn("  workflow_dispatch:", wf)
+        # Historical F9 proof belongs to V3.2.97 even when shipping F07 3.2.98.
+        self.assertIn("V3.2.97 managed receipt blocks stale", wf)
+        self.assertNotIn("V3.2.98 managed receipt blocks stale", wf)
         self.assertNotIn("  workflow_run:", wf)
         for marker in ("Require V3.2.98 F07 fresh-pair identity",
                        "No successful production CI for current main SHA",
