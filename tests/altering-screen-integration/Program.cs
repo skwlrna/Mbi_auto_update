@@ -275,6 +275,28 @@ try
             "medicine cannot click results while green Apply popup remains visible");
     }
 
+    // V3.3.00: test the actual compiled crafting station pixel detector,
+    // including false-positive rejection before any Space input is authorized.
+    Type craftingScreen = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
+    using var craftButtonVisible = new Bitmap(800, 1000);
+    using (var g = Graphics.FromImage(craftButtonVisible))
+        g.FillRectangle(new SolidBrush(Color.FromArgb(34, 155, 130)),
+            new Rectangle(399, 927, 216, 46));
+    using var craftButtonAbsent = new Bitmap(800, 1000);
+    using var craftButtonTiny = new Bitmap(800, 1000);
+    using (var g = Graphics.FromImage(craftButtonTiny))
+        g.FillRectangle(new SolidBrush(Color.FromArgb(34, 155, 130)),
+            new Rectangle(490, 939, 20, 10));
+    using var wrongSize = new Bitmap(500, 700);
+    Check(CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonVisible) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonAbsent) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", craftButtonTiny) &&
+          !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", wrongSize) &&
+          Has(ScreenCalls("HasTwoFreshCraftReadyFramesAsync", 2), "HasCraftReadyActionVisual") &&
+          Has(ScreenCalls("FinishDirectCraftAsync", 3), "HasTwoFreshCraftReadyFramesAsync") &&
+          Has(ScreenCalls("ReturnToStationAndCraftAsync", 3), "HasTwoFreshCraftReadyFramesAsync"),
+        "V3.3.00 food/item action uses fresh pixel proof without mandatory 제작하기 OCR");
+
     var medicine = ScreenCalls("TrySelectMedicineRecipeBySearchAsync", 3);
     Check(Has(medicine, "ShouldVetoRecipeMoveButton") &&
           Has(medicine, "HasBottomConfirmationModal") &&
