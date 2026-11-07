@@ -284,8 +284,10 @@ try
         "real medicine search cannot autonomously issue facility movement");
     Check(!Has(medicine, "IsNearMedicineFirstResult") &&
           Has(medicine, "MeasureVisualChangeRatio") &&
-          Has(medicine, "FindAlteringLabelsAsync"),
-        "medicine follows food crafting: OCR only helps confirm a changed fixed search result screen");
+          Has(medicine, "HasSingleMedicineSearchResultVisual") &&
+          Has(medicine, "IsMedicineSearchApplyPopupVisible") &&
+          !Has(medicine, "FindAlteringLabelsAsync"),
+        "medicine now rejects recent-tag unfiltered results using two visual frames without OCR search authority");
 
     var queue = ScreenCalls("QueueAsync", 4);
     Check(Has(queue, "SelectRecipeAsync") && Has(queue, "TravelToFacilityAsync") &&
