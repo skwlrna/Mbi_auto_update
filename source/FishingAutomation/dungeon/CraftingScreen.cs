@@ -12,6 +12,10 @@ internal sealed class CraftingScreen : ICraftingScreen
     private string? _activeCraftingRecipe;
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
+    // Latest exact recipe detail immediately before crafting travel/quest.
+    // Prevents a still-open '제작하러 가기' button from masquerading as
+    // the station's '제작하기' button after an unobserved move.
+    private Bitmap? _craftReadyPreTravel;
     private CraftingQuestDeficit? _lastSingleQuestDeficit;
     // Per quest/batch only: no reuse across a freshly created quest.
     private string? _lastNamedDeficitRecipe;
@@ -57,6 +61,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
         _directCraftPendingName = null;
         _directCraftPendingCount = 0;
+        _craftReadyPreTravel?.Dispose();
+        _craftReadyPreTravel = null;
         _lastNamedDeficitRecipe = null;
         _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
 
@@ -136,6 +142,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             _directCraftPendingName = plan.DisplayName;
             _directCraftPendingCount = craftCount;
 
+            _craftReadyPreTravel?.Dispose();
+            _craftReadyPreTravel = Capture(ct);
             _ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct);
             Log?.Invoke(
                 $"[제작] 재료 충분 · 제작하러 가기 · 고정좌표 " +
@@ -146,6 +154,8 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
 
         _stage.Move(ProductionStage.CreateQuest, $"{plan.DisplayName} {craftCount}회 퀘스트 생성");
+        _craftReadyPreTravel?.Dispose();
+        _craftReadyPreTravel = Capture(ct);
         _ui.ClickFresh(CraftingHubLayout.CraftQuestButtonPoint, ct);
         Log?.Invoke(
             $"[제작] 재료 부족 · 퀘스트 만들기 · 고정좌표 " +
@@ -1384,6 +1394,47 @@ internal sealed class CraftingScreen : ICraftingScreen
         await Task.Delay(300, ct);
     }
 
+    // V3.3.00: the final '제작하기' text OCR is no longer a mandatory
+    // permit. Prefer a fixed action-body visual + demonstrably changed
+    // detail frame. Retain OCR only as an OPTIONAL fallback when visual
+    // calibration is unavailable; never accept the old unchanged 'go' screen.
+    private async Task<bool> HasCraftReadyEvidenceAsync(Bitmap frame, CancellationToken ct)
+    {
+        bool changedFromProduct = _craftReadyPreTravel is not null &&
+            ProductionUiRuntime.MeasureVisualChangeRatio(
+                _craftReadyPreTravel, frame, CraftingHubLayout.ProductDetailPanelArea) >= 0.12;
+        if (changedFromProduct && CraftingHubLayout.HasCraftReadyActionVisual(frame))
+            return true;
+
+        // OCR may still provide positive evidence; an OCR miss is NOT a veto
+        // when the stable two-frame visual path is positively confirmed.
+        var ocr = await FindUniqueAsync(
+            frame, CraftingHubLayout.CraftActionButtonArea, "제작하기", ct);
+        return ocr is not null;
+    }
+
+    private async Task<bool> HasConfirmedCraftReadyAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (!await HasCraftReadyEvidenceAsync(frame, ct))
+            return false;
+        await Task.Delay(180, ct);
+        using var second = Capture(ct);
+        if (!await HasCraftReadyEvidenceAsync(second, ct))
+            return false;
+
+        var activityResponse = await _cli.GetActivityAsync(ct);
+        if (!activityResponse.Success)
+            return false;
+        var activity = GatheringQueries.ParseActivity(activityResponse);
+        // Don't turn an in-flight '제작하러 가기' or gathering state into Space.
+        bool safe = activity.IsSafeField && !activity.IsAutoTraveling &&
+                    !activity.IsGathering && !activity.IsFishing &&
+                    activity.MainButtonState != "Stop";
+        if (!safe)
+            Log?.Invoke("[제작] 제작하기 후보 화면 확인 · CLI 이동/채집/위험 상태 · Space 대기");
+        return safe;
+    }
+
     public async Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
     {
         if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal) &&
@@ -1404,20 +1455,17 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct.ThrowIfCancellationRequested();
 
             using var frame = Capture(ct);
-            var craftReady = await FindUniqueAsync(
-                frame,
-                CraftingHubLayout.CraftActionButtonArea,
-                "제작하기",
-                ct);
+            bool craftReady = await HasConfirmedCraftReadyAsync(frame, ct);
 
-            if (craftReady is not null)
+            if (craftReady)
             {
                 long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 제작");
 
                 // The quest keeps the quantity selected when it was created.
                 // Do not touch the count controls again after the automatic return.
-                _ui.TapFresh(0x39, ct); // Space = 제작하기
+                await _ui.TapVerifiedFreshAsync(
+                    0x39, fresh => HasCraftReadyEvidenceAsync(fresh, ct), ct); // Space = 제작하기
                 Log?.Invoke(
                     $"[제작] 제작대 도착 · 제작창 자동 표시 확인 · 기존 {craftCount}회 유지 · " +
                     $"수량 재설정 없음 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
@@ -1448,17 +1496,14 @@ internal sealed class CraftingScreen : ICraftingScreen
             ct.ThrowIfCancellationRequested();
 
             using var frame = Capture(ct);
-            var craftReady = await FindUniqueAsync(
-                frame,
-                CraftingHubLayout.CraftActionButtonArea,
-                "제작하기",
-                ct);
+            bool craftReady = await HasConfirmedCraftReadyAsync(frame, ct);
 
-            if (craftReady is not null)
+            if (craftReady)
             {
                 long inventoryBefore = await _data.InventoryOnlyCountAsync(plan.DisplayName, ct);
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
-                _ui.TapFresh(0x39, ct); // Space = 제작하기
+                await _ui.TapVerifiedFreshAsync(
+                    0x39, fresh => HasCraftReadyEvidenceAsync(fresh, ct), ct); // Space = 제작하기
                 Log?.Invoke(
                     $"[제작] 제작대 도착 · 제작하기 버튼 즉시 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
