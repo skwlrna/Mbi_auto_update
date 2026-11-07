@@ -56,7 +56,7 @@ class V3300CraftingAndMedicinePolicy(unittest.TestCase):
         self.assertNotIn("_ui.TapFresh(0x39, ct)",wait)
         self.assertIn("_craftReadyPreTravel = Capture(ct);",source)
         self.assertIn("CraftActionButtonArea",layout)
-        self.assertIn("HasCraftReadyActionVisual(Bitmap frame)",layout)
+        self.assertIn("HasCraftReadyActionVisual(Bitmap frame)",source)
         self.assertIn("new(218, 613)",layout)
         self.assertIn("new(507, 950)",layout)
 
