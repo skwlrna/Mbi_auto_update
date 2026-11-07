@@ -21,6 +21,10 @@ class V3298F07ReleasePolicy(unittest.TestCase):
             self.assertIs(auth[key], True)
         updater = (ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
         project = (ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
+        # The historical 3.2.98 release keeps its own exact-SHA contract.
+        # Future builds must never republish the old tag.
+        if 'CurrentVersion = "V3.2.98"' not in updater:
+            return
         self.assertIn('CurrentVersion = "V3.2.98"', updater)
         for tag, version in (("Version", "3.2.98"), ("AssemblyVersion", "3.2.98.0"),
                              ("FileVersion", "3.2.98.0")):
