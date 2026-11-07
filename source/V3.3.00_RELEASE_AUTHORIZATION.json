@@ -5,7 +5,7 @@
   "approvedBy": "user_direct_request_in_conversation",
   "request": "이번 수정안 정리해봐 / 음식은? / 수정하고 배포해 / 진행해",
   "requestedAtKst": "2026-11-07",
-  "sourcePullRequest": 0,
+  "sourcePullRequest": 399,
   "incidentAtKst": "2026-11-07 14:31:46",
   "realGameTested": false,
   "postUpdateGameTestingPending": true,
