@@ -37,6 +37,10 @@ class V3300ProductionReleaseSafety(unittest.TestCase):
         self.assertLess(finder.index("_selectedMedicineSearchKey"), finder.index(
             "var exact = await FindAsync"))
         self.assertIn("TryFindFreeProcessButtonVisual(frame, out _)", finder)
+        detail = code.split("private async Task<bool> IsRecipeDetailStructureAsync")[1].split(
+            "private static bool TryFindFreeProcessButtonVisual")[0]
+        self.assertLess(detail.index("_selectedMedicineSearchKey is not null"),
+                        detail.index('FindAsync(frame, new(100, 690, 580, 200), "필요한 재료"'))
         self.assertIn("string.Equals(_selectedMedicineSearchKey, RecipeCacheKey(plan)", finder)
         for x in ("bool firstOnly = HasSingleMedicineSearchResultVisual",
                   "bool secondFirstOnly = HasSingleMedicineSearchResultVisual",
