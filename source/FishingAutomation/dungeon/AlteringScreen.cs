@@ -22,6 +22,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     private string? _postTravelProvenFacilityTitle;
     private bool _repeatOcrFreeRecipe;
     private string? _selectedFixedRecipeKey;
+    // Scoped to the exact medicine search performed in this selection pass.
+    // This is NOT a reusable F9 receipt/registration authorization.
+    private string? _selectedMedicineSearchRecipeKey;
     // Every managed K, including the first, needs positive ordinary-field proof.
     // Unknown->K navigation must
     // positively match 3/4 HUD templates on two fresh frames, or
@@ -56,6 +59,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             _repeatOcrFreeFacilityTitle = null;
             _cachedRecipeKey = null;
             _hasCachedRecipeCenter = false;
+            _selectedMedicineSearchRecipeKey = null;
         };
         _stage.Changed += (stage, detail) =>
             Log?.Invoke($"[자동 가공][상태] {stage} · {detail}");
@@ -711,6 +715,16 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // gate for that known location, even on the first registration.
         if (_repeatOcrFreeRecipe ||
             string.Equals(_selectedFixedRecipeKey, RecipeCacheKey(plan), StringComparison.Ordinal))
+            return TryFindFreeProcessButtonVisual(frame, out _)
+                ? new DetectionResult(true, Popup, 1.0, plan.DisplayName)
+                : null;
+        // V3.3.00: this precise medicine recipe has ALREADY been entered by
+        // exact search (Enter->paste->Enter->Space), two independent sole-card
+        // observations and the fixed medicine first-card click. Do not re-read
+        // the same name by OCR on every F07/N01 input frame; OCR missed the
+        // visibly correct 산뜻 버섯 진액 detail in V3.2.99 14:31 incident.
+        // All detail, on-site, live free-button, geometry and CLI gates remain.
+        if (string.Equals(_selectedMedicineSearchRecipeKey, RecipeCacheKey(plan), StringComparison.Ordinal))
             return TryFindFreeProcessButtonVisual(frame, out _)
                 ? new DetectionResult(true, Popup, 1.0, plan.DisplayName)
                 : null;
@@ -1830,8 +1844,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         if (!await IsRecipeDetailStructureAsync(popup, ct))
             Fail(popup, "약품 검색 첫 결과 클릭 후 품목 상세 구조를 확인하지 못했습니다.");
 
+        // Only AFTER selecting the screenshot-proven first card and verifying
+        // the detail structure may the F07/N01 gate reuse this exact selection.
+        _selectedMedicineSearchRecipeKey = RecipeCacheKey(plan);
         _stage.Move(ProductionStage.Detail, plan.DisplayName);
-        Log?.Invoke($"[자동 가공] 약품 검색 완료 · {plan.DisplayName} · 제작과 동일한 검색 흐름");
+        Log?.Invoke($"[자동 가공] 약품 검색 완료 · {plan.DisplayName} · 선택 증거 유지 · F07 품목명 중복 OCR 생략");
         return true;
     }
 
@@ -1841,6 +1858,8 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         CancellationToken ct)
     {
         await RequireManagedIdleAsync(plan, directive, "품목 선택 경로 진입", ct);
+        // Never carry medicine-search evidence into a different selection.
+        _selectedMedicineSearchRecipeKey = null;
         _stage.Move(ProductionStage.Search, plan.DisplayName);
         if (await TrySelectFixedRecipeAsync(plan, directive, ct))
             return;
@@ -2541,7 +2560,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             frameInPair++;
                             using var fresh = Capture(token);
                             bool detail = await IsRecipeDetailStructureAsync(fresh, token);
-                            bool identity = detail && await FindRecipeAsync(fresh, plan, token) is not null;
+                            bool identity = detail && await FindRecipeAsync(fresh, plan, token) is not null; // medicine: proven selection, no name OCR
                             bool remote = detail && (await DetectRemoteProcessStateAsync(fresh, token)).IsRemote;
                             Point candidate = Point.Empty;
                             bool button = detail && TryFindFreeProcessButtonVisual(fresh, out candidate);
@@ -2567,7 +2586,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                             plan.FacilityName, reason, new InvalidOperationException(reason));
                     }
                     visualActionCenter = priorVerifiedCenter;
-                    await RequireManagedIdleAsync(plan, directive, "품목명 확인 후 입력 직전", ct);
+                    await RequireManagedIdleAsync(plan, directive, "선택 제법 및 무료 버튼 확인 후 입력 직전", ct);
                 }
 
                 // N01: never click an earlier bitmap's remembered button
