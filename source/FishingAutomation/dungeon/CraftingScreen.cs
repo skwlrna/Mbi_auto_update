@@ -1403,7 +1403,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         if (frame.Width != 800 || frame.Height != 1000)
             return false;
-        var roi = CraftActionButtonArea;
+        var roi = CraftingHubLayout.CraftActionButtonArea;
         int action = 0;
         int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
         for (int y = roi.Top + 6; y < roi.Bottom - 6; y += 2)
