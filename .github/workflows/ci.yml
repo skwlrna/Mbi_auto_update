@@ -101,11 +101,14 @@ jobs:
           $match = [regex]::Match($u, 'CurrentVersion = "(V[0-9]+\.[0-9]+\.[0-9]+)"')
           if (-not $match.Success) { throw 'version constant mismatch' }
           $version = $match.Groups[1].Value.Substring(1)
+          # GitHub tag V3.3.00 and Windows/MSBuild version 3.3.0 are the same
+          # numeric triplet. Never compare a zero-padded patch as raw text.
+          $numericVersion = (($version.Split('.') | ForEach-Object { [int]$_ }) -join '.')
           if ($u -notmatch 'RepositoryOwner = "skwlrna"') { throw 'repository owner mismatch' }
           $p = Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
-          foreach ($required in @("<Version>$version</Version>",
-                                   "<AssemblyVersion>$version.0</AssemblyVersion>",
-                                   "<FileVersion>$version.0</FileVersion>")) {
+          foreach ($required in @("<Version>$numericVersion</Version>",
+                                   "<AssemblyVersion>$numericVersion.0</AssemblyVersion>",
+                                   "<FileVersion>$numericVersion.0</FileVersion>")) {
             if (-not $p.Contains($required)) { throw 'project version mismatch' }
           }
           # Auto-repair was intentionally retired; keep it absent.
