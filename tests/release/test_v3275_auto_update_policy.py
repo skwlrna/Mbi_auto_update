@@ -498,6 +498,26 @@ class V3275ReleaseSafety(unittest.TestCase):
             self.assertIn('수정하고 배포해', authorization['request'])
             self.assertIs(authorization['realGameTested'], False)
             self.assertIs(authorization['mainCiRequired'], True)
+        elif 'CurrentVersion = "V3.3.02"' in current:
+            for tag, version in [('Version', '3.3.2'),
+                                 ('AssemblyVersion', '3.3.2.0'),
+                                 ('FileVersion', '3.3.2.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            workflow = (ROOT / '.github/workflows/release-v3302-auto-update.yml').read_text(encoding='utf-8')
+            for token in ('No successful production CI for current main SHA',
+                          'main changed since CI; abort release',
+                          'MabiAuto_V3.3.02_Windows_Lite.zip.sha256',
+                          'gh release create V3.3.02',
+                          'gh release edit V3.3.02 --draft=false',
+                          'Require V3.3.02 medicine F07 selection evidence',
+                          'Require V3.3.02 food and item craft-ready'):
+                self.assertIn(token, workflow)
+            authorization = json.loads(
+                (ROOT / 'source/V3.3.02_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(authorization['sourcePullRequest'], 401)
+            self.assertIn('배포해', authorization['request'])
+            self.assertIs(authorization['realGameTested'], False)
+            self.assertIs(authorization['mainCiRequired'], True)
         else:
             self.assertIn('CurrentVersion = "V3.2.79"', current)
             for tag, version in [('Version', '3.2.79'), ('AssemblyVersion', '3.2.79.0'), ('FileVersion', '3.2.79.0')]:
