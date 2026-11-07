@@ -752,10 +752,12 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
 
     private async Task<bool> IsRecipeDetailStructureAsync(Bitmap frame, CancellationToken ct)
     {
-        // Once this exact fixed-position recipe has been successfully registered,
-        // repeat observations use only the existing fixed free-button geometry.
-        // No '필요한 재료', action label or recipe OCR calls are made.
-        if (_repeatOcrFreeRecipe || _selectedFixedRecipeKey is not null)
+        // For a verified fixed recipe OR a medicine search proven by two
+        // single-result frames and a real detail sheet, all following managed
+        // observations use the fixed free-button visual. Do not OCR the title,
+        // materials label or action label a second time after that proof.
+        if (_repeatOcrFreeRecipe || _selectedFixedRecipeKey is not null ||
+            _selectedMedicineSearchKey is not null)
         {
             ct.ThrowIfCancellationRequested();
             return TryFindFreeProcessButtonVisual(frame, out _);
