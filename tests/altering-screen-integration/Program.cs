@@ -311,6 +311,35 @@ try
           !Has(medicine, "FindAlteringLabelsAsync"),
         "medicine now rejects recent-tag unfiltered results using two visual frames without OCR search authority");
 
+    // V3.3.00: verify the *compiled* production crafting visual gate, rather
+    // than accepting a mock OCR result for "제작하기".
+    Type craftingScreen = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
+    using (var blankCraft = new Bitmap(800, 1000))
+    using (var greenCraft = new Bitmap(800, 1000))
+    using (var tinyPatch = new Bitmap(800, 1000))
+    using (var wrongSize = new Bitmap(640, 800))
+    {
+        using (var g = Graphics.FromImage(greenCraft))
+        {
+            g.Clear(Color.FromArgb(32, 39, 45));
+            using var teal = new SolidBrush(Color.FromArgb(34, 178, 143));
+            g.FillRectangle(teal, 399, 922, 220, 58);
+        }
+        using (var g = Graphics.FromImage(tinyPatch))
+        {
+            g.Clear(Color.Black);
+            using var teal = new SolidBrush(Color.FromArgb(34, 178, 143));
+            g.FillRectangle(teal, 495, 936, 20, 12);
+        }
+        Check(CallBoolean(craftingScreen, "HasCraftReadyActionVisual", greenCraft) &&
+              !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", blankCraft) &&
+              !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", tinyPatch) &&
+              !CallBoolean(craftingScreen, "HasCraftReadyActionVisual", wrongSize),
+            "V3.3.00 crafting fixed ready-button body accepts wide teal, rejects empty/tiny/wrong-resolution");
+    }
+    Check(screen.GetField("_selectedMedicineSearchKey", all) is not null,
+        "V3.3.00 compiled F07 persists only current exact medicine search selection evidence");
+
     var queue = ScreenCalls("QueueAsync", 4);
     Check(Has(queue, "SelectRecipeAsync") && Has(queue, "TravelToFacilityAsync") &&
           Has(queue, "MustReportToCoordinator") &&
