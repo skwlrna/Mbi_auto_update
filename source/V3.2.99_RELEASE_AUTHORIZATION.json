@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "version": "V3.2.99",
+  "purpose": "enter_focused_recent_search_medicine_crafting",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "약품가공점 잘 수정해봐 / 음식도 마찬가지겠는걸 / 확인 했어 (Enter로 검색 입력칸 활성화 확인); earlier explicit 수정하고 배포해",
+  "requestedAtKst": "2026-11-07",
+  "sourcePullRequest": 397,
+  "sourcePullRequests": [
+    397
+  ],
+  "incidentAtKst": "2026-11-07 13:42:52",
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_recent_search_enter",
+  "note": "Observed V3.2.98 medicine search input click at (400,862) landing on recent-search chip; user confirmed Enter opens active input on search popup. Replaces stale coordinate clicking in medicine and crafting, preserves separate result positions (218,412) and (218,613), adds fail-closed medicine 2-frame single-card and closed-Apply-popup proof. Korean OCR is not an entry authority. Actual game behavior on V3.2.99 not yet verified; require CI and rollback before public release."
+}

@@ -383,9 +383,12 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         Log?.Invoke("[제작] 검색창 열림 확인 · OCR 미사용 · 다음 입력 허용");
 
-        _ui.ClickFresh(CraftingHubLayout.ProductSearchInputPoint, ct);
-        Log?.Invoke(
-            $"[제작] 검색 입력칸 · 고정좌표 ({CraftingHubLayout.ProductSearchInputPoint.X},{CraftingHubLayout.ProductSearchInputPoint.Y})");
+        // Recent-search chips can occupy the old (400,862) point.
+        // The user verified that Enter opens text entry in the search popup.
+        // Keep food/item first-result coordinates unchanged.
+        _ui.TapFresh(0x1C, ct); // Enter: focus text input, not commit.
+        Log?.Invoke("[제작] 검색 입력칸 · Enter로 활성화 · 최근 검색어 고정좌표 클릭 금지");
+        await Task.Delay(120, ct);
         _ui.PasteFresh(displayName, ct);
         await Task.Delay(120, ct);
 

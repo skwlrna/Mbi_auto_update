@@ -1670,6 +1670,57 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         return true;
     }
 
+    // 2026-11-07 incident: after a recent-search chip appeared, the old text
+    // field click at (400,862) selected the chip instead. Even after Enter
+    // focuses the editable field, do not mistake a generic ROI pixel change for
+    // a successfully filtered recipe list.
+    // The verified medicine grid starts with a single x=162..275/y=330..493
+    // card when a unique search is applied. Other cards are 121px apart.
+    // Count icon + title ink in each card interior. This check is intentionally
+    // fail-closed when textures/lighting no longer match the observed layout.
+    private static int CountMedicineSearchCardInk(Bitmap frame, Rectangle area)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return 0;
+        int count = 0;
+        for (int y = area.Top; y < area.Bottom; y += 3)
+        for (int x = area.Left; x < area.Right; x += 3)
+        {
+            Color p = frame.GetPixel(x, y);
+            int high = Math.Max(p.R, Math.Max(p.G, p.B));
+            int low = Math.Min(p.R, Math.Min(p.G, p.B));
+            if (high >= 95 && (high - low >= 20 || low >= 95))
+                count++;
+        }
+        return count;
+    }
+
+    private static bool IsMedicineSearchApplyPopupVisible(Bitmap frame)
+    {
+        if (frame.Width != 800 || frame.Height != 1000)
+            return true;
+        // Green Apply button body, away from its lettering.
+        int green = 0, sampled = 0;
+        for (int y = 941; y <= 961; y += 4)
+        for (int x = 505; x <= 617; x += 4)
+        {
+            Color p = frame.GetPixel(x, y);
+            sampled++;
+            if (p.G >= 100 && p.G >= p.R + 35 && p.G >= p.B + 14)
+                green++;
+        }
+        return green * 5 >= sampled;
+    }
+
+    private static bool HasSingleMedicineSearchResultVisual(
+        Bitmap frame, out int firstInk, out int secondInk)
+    {
+        firstInk = CountMedicineSearchCardInk(frame, new Rectangle(182, 355, 74, 118));
+        secondInk = CountMedicineSearchCardInk(frame, new Rectangle(303, 355, 74, 118));
+        // First card must have real icon/title pixels; no visible second card.
+        return firstInk >= 12 && secondInk <= 5;
+    }
+
     private async Task<bool> TrySelectMedicineRecipeBySearchAsync(
         AlteringPlan plan,
         AlteringFacilityEntryDirective directive,
@@ -1710,9 +1761,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
 
         Log?.Invoke("[자동 가공] 약품 검색창 열림 확인 · OCR 미사용 · 다음 입력 허용");
-        await RequireManagedIdleAsync(plan, directive, "약품 검색어 입력 직전", ct);
-        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
-        Log?.Invoke($"[자동 가공] 약품 검색 입력칸 · 고정좌표 ({AlteringRecipeLayout.ProcessingSearchInputPoint.X},{AlteringRecipeLayout.ProcessingSearchInputPoint.Y})");
+        // 2026-11-07 live incident: the former (400,862) lands on a
+        // newly inserted recent-search chip, not the editable text field.
+        // The user verified Enter focuses the actual text field while the
+        // search popup is open. Do not click a stale popup coordinate.
+        await RequireManagedIdleAsync(plan, directive, "약품 검색 입력칸 Enter 활성화 직전", ct);
+        _ui.TapFresh(0x1C, ct); // Enter: focus text entry, NOT recipe commit.
+        Log?.Invoke("[자동 가공] 약품 검색 입력칸 · Enter로 활성화 · 최근 검색어 고정좌표 클릭 금지");
+        await Task.Delay(120, ct);
+        await RequireManagedIdleAsync(plan, directive, "약품 검색어 붙여넣기 직전", ct);
         _ui.PasteFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
         await RequireManagedIdleAsync(plan, directive, "약품 검색 Enter 직전", ct);
@@ -1731,26 +1788,32 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
             beforeApply,
             resultFrame,
             AlteringRecipeLayout.ProcessingSearchResultArea);
-        var exact = await _ui.Ocr.FindAlteringLabelsAsync(
-            resultFrame,
-            AlteringRecipeLayout.ProcessingSearchResultArea,
-            plan.DisplayName,
-            ct,
-            cardCandidate: directive == AlteringFacilityEntryDirective.Automatic);
-
-        // 음식 제작과 동일: 검색어 OCR은 보조 증거다. 한 건만 일치하면
-        // 성공으로 취급하고, OCR 미검출/중복이어도 검색 목록 화면이
-        // 실제로 전환됐다면 고정 첫 번째 결과를 선택한다.
-        bool exactUnique = exact.Count == 1;
+        // OCR is intentionally not a search-entry authority: the recent-query
+        // chip incident proved that an unfiltered list can change by 10.5%.
+        // Require a closed apply popup and exactly one populated result card
+        // in TWO new screenshots before the existing first-card click.
+        bool firstOnly = HasSingleMedicineSearchResultVisual(
+            resultFrame, out int firstInk, out int secondInk);
+        bool popupVisible = IsMedicineSearchApplyPopupVisible(resultFrame);
         Log?.Invoke(
-            exactUnique
-                ? $"[자동 가공] 약품 검색 결과 · exact OCR 확인 · 화면 변화 {resultRatio:P1}"
-                : $"[자동 가공] 약품 검색 결과 · OCR 미검출/중복 · 화면 변화 {resultRatio:P1}");
-
-        if (!exactUnique &&
-            resultRatio < AlteringRecipeLayout.ProcessingSearchResultChangeRatio)
+            $"[자동 가공] 약품 검색 결과 검증 1/2 · 화면 변화={resultRatio:P1} · " +
+            $"첫 카드 픽셀={firstInk} · 둘째 카드 픽셀={secondInk} · 적용창잔류={popupVisible}");
+        if (!firstOnly || popupVisible)
             Fail(resultFrame,
-                $"약품 검색 적용 후 결과 화면 전환을 확인하지 못했습니다. 변화율={resultRatio:P1} · 첫 결과 클릭 없이 정지");
+                "약품 검색 결과가 단일 품목으로 확정되지 않았거나 적용창이 남아 있습니다. " +
+                "최근 검색어/전체 목록을 첫 카드로 오인하지 않도록 입력 없이 정지합니다.");
+
+        await Task.Delay(180, ct);
+        using var secondResultFrame = Capture(ct);
+        bool secondFirstOnly = HasSingleMedicineSearchResultVisual(
+            secondResultFrame, out int secondFirstInk, out int secondSecondInk);
+        bool secondPopupVisible = IsMedicineSearchApplyPopupVisible(secondResultFrame);
+        Log?.Invoke(
+            $"[자동 가공] 약품 검색 결과 검증 2/2 · " +
+            $"첫 카드 픽셀={secondFirstInk} · 둘째 카드 픽셀={secondSecondInk} · 적용창잔류={secondPopupVisible}");
+        if (!secondFirstOnly || secondPopupVisible)
+            Fail(secondResultFrame,
+                "약품 검색 결과 단일 카드/적용창 닫힘 상태가 연속 2프레임에서 확인되지 않아 입력 없이 정지합니다.");
 
         if (plan.RecipeOrdinal != 1)
             Fail(resultFrame,
@@ -1759,7 +1822,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         await RequireManagedIdleAsync(plan, directive, "약품 검색 결과 선택 직전", ct);
         _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchFirstResultPoint, ct);
         Log?.Invoke(
-            $"[자동 가공] 약품 검색 첫 결과 선택 · 음식 제작과 동일한 고정좌표 " +
+            $"[자동 가공] 약품 검색 첫 결과 선택 · 약품 전용 검증 좌표 " +
             $"({AlteringRecipeLayout.ProcessingSearchFirstResultPoint.X},{AlteringRecipeLayout.ProcessingSearchFirstResultPoint.Y})");
         await Task.Delay(550, ct);
 
