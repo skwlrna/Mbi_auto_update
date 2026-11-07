@@ -1710,9 +1710,15 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 $"약품 검색 돋보기 입력 후 검색창 화면 전환을 확인하지 못했습니다. 변화율={openRatio:P1}");
 
         Log?.Invoke("[자동 가공] 약품 검색창 열림 확인 · OCR 미사용 · 다음 입력 허용");
-        await RequireManagedIdleAsync(plan, directive, "약품 검색어 입력 직전", ct);
-        _ui.ClickFresh(AlteringRecipeLayout.ProcessingSearchInputPoint, ct);
-        Log?.Invoke($"[자동 가공] 약품 검색 입력칸 · 고정좌표 ({AlteringRecipeLayout.ProcessingSearchInputPoint.X},{AlteringRecipeLayout.ProcessingSearchInputPoint.Y})");
+        // 2026-11-07 live incident: the former (400,862) lands on a
+        // newly inserted recent-search chip, not the editable text field.
+        // The user verified Enter focuses the actual text field while the
+        // search popup is open. Do not click a stale popup coordinate.
+        await RequireManagedIdleAsync(plan, directive, "약품 검색 입력칸 Enter 활성화 직전", ct);
+        _ui.TapFresh(0x1C, ct); // Enter: focus text entry, NOT recipe commit.
+        Log?.Invoke("[자동 가공] 약품 검색 입력칸 · Enter로 활성화 · 최근 검색어 고정좌표 클릭 금지");
+        await Task.Delay(120, ct);
+        await RequireManagedIdleAsync(plan, directive, "약품 검색어 붙여넣기 직전", ct);
         _ui.PasteFresh(plan.DisplayName, ct);
         await Task.Delay(120, ct);
         await RequireManagedIdleAsync(plan, directive, "약품 검색 Enter 직전", ct);
