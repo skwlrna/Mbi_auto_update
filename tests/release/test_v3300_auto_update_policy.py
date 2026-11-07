@@ -10,10 +10,14 @@ def read(path):
 
 class V3300ProductionReleaseSafety(unittest.TestCase):
     def test_version_and_real_game_state_are_explicit(self):
-        self.assertTrue(any(f'CurrentVersion = "{v}"' in read("source/FishingAutomation/UpdateManager.cs") for v in ("V3.3.00", "V3.3.01")))
+        current = read("source/FishingAutomation/UpdateManager.cs")
+        versions = {"V3.3.00": ("3.3.0", "3.3.0.0", "3.3.0.0"),
+                    "V3.3.01": ("3.3.1", "3.3.1.0", "3.3.1.0"),
+                    "V3.3.02": ("3.3.2", "3.3.2.0", "3.3.2.0")}
+        active = next((v for v in versions if f'CurrentVersion = "{v}"' in current), None)
+        self.assertIsNotNone(active)
         project = read("source/FishingAutomation/FishingAutomation.csproj")
-        for key, value in (("Version","3.3.1"), ("AssemblyVersion","3.3.1.0"),
-                           ("FileVersion","3.3.1.0")):
+        for key, value in zip(("Version","AssemblyVersion","FileVersion"), versions[active]):
             self.assertIn(f"<{key}>{value}</{key}>", project)
         auth = json.loads(read("source/V3.3.00_RELEASE_AUTHORIZATION.json"))
         self.assertEqual(auth["version"], "V3.3.00")
