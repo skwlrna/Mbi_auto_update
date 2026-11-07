@@ -629,13 +629,24 @@ jobs:
              $fixedRetry -notmatch 'facilityVisible' -or
              $fixedRetry -notmatch '!moveButtonVisible' -or
              $fixedRetry -notmatch '!retryAlreadyUsed'){throw 'fixed recipe retry safety policy missing'}
-          if($medicineSelect -notmatch 'bool exactUnique = exact.Count == 1' -or
-              $medicineSelect -notmatch 'if \(!exactUnique &&' -or
-              $medicineSelect -notmatch 'ProcessingSearchResultChangeRatio' -or
-              $medicineSelect -match 'IsNearMedicineFirstResult|exact.Count != 1' -or
-              $medicineSelect -notmatch 'await Task.Delay\(550, ct\)' -or
-              $medicineSelect -notmatch 'ProcessingSearchFirstResultPoint'){
-              throw 'medicine search must match food: OCR advisory, ROI transition, first-row click and 550ms settle'
+          # The 2026-11-07 recent-search chip occupies the retired (400,862)
+          # text field point. User verified Enter focuses the real input.
+          # Never let a mere search-ROI pixel change authorize a medicine card.
+          $craftScreen = Get-Content 'source/FishingAutomation/dungeon/CraftingScreen.cs' -Raw
+          $craftSearch = [regex]::Match($craftScreen, 'private async Task SearchProductAsync[\s\S]*?(?=\r?\n    private async Task<bool> IsProductDetailStructureAsync)').Value
+          if($medicineSelect -notmatch 'TapFresh\(0x1C, ct\); // Enter: focus text entry' -or
+             $craftSearch -notmatch 'TapFresh\(0x1C, ct\); // Enter: focus text input' -or
+             $medicineSelect -match 'ClickFresh\(AlteringRecipeLayout\.ProcessingSearchInputPoint' -or
+             $craftSearch -match 'ClickFresh\(CraftingHubLayout\.ProductSearchInputPoint' -or
+             $medicineSelect -notmatch 'HasSingleMedicineSearchResultVisual' -or
+             $medicineSelect -notmatch 'IsMedicineSearchApplyPopupVisible' -or
+             $medicineSelect -notmatch 'await Task.Delay\(180, ct\)' -or
+             $medicineSelect -notmatch 'if \(!firstOnly \|\| popupVisible\)' -or
+             $medicineSelect -notmatch 'if \(!secondFirstOnly \|\| secondPopupVisible\)' -or
+             $medicineSelect -notmatch 'ProcessingSearchFirstResultPoint' -or
+             $medicineSelect -notmatch 'await Task.Delay\(550, ct\)' -or
+             $craftSearch -notmatch 'CraftingHubLayout.ProductFirstResultPoint'){
+             throw 'recent-search popup Enter focus / medicine two-frame sole-card & closed-popup safety missing'
           }
           if($medicineSelect -notmatch 'HasFacilityMoveButtonVisual' -or
              $medicineSelect -notmatch '설비로 이동 버튼이 남아 있어 원격 화면으로 판정' -or
