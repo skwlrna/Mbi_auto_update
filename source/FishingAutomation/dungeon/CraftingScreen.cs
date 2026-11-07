@@ -1457,7 +1457,11 @@ internal sealed class CraftingScreen : ICraftingScreen
             return false;
         var activity = GatheringQueries.ParseActivity(activityResponse);
         // Don't turn an in-flight '제작하러 가기' or gathering state into Space.
-        bool safe = activity.IsSafeField && !activity.IsAutoTraveling &&
+        // An open crafting station can legitimately be a dialogue panel.
+        // Do not require field-only IsSafeField here; block actual unsafe
+        // movement/combat/death/gathering states, not the station UI itself.
+        bool safe = !activity.IsDead && activity.IsReviving != true &&
+                    !activity.IsInCombat && !activity.IsAutoTraveling &&
                     !activity.IsGathering && !activity.IsFishing &&
                     activity.MainButtonState != "Stop";
         if (!safe)
