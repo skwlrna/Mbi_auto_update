@@ -311,6 +311,16 @@ try
           !Has(medicine, "FindAlteringLabelsAsync"),
         "medicine now rejects recent-tag unfiltered results using two visual frames without OCR search authority");
 
+    var filterReuse = Method(screen, "CanReuseMedicineFilter", 3);
+    var directiveType = filterReuse.GetParameters()[0].ParameterType;
+    bool Reuse(string directive, string? oldKey, string newKey) =>
+        (bool)filterReuse.Invoke(null, new object?[] { Enum.Parse(directiveType, directive), oldKey, newKey })!;
+    Check(Reuse("ReuseCoordinatorConfirmedOnsite", "medicine:item:1", "medicine:item:1") &&
+          !Reuse("FreshMoveRequired", "medicine:item:1", "medicine:item:1") &&
+          !Reuse("Automatic", "medicine:item:1", "medicine:item:1") &&
+          !Reuse("ReuseCoordinatorConfirmedOnsite", "medicine:item:1", "medicine:other:1") &&
+          !Reuse("ReuseCoordinatorConfirmedOnsite", null, "medicine:item:1"),
+        "medicine filter reuse requires consecutive manager-confirmed exact facility/recipe identity");
     Check(screen.GetField("_selectedMedicineSearchKey", all) is not null,
         "V3.3.00 compiled F07 persists only current exact medicine search selection evidence");
 

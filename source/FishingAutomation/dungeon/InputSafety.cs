@@ -9,6 +9,7 @@ internal interface IInputController : IDisposable
     void DragClientPoint(nint hwnd, Point startClientPoint, Point endClientPoint, int durationMs, CancellationToken ct);
     void TapScanCode(ushort scanCode, CancellationToken ct);
     void PasteText(string text, CancellationToken ct);
+    void ReplaceText(string text, CancellationToken ct) => throw new NotSupportedException("Text replacement unavailable");
 }
 
 // Native calls live behind these seams. Tests run the production sequencer with
@@ -243,7 +244,11 @@ internal sealed class CancellableInputSequence(
         ct.ThrowIfCancellationRequested();
     }
 
-    internal void Paste(string text, CancellationToken ct)
+    internal void Replace(string text, CancellationToken ct) => Paste(text, ct, replace: true);
+
+    internal void Paste(string text, CancellationToken ct) => Paste(text, ct, replace: false);
+
+    private void Paste(string text, CancellationToken ct, bool replace)
     {
         ct.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(text) || text.Length > 256 || text.Any(char.IsControl))
@@ -253,11 +258,18 @@ internal sealed class CancellableInputSequence(
         using var permit = new InputSendPermit(ct);
         transport.Clipboard(text, ct);
         ct.ThrowIfCancellationRequested();
-        bool ctrl = false, v = false;
+        bool ctrl = false, v = false, a = false;
         try
         {
             KeyDown(permit, 0x1D, ref ctrl);
             Wait(30, ct);
+            if (replace)
+            {
+                KeyDown(permit, 0x1E, ref a); // Ctrl+A selects the existing text.
+                Wait(30, ct);
+                Release(() => transport.Key(0x1E, false)); a = false;
+                Wait(30, ct);
+            }
             KeyDown(permit, 0x2F, ref v);
             Wait(30, ct);
             // Clear only after successful release; on a failed UP fail closed.
@@ -268,7 +280,11 @@ internal sealed class CancellableInputSequence(
         {
             // Even a failing V release must not skip Ctrl release.
             try { if (v && !_releaseFailed) Release(() => transport.Key(0x2F, false)); }
-            finally { if (ctrl) Release(() => transport.Key(0x1D, false)); }
+            finally
+            {
+                try { if (a && !_releaseFailed) Release(() => transport.Key(0x1E, false)); }
+                finally { if (ctrl) Release(() => transport.Key(0x1D, false)); }
+            }
         }
         Wait(80, ct);
     }
