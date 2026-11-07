@@ -88,8 +88,8 @@ jobs:
              $craft -notmatch 'HasTwoFreshCraftReadyFramesAsync' -or
              $return -notmatch 'HasTwoFreshCraftReadyFramesAsync' -or
              $direct -notmatch 'HasTwoFreshCraftReadyFramesAsync' -or
-             $return -notmatch 'HasCraftReadyActionVisual\(immediate\)' -or
-             $direct -notmatch 'HasCraftReadyActionVisual\(immediate\)' -or
+             $return -notmatch 'HasCraftReadyWithStationTransition\(immediate\)' -or
+             $direct -notmatch 'HasCraftReadyWithStationTransition\(immediate\)' -or
              $return -match 'FindUniqueAsync\([\s\S]*?"제작하기"' -or
              $direct -match 'FindUniqueAsync\([\s\S]*?"제작하기"'){
             throw 'V3.3.00 crafting must use 2 fresh button pixels plus final frame, not OCR hard gate'
