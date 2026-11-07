@@ -235,6 +235,46 @@ try
           CallBoolean(recipeLayout, "IsSafeMedicineSearchGeometry"),
         "2026-11-06 medicine first search result uses observed card center; crafting unchanged");
 
+    // 2026-11-07 13:42 live medicine incident: a recent-search chip
+    // consumed the former text-input click and an unfiltered 4-card row
+    // was treated as a successful search. OCR is not the authority here.
+    using (var single = new Bitmap(800, 1000))
+    using (var multi = new Bitmap(800, 1000))
+    using (var openPopup = new Bitmap(800, 1000))
+    {
+        using (var g = Graphics.FromImage(single))
+        {
+            g.Clear(Color.Black);
+            g.FillRectangle(Brushes.Orange, 196, 376, 30, 25);
+            g.FillRectangle(Brushes.White, 195, 452, 49, 12);
+        }
+        using (var g = Graphics.FromImage(multi))
+        {
+            g.Clear(Color.Black);
+            g.FillRectangle(Brushes.Orange, 196, 376, 30, 25);
+            g.FillRectangle(Brushes.White, 195, 452, 49, 12);
+            g.FillRectangle(Brushes.Cyan, 321, 376, 30, 25);
+            g.FillRectangle(Brushes.White, 318, 452, 49, 12);
+        }
+        using (var g = Graphics.FromImage(openPopup))
+        {
+            g.Clear(Color.Black);
+            g.FillRectangle(Brushes.LimeGreen, 500, 936, 130, 32);
+        }
+
+        bool SingleResult(Bitmap bitmap)
+        {
+            object?[] args = { bitmap, 0, 0 };
+            return (bool)Method(screen, "HasSingleMedicineSearchResultVisual", 3)
+                .Invoke(null, args)!;
+        }
+        Check(SingleResult(single) && !SingleResult(multi),
+            "2026-11-07 medicine recent-query visual gate accepts one card and vetoes unfiltered multi-card list");
+        Check(CallBoolean(screen, "IsMedicineSearchApplyPopupVisible", openPopup) &&
+              !CallBoolean(screen, "IsMedicineSearchApplyPopupVisible", single),
+            "medicine cannot click results while green Apply popup remains visible");
+    }
+
     var medicine = ScreenCalls("TrySelectMedicineRecipeBySearchAsync", 3);
     Check(Has(medicine, "ShouldVetoRecipeMoveButton") &&
           Has(medicine, "HasBottomConfirmationModal") &&
