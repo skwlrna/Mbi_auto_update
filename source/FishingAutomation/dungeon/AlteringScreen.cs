@@ -2459,27 +2459,43 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 await RequireManagedIdleAsync(plan, directive, "무료 가공 등록 버튼 직전", ct);
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                 {
-                    // F07: require matching recipe identity and the intended
-                    // free button in TWO new images. Ambiguous output aliases
-                    // never stand in for two differently-qualified recipes.
+                    // F07: each bounded attempt still requires TWO independent
+                    // fresh frames proving exact recipe, on-site state, free button
+                    // and stable geometry. Retry only the read-only verification;
+                    // never retry an input or weaken recipe/remote veto.
                     Point priorVerifiedCenter = Point.Empty;
-                    bool exactDetail = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsAsync(
-                        async token =>
+                    int currentF07Attempt = 0;
+                    int frameInPair = 0;
+                    bool exactDetail = await AlteringRecipeIdentityPolicy.VerifyTwoFreshObservationsWithRetriesAsync(
+                        async (attempt, token) =>
                         {
+                            if (currentF07Attempt != attempt)
+                            {
+                                currentF07Attempt = attempt;
+                                frameInPair = 0;
+                                priorVerifiedCenter = Point.Empty;
+                            }
+                            frameInPair++;
                             using var fresh = Capture(token);
-                            if (!await IsRecipeDetailStructureAsync(fresh, token) ||
-                                await FindRecipeAsync(fresh, plan, token) is null ||
-                                (await DetectRemoteProcessStateAsync(fresh, token)).IsRemote ||
-                                !TryFindFreeProcessButtonVisual(fresh, out Point candidate))
-                                return false;
-                            if (priorVerifiedCenter != Point.Empty &&
-                                !AlteringRecipeIdentityPolicy.IsStableFreshFreeActionTarget(
-                                    priorVerifiedCenter, candidate, FreeProcessVisualButton))
-                                return false;
-                            priorVerifiedCenter = candidate;
-                            return true;
+                            bool detail = await IsRecipeDetailStructureAsync(fresh, token);
+                            bool identity = detail && await FindRecipeAsync(fresh, plan, token) is not null;
+                            bool remote = detail && (await DetectRemoteProcessStateAsync(fresh, token)).IsRemote;
+                            Point candidate = Point.Empty;
+                            bool button = detail && TryFindFreeProcessButtonVisual(fresh, out candidate);
+                            bool stable = button && (priorVerifiedCenter == Point.Empty ||
+                                AlteringRecipeIdentityPolicy.IsStableFreshFreeActionTarget(
+                                    priorVerifiedCenter, candidate, FreeProcessVisualButton));
+                            bool valid = detail && identity && !remote && button && stable;
+                            Log?.Invoke(
+                                $"[자동 가공][F07] {plan.DisplayName} · 재검증 {attempt}/3 프레임 {frameInPair}/2 · " +
+                                $"상세={detail} · 제법={identity} · 원격={remote} · 무료버튼={button} · " +
+                                $"좌표=({candidate.X},{candidate.Y}) · 위치안정={stable}");
+                            if (valid)
+                                priorVerifiedCenter = candidate;
+                            return valid;
                         },
                         Task.Delay,
+                        3,
                         ct);
                     if (!exactDetail)
                     {
