@@ -623,6 +623,19 @@ Assert(mainFormSource.Contains("_schedulerMonitor.RequestStop()") &&
        mainFormSource.Contains("_schedulerMonitor.Observe(TimeSpan.FromMinutes(15))"),
     "F10 and application stop update telemetry without changing cancellation ownership");
 
+// Repeated transient read failures may recover on the fourth bounded attempt.
+int lateReadCalls = 0;
+var readBackoffs = new List<double>();
+int lateRead = await SchedulerReadOnlyRetry.RunAsync<int>(_ =>
+    ++lateReadCalls < 4 ? Task.FromException<int>(new TimeoutException()) : Task.FromResult(9),
+    CancellationToken.None, delay: (wait, _) =>
+    {
+        readBackoffs.Add(wait.TotalMilliseconds);
+        return Task.CompletedTask;
+    });
+Assert(lateRead == 9 && lateReadCalls == 4 && readBackoffs.SequenceEqual(new double[] { 300, 1000, 3000 }),
+    "fourth read recovers with bounded incremental backoff and no input replay");
+
 // Phase 3: retries are authorized ONLY for read-only scheduler queries.
 int readCalls = 0;
 int readAdvisories = 0;
@@ -677,7 +690,7 @@ try
     throw new Exception("read retry overflow");
 }
 catch (IOException) { }
-Assert(exhausted == 2, "read retry budget is at most two attempts");
+Assert(exhausted == 4, "read-only retry budget is at most four attempts");
 
 using (var stopCts = new CancellationTokenSource())
 {
@@ -964,5 +977,58 @@ catch (InvalidOperationException ex) when (
 }
 Assert(mixedWoodStopped && mixedWoodManagerCalls == 0,
     "wood: mixed completed/running lane stops before manager input");
+
+// V3.3.03: a frozen wood lane must not prevent a healthy metal lane
+// from reaching its guarded callback. Queue recovery must be read, not assumed.
+foreach (bool recoverWood in new[] { false, true })
+{
+    DateTimeOffset clock = new(2026, 11, 8, 0, 0, 0, TimeSpan.Zero);
+    var start = clock;
+    var wood = new AlteringPlan("목재 가공 시설", "목재", 1, 1, false);
+    var metal = new AlteringPlan("금속 가공 시설", "철괴", 1, 1, false);
+    int woodCalls = 0, metalCalls = 0;
+    bool allStalled = false;
+    var messages = new List<string>();
+    var runner = new MultiAlteringCoordinator(now: () => clock);
+    runner.Log += messages.Add;
+    try
+    {
+        await runner.RunAsync(new[] { wood, metal }, (plan, _, _) =>
+        {
+            if (plan.FacilityName == wood.FacilityName)
+            {
+                woodCalls++;
+                Assert(recoverWood && (clock - start).TotalSeconds >= 240,
+                    "stalled lane receives no callback until its live works recover");
+            }
+            else metalCalls++;
+            return Task.FromResult(true);
+        }, _ =>
+        {
+            double elapsed = (clock - start).TotalSeconds;
+            long woodSeconds = recoverWood && elapsed >= 180 ? Math.Max(0, 240 - (long)elapsed) : 500;
+            long metalSeconds = Math.Max(0, 180 - (long)elapsed);
+            return Task.FromResult<IReadOnlyList<AlteringWork>>(new[] {
+                new AlteringWork("목재", wood.FacilityName, woodSeconds == 0 ? "Completed" : "InProgress", woodSeconds == 0, woodSeconds),
+                new AlteringWork("철괴", metal.FacilityName, metalSeconds == 0 ? "Completed" : "InProgress", metalSeconds == 0, metalSeconds)
+            });
+        }, (_, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            clock += TimeSpan.FromSeconds(60);
+            if ((clock - start).TotalMinutes > 10) throw new Exception("unbounded stall recovery loop");
+            return Task.CompletedTask;
+        }, CancellationToken.None);
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("다중가공 시설별 정체 감지"))
+    {
+        allStalled = true;
+    }
+    Assert(metalCalls == 1 && woodCalls == (recoverWood ? 1 : 0) && allStalled == !recoverWood,
+        "healthy independent facility completes despite another frozen lane");
+    Assert(messages.Any(x => x.Contains("[시설 보류]")) &&
+           (!recoverWood || messages.Any(x => x.Contains("[시설 재확인]"))),
+        "stall hold and observed recovery are visible in runtime logs");
+}
 
 Console.WriteLine("Combined scheduler regressions passed.");

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": "V3.3.03",
+  "purpose": "bounded_macro_recovery_and_redundant_wait_reduction",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정해서 배포해",
+  "requestedAtKst": "2026-11-08",
+  "sourcePullRequest": 403,
+  "realGameTested": false,
+  "postUpdateGameTestingPending": true,
+  "offlineRegressionRequired": true,
+  "rollbackProvided": true,
+  "mainCiRequired": true,
+  "rolloutMode": "user_requested_ci_gated_macro_recovery",
+  "note": "Lane-local stall handling, shorter initial arrival stabilization, elapsed dialogue wait, bounded read retries and fresh-frame revalidation. Real-game acceptance pending."
+}

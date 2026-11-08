@@ -28,7 +28,7 @@ public static class SchedulerReadOnlyRetry
         Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         ArgumentNullException.ThrowIfNull(readOnlyQuery);
-        for (int attempt = 1; attempt <= 2; attempt++)
+        for (int attempt = 1; attempt <= 4; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
@@ -36,11 +36,12 @@ public static class SchedulerReadOnlyRetry
                 return await readOnlyQuery(cancellationToken);
             }
             catch (Exception error) when (
-                attempt == 1 && !cancellationToken.IsCancellationRequested &&
+                attempt < 4 && !cancellationToken.IsCancellationRequested &&
                 IsTransient(error))
             {
-                advisory?.Invoke("[스케줄러 조회] 일시적 조회 오류 · 1회 재조회 후 실패 시 안전 정지");
-                await (delay ?? Task.Delay)(TimeSpan.FromMilliseconds(300), cancellationToken);
+                advisory?.Invoke($"[스케줄러 조회] 일시적 조회 오류 · 재조회 {attempt}/3 · 게임 입력 없음");
+                int backoffMs = attempt switch { 1 => 300, 2 => 1000, _ => 3000 };
+                await (delay ?? Task.Delay)(TimeSpan.FromMilliseconds(backoffMs), cancellationToken);
             }
         }
         throw new InvalidOperationException("조회 재시도 횟수 초과"); // unreachable

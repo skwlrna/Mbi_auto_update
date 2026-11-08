@@ -1791,8 +1791,10 @@ Check(AlteringTravelActivityPolicy.AssessAfterMove(
       AlteringTravelActivityPolicy.AssessAfterMove(
         travelIdle with { IsWaitingForSelection = true }) ==
       AlteringTravelActivityVerdict.AwaitPossibleTravelDialog &&
-      AlteringTravelActivityPolicy.MaxAmbiguousFrames == 8,
-    "F9 travel: transient CLI dialogue/selection observes at most eight no-input frames");
+      AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(TimeSpan.FromMilliseconds(9999)) &&
+      !AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(TimeSpan.FromSeconds(10)) &&
+      !AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(TimeSpan.FromMilliseconds(-1)),
+    "F9 travel: transient CLI dialogue/selection observes up to ten elapsed seconds without input");
 Check(AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
         travelIdle with { IsDialoguePlaying = true, IsWaitingForSelection = true }) &&
       !GatheringSafetyPolicy.IsSafeField(
@@ -2401,11 +2403,11 @@ Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         TimeSpan.FromSeconds(4)) &&
       !AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
-        TimeSpan.FromMilliseconds(2999)),
+        TimeSpan.FromMilliseconds(599)),
     "16:43 arrival regression: facility arrival cannot be authorized by a short move-button disappearance");
 Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
-        TimeSpan.FromSeconds(3)),
+        TimeSpan.FromMilliseconds(600)),
     "18:16 sufficient-material regression: facility arrival requires the full stable frame and duration threshold");
 Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
     "facility arrival keeps a delayed final recheck after the stable window");
