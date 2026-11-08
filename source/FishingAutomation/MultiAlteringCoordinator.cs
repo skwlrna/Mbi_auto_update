@@ -1306,6 +1306,31 @@ internal sealed class MultiAlteringCoordinator
                         }
                         break;
                     }
+                    catch (MaterialSupplyHoldException capacityHold)
+                        when (recheckUnavailableRoute is not null &&
+                              capacityHold.Evidence.Category == "bag_capacity_90pct")
+                    {
+                        // This is only a safe lane-local deferral if the parent
+                        // queue was empty before gathering and remains empty.
+                        // A possible registration/receipt must still fail closed.
+                        var afterHold = await readWorks(ct);
+                        _laneState?.AssertAccess(facility, _laneOwner);
+                        _laneState?.Observe(facility, afterHold, allowShrink: false);
+                        if (beforeCount != 0 ||
+                            afterHold.Any(x => x.FacilityName == facility))
+                            throw new InvalidOperationException(
+                                "가방 무게 보류 중 시설 작업 상태 미확정 · 중복 실행 방지를 위해 안전 정지",
+                                capacityHold);
+                        persistMaterialHold?.Invoke(plan, capacityHold.Evidence);
+                        held[facility] = (plan, capacityHold.Evidence,
+                            _now() + TimeSpan.FromSeconds(30));
+                        prepared.Remove(Key(plan));
+                        works = afterHold;
+                        Log?.Invoke($"[다중가공][가방 무게 보류] {facility} · " +
+                            $"{plan.DisplayName} · 대기열 0건 확인 · " +
+                            "채집 중단, 다른 시설 가공 계속 · 30초 후 무게/재료 재검증");
+                        break;
+                    }
                     catch (DrainedMaterialSupplyHoldException hold)
                         when (recheckUnavailableRoute is not null &&
                               hold.FacilityName == facility)
