@@ -904,6 +904,18 @@ public sealed partial class MainForm
                         alteringWorkFence.ConfirmBatchReturn(workTicket, 0, false);
                         throw;
                     }
+                    catch (GatheringBagCapacityException)
+                        when (automation.ConfirmedRegistrationsThisRun == registrationsBefore)
+                    {
+                        // Gathering stopped at the capacity guard. No new parent
+                        // registration was confirmed. The coordinator must also
+                        // verify the facility queue before accepting this hold.
+                        alteringWorkFence.ConfirmBatchReturn(workTicket, 0, false);
+                        Ui(() => _log.Write(
+                            "[다중가공][채집 보류] 가방 무게 90% 도달 · 해당 시설 재료 보류 · 다른 시설 계속"));
+                        throw new MaterialSupplyHoldException(
+                            new MaterialSupplyHold("가방 공간", 1, 0, "bag_capacity_90pct"));
+                    }
                     catch (DrainedMaterialSupplyHoldException hold)
                         when (hold.FacilityName == plan.FacilityName &&
                               automation.ConfirmedRegistrationsThisRun == registrationsBefore)
