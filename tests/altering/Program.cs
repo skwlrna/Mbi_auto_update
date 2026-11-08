@@ -1791,8 +1791,10 @@ Check(AlteringTravelActivityPolicy.AssessAfterMove(
       AlteringTravelActivityPolicy.AssessAfterMove(
         travelIdle with { IsWaitingForSelection = true }) ==
       AlteringTravelActivityVerdict.AwaitPossibleTravelDialog &&
-      AlteringTravelActivityPolicy.MaxAmbiguousFrames == 8,
-    "F9 travel: transient CLI dialogue/selection observes at most eight no-input frames");
+      AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(TimeSpan.FromMilliseconds(9999)) &&
+      !AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(TimeSpan.FromSeconds(10)) &&
+      !AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(TimeSpan.FromMilliseconds(-1)),
+    "F9 travel: transient CLI dialogue/selection observes up to ten elapsed seconds without input");
 Check(AlteringTravelActivityPolicy.CanConfirmVerifiedTravelDialog(
         travelIdle with { IsDialoguePlaying = true, IsWaitingForSelection = true }) &&
       !GatheringSafetyPolicy.IsSafeField(
@@ -2401,11 +2403,11 @@ Check(!AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         TimeSpan.FromSeconds(4)) &&
       !AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
-        TimeSpan.FromMilliseconds(2999)),
+        TimeSpan.FromMilliseconds(599)),
     "16:43 arrival regression: facility arrival cannot be authorized by a short move-button disappearance");
 Check(AlteringFacilityTravelConfirmPolicy.HasStableOnsiteEvidence(
         AlteringFacilityTravelConfirmPolicy.RequiredOnsiteStableFrames,
-        TimeSpan.FromSeconds(3)),
+        TimeSpan.FromMilliseconds(600)),
     "18:16 sufficient-material regression: facility arrival requires the full stable frame and duration threshold");
 Check(AlteringFacilityTravelConfirmPolicy.FinalOnsiteRecheckDelay >= TimeSpan.FromSeconds(1),
     "facility arrival keeps a delayed final recheck after the stable window");
@@ -4818,6 +4820,8 @@ var m2BlockedPlans = new[]
 };
 int m2UnexpectedRegistrations = 0, m2WaitCycles = 0;
 bool m2PerFacilityStopped = false;
+bool m2CancelledAfterIndependentWait = false;
+using var m2IndependentStop = new CancellationTokenSource();
 try
 {
     await m2BlockedScheduler.RunAsync(
@@ -4843,9 +4847,18 @@ try
             {
                 RemainingSeconds = m2BlockedWorks[1].RemainingSeconds - 10
             };
+            if (m2WaitCycles == 4)
+            {
+                m2IndependentStop.Cancel();
+                token.ThrowIfCancellationRequested();
+            }
             return Task.CompletedTask;
         },
-        default);
+        m2IndependentStop.Token);
+}
+catch (OperationCanceledException) when (m2IndependentStop.IsCancellationRequested)
+{
+    m2CancelledAfterIndependentWait = true;
 }
 catch (InvalidOperationException ex)
 {
@@ -4853,11 +4866,11 @@ catch (InvalidOperationException ex)
         ex.Message.Contains("다중가공 시설별 정체 감지") &&
         ex.Message.Contains("목재 가공 시설");
 }
-Check(m2PerFacilityStopped && m2UnexpectedRegistrations == 0 &&
-      m2WaitCycles >= 2 &&
+Check(!m2PerFacilityStopped && m2CancelledAfterIndependentWait &&
+      m2UnexpectedRegistrations == 0 && m2WaitCycles == 4 &&
       m2BlockedLane.QueueDirectiveFor("목재 가공 시설") ==
           AlteringFacilityEntryDirective.FreshMoveRequired,
-    "M2 wait: stalled wood lane stops after 60s despite progressing metal lane, revokes onsite, and never clicks or registers");
+    "M2 wait: stalled wood lane is held after 60s while healthy metal continues; F10 cancels and onsite proof stays revoked");
 
 
 var partialRaceWorks = new AlteringWork[]

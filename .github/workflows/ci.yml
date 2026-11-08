@@ -1323,7 +1323,7 @@ jobs:
               $watchCore -notmatch '다중가공 시설별 정체 감지' -or
               $watchCore -notmatch '임의 설비 이동/모두 받기/Space 재시도 없이 안전 정지' -or
               $multiAlter -notmatch 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' -or
-              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed,\s*deferTimeout: waitingForForeignBatch \|\|\s*observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)' -or
+              $multiAlter -notmatch 'idleWatchdog.Observe\(facility, observed,\s*deferTimeout: !stalledFacilities.ContainsKey\(facility\) &&\s*\(waitingForForeignBatch \|\|\s*observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)\)' -or
                $multiAlter -notmatch 'dependencyWaitWatchdog.Observe\(dependencyFacility!, dependencyWorks\)' -or
               $multiAlter -notmatch 'idleWatchdog.Observe\(facility, afterFacilityWorks\)' -or
               $watchCore -notmatch 'if \(idle < _threshold \|\| deferTimeout\)' -or
@@ -1337,7 +1337,9 @@ jobs:
               $alterTests -notmatch 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' -or
               $alterTests -notmatch 'M2 wait: genuine countdown decreases refresh' -or
               $alterTests -notmatch 'M2 wait: an increasing or noisy countdown cannot conceal' -or
-              $alterTests -notmatch 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane') {
+              $alterTests -notmatch 'M2 wait: stalled wood lane is held after 60s while healthy metal continues' -or
+              $multiAlter -notmatch 'HoldStalledFacility\(facility, ex\)' -or
+              $multiAlter -notmatch 'remainingFacilities.All\(stalledFacilities.ContainsKey\)') {
               throw 'M2 long batch-wait watchdog missing per-facility safety and regression coverage'
           }
           if($multiAlter -notmatch '같은 시설 여러 품목은 앞 품목 완료 후 다음 품목' -or

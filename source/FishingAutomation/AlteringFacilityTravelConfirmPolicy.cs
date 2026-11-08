@@ -10,9 +10,9 @@ internal static class AlteringFacilityTravelConfirmPolicy
     internal static bool IsManagedTravelWithinLimit(TimeSpan elapsed)
         => elapsed >= TimeSpan.Zero && elapsed < ManagedTravelTimeout;
 
-    internal const int RequiredOnsiteStableFrames = 7;
+    internal const int RequiredOnsiteStableFrames = 3;
     internal const int MaxTravelConfirmationSpaces = 2;
-    internal static readonly TimeSpan RequiredOnsiteStableDuration = TimeSpan.FromSeconds(3);
+    internal static readonly TimeSpan RequiredOnsiteStableDuration = TimeSpan.FromMilliseconds(600);
     internal static readonly TimeSpan FinalOnsiteRecheckDelay = TimeSpan.FromMilliseconds(1200);
 
     internal static bool ShouldConfirmAfterMoveClick(
@@ -94,7 +94,7 @@ internal static class AlteringFacilityTravelConfirmPolicy
     // may finish before the first post-click capture. Require TWO separate
     // visual anchors: a POSITIVELY observed remote move button before the
     // click and the actual onsite close-X after the click, with the remote
-    // move control absent. Still require CLI idle, no modal, 7 stable frames,
+    // move control absent. Still require CLI idle, no modal, 3 stable frames,
     // and an independent delayed final capture in the caller. Neither an
     // OCR title miss nor a click alone can establish this path.
     internal static bool HasVerifiedManagedInstantArrival(

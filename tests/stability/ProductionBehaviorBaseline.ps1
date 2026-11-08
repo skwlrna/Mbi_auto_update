@@ -65,10 +65,11 @@ Match-Required $multiAlter 'new MultiAlteringWaitWatchdog\(_idleThreshold, _now\
 # The V3.2.19 wood-completed timeout exception remains; V3.2.96 adds
 # a distinct cooperative wait ONLY while an independently watched foreign
 # intermediate facility has confirmed active CLI work (no parent input).
-Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, observed,\s*deferTimeout: waitingForForeignBatch \|\|\s*observed\.Length > 0 && observed\.All\(x => x\.IsCompleted\)\)' 'only completed parent lanes or independently monitored prerequisite waits may defer receipt timeout'
+Match-Required $multiAlter 'deferTimeout: !stalledFacilities.ContainsKey\(facility\) &&\s*\(waitingForForeignBatch \|\|\s*observed.Length > 0 && observed.All\(x => x.IsCompleted\)\)' 'only completed parent lanes or independently monitored prerequisite waits may defer receipt timeout'
 Match-Required $multiAlter 'var dependencyWaitWatchdog = new MultiAlteringWaitWatchdog\(_idleThreshold, _now\)' 'cooperative intermediate wait owns a separate unchanged-stall deadline'
 Match-Required $multiAlter 'dependencyWaitWatchdog\.Observe\(dependencyFacility!, dependencyWorks\)' 'foreign dependency has live CLI watchdog even if not a selected F9 facility'
-Match-Required $multiAlter '중간재료 시설 정체' 'foreign dependency stall invalidates onsite proof and stops without input'
+Match-Required $multiAlter 'HoldStalledFacility\(facility, ex\)' 'dependency or facility stall invalidates onsite proof and holds its own lane'
+Match-Required $multiAlter 'remainingFacilities.All\(stalledFacilities.ContainsKey\)' 'all stalled remaining facilities terminate without declaring completion'
 Match-Required $multiAlter 'if \(idle < _threshold \|\| deferTimeout\)' 'watchdog deferral preserves rather than resets its original deadline'
 Match-Required $multiAlter 'idleWatchdog\.Observe\(facility, afterFacilityWorks\)' 'manager no-op rechecks the same timeout before further processing'
 Match-Required $multiAlter 'if \(works.Count == 0\)' 'empty facility stays idle and clears stale watchdog history'
@@ -87,7 +88,7 @@ Match-Required $multiAlter '다중가공 시설별 정체 감지' 'persistent id
 Match-Required $multiAlter '_laneState\?\.InvalidateOnsite' 'stalled facility revokes cached manager onsite proof'
 Match-Required $alterTests 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' 'M2 long wait timeout has executable regression'
 Match-Required $alterTests 'M2 wait: genuine countdown decreases refresh' 'M2 legitimate long work is not prematurely stopped'
-Match-Required $alterTests 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane' 'M2 one healthy facility cannot hide another stalled lane'
+Match-Required $alterTests 'M2 wait: stalled wood lane is held after 60s while healthy metal continues' 'M2 one healthy facility cannot hide another stalled lane'
 
 # M3: saved jobs/sessions do not attest where the character stands after F9.
 # The central manager must distinguish Unknown from both verified onsite and
@@ -401,8 +402,8 @@ Match-Required $alterTests 'M4: selected item disappearing while another complet
 
 # 4b) 16:43 real-world regression: transient move-button disappearance cannot prove arrival.
 $facilityTravel = Method-Block $alter 'private async Task TravelToFacilityAsync' '\r?\n    // Free navigation only' 'facility travel arrival'
-Match-Required $travelPolicy 'RequiredOnsiteStableFrames = 7' 'facility arrival requires seven stable observations'
-Match-Required $travelPolicy 'RequiredOnsiteStableDuration = TimeSpan\.FromSeconds\(3\)' 'facility arrival requires a three-second stable window'
+Match-Required $travelPolicy 'RequiredOnsiteStableFrames = 3' 'facility arrival requires three stable observations'
+Match-Required $travelPolicy 'RequiredOnsiteStableDuration = TimeSpan\.FromMilliseconds\(600\)' 'facility arrival requires a bounded initial stable window before independent final check'
 Match-Required $travelPolicy 'FinalOnsiteRecheckDelay = TimeSpan\.FromMilliseconds\(1200\)' 'facility arrival has a delayed fresh final recheck'
 Match-Required $travelPolicy 'autoTraveling == false' 'unknown/stale CLI cannot prove facility arrival'
 Match-Required $facilityTravel 'HasStableOnsiteEvidence' 'travel flow uses the long stable-arrival policy'

@@ -3237,7 +3237,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // auto-travel. The counter is consecutive and resets on readable CLI.
         int loadingDepartureStreak = 0;
         bool confirmedMoveTransition = false;
-        int ambiguousTravelActivityFrames = 0;
+        System.Diagnostics.Stopwatch? ambiguousTravelActivityClock = null;
 
         // V3.1.76: start the timer after the first confirmed move click.
         // The old 120 polls (~54 seconds of delays plus CLI/OCR time) could
@@ -3409,14 +3409,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 var travelActivity = AlteringTravelActivityPolicy.AssessAfterMove(activity);
                 if (travelActivity == AlteringTravelActivityVerdict.AwaitPossibleTravelDialog)
                 {
-                    ambiguousTravelActivityFrames++;
+                    ambiguousTravelActivityClock ??= System.Diagnostics.Stopwatch.StartNew();
                     Log?.Invoke("[자동 가공] " + plan.ScreenTitle +
                         " · 이동 직후 CLI 대화/선택 상태, 이동 확인창 재탐색 " +
-                        ambiguousTravelActivityFrames + "/" +
-                        AlteringTravelActivityPolicy.MaxAmbiguousFrames +
+                        $"{ambiguousTravelActivityClock.Elapsed.TotalSeconds:F1}/10초" +
                         " · 입력 없음 · " + AlteringTravelActivityPolicy.Describe(activity));
-                    if (ambiguousTravelActivityFrames <
-                        AlteringTravelActivityPolicy.MaxAmbiguousFrames)
+                    if (AlteringTravelActivityPolicy.CanWaitForAmbiguousActivity(
+                            ambiguousTravelActivityClock.Elapsed))
                         continue;
 
                     throw new InvalidOperationException(
@@ -3424,7 +3423,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         AlteringTravelActivityPolicy.Describe(activity));
                 }
 
-                ambiguousTravelActivityFrames = 0;
+                ambiguousTravelActivityClock = null;
                 if (travelActivity == AlteringTravelActivityVerdict.Unsafe)
                 {
                     Log?.Invoke("[자동 가공] " + plan.ScreenTitle +

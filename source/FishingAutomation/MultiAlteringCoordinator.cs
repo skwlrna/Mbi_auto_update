@@ -787,6 +787,16 @@ internal sealed class MultiAlteringCoordinator
             "[다중가공] 운용 방식 · 시설별 최대 7칸 · 같은 시설 여러 품목은 앞 품목 완료 후 다음 품목 · " +
             "한 칸 완료마다 이동하지 않음 · 현재 배치 전체 완료 후 묶음 수령/재충전");
 
+        var stalledFacilities = new Dictionary<string, InvalidOperationException>(StringComparer.Ordinal);
+        void HoldStalledFacility(string facility, InvalidOperationException error)
+        {
+            Bottlenecks.NoteStalledWork(facility);
+            _laneState?.InvalidateOnsite($"시설별 대기 정체 · {facility} · 화면 재확인 필요");
+            if (!stalledFacilities.ContainsKey(facility))
+                Log?.Invoke($"[다중가공][시설 보류] {facility} · {error.Message} · 다른 독립 시설 계속");
+            stalledFacilities[facility] = error;
+        }
+
         while (completed.Count < plans.Count)
         {
             ct.ThrowIfCancellationRequested();
@@ -816,11 +826,10 @@ internal sealed class MultiAlteringCoordinator
                     var dependencyWorks = works.Where(x =>
                         x.FacilityName == dependencyFacility).ToArray();
                     try { dependencyWaitWatchdog.Observe(dependencyFacility!, dependencyWorks); }
-                    catch (InvalidOperationException)
+                    catch (InvalidOperationException ex)
                     {
-                        _laneState?.InvalidateOnsite(
-                            "중간재료 시설 정체 · " + dependencyFacility + " · 입력 없이 정지");
-                        throw;
+                        HoldStalledFacility(facility, ex);
+                        continue;
                     }
                 }
                 if (waitingForForeignBatch &&
@@ -904,19 +913,15 @@ internal sealed class MultiAlteringCoordinator
                     // An all-completed lane needs one guarded manager turn for
                     // receipt. Do not reset its original stall deadline here.
                     idleWatchdog.Observe(facility, observed,
-                        deferTimeout: waitingForForeignBatch ||
-                        observed.Length > 0 && observed.All(x => x.IsCompleted));
+                        deferTimeout: !stalledFacilities.ContainsKey(facility) &&
+                        (waitingForForeignBatch ||
+                         observed.Length > 0 && observed.All(x => x.IsCompleted)));
+                    if (stalledFacilities.Remove(facility))
+                        Log?.Invoke($"[다중가공][시설 재확인] {facility} · CLI 작업 변화 확인 · 화면/장부 재검증 후 처리");
                 }
                 catch (InvalidOperationException ex)
                 {
-                    // A stalled facility is no longer a safe onsite assumption.
-                    // Invalidate its shared authority and surface the CLI-only
-                    // diagnostic; never start an autonomous movement or receipt.
-                    Bottlenecks.NoteStalledWork(facility);
-                    _laneState?.InvalidateOnsite(
-                        $"시설별 대기 정체 · {facility} · 화면 재확인 필요");
-                    Log?.Invoke($"[다중가공] {ex.Message}");
-                    throw;
+                    HoldStalledFacility(facility, ex);
                 }
             }
 
@@ -978,7 +983,8 @@ internal sealed class MultiAlteringCoordinator
                     continue;
                 // Parent registration can wait for its dependency's existing
                 // work without blocking independent medicine/metal/wood lanes.
-                if (waitingForDependency.ContainsKey(facility))
+                if (waitingForDependency.ContainsKey(facility) ||
+                    stalledFacilities.ContainsKey(facility))
                     continue;
 
                 if (held.TryGetValue(facility, out var waiting))
@@ -1382,12 +1388,10 @@ internal sealed class MultiAlteringCoordinator
                         {
                             idleWatchdog.Observe(facility, afterFacilityWorks);
                         }
-                        catch (InvalidOperationException)
+                        catch (InvalidOperationException ex)
                         {
-                            Bottlenecks.NoteStalledWork(facility);
-                            _laneState?.InvalidateOnsite(
-                                "시설별 대기 정체 · " + facility + " · 화면 재확인 필요");
-                            throw;
+                            HoldStalledFacility(facility, ex);
+                            break;
                         }
                         idleSelections++;
                         if (idleSelections >= Math.Max(1, pendingBefore))
@@ -1434,6 +1438,12 @@ internal sealed class MultiAlteringCoordinator
             Efficiency.EndPass();
             if (completed.Count >= plans.Count)
                 break;
+
+            // Never declare held plans complete or keep an all-stalled run alive.
+            var remainingFacilities = orderedFacilities.Where(f => PendingCount(f) > 0).ToArray();
+            if (remainingFacilities.Length > 0 &&
+                remainingFacilities.All(stalledFacilities.ContainsKey))
+                throw stalledFacilities[remainingFacilities[0]];
 
             if (acted)
                 continue;
