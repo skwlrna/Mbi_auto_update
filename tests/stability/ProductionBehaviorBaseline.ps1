@@ -88,7 +88,7 @@ Match-Required $multiAlter '다중가공 시설별 정체 감지' 'persistent id
 Match-Required $multiAlter '_laneState\?\.InvalidateOnsite' 'stalled facility revokes cached manager onsite proof'
 Match-Required $alterTests 'M2 wait: unchanged CLI queue across repeated multi-batch polling stops safely' 'M2 long wait timeout has executable regression'
 Match-Required $alterTests 'M2 wait: genuine countdown decreases refresh' 'M2 legitimate long work is not prematurely stopped'
-Match-Required $alterTests 'M2 wait: stalled wood lane stops after 60s despite progressing metal lane' 'M2 one healthy facility cannot hide another stalled lane'
+Match-Required $alterTests 'M2 wait: stalled wood lane is held after 60s while healthy metal continues' 'M2 one healthy facility cannot hide another stalled lane'
 
 # M3: saved jobs/sessions do not attest where the character stands after F9.
 # The central manager must distinguish Unknown from both verified onsite and
