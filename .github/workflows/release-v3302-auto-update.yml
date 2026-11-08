@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/release-v3301-auto-update.yml'
+      - '.github/workflows/release-v3302-auto-update.yml'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: v3301-auto-update-release
+  group: v3302-auto-update-release
   cancel-in-progress: false
 
 jobs:
