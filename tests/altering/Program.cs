@@ -4820,6 +4820,8 @@ var m2BlockedPlans = new[]
 };
 int m2UnexpectedRegistrations = 0, m2WaitCycles = 0;
 bool m2PerFacilityStopped = false;
+bool m2CancelledAfterIndependentWait = false;
+using var m2IndependentStop = new CancellationTokenSource();
 try
 {
     await m2BlockedScheduler.RunAsync(
@@ -4845,9 +4847,18 @@ try
             {
                 RemainingSeconds = m2BlockedWorks[1].RemainingSeconds - 10
             };
+            if (m2WaitCycles == 4)
+            {
+                m2IndependentStop.Cancel();
+                token.ThrowIfCancellationRequested();
+            }
             return Task.CompletedTask;
         },
-        default);
+        m2IndependentStop.Token);
+}
+catch (OperationCanceledException) when (m2IndependentStop.IsCancellationRequested)
+{
+    m2CancelledAfterIndependentWait = true;
 }
 catch (InvalidOperationException ex)
 {
@@ -4855,11 +4866,11 @@ catch (InvalidOperationException ex)
         ex.Message.Contains("다중가공 시설별 정체 감지") &&
         ex.Message.Contains("목재 가공 시설");
 }
-Check(m2PerFacilityStopped && m2UnexpectedRegistrations == 0 &&
-      m2WaitCycles >= 2 &&
+Check(!m2PerFacilityStopped && m2CancelledAfterIndependentWait &&
+      m2UnexpectedRegistrations == 0 && m2WaitCycles == 4 &&
       m2BlockedLane.QueueDirectiveFor("목재 가공 시설") ==
           AlteringFacilityEntryDirective.FreshMoveRequired,
-    "M2 wait: stalled wood lane stops after 60s despite progressing metal lane, revokes onsite, and never clicks or registers");
+    "M2 wait: stalled wood lane is held after 60s while healthy metal continues; F10 cancels and onsite proof stays revoked");
 
 
 var partialRaceWorks = new AlteringWork[]
