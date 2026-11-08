@@ -10,10 +10,16 @@ def read(path):
 
 class V3301ProductionReleaseSafety(unittest.TestCase):
     def test_version_and_real_game_state_are_explicit(self):
-        self.assertIn('CurrentVersion = "V3.3.01"', read("source/FishingAutomation/UpdateManager.cs"))
+        current = read("source/FishingAutomation/UpdateManager.cs")
         project = read("source/FishingAutomation/FishingAutomation.csproj")
-        for key, value in (("Version","3.3.1"), ("AssemblyVersion","3.3.1.0"),
-                           ("FileVersion","3.3.1.0")):
+        if 'CurrentVersion = "V3.3.01"' in current:
+            expected = ("3.3.1", "3.3.1.0", "3.3.1.0")
+        else:
+            self.assertIn('CurrentVersion = "V3.3.02"', current)
+            expected = ("3.3.2", "3.3.2.0", "3.3.2.0")
+            self.assertIn("gh release create V3.3.02",
+                          read(".github/workflows/release-v3302-auto-update.yml"))
+        for key, value in zip(("Version","AssemblyVersion","FileVersion"), expected):
             self.assertIn(f"<{key}>{value}</{key}>", project)
         auth = json.loads(read("source/V3.3.01_RELEASE_AUTHORIZATION.json"))
         self.assertEqual(auth["version"], "V3.3.01")
