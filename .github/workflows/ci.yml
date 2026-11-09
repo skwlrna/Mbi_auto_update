@@ -896,7 +896,21 @@ jobs:
           if ($screen -notmatch 'AlteringReceiptPolicy\.CanConfirmCompletion' -or
               $screen -notmatch 'AutoTraveling=true · 추가 Space 차단' -or
               $screen -notmatch 'IsFacilityTravelDialogAsync') { throw 'travel popup/autotravel completion Space veto missing' }
-          if ($screen -notmatch 'p\.G >= 90' -or $screen -notmatch 'green \* 100 >= sampled \* 8') { throw 'completion-result green visual gate missing' }
+          # The old 8%-green area rule falsely called a normal facility
+          # backdrop a modal (2026-11-09 18:13). Lock the bounded control
+          # detector instead; compiled screen regressions above cover green
+          # scenery negatives and real confirmation positives.
+          $confirmationVisual = Get-Content source/FishingAutomation/dungeon/ProductionConfirmationVisual.cs -Raw
+          if ($screen -notmatch 'ProductionConfirmationVisual.HasBoundedGreenButton\(frame, 820\)' -or
+              $screen -notmatch 'ProductionConfirmationVisual.HasBoundedGreenButton\(frame, FacilityTravelConfirmVisual.Top\)') {
+            throw 'shared bounded confirmation detector must cover receipt and travel'
+          }
+          if ($confirmationVisual -notmatch 'width is >= 110 and <= 480' -or
+              $confirmationVisual -notmatch 'height is >= 22 and <= 100' -or
+              $confirmationVisual -notmatch 'count \* 100 >=' -or
+              $confirmationVisual -notmatch 'maxY < rows - 1') {
+            throw 'bounded confirmation control shape/extent proof missing'
+          }
           if ($screen -notmatch 'p\.B >= 95' -or $screen -notmatch 'blue \* 100 >= sampled \* 2') { throw 'tolerant blue collect-button visual gate missing' }
           if ($screen -notmatch 'WaitForCollectPromptAsync' -or $screen -notmatch 'stableFrames >= 2') { throw 'stable completed-work receive wait missing' }
           if ($screen -notmatch 'attempts: 24, delayMs: 250') { throw 'on-site receive wait window missing' }
