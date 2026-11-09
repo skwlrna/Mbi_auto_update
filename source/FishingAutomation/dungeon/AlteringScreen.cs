@@ -43,6 +43,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // button region, still ending before the first 100%-work circle.
     private static readonly Rectangle CollectVisualButton = new(15, 245, 100, 60);
     private static readonly Rectangle FacilityTravelDialog = new(80, 260, 640, 700);
+    private static readonly Rectangle FacilityTravelConfirmVisual = new(120, 340, 560, 620);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
     internal string InputMode => _ui.InputMode;
@@ -2710,7 +2711,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     }
 
     private static bool HasFacilityTravelConfirmationVisual(Bitmap frame)
-        => ProductionConfirmationVisual.HasBoundedGreenButton(frame, 550);
+        => ProductionConfirmationVisual.HasBoundedGreenButton(frame, FacilityTravelConfirmVisual.Top);
 
     // F9-only facility travel modal: the confirmed 800x1000 game screenshot
     // shows a slate panel at x175..625/y754..973 and a WIDE green confirm
