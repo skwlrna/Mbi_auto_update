@@ -311,50 +311,22 @@ internal sealed class CraftingScreen : ICraftingScreen
             !CraftingHubLayout.IsSafeFallbackPoint(category))
             throw new InvalidOperationException("지원하지 않는 제작 허브 분류입니다.");
 
-        DetectionResult? firstHeader = null;
-        for (int pass = 0; pass < 2; pass++)
-        {
-            using var frame = Capture(ct);
-
-            var header = await _ui.Ocr.FindCompactLabelAsync(
-                frame, CraftingHubLayout.HubHeaderArea, "제작", ct);
-            if (!header.Found)
-            {
-                var exact = await _ui.Ocr.FindAlteringLabelsAsync(
-                    frame,
-                    CraftingHubLayout.HubHeaderArea,
-                    "제작",
-                    ct,
-                    acceptedBounds: CraftingHubLayout.HubHeaderArea,
-                    dimText: true);
-                if (exact.Count != 1)
-                    throw Fail(frame,
-                        "제작 허브 상단 제목을 확인하지 못해 고정 카드 좌표 클릭을 중단합니다.");
-                header = exact[0];
-            }
-
-            if (pass == 0)
-            {
-                firstHeader = header;
-                await Task.Delay(150, ct);
-                continue;
-            }
-
-            if (firstHeader is null ||
-                !CraftingHubLayout.IsStableTitle(firstHeader.Value.Bounds, header.Bounds))
-                throw Fail(frame,
-                    "제작 허브 상단 제목 위치가 두 프레임에서 안정적으로 일치하지 않았습니다.");
-
-            // 800x1000 제작 허브는 카드 위치가 고정이다. OCR은 허브 상태
-            // 확인에만 사용하고 음식/아이템 선택 좌표는 저장된 카드 중심을 쓴다.
-            _ui.ClickFresh(fixedPoint, ct);
-            Log?.Invoke(
-                $"[제작] 제작 허브 카드 선택 · {label} · 고정좌표 ({fixedPoint.X},{fixedPoint.Y})");
-            return;
-        }
-
-        using var failed = Capture(ct);
-        throw Fail(failed, $"제작 허브에서 {label} 카드를 선택하지 못했습니다.");
+        // Use the same bounded observation policy as the shared production
+        // runtime. A single OCR miss must not abort a stable crafting hub.
+        var header = await _ui.RequireStableExactAsync(
+            "제작", CraftingHubLayout.HubHeaderArea, ct,
+            "제작 허브 상단 제목을 확인하지 못했습니다.",
+            compact: true, dimText: true, settleMs: 150);
+        using var fresh = Capture(ct);
+        var current = await _ui.FindCompactAsync(
+            fresh, CraftingHubLayout.HubHeaderArea, "제작", ct)
+            ?? await FindUniqueAsync(fresh, CraftingHubLayout.HubHeaderArea, "제작", ct);
+        if (current is null ||
+            !CraftingHubLayout.IsStableTitle(header.Bounds, current.Value.Bounds))
+            throw Fail(fresh, "제작 허브 카드 클릭 직전 제목 위치가 바뀌었습니다.");
+        _ui.ClickFresh(fixedPoint, ct);
+        Log?.Invoke(
+            $"[제작] {label} 제작 허브 카드 선택 · 고정좌표 ({fixedPoint.X},{fixedPoint.Y})");
     }
 
     private async Task SearchProductAsync(string displayName, string category, CancellationToken ct)

@@ -1104,7 +1104,7 @@ try
             Color.FromArgb(15, 205, 93));
         Paint(travelHud, new Rectangle(555, 844, 58, 61),
             Color.FromArgb(13, 190, 86));
-        Check(PixelGate("HasFacilityTravelConfirmationVisual", travelHud) &&
+        Check(!PixelGate("HasFacilityTravelConfirmationVisual", travelHud) &&
               !PixelGate("HasManagedFacilityTravelConfirmationVisual", travelHud),
             "V3.1.69 20:03 after-Space green STOP + skill HUD is NOT a managed travel popup");
 
@@ -1135,7 +1135,7 @@ try
             Color.FromArgb(215, 174, 56));
         Paint(grassyField, new Rectangle(21, 880, 48, 46),
             Color.FromArgb(0, 190, 145));
-        Check(PixelGate("HasBottomConfirmationModal", grassyField) &&
+        Check(!PixelGate("HasBottomConfirmationModal", grassyField) &&
               !PixelGate("HasManagedKEntryBlockingModal", grassyField) &&
               !PixelGate("HasManagedKEntryFieldHudVisual", grassyField),
             "foliage/coloured blobs alone are neither a popup nor positive shortcut evidence");
@@ -1491,6 +1491,29 @@ try
               PixelGate("HasFacilityQueueSlotStructureVisual", pillMiss) &&
               PixelGate("HasVerifiedFacilityMoveClickScreen", pillMiss),
             "remote facility remains input-eligible when teal pill pixels are missed but work-ring structure is intact");
+    }
+    // 2026-11-09 18:13: a normal metal facility's green backdrop was
+    // counted as a confirmation popup. Keep a public reviewed facility
+    // fixture and reproduce ONLY that background; no private log image.
+    using (var greenFacility = new Bitmap(Path.Combine(moveFixtures,
+        "remote-wood-20261007-172137.png")))
+    {
+        Paint(greenFacility, new Rectangle(100, 875, 600, 125),
+            Color.FromArgb(35, 92, 25));
+        Check(!PixelGate("HasFacilityTravelConfirmationVisual", greenFacility) &&
+              !PixelGate("HasBottomConfirmationModal", greenFacility) &&
+              PixelGate("HasVerifiedFacilityEntryScreen", greenFacility) &&
+              PixelGate("HasVerifiedFacilityMoveClickScreen", greenFacility),
+            "18:13 full facility plus green scenery is eligible without a false confirmation veto");
+        // A real rectangular control remains blocking on the same facility.
+        Paint(greenFacility, new Rectangle(175, 754, 450, 218),
+            Color.FromArgb(37, 44, 59));
+        Paint(greenFacility, new Rectangle(405, 889, 189, 55),
+            Color.FromArgb(0, 185, 90));
+        Check(PixelGate("HasFacilityTravelConfirmationVisual", greenFacility) &&
+              PixelGate("HasBottomConfirmationModal", greenFacility) &&
+              !PixelGate("HasVerifiedFacilityEntryScreen", greenFacility),
+            "18:13 fix still blocks an actual travel confirmation over the facility");
     }
     // 2026-10-28 14:38 muted metal move button incident. The private log
     // screenshot is intentionally NOT committed to this public repository.

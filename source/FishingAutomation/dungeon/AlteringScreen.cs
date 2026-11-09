@@ -43,7 +43,6 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     // button region, still ending before the first 100%-work circle.
     private static readonly Rectangle CollectVisualButton = new(15, 245, 100, 60);
     private static readonly Rectangle FacilityTravelDialog = new(80, 260, 640, 700);
-    private static readonly Rectangle FacilityTravelConfirmVisual = new(120, 340, 560, 620);
     private static readonly Rectangle RecipeActionButton = new(150, 820, 540, 170);
     private static readonly Rectangle FreeProcessVisualButton = new(180, 895, 470, 95);
     internal string InputMode => _ui.InputMode;
@@ -2711,45 +2710,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     }
 
     private static bool HasFacilityTravelConfirmationVisual(Bitmap frame)
-    {
-        // The optional "nearby facility unavailable -> move to ..." dialog appears
-        // around the middle of the screen, not only in the old bottom confirmation ROI.
-        // Detect a broad saturated-green confirmation control in the center/lower modal
-        // area. This detector is used as authoritative only immediately after a
-        // facility-move click; elsewhere travel wording is still required.
-        var roi = Rectangle.Intersect(
-            FacilityTravelConfirmVisual,
-            new Rectangle(Point.Empty, frame.Size));
-        if (roi.Width < 300 || roi.Height < 250)
-            return false;
-
-        int sampled = 0;
-        int green = 0;
-        int minX = roi.Right, minY = roi.Bottom, maxX = roi.Left, maxY = roi.Top;
-        for (int y = roi.Top; y < roi.Bottom; y += 3)
-        for (int x = roi.Left; x < roi.Right; x += 3)
-        {
-            Color p = frame.GetPixel(x, y);
-            sampled++;
-            bool confirmGreen =
-                p.G >= 95 &&
-                p.G >= p.R + 40 &&
-                p.G >= p.B + 15;
-            if (!confirmGreen)
-                continue;
-
-            green++;
-            minX = Math.Min(minX, x);
-            minY = Math.Min(minY, y);
-            maxX = Math.Max(maxX, x);
-            maxY = Math.Max(maxY, y);
-        }
-
-        if (sampled == 0 || green * 1000 < sampled * 12)
-            return false;
-
-        return maxX - minX >= 110 && maxY - minY >= 22;
-    }
+        => ProductionConfirmationVisual.HasBoundedGreenButton(frame, 550);
 
     // F9-only facility travel modal: the confirmed 800x1000 game screenshot
     // shows a slate panel at x175..625/y754..973 and a WIDE green confirm
@@ -3044,30 +3005,7 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     }
 
     private static bool HasBottomConfirmationModal(Bitmap frame)
-    {
-        // Screenshot evidence: the modal's confirm control is a broad saturated-green
-        // button around the lower-right quarter. Sample sparsely so detection is fast.
-        var roi = Rectangle.Intersect(new Rectangle(370, 840, 270, 140),
-            new Rectangle(Point.Empty, frame.Size));
-        if (roi.Width < 120 || roi.Height < 60)
-            return false;
-
-        int sampled = 0;
-        int green = 0;
-        for (int y = roi.Top; y < roi.Bottom; y += 4)
-        for (int x = roi.Left; x < roi.Right; x += 4)
-        {
-            Color p = frame.GetPixel(x, y);
-            sampled++;
-            if (p.G >= 90 && p.G >= p.R + 45 && p.G >= p.B + 20)
-                green++;
-        }
-
-        // The real confirmation button covers roughly a quarter of this ROI.
-        // Eight percent leaves ample room for dimming/anti-aliasing while ordinary
-        // facility screens stay far below the threshold.
-        return sampled > 0 && green * 100 >= sampled * 8;
-    }
+        => ProductionConfirmationVisual.HasBoundedGreenButton(frame, 820);
 
     // Screenshot 2026-10-09 07:00, 800x1000: the genuine processing-result
     // screen has FOUR independent anchors (blue chest halo, brown chest body, white centered

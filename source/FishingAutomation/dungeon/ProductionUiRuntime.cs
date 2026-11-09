@@ -239,34 +239,30 @@ internal sealed class ProductionUiRuntime : IDisposable
         int settleMs = 140)
     {
         DetectionResult? first = null;
-
-        for (int pass = 0; pass < 2; pass++)
+        // OCR may omit a label for one capture during a transition. Observe
+        // again without sending input; still require two consecutive stable
+        // positives and the caller's final fresh pre-click verification.
+        const int maxObservations = 6;
+        for (int pass = 0; pass < maxObservations; pass++)
         {
+            ct.ThrowIfCancellationRequested();
             using var frame = Capture(ct);
             DetectionResult? found = compact
                 ? await FindCompactAsync(frame, roi, text, ct)
-                : await FindUniqueAsync(frame, roi, text, ct, dimText);
+                : null;
+            found ??= await FindUniqueAsync(frame, roi, text, ct, dimText);
 
-            if (found is null)
-                throw Failure(frame, failure);
+            if (found is not null && first is not null &&
+                Stable(first.Value.Bounds, found.Value.Bounds))
+                return found.Value;
 
-            if (pass == 0)
-            {
-                first = found;
+            first = found;
+            if (pass + 1 < maxObservations)
                 await Task.Delay(settleMs, ct);
-                continue;
-            }
-
-            if (first is null || !Stable(first.Value.Bounds, found.Value.Bounds))
-                throw Failure(
-                    frame,
-                    failure + " · 두 프레임의 위치가 안정적으로 일치하지 않았습니다.");
-
-            return found.Value;
         }
 
         using var failed = Capture(ct);
-        throw Failure(failed, failure);
+        throw Failure(failed, failure + " · 관찰 한도 내 연속 두 프레임 미확인");
     }
 
     internal async Task<DetectionResult> ClickStableExactAsync(
