@@ -14,7 +14,8 @@ class V3300ProductionReleaseSafety(unittest.TestCase):
         versions = {"V3.3.00": ("3.3.0", "3.3.0.0", "3.3.0.0"),
                     "V3.3.01": ("3.3.1", "3.3.1.0", "3.3.1.0"),
                     "V3.3.02": ("3.3.2", "3.3.2.0", "3.3.2.0"),
-                    "V3.3.03": ("3.3.3", "3.3.3.0", "3.3.3.0")}
+                    "V3.3.03": ("3.3.3", "3.3.3.0", "3.3.3.0"),
+                    "V3.3.04": ("3.3.4", "3.3.4.0", "3.3.4.0")}
         active = next((v for v in versions if f'CurrentVersion = "{v}"' in current), None)
         self.assertIsNotNone(active)
         project = read("source/FishingAutomation/FishingAutomation.csproj")
