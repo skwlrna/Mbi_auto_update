@@ -313,20 +313,13 @@ internal sealed class CraftingScreen : ICraftingScreen
 
         // Use the same bounded observation policy as the shared production
         // runtime. A single OCR miss must not abort a stable crafting hub.
-        var header = await _ui.RequireStableExactAsync(
+        _ = await _ui.RequireStableExactAsync(
             "제작", CraftingHubLayout.HubHeaderArea, ct,
             "제작 허브 상단 제목을 확인하지 못했습니다.",
             compact: true, dimText: true, settleMs: 150);
-        using var fresh = Capture(ct);
-        var current = await _ui.FindCompactAsync(
-            fresh, CraftingHubLayout.HubHeaderArea, "제작", ct)
-            ?? await FindUniqueAsync(fresh, CraftingHubLayout.HubHeaderArea, "제작", ct);
-        if (current is null ||
-            !CraftingHubLayout.IsStableTitle(header.Bounds, current.Value.Bounds))
-            throw Fail(fresh, "제작 허브 카드 클릭 직전 제목 위치가 바뀌었습니다.");
         _ui.ClickFresh(fixedPoint, ct);
         Log?.Invoke(
-            $"[제작] {label} 제작 허브 카드 선택 · 고정좌표 ({fixedPoint.X},{fixedPoint.Y})");
+            $"[제작] 제작 허브 카드 선택 · {label} · 고정좌표 ({fixedPoint.X},{fixedPoint.Y})");
     }
 
     private async Task SearchProductAsync(string displayName, string category, CancellationToken ct)
