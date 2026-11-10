@@ -13,6 +13,7 @@ try
     }
 
     CraftingRestartSafetyTests.Run(Check);
+    CraftingFoodRecipeCatalogTests.Run(Check);
 
     DateTimeOffset ocrAdvisoryNow = new(2026, 11, 3, 0, 0, 0, TimeSpan.Zero);
     var ocrTracker = new CraftingOcrWaitAdvisoryTracker(() => ocrAdvisoryNow);
@@ -642,6 +643,7 @@ try
 
     await CraftingFoodMaterialPolicyTests.RunAsync(Check);
     await CraftingFoodMaterialIntegrationTests.RunAsync(Check, log);
+    await CraftingFoodBatchPolicyTests.RunAsync(Check, log);
     await CraftingFlowTests.RunAsync(Check, log);
     await BulkGatheringFlowTests.RunAsync(Check);
     if (args.Length == 1 && args[0] == "--live-readonly") await LiveReadOnlyTests.RunAsync(Check, log);

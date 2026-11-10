@@ -21,9 +21,9 @@ class V3299RecentSearchPolicy(unittest.TestCase):
         # Historical V3.2.99 policy continues to guard the Enter-search flow
         # after a later version is built; never lock CI to a retired binary.
         current=(ROOT / "source/FishingAutomation/UpdateManager.cs").read_text(encoding="utf-8")
-        self.assertTrue(any(f'CurrentVersion = "{v}"' in current for v in ("V3.2.99", "V3.3.00", "V3.3.01", "V3.3.02", "V3.3.03", "V3.3.04", "V3.3.05", "V3.3.06", "V3.3.07")))
+        self.assertTrue(any(f'CurrentVersion = "{v}"' in current for v in ("V3.2.99", "V3.3.00", "V3.3.01", "V3.3.02", "V3.3.03", "V3.3.04", "V3.3.05", "V3.3.06", "V3.3.07", "V3.3.08")))
         proj=(ROOT / "source/FishingAutomation/FishingAutomation.csproj").read_text(encoding="utf-8")
-        for version,assembly in (("3.2.99","3.2.99.0"),("3.3.0","3.3.0.0"),("3.3.1","3.3.1.0"),("3.3.2","3.3.2.0"),("3.3.3","3.3.3.0"),("3.3.4","3.3.4.0"),("3.3.5","3.3.5.0"),("3.3.6","3.3.6.0"),("3.3.7","3.3.7.0")):
+        for version,assembly in (("3.2.99","3.2.99.0"),("3.3.0","3.3.0.0"),("3.3.1","3.3.1.0"),("3.3.2","3.3.2.0"),("3.3.3","3.3.3.0"),("3.3.4","3.3.4.0"),("3.3.5","3.3.5.0"),("3.3.6","3.3.6.0"),("3.3.7","3.3.7.0"),("3.3.8","3.3.8.0")):
             if f"<Version>{version}</Version>" in proj:
                 self.assertIn(f"<AssemblyVersion>{assembly}</AssemblyVersion>", proj)
                 self.assertIn(f"<FileVersion>{assembly}</FileVersion>", proj)

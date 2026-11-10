@@ -280,6 +280,13 @@ try
     Type craftingScreen = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
     Check(Has(Calls(Method(craftingScreen, "ReadQuestDeficitsAsync", 2)), "ReadQuestDeficitsOnceAsync"),
         "Food OCR retry wrapper reads same-batch quest before failing recognition");
+    Check(Has(Calls(Method(craftingScreen, "ReadQuestDeficitsAsync", 2)), "ReadRegisteredFoodDeficitsAsync"),
+        "Registered foods bypass the legacy OCR name retry wrapper");
+    var registeredCalls = Calls(Method(craftingScreen, "ReadRegisteredFoodDeficitsAsync", 2)).ToList();
+    Check(Has(registeredCalls, "InventoryOnlyCountsWithLoadingRetryAsync") &&
+          Has(registeredCalls, "Deficits") && !Has(registeredCalls, "ReadLinesAsync") &&
+          !Has(registeredCalls, "ReadDimLinesAsync"),
+        "Production registered-food shortages and completion use full recipe CLI stock without material OCR");
     var readQuestCalls = Calls(Method(craftingScreen, "ReadQuestDeficitsOnceAsync", 2)).ToList();
     int inventoryGate = readQuestCalls.FindIndex(x => x.Contains("InventoryOnlyCountWithLoadingRetryAsync", StringComparison.Ordinal));
     int shortagePopup = readQuestCalls.FindIndex(x => x.Contains("OpenQuestPopupAsync", StringComparison.Ordinal));

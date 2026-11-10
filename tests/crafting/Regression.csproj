@@ -14,6 +14,8 @@
     <Compile Include="../../source/FishingAutomation/InventoryBulkGatheringAutomation.cs" Link="InventoryBulkGatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/LifeSkillBulkGatheringAutomation.cs" Link="LifeSkillBulkGatheringAutomation.cs" />
     <Compile Include="../../source/FishingAutomation/LivingSkillGatheringCatalog.cs" Link="LivingSkillGatheringCatalog.cs" />
+    <Compile Include="../../source/FishingAutomation/CraftingFoodBatchPolicy.cs" Link="CraftingFoodBatchPolicy.cs" />
+    <Compile Include="../../source/FishingAutomation/CraftingFoodRecipeCatalog.cs" Link="CraftingFoodRecipeCatalog.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingFoodMaterialPolicy.cs" Link="CraftingFoodMaterialPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingQuestMaterialRecoveryPolicy.cs" Link="CraftingQuestMaterialRecoveryPolicy.cs" />
     <Compile Include="../../source/FishingAutomation/CraftingAutomation.cs" Link="CraftingAutomation.cs" />

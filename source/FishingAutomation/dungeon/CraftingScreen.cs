@@ -10,6 +10,8 @@ internal sealed class CraftingScreen : ICraftingScreen
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("제작");
     private string? _activeCraftingRecipe;
+    private CraftingPlan? _registeredFoodPlan;
+    private IReadOnlyList<CraftingFoodIngredient>? _registeredFoodBatch;
     private string? _directCraftPendingName;
     private int _directCraftPendingCount;
     // The original detail screen must visibly transition before the same
@@ -37,6 +39,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     }
 
     public string InputMode => _ui.InputMode;
+    public IReadOnlyList<CraftingFoodIngredient>? RegisteredFoodBatch => _registeredFoodBatch;
     public event Action<string>? Log;
 
     internal Task<bool> CheckInterruptionsAsync(CancellationToken ct) => _ui.CheckInterruptionsAsync(ct);
@@ -68,63 +71,84 @@ internal sealed class CraftingScreen : ICraftingScreen
         await OpenProductAsync(plan, ct);
         await SetCraftCountAsync(plan.DisplayName, craftCount, ct);
 
-        // CLI Craftable reflects whether the recipe is currently craftable at all
-        // (effectively one craft in the live catalog). For a selected 2~10 craft batch,
-        // the detail UI is authoritative because it already scales every material
-        // requirement to the selected count (e.g. 65/80 for a 10-craft batch).
+        // CLI Craftable describes one craft, not the selected batch. Registered
+        // foods use a complete recipe and fresh stock; unregistered foods/items
+        // retain the selected-detail UI fallback.
         var exact = await _data.ExactAsync(plan.DisplayName, ct);
-        var materialState = await ReadSelectedBatchMaterialStateAsync(plan, craftCount, ct);
-
-        // Refresh canonical ingredient names exposed by the filtered CLI on every
-        // batch. Do not clear names learned by earlier batches: an ingredient that
-        // was sufficient before can become short after prior crafts consume stock.
-        _questRecipeMaterialNames = _questRecipeMaterialNames
-            .Concat(exact.MissingIngredients.Select(ingredient => ingredient.DisplayName))
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        // Seed the quest-name matcher before the quest is created. The CLI gives
-        // canonical names for currently missing one-craft ingredients, while the
-        // selected batch detail can reveal additional ingredients that become short
-        // only after the count is raised (for example 10 crafts). Accept detail OCR
-        // names only when they exactly normalize to one known real item; fuzzy
-        // correction is intentionally deferred until the quest row is read.
-        _questMaterialNameCatalog ??= await LoadQuestMaterialNameCatalogAsync(
-            plan.DisplayName, ct);
-        var detailCanonicalNames = materialState.MaterialNames
-            .Select(name =>
-            {
-                string normalized = FuzzyText.Normalize(name);
-                var matches = _questMaterialNameCatalog
-                    .Where(candidate =>
-                        string.Equals(
-                            FuzzyText.Normalize(candidate),
-                            normalized,
-                            StringComparison.Ordinal))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToArray();
-                return matches.Length == 1 ? matches[0] : null;
-            })
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
-            .ToArray();
-
-        _questRecipeMaterialNames = _questRecipeMaterialNames
-            .Concat(detailCanonicalNames)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
-
-        if (_questRecipeMaterialNames.Count > 0)
-            Log?.Invoke(
-                $"[제작] 퀘스트 생성 전 레시피 재료 후보 확정 · " +
-                string.Join(", ", _questRecipeMaterialNames));
+        (bool Parsed, bool AllEnough, string Summary, IReadOnlyList<string> MaterialNames) materialState;
+        _registeredFoodPlan = null;
+        _registeredFoodBatch = null;
+        if (plan.Category == CraftingCategory.Food &&
+            CraftingFoodRecipeCatalog.TryGet(plan.DisplayName, out var recipe))
+        {
+            _registeredFoodPlan = plan;
+            _registeredFoodBatch = recipe.ForBatch(craftCount);
+            _questRecipeMaterialNames = recipe.Ingredients.Select(x => x.Name).ToArray();
+            var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                _questRecipeMaterialNames, ct, Log);
+            var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
+            materialState = (true, deficits.Count == 0,
+                string.Join(", ", _registeredFoodBatch.Select(x =>
+                    $"{x.Name} CLI {stock[x.Name]}/{x.Amount}")), _questRecipeMaterialNames);
+            Log?.Invoke($"[제작][레시피+CLI] {plan.DisplayName} {craftCount}회 · " +
+                "재료명/수량 OCR 생략 · " + materialState.Summary);
+        }
         else
-            Log?.Invoke(
-                "[제작] 퀘스트 생성 전 레시피 재료 후보를 확정하지 못함 · " +
-                "기존 전체 카탈로그 안전 보정 경로 유지");
+        {
+            materialState = await ReadSelectedBatchMaterialStateAsync(plan, craftCount, ct);
+
+            // Refresh canonical ingredient names exposed by the filtered CLI on every
+            // batch. Do not clear names learned by earlier batches: an ingredient that
+            // was sufficient before can become short after prior crafts consume stock.
+            _questRecipeMaterialNames = _questRecipeMaterialNames
+                .Concat(exact.MissingIngredients.Select(ingredient => ingredient.DisplayName))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+
+            // Seed the quest-name matcher before the quest is created. The CLI gives
+            // canonical names for currently missing one-craft ingredients, while the
+            // selected batch detail can reveal additional ingredients that become short
+            // only after the count is raised (for example 10 crafts). Accept detail OCR
+            // names only when they exactly normalize to one known real item; fuzzy
+            // correction is intentionally deferred until the quest row is read.
+            _questMaterialNameCatalog ??= await LoadQuestMaterialNameCatalogAsync(
+                plan.DisplayName, ct);
+            var detailCanonicalNames = materialState.MaterialNames
+                .Select(name =>
+                {
+                    string normalized = FuzzyText.Normalize(name);
+                    var matches = _questMaterialNameCatalog
+                        .Where(candidate =>
+                            string.Equals(
+                                FuzzyText.Normalize(candidate),
+                                normalized,
+                                StringComparison.Ordinal))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    return matches.Length == 1 ? matches[0] : null;
+                })
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!)
+                .ToArray();
+
+            _questRecipeMaterialNames = _questRecipeMaterialNames
+                .Concat(detailCanonicalNames)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+
+            if (_questRecipeMaterialNames.Count > 0)
+                Log?.Invoke(
+                    $"[제작] 퀘스트 생성 전 레시피 재료 후보 확정 · " +
+                    string.Join(", ", _questRecipeMaterialNames));
+            else
+                Log?.Invoke(
+                    "[제작] 퀘스트 생성 전 레시피 재료 후보를 확정하지 못함 · " +
+                    "기존 전체 카탈로그 안전 보정 경로 유지");
+
+        }
 
         bool canDirectCraft =
             exact.Craftable &&
@@ -481,6 +505,9 @@ internal sealed class CraftingScreen : ICraftingScreen
     public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
         CraftingPlan plan, CancellationToken ct)
     {
+        if (_registeredFoodBatch is not null && _registeredFoodPlan?.DisplayName == plan.DisplayName)
+            return await ReadRegisteredFoodDeficitsAsync(plan, ct);
+
         for (int attempt = 1; attempt <= 3; attempt++)
         {
             var rows = await ReadQuestDeficitsOnceAsync(plan, ct);
@@ -492,6 +519,78 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
         using var failed = Capture(ct);
         throw Fail(failed, "음식 재료명 OCR 미확인 · 수급 불가와 구분 · 현재 배치 재인식 필요");
+    }
+
+    private async Task<IReadOnlyList<CraftingQuestDeficit>> ReadRegisteredFoodDeficitsAsync(
+        CraftingPlan plan, CancellationToken ct)
+    {
+        if (_directCraftPendingName == plan.DisplayName)
+            return Array.Empty<CraftingQuestDeficit>();
+        var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+            _registeredFoodBatch!.Select(x => x.Name), ct, Log);
+        var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
+        Log?.Invoke($"[제작][CLI 부족량] {plan.DisplayName} · " +
+            (deficits.Count == 0 ? "전체 재료 확보" : string.Join(", ",
+                deficits.Select(x => $"{x.DisplayName} {x.Current}/{x.Required}"))));
+        if (deficits.Count > 0) return deficits;
+
+        using var frame = Capture(ct);
+        if (!await HasCraftActionLabelAsync(frame, ct))
+        {
+            await CloseOverlayAsync(ct);
+            await Task.Delay(CraftingHubLayout.ProductionQuestListSettleDelayMs, ct);
+            _ui.ClickFresh(CraftingHubLayout.ProductionQuestTopPoint, ct);
+            Log?.Invoke("[제작] 전체 레시피 CLI 재고 충족 · 퀘스트 1회 클릭 · 제작대 자동 복귀");
+        }
+        ClearQuestDeficits();
+        return Array.Empty<CraftingQuestDeficit>();
+    }
+
+    private async Task<CraftingFoodQuestRow> FindRegisteredFoodRowAsync(
+        CraftingQuestDeficit requested, CancellationToken ct)
+    {
+        await OpenQuestPopupAsync(_registeredFoodPlan!, ct);
+        var gatherable = GatheringQueries.ParseCatalog(await _cli.GetGatherableItemsAsync(ct));
+        var supported = _registeredFoodBatch!.Where(x =>
+            !CraftingFoodMaterialPolicy.IsUnsupportedDirect(x.Name) &&
+            !CraftingFoodMaterialPolicy.IsKnownProcessing(x.Name) &&
+            (gatherable.Any(g => g.DisplayName == x.Name && g.ToolOk) ||
+             (!gatherable.Any(g => g.DisplayName == x.Name) &&
+              (LivingSkillGatheringCatalog.TryResolveBulk(x.Name, out _) ||
+               LivingSkillGatheringCatalog.IsQuestOnlyMaterial(x.Name)))))
+            .Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var frame = Capture(ct);
+            var lines = await _ui.Ocr.ReadLinesAsync(frame,
+                CraftingHubLayout.ProductionQuestMaterialArea, 3, ct);
+            var visible = new List<CraftingQuestDeficit>();
+            foreach (var line in lines.OrderBy(x => x.Center.Y))
+            {
+                var match = Regex.Match(line.ReadText ?? "", @"(?<cur>\d+)\s*/\s*(?<req>\d+)");
+                if (match.Success && long.TryParse(match.Groups["cur"].Value, out long current) &&
+                    long.TryParse(match.Groups["req"].Value, out long required) && required > 0)
+                    visible.Add(new("", current, required, line.Center.Y));
+            }
+            var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                _registeredFoodBatch.Select(x => x.Name), ct, Log);
+            var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
+            if (!deficits.Any(x => x.DisplayName == requested.DisplayName))
+                return new(requested, Array.Empty<CraftingQuestDeficit>());
+            var row = CraftingFoodBatchPolicy.FindGatherRow(
+                requested.DisplayName, deficits, visible, supported);
+            if (row is not null)
+            {
+                Log?.Invoke($"[제작] 레시피 재료 행 위치 · Y={row.Row.RowY} · " +
+                    $"CLI 검증 대상={string.Join(", ", row.Targets.Select(x => x.DisplayName))} · 재료명 OCR 미사용");
+                return row;
+            }
+            Log?.Invoke($"[제작][행 위치 재확인] {attempt}/3 · 퀘스트 재생성 없음");
+            await Task.Delay(300, ct);
+        }
+        throw new CraftingQuestRowRecognitionException(
+            "등록 음식 재료 행 위치를 확인하지 못했습니다. 재료 부족으로 건너뛰거나 퀘스트를 반복 생성하지 않습니다.");
     }
 
     private async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsOnceAsync(
@@ -932,6 +1031,23 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     public async Task GatherQuestDeficitAsync(CraftingQuestDeficit deficit, CancellationToken ct)
     {
+        IReadOnlyList<CraftingQuestDeficit> gatherTargets = new[] { deficit };
+        if (_registeredFoodBatch is not null && _registeredFoodPlan is not null)
+        {
+            var binding = await FindRegisteredFoodRowAsync(deficit, ct);
+            if (binding.Targets.Count == 0) return;
+            deficit = binding.Row;
+            gatherTargets = binding.Targets;
+        }
+        async Task<(string Name, long Current, long Required)> ReadGatherStockAsync()
+        {
+            var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                gatherTargets.Select(x => x.DisplayName), ct, Log);
+            var reached = gatherTargets.FirstOrDefault(x => stock[x.DisplayName] >= x.Required)
+                ?? gatherTargets[0];
+            return (reached.DisplayName, stock[reached.DisplayName], reached.Required);
+        }
+
         string label = string.IsNullOrWhiteSpace(deficit.DisplayName)
             ? $"부족 재료 행 {deficit.Current}/{deficit.Required}"
             : deficit.DisplayName;
@@ -1051,20 +1167,20 @@ internal sealed class CraftingScreen : ICraftingScreen
             {
                 try
                 {
-                    long current = await _data.InventoryOnlyCountWithLoadingRetryAsync(
-                        deficit.DisplayName, ct, Log);
-                    if (current >= deficit.Required)
+                    var observed = await ReadGatherStockAsync();
+                    long current = observed.Current;
+                    if (current >= observed.Required)
                     {
                         stableInventory++;
                         if (CraftingGatherCompletionPolicy.HasVerifiedTarget(
-                            deficit.DisplayName, current, deficit.Required, stableInventory))
+                            observed.Name, current, observed.Required, stableInventory))
                         {
                             Log?.Invoke(
-                                $"[제작] {deficit.DisplayName} 준비 완료 · {current}/{deficit.Required} · " +
+                                $"[제작] {observed.Name} 준비 완료 · {current}/{observed.Required} · " +
                                 "CLI 검증 성공 · 초과 허용");
                             _stage.Move(
                                 ProductionStage.VerifyInventory,
-                                $"{deficit.DisplayName} {current}/{deficit.Required}");
+                                $"{observed.Name} {current}/{observed.Required}");
                             return;
                         }
                     }
@@ -1113,13 +1229,13 @@ internal sealed class CraftingScreen : ICraftingScreen
         {
             try
             {
-                long final = await _data.InventoryOnlyCountWithLoadingRetryAsync(
-                    deficit.DisplayName, ct, Log);
-                if (final >= deficit.Required)
+                var observed = await ReadGatherStockAsync();
+                long final = observed.Current;
+                if (final >= observed.Required)
                 {
                     Log?.Invoke(
-                        $"[제작] {deficit.DisplayName} 제한시간 종료 직전 재고 검증 완료 · " +
-                        $"{final}/{deficit.Required}");
+                        $"[제작] {observed.Name} 제한시간 종료 직전 재고 검증 완료 · " +
+                        $"{final}/{observed.Required}");
                     _stage.Move(
                         ProductionStage.VerifyInventory,
                         $"{deficit.DisplayName} {final}/{deficit.Required}");
