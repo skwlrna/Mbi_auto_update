@@ -1561,7 +1561,7 @@ jobs:
              $craftScreen -notmatch '재료 부족 · 퀘스트 만들기'){throw 'fixed crafting detail/direct route missing'}
           $createQuest = [regex]::Match($craftScreen, 'public async Task CreateQuestAsync[\s\S]*?(?=\r?\n    private async Task<\(bool Parsed, bool AllEnough, string Summary, IReadOnlyList<string> MaterialNames\)> ReadSelectedBatchMaterialStateAsync)').Value
           if([string]::IsNullOrWhiteSpace($createQuest)){throw 'craft route selection block missing'}
-          if($createQuest -notmatch 'ReadSelectedBatchMaterialStateAsync\(craftCount, ct\)' -or
+          if($createQuest -notmatch 'ReadSelectedBatchMaterialStateAsync\(plan, craftCount, ct\)' -or
              $createQuest -notmatch 'materialState\.Parsed' -or
              $createQuest -notmatch 'materialState\.AllEnough'){throw 'craft route must use selected-batch material ratios'}
           if($craftScreen -notmatch '선택 .*회 실제 재료 판정' -or

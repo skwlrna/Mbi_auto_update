@@ -40,9 +40,21 @@ internal sealed class CraftingCliData
         Action<string>? log = null,
         int maxTransientRejects = 20)
     {
+        var counts = await InventoryOnlyCountsWithLoadingRetryAsync(
+            new[] { displayName }, ct, log, maxTransientRejects);
+        return counts[displayName];
+    }
+
+    // One fresh get_items response for all materials; never mix snapshots or
+    // interpret a failed read as zero stock.
+    internal async Task<IReadOnlyDictionary<string, long>> InventoryOnlyCountsWithLoadingRetryAsync(
+        IEnumerable<string> displayNames, CancellationToken ct,
+        Action<string>? log = null, int maxTransientRejects = 20)
+    {
         if (maxTransientRejects < 1)
             throw new ArgumentOutOfRangeException(nameof(maxTransientRejects));
-
+        var names = displayNames.Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal).ToArray();
         int rejects = 0;
         while (true)
         {
@@ -50,20 +62,18 @@ internal sealed class CraftingCliData
             var response = await _cli.GetItemsAsync(ct);
             if (response.Success && response.Data is not null &&
                 response.Data.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
-                return ParseInventoryOnlyCount(response.Data.Value, displayName);
+                return names.ToDictionary(name => name,
+                    name => ParseInventoryOnlyCount(response.Data.Value, name), StringComparer.Ordinal);
 
             if (!CliAutomationGuards.IsTransientLoadingRejection(response))
-                throw new InvalidDataException("가방 품목 수량 조회에 실패했습니다.");
+                throw new InvalidDataException("가방 품목 수량 조회 실패 · 재료 부족/0개로 판정하지 않습니다.");
 
             rejects++;
             if (rejects > maxTransientRejects)
                 throw new InvalidDataException(
                     $"가방 품목 수량 조회가 지역 이동/로딩 중 {maxTransientRejects}회 연속 거절되어 정지합니다.");
-
             if (rejects == 1 || rejects % 5 == 0)
-                log?.Invoke(
-                    $"[제작] 지역 이동/채집 중 get_items CLI 일시 거부 · 재시도 {rejects}회");
-
+                log?.Invoke($"[제작] 지역 이동/채집 중 get_items CLI 일시 거부 · 재시도 {rejects}회");
             await Task.Delay(500, ct).ConfigureAwait(false);
         }
     }

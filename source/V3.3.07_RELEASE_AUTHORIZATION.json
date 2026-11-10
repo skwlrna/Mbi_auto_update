@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.07",
+  "purpose": "food_cli_inventory_recognition",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

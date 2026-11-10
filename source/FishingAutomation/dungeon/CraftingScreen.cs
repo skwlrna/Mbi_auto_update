@@ -73,7 +73,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         // the detail UI is authoritative because it already scales every material
         // requirement to the selected count (e.g. 65/80 for a 10-craft batch).
         var exact = await _data.ExactAsync(plan.DisplayName, ct);
-        var materialState = await ReadSelectedBatchMaterialStateAsync(craftCount, ct);
+        var materialState = await ReadSelectedBatchMaterialStateAsync(plan, craftCount, ct);
 
         // Refresh canonical ingredient names exposed by the filtered CLI on every
         // batch. Do not clear names learned by earlier batches: an ingredient that
@@ -161,7 +161,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     }
 
     private async Task<(bool Parsed, bool AllEnough, string Summary, IReadOnlyList<string> MaterialNames)> ReadSelectedBatchMaterialStateAsync(
-        int craftCount,
+        CraftingPlan plan, int craftCount,
         CancellationToken ct)
     {
         // Let the material counters finish updating after the final + count click.
@@ -240,7 +240,9 @@ internal sealed class CraftingScreen : ICraftingScreen
             }
 
             if (first.Count != ratios.Count ||
-                !first.SequenceEqual(ratios))
+                (plan.Category == CraftingCategory.Food
+                    ? !first.Select(x => x.Required).SequenceEqual(ratios.Select(x => x.Required))
+                    : !first.SequenceEqual(ratios)))
             {
                 Log?.Invoke(
                     $"[제작] 선택 {craftCount}회 상세 재료 수량 2프레임 불일치 · 안전하게 퀘스트 경로 사용");
@@ -250,6 +252,17 @@ internal sealed class CraftingScreen : ICraftingScreen
             bool allEnough = ratios.All(x => x.Owned >= x.Required);
             string summary = string.Join(", ", ratios.Select(x => $"{x.Owned}/{x.Required}"));
             var materialNames = ParseMaterialNames(lines);
+            if (plan.Category == CraftingCategory.Food)
+            {
+                // Required comes from selected count; Owned comes from CLI.
+                if (materialNames.Count != ratios.Count)
+                    return (false, false, "재료명 재인식 필요 · 퀘스트 경로 사용", materialNames);
+                var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(materialNames, ct, Log);
+                allEnough = materialNames.Select((name, index) =>
+                    stock[name] >= ratios[index].Required).All(x => x);
+                summary = string.Join(", ", materialNames.Select((name, index) =>
+                    $"{name} CLI {stock[name]}/{ratios[index].Required}"));
+            }
             if (materialNames.Count > 0)
                 Log?.Invoke(
                     $"[제작] 선택 {craftCount}회 상세 레시피 재료명 선판독 · " +
@@ -466,8 +479,23 @@ internal sealed class CraftingScreen : ICraftingScreen
     }
 
     public async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(
-        CraftingPlan plan,
-        CancellationToken ct)
+        CraftingPlan plan, CancellationToken ct)
+    {
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            var rows = await ReadQuestDeficitsOnceAsync(plan, ct);
+            if (plan.Category != CraftingCategory.Food ||
+                rows.All(x => !string.IsNullOrWhiteSpace(x.DisplayName)))
+                return rows;
+            Log?.Invoke($"[제작][인식 재시도] {plan.DisplayName} · 재료명 미확인 · {attempt}/3 · 재료 부족으로 건너뛰지 않음");
+            await Task.Delay(300, ct);
+        }
+        using var failed = Capture(ct);
+        throw Fail(failed, "음식 재료명 OCR 미확인 · 수급 불가와 구분 · 현재 배치 재인식 필요");
+    }
+
+    private async Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsOnceAsync(
+        CraftingPlan plan, CancellationToken ct)
     {
         if (string.Equals(_directCraftPendingName, plan.DisplayName, StringComparison.Ordinal))
         {
@@ -532,6 +560,8 @@ internal sealed class CraftingScreen : ICraftingScreen
             .ThenBy(x => x.Center.X)
             .ToArray();
 
+        _ui.NoteDiagnostic("quest-material-ocr",
+            $"{plan.DisplayName} ROI={roi} · " + string.Join(" | ", lines.Select(x => $"Y={x.Center.Y}:{x.ReadText}")));
         var ratios = new List<(long Current, long Required, int Y, string Text)>();
         foreach (var line in lines)
         {
@@ -634,13 +664,20 @@ internal sealed class CraftingScreen : ICraftingScreen
                 }
             }
 
-            if (ratio.Current < ratio.Required)
+            long currentQuantity = ratio.Current;
+            if (plan.Category == CraftingCategory.Food && !string.IsNullOrWhiteSpace(name))
+            {
+                currentQuantity = await _data.InventoryOnlyCountWithLoadingRetryAsync(name!, ct, Log);
+                Log?.Invoke($"[제작][수량 기준=CLI] {name} · OCR={ratio.Current}/{ratio.Required} · CLI={currentQuantity}/{ratio.Required} · 행Y={ratio.Y}");
+            }
+            if (currentQuantity < ratio.Required ||
+                plan.Category == CraftingCategory.Food && string.IsNullOrWhiteSpace(name))
             {
                 if (string.IsNullOrWhiteSpace(name))
                     Log?.Invoke(
                         $"[제작] 퀘스트 재료명 OCR 미확인 · 수량={ratio.Current}/{ratio.Required} · " +
                         $"행Y={ratio.Y} · 이름 없이 부족 행으로 등록");
-                deficits.Add(new(name ?? "", ratio.Current, ratio.Required, ratio.Y));
+                deficits.Add(new(name ?? "", currentQuantity, ratio.Required, ratio.Y));
             }
         }
 
@@ -662,7 +699,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                     fresh[name] = await _data.InventoryOnlyCountWithLoadingRetryAsync(
                         name, ct, Log);
 
-                var recovered = CraftingQuestMaterialRecoveryPolicy.IdentifyUnique(
+                var recovered = CraftingQuestMaterialRecoveryPolicy.IdentifyUniqueFromInventory(
                     _lastNamedDeficits, deficits, fresh);
                 if (recovered is not null)
                 {
@@ -670,13 +707,12 @@ internal sealed class CraftingScreen : ICraftingScreen
                     deficits[index] = recovered;
                     Log?.Invoke(
                         $"[제작] 이전 퀘스트 재료명 안전 복원 · {recovered.DisplayName} " +
-                        $"{recovered.Current}/{recovered.Required} · 이전 명시 OCR + 새 CLI 재고 유일 일치 · " +
+                        $"{recovered.Current}/{recovered.Required} · 현재 배치 이름/필요량 + CLI 부족 재료 유일 확인 · " +
                         "이후 일반 재료 수급 검증 유지");
                 }
                 else
                     Log?.Invoke(
-                        "[제작] 재료명 복원 미확정 · 이전 이름/수량과 새 CLI 재고가 유일하게 일치하지 않아 " +
-                        "음식 건너뛰기 안전 정책 유지");
+                        "[제작] 재료명 복원 미확정 · CLI 부족 후보가 하나로 좁혀지지 않음 · 건너뛰기 대신 재인식");
             }
             catch (InvalidDataException ex)
             {
@@ -685,6 +721,13 @@ internal sealed class CraftingScreen : ICraftingScreen
             }
         }
 
+        if (plan.Category == CraftingCategory.Food && deficits.Count == 0 && ratios.Count > 0)
+        {
+            await CloseOverlayAsync(ct);
+            await Task.Delay(CraftingHubLayout.ProductionQuestListSettleDelayMs, ct);
+            _ui.ClickFresh(CraftingHubLayout.ProductionQuestTopPoint, ct);
+            Log?.Invoke("[제작] CLI 재료 충분 · 부족 팝업 정리 후 퀘스트 1회 클릭 · 제작대 자동 복귀");
+        }
         if (deficits.Count == 0)
         {
             _lastNamedDeficitRecipe = null;
@@ -1208,6 +1251,13 @@ internal sealed class CraftingScreen : ICraftingScreen
                required == deficit.Required;
     }
 
+    public Task RecordMaterialFailureAsync(string reason, CancellationToken ct)
+    {
+        using var frame = Capture(ct);
+        Log?.Invoke(Fail(frame, "[제작][건너뛰기 근거] " + reason).Message);
+        return Task.CompletedTask;
+    }
+
     public async Task RecoverBatchPreparationAsync(
         CraftingPlan plan,
         CancellationToken ct)
@@ -1460,8 +1510,9 @@ internal sealed class CraftingScreen : ICraftingScreen
             return false;
         await Task.Delay(180, ct);
         using var fresh = Capture(ct);
-        return HasCraftReadyWithStationTransition(fresh) &&
-               await HasCraftActionLabelAsync(fresh, ct);
+        // First-frame label distinguishes 제작하기 from 제작하러 가기.
+        // A second fresh active button suffices; do not repeat the OCR hard gate.
+        return HasCraftReadyWithStationTransition(fresh);
     }
 
     public async Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct)

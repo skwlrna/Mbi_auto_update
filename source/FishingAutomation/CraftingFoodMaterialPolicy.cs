@@ -88,9 +88,10 @@ internal static class CraftingFoodMaterialPolicy
         ArgumentNullException.ThrowIfNull(deficits);
         ArgumentNullException.ThrowIfNull(readFreshInventory);
 
-        // The quest's Current/Required already accounts for root inventory.
-        // Child ingredients are read once and then shared across all roots.
+        // Root and child stock come from fresh CLI reads, never OCR Current.
+        // Reserve root stock first so it cannot also satisfy a nested recipe.
         var left = new Dictionary<string, long>(StringComparer.Ordinal);
+        var original = new Dictionary<string, long>(StringComparer.Ordinal);
         async Task<long> AvailableAsync(string name)
         {
             if (!left.TryGetValue(name, out long available))
@@ -99,6 +100,7 @@ internal static class CraftingFoodMaterialPolicy
                 if (available < 0)
                     throw new InvalidDataException("재료 보유량이 음수입니다: " + name);
                 left.Add(name, available);
+                original.Add(name, available);
             }
             return available;
         }
@@ -115,7 +117,7 @@ internal static class CraftingFoodMaterialPolicy
             try
             {
                 if (isRoot && IsUnsupportedDirect(name))
-                    return new CraftingFoodPurchaseShortage(name, missing, 0, parent);
+                    return new CraftingFoodPurchaseShortage(name, missing, original[name], parent);
 
                 if (!isRoot)
                 {
@@ -150,15 +152,21 @@ internal static class CraftingFoodMaterialPolicy
             }
         }
 
+        var roots = new List<(string Name, long Missing)>();
         foreach (var deficit in deficits)
         {
             ct.ThrowIfCancellationRequested();
-            if (deficit.Required <= deficit.Current) continue;
-            long missing = checked(deficit.Required - deficit.Current);
-            var shortage = await VisitAsync(deficit.DisplayName, missing,
-                deficit.DisplayName, true, new HashSet<string>(StringComparer.Ordinal));
-            if (shortage is not null)
-                return shortage;
+            if (string.IsNullOrWhiteSpace(deficit.DisplayName)) continue;
+            long available = await AvailableAsync(deficit.DisplayName);
+            long consumed = Math.Min(available, deficit.Required);
+            left[deficit.DisplayName] = available - consumed;
+            roots.Add((deficit.DisplayName, checked(deficit.Required - consumed)));
+        }
+        foreach (var root in roots)
+        {
+            var shortage = await VisitAsync(root.Name, root.Missing,
+                root.Name, true, new HashSet<string>(StringComparer.Ordinal));
+            if (shortage is not null) return shortage;
         }
         return null;
     }

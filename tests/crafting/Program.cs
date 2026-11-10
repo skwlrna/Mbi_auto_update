@@ -156,6 +156,16 @@ try
         new Dictionary<string, long> { ["감자"] = 66, ["양파"] = 6, ["소금"] = 1 }) is null,
         "unexpected named row indicates a changed quest and blocks identity recovery");
 
+    var inventoryRecovered = DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUniqueFromInventory(
+        priorPumpkinSoup, new[] { new DungeonVisionBot.CraftingQuestDeficit("", 999, 60, 778) },
+        new Dictionary<string, long> { ["감자"] = 66, ["양파"] = 7 });
+    Check(inventoryRecovered?.DisplayName == "양파" && inventoryRecovered.Current == 7,
+        "food name recovery ignores erroneous OCR numerator and uses current CLI stock");
+    Check(DungeonVisionBot.CraftingQuestMaterialRecoveryPolicy.IdentifyUniqueFromInventory(
+        priorPumpkinSoup, unnamedOnion,
+        new Dictionary<string, long> { ["감자"] = 8, ["양파"] = 7 }) is null,
+        "two CLI shortages never authorize guessing an unnamed row");
+
     Check(!CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 32, 100, 5) &&
           !CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 1) &&
           CraftingGatherCompletionPolicy.HasVerifiedTarget("파스닙", 100, 100, 2),
