@@ -75,6 +75,19 @@ internal sealed class CraftingScreen : ICraftingScreen
         var exact = await _data.ExactAsync(plan.DisplayName, ct);
         var materialState = await ReadSelectedBatchMaterialStateAsync(plan, craftCount, ct);
 
+        // Reviewed complete recipe inputs supply canonical names even when CLI
+        // MissingIngredients is empty (one craft is possible, ten may not be).
+        // This registration does not equate a partial CLI shortage list with a recipe.
+        if (plan.Category == CraftingCategory.Food &&
+            CraftingFoodRecipeCatalog.TryGet(plan.DisplayName, out var registeredRecipe))
+        {
+            _questRecipeMaterialNames = _questRecipeMaterialNames
+                .Concat(registeredRecipe.Ingredients.Select(x => x.Name))
+                .Distinct(StringComparer.Ordinal).ToArray();
+            Log?.Invoke($"[제작] 등록 레시피 재료 후보 · {registeredRecipe.DisplayName} · " +
+                $"{registeredRecipe.Ingredients.Count}종 · 외부 자료 대조 {CraftingFoodRecipeCatalog.ReviewedOn}");
+        }
+
         // Refresh canonical ingredient names exposed by the filtered CLI on every
         // batch. Do not clear names learned by earlier batches: an ingredient that
         // was sufficient before can become short after prior crafts consume stock.

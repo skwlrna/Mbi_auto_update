@@ -13,6 +13,7 @@ try
     }
 
     CraftingRestartSafetyTests.Run(Check);
+    CraftingFoodRecipeCatalogTests.Run(Check);
 
     DateTimeOffset ocrAdvisoryNow = new(2026, 11, 3, 0, 0, 0, TimeSpan.Zero);
     var ocrTracker = new CraftingOcrWaitAdvisoryTracker(() => ocrAdvisoryNow);
