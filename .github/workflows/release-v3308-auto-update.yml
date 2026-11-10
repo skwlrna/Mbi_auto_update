@@ -1,5 +1,6 @@
 name: Publish V3.3.08 Food Recipe CLI Materials After Main CI
 
+# Final row binding excludes station progress counters (0/1).
 # User-approved release; game acceptance for V3.3.08 remains pending.
 # Publish from exact CI-approved main only, once. Preserve rollback and
 # SHA256-verified updater ZIP, source archive, and executable smoke test.
