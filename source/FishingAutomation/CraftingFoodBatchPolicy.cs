@@ -35,6 +35,8 @@ internal static class CraftingFoodBatchPolicy
         var bindings = new List<CraftingFoodQuestRow>();
         foreach (var row in visible.Where(x => x.Current >= 0 && x.Required > x.Current && x.RowY > 0))
         {
+            if (row.DisplayName.Replace(" ", "", StringComparison.Ordinal)
+                .Contains("제작대", StringComparison.Ordinal)) continue;
             var sameRequired = deficits.Where(x => x.Required == row.Required).ToArray();
             var candidates = sameRequired.Where(x => x.Current == row.Current).ToArray();
             // Current-count OCR is only a positioning aid; a unique requirement

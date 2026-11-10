@@ -28,7 +28,10 @@ internal static class CraftingFoodBatchPolicyTests
         check(CraftingFoodBatchPolicy.FindGatherRow("감자", mixed,
                 new[] { new CraftingQuestDeficit("", 0, 60, 711) }, supported) is null,
             "ambiguous purchased or processing input cannot authorize generic gathering");
-        check(CraftingFoodBatchPolicy.FindGatherRow("호박", missing,
+        check(CraftingFoodBatchPolicy.FindGatherRow("감자",
+                new[] { new CraftingQuestDeficit("감자", 0, 1, 0) },
+                new[] { new CraftingQuestDeficit("음식 제작대 0/1", 0, 1, 908) }, supported) is null &&
+              CraftingFoodBatchPolicy.FindGatherRow("호박", missing,
                 new[] { new CraftingQuestDeficit("", 0, 1, 908) }, supported) is null &&
               CraftingFoodBatchPolicy.FindGatherRow("호박", missing, Array.Empty<CraftingQuestDeficit>(), supported) is null,
             "station counter and missing ratio evidence never authorize a row click");

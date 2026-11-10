@@ -571,7 +571,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                 var match = Regex.Match(line.ReadText ?? "", @"(?<cur>\d+)\s*/\s*(?<req>\d+)");
                 if (match.Success && long.TryParse(match.Groups["cur"].Value, out long current) &&
                     long.TryParse(match.Groups["req"].Value, out long required) && required > 0)
-                    visible.Add(new("", current, required, line.Center.Y));
+                    visible.Add(new(line.ReadText ?? "", current, required, line.Center.Y));
             }
             var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
                 _registeredFoodBatch.Select(x => x.Name), ct, Log);
