@@ -478,6 +478,44 @@ internal sealed class CraftingScreen : ICraftingScreen
             return Array.Empty<CraftingQuestDeficit>();
         }
 
+        // A completed quest navigates to the station; it no longer opens a shortage popup.
+        // Check the previous quest's remaining named deficits BEFORE requiring that popup.
+        using (var current = Capture(ct))
+        {
+            if (await HasCraftActionLabelAsync(current, ct))
+            {
+                ClearQuestDeficits();
+                Log?.Invoke("[제작] 제작하기 상세창 확인 · 부족 재료 팝업 검사 생략 · 기존 수량 유지");
+                return Array.Empty<CraftingQuestDeficit>();
+            }
+        }
+        if (string.Equals(_lastNamedDeficitRecipe, plan.DisplayName, StringComparison.Ordinal) &&
+            _lastNamedDeficits.Count > 0 &&
+            _lastNamedDeficits.All(x => !string.IsNullOrWhiteSpace(x.DisplayName)))
+        {
+            bool allReady = true;
+            foreach (var deficit in _lastNamedDeficits)
+            {
+                long inventory = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                    deficit.DisplayName, ct, Log);
+                if (inventory < deficit.Required) allReady = false;
+            }
+            if (allReady)
+            {
+                // Recheck after inventory queries: navigation may already have completed.
+                using var latest = Capture(ct);
+                if (!await HasCraftActionLabelAsync(latest, ct))
+                {
+                    await CloseOverlayAsync(ct);
+                    await Task.Delay(CraftingHubLayout.ProductionQuestListSettleDelayMs, ct);
+                    _ui.ClickFresh(CraftingHubLayout.ProductionQuestTopPoint, ct);
+                    Log?.Invoke("[제작] 남은 부족 재료 재고 확보 확인 · 퀘스트 1회 클릭 · 제작대 자동 이동 대기");
+                }
+                ClearQuestDeficits();
+                return Array.Empty<CraftingQuestDeficit>();
+            }
+        }
+
         _stage.Move(ProductionStage.ReadQuest, $"{plan.DisplayName} 부족 재료 확인");
         // This method is entered immediately after creating the production quest.
         // The new quest is pinned at the top of the right quest list in the live
@@ -1400,13 +1438,30 @@ internal sealed class CraftingScreen : ICraftingScreen
         return true;
     }
 
+    private void ClearQuestDeficits()
+    {
+        _lastSingleQuestDeficit = null;
+        _lastNamedDeficitRecipe = null;
+        _lastNamedDeficits = Array.Empty<CraftingQuestDeficit>();
+    }
+
+    private async Task<bool> HasCraftActionLabelAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (!HasCraftReadyActionVisual(frame)) return false;
+        var label = await _ui.Ocr.FindCompactLabelAsync(
+            frame, CraftingHubLayout.CraftActionButtonArea, "제작하기", ct);
+        return label.Found;
+    }
+
     private async Task<bool> HasTwoFreshCraftReadyFramesAsync(Bitmap first, CancellationToken ct)
     {
-        if (!HasCraftReadyWithStationTransition(first))
+        if (!HasCraftReadyWithStationTransition(first) ||
+            !await HasCraftActionLabelAsync(first, ct))
             return false;
         await Task.Delay(180, ct);
         using var fresh = Capture(ct);
-        return HasCraftReadyWithStationTransition(fresh);
+        return HasCraftReadyWithStationTransition(fresh) &&
+               await HasCraftActionLabelAsync(fresh, ct);
     }
 
     public async Task ReturnToStationAndCraftAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
@@ -1443,10 +1498,10 @@ internal sealed class CraftingScreen : ICraftingScreen
 
                 // The quest keeps the quantity selected when it was created.
                 // Do not touch the count controls again after the automatic return.
-                _ui.TapFresh(0x39, ct); // Space = 제작하기
+                _ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct); // 제작하기
                 Log?.Invoke(
                     $"[제작] 제작대 도착 · 제작 버튼 화면 픽셀 2프레임+최종 확인 · 기존 {craftCount}회 유지 · " +
-                    $"수량 재설정 없음 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                    $"수량 재설정 없음 · 제작하기 클릭 · 완료판정 재고기준={inventoryBefore}");
 
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
                 return;
@@ -1483,9 +1538,9 @@ internal sealed class CraftingScreen : ICraftingScreen
                 if (!HasCraftReadyWithStationTransition(immediate))
                     continue;
                 _stage.Move(ProductionStage.Process, $"{plan.DisplayName} {craftCount}회 직접 제작");
-                _ui.TapFresh(0x39, ct); // Space = 제작하기
+                _ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct); // 제작하기
                 Log?.Invoke(
-                    $"[제작] 제작대 도착 · 제작하기 버튼 즉시 확인 · 화면 픽셀 2프레임+최종 확인 · 기존 {craftCount}회 유지 · Space 제작 시작 · 완료판정 재고기준={inventoryBefore}");
+                    $"[제작] 제작대 도착 · 제작하기 버튼 즉시 확인 · 화면 픽셀 2프레임+최종 확인 · 기존 {craftCount}회 유지 · 제작하기 클릭 · 완료판정 재고기준={inventoryBefore}");
                 await WaitForCompletionAsync(plan.DisplayName, inventoryBefore, ct);
                 _directCraftBeforeTravel?.Dispose();
                 _directCraftBeforeTravel = null;

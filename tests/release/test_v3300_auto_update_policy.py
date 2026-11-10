@@ -16,6 +16,7 @@ class V3300ProductionReleaseSafety(unittest.TestCase):
                     "V3.3.02": ("3.3.2", "3.3.2.0", "3.3.2.0"),
                     "V3.3.03": ("3.3.3", "3.3.3.0", "3.3.3.0"),
                     "V3.3.04": ("3.3.4", "3.3.4.0", "3.3.4.0"),
+                    "V3.3.06": ("3.3.6", "3.3.6.0", "3.3.6.0"),
                     "V3.3.05": ("3.3.5", "3.3.5.0", "3.3.5.0")}
         active = next((v for v in versions if f'CurrentVersion = "{v}"' in current), None)
         self.assertIsNotNone(active)
@@ -82,7 +83,7 @@ class V3300ProductionReleaseSafety(unittest.TestCase):
             self.assertIn("HasTwoFreshCraftReadyFramesAsync(frame, ct)", part)
             self.assertIn("using var immediate = Capture(ct)", part)
             self.assertIn("if (!HasCraftReadyWithStationTransition(immediate))", part)
-            self.assertIn("_ui.TapFresh(0x39, ct)", part)
+            self.assertIn("_ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct)", part)
             self.assertNotIn('"제작하기",', part)
             self.assertIn("InventoryOnlyCountAsync", part)
             self.assertIn("WaitForCompletionAsync", part)

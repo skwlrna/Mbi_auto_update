@@ -14,6 +14,10 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
         project = read("source/FishingAutomation/FishingAutomation.csproj")
         if 'CurrentVersion = "V3.3.01"' in current:
             expected = ("3.3.1", "3.3.1.0", "3.3.1.0")
+        elif 'CurrentVersion = "V3.3.06"' in current:
+            expected = ("3.3.6", "3.3.6.0", "3.3.6.0")
+            self.assertIn("gh release create V3.3.06",
+                          read(".github/workflows/release-v3306-auto-update.yml"))
         elif 'CurrentVersion = "V3.3.05"' in current:
             expected = ("3.3.5", "3.3.5.0", "3.3.5.0")
             self.assertIn("gh release create V3.3.05",
@@ -107,7 +111,7 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
             self.assertIn("HasTwoFreshCraftReadyFramesAsync(frame, ct)", part)
             self.assertIn("using var immediate = Capture(ct)", part)
             self.assertIn("if (!HasCraftReadyWithStationTransition(immediate))", part)
-            self.assertIn("_ui.TapFresh(0x39, ct)", part)
+            self.assertIn("_ui.ClickFresh(CraftingHubLayout.CraftGoButtonPoint, ct)", part)
             self.assertNotIn('"제작하기",', part)
             self.assertIn("InventoryOnlyCountAsync", part)
             self.assertIn("WaitForCompletionAsync", part)
