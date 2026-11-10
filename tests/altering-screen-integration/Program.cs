@@ -278,6 +278,17 @@ try
     // V3.3.00: test the actual compiled crafting station pixel detector,
     // including false-positive rejection before any Space input is authorized.
     Type craftingScreen = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
+    var readQuestCalls = Calls(Method(craftingScreen, "ReadQuestDeficitsAsync", 2)).ToList();
+    int inventoryGate = readQuestCalls.FindIndex(x => x.Contains("InventoryOnlyCountWithLoadingRetryAsync", StringComparison.Ordinal));
+    int shortagePopup = readQuestCalls.FindIndex(x => x.Contains("OpenQuestPopupAsync", StringComparison.Ordinal));
+    Check(inventoryGate >= 0 && shortagePopup > inventoryGate &&
+          Has(readQuestCalls, "HasCraftActionLabelAsync") &&
+          Has(readQuestCalls, "ClearQuestDeficits"),
+          "Completed quest checks remaining inventory/ready detail before requiring shortage popup");
+    Check(Has(Calls(Method(craftingScreen, "HasTwoFreshCraftReadyFramesAsync", 2)), "HasCraftActionLabelAsync") &&
+          Has(Calls(Method(craftingScreen, "HasCraftActionLabelAsync", 2)), "FindCompactLabelAsync"),
+          "Station arrival requires 제작하기 label as well as active button pixels");
+
     using var craftButtonVisible = new Bitmap(800, 1000);
     using (var g = Graphics.FromImage(craftButtonVisible))
         g.FillRectangle(new SolidBrush(Color.FromArgb(34, 155, 130)),
