@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "version": "V3.3.08",
+  "purpose": "food_recipe_cli_materials_without_name_ocr",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "전부 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true,
+  "sourcePullRequest": 410
+}
