@@ -74,6 +74,7 @@ internal static class CraftingFoodBatchPolicyTests
         private IReadOnlyList<CraftingFoodIngredient> _batch = Array.Empty<CraftingFoodIngredient>();
         internal int Created, Recoveries, Gathers;
         public string InputMode => "test";
+        public IReadOnlyList<CraftingFoodIngredient>? RegisteredFoodBatch => _batch;
         public event Action<string>? Log { add { } remove { } }
         public Task CreateQuestAsync(CraftingPlan plan, int count, CancellationToken ct)
         { Created++; _batch = recipe.ForBatch(count); return Task.CompletedTask; }

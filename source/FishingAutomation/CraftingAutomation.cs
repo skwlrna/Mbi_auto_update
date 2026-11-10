@@ -349,10 +349,22 @@ internal sealed class CraftingAutomation
 
             if (plan.Category == CraftingCategory.Food)
             {
+                // Reserve sufficient direct inputs too: cream processing must not
+                // consume sugar/milk already needed by the selected food itself.
+                IReadOnlyList<CraftingQuestDeficit> preflightInputs = deficits;
+                IReadOnlyDictionary<string, long>? recipeStock = null;
+                if (_screen.RegisteredFoodBatch is { } batch)
+                {
+                    recipeStock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                        batch.Select(x => x.Name), ct, Log);
+                    preflightInputs = batch.Select(x => new CraftingQuestDeficit(
+                        x.Name, recipeStock[x.Name], x.Amount, 0)).ToArray();
+                }
                 var purchaseShortage = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
-                    deficits,
-                    (name, token) => _data.InventoryOnlyCountWithLoadingRetryAsync(
-                        name, token, Log), ct);
+                    preflightInputs,
+                    (name, token) => recipeStock is not null && recipeStock.TryGetValue(name, out long owned)
+                        ? Task.FromResult(owned)
+                        : _data.InventoryOnlyCountWithLoadingRetryAsync(name, token, Log), ct);
                 if (purchaseShortage is not null)
                 {
                     Log?.Invoke(

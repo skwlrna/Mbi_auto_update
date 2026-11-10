@@ -39,6 +39,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     }
 
     public string InputMode => _ui.InputMode;
+    public IReadOnlyList<CraftingFoodIngredient>? RegisteredFoodBatch => _registeredFoodBatch;
     public event Action<string>? Log;
 
     internal Task<bool> CheckInterruptionsAsync(CancellationToken ct) => _ui.CheckInterruptionsAsync(ct);

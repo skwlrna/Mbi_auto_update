@@ -7,6 +7,7 @@ internal sealed record CraftingQuestDeficit(string DisplayName, long Current, lo
 internal interface ICraftingScreen : IDisposable
 {
     string InputMode { get; }
+    IReadOnlyList<CraftingFoodIngredient>? RegisteredFoodBatch => null;
     event Action<string>? Log;
     Task CreateQuestAsync(CraftingPlan plan, int craftCount, CancellationToken ct);
     Task<IReadOnlyList<CraftingQuestDeficit>> ReadQuestDeficitsAsync(CraftingPlan plan, CancellationToken ct);
