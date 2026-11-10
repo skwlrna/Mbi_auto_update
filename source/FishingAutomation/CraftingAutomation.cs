@@ -189,6 +189,13 @@ internal sealed class CraftingAutomation
             {
                 if (ex is CraftingMaterialAcquisitionException materialFailure)
                 {
+                        Log?.Invoke($"[제작][건너뛰기 사유] {plan.DisplayName} · {materialFailure.Message}");
+                        try { await _screen.RecordMaterialFailureAsync(materialFailure.Message, ct); }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception diagnosticError)
+                        {
+                            Log?.Invoke("[제작] 진단 화면 저장 실패 · " + diagnosticError.Message);
+                        }
                         // A skip is permitted only after the screen returns to a
                         // neutral, verified state that can start the next recipe.
                         // Failed cleanup is a global stop, NOT a skipped recipe.
@@ -235,7 +242,8 @@ internal sealed class CraftingAutomation
                             StringComparison.Ordinal) ||
                         ex.Message.Contains(
                             "부족 재료 팝업 연속 2프레임 미확인",
-                            StringComparison.Ordinal);
+                            StringComparison.Ordinal) ||
+                        ex.Message.Contains("음식 재료명 OCR 미확인", StringComparison.Ordinal);
                     if (recognizedOcrFault && CompletedCrafts == 0 && Gained == 0)
                     {
                         try
@@ -316,6 +324,19 @@ internal sealed class CraftingAutomation
         {
             ct.ThrowIfCancellationRequested();
             var deficits = await _screen.ReadQuestDeficitsAsync(plan, ct);
+            if (plan.Category == CraftingCategory.Food && deficits.Count > 0)
+            {
+                if (deficits.Any(x => string.IsNullOrWhiteSpace(x.DisplayName)))
+                    throw new InvalidOperationException(
+                        "음식 재료명 OCR 미확인 · 실제 재료 부족으로 건너뛰지 않고 화면 재인식");
+                var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                    deficits.Select(x => x.DisplayName), ct, Log);
+                foreach (var row in deficits)
+                    Log?.Invoke($"[제작][CLI 재료 판정] {row.DisplayName} · " +
+                        $"화면/이전값={row.Current}/{row.Required} · CLI={stock[row.DisplayName]}/{row.Required}");
+                deficits = deficits.Select(x => x with { Current = stock[x.DisplayName] })
+                    .Where(x => x.Current < x.Required).ToArray();
+            }
             if (deficits.Count == 0)
             {
                 Log?.Invoke(
@@ -332,8 +353,8 @@ internal sealed class CraftingAutomation
                 if (purchaseShortage is not null)
                 {
                     Log?.Invoke(
-                        $"[제작][수급 불가] {plan.DisplayName} · {purchaseShortage.Parent} 하위 재료 " +
-                        $"{purchaseShortage.MaterialName} 부족 {purchaseShortage.Required}개 · " +
+                        $"[제작][실제 재료 부족/수급 불가] {plan.DisplayName} · {purchaseShortage.Parent} 하위 재료 " +
+                        $"{purchaseShortage.MaterialName} CLI 보유 {purchaseShortage.Owned}개 · 부족 {purchaseShortage.Required}개 · " +
                         "상점/마이홈/던전/낚시 자동 수급 대상 아님 · 현재 음식만 건너뛰기");
                     throw new CraftingMaterialAcquisitionException(
                         purchaseShortage.MaterialName,
@@ -344,14 +365,24 @@ internal sealed class CraftingAutomation
             }
 
             string signature = string.Join("|", deficits.Select(x =>
-                $"{(string.IsNullOrWhiteSpace(x.DisplayName) ? "[행]" : x.DisplayName)}:{x.Current}/{x.Required}@{x.RowY}"));
+                $"{(string.IsNullOrWhiteSpace(x.DisplayName) ? "[행]" : x.DisplayName)}:{x.Current}/{x.Required}")
+                .OrderBy(x => x, StringComparer.Ordinal));
             if (signature == previousSignature) unchanged++;
             else unchanged = 0;
             previousSignature = signature;
             if (unchanged >= 3)
+            {
+                var activity = await _gathering.ActivityAsync(ct);
+                if (activity.IsAutoTraveling || activity.IsGathering)
+                {
+                    Log?.Invoke("[제작] CLI 재고 변화 대기 · 이동/채집 진행 중 · 건너뛰기 보류");
+                    await _delay(TimeSpan.FromSeconds(1), ct);
+                    continue;
+                }
                 throw new CraftingMaterialAcquisitionException(
                     deficits[0].DisplayName,
-                    "제작 퀘스트 부족 재료 상태가 3회 연속 변하지 않아 중복 입력 없이 재료 확보를 중단합니다.");
+                    "[CLI 재고 증가 없음] 재료 확보 후 새 재고가 3회 연속 변하지 않음 · " + signature);
+            }
 
             var deficit = deficits[0];
             long shortage = Math.Max(0, deficit.Required - deficit.Current);
@@ -403,7 +434,7 @@ internal sealed class CraftingAutomation
                 !supportedDirect && !intermediate)
                 throw new CraftingMaterialAcquisitionException(
                     deficit.DisplayName,
-                    $"음식 재료 {deficit.DisplayName}의 일반 채집/가공 경로가 검증되지 않았습니다. " +
+                    $"[수급 경로 없음] 음식 재료 {deficit.DisplayName} CLI {deficit.Current}/{deficit.Required} · 일반 채집/가공 경로가 검증되지 않았습니다. " +
                     "임의 추천 획득처를 누르지 않고 현재 음식만 건너뜁니다.");
 
             // Verified direct sources use the existing crafting quest route.
@@ -483,14 +514,21 @@ internal sealed class CraftingAutomation
         long expectedMinimum,
         CancellationToken ct)
     {
-        DateTime deadline = DateTime.UtcNow.AddSeconds(25);
+        DateTime deadline = DateTime.UtcNow.AddSeconds(60);
         long last = before;
         int stable = 0;
 
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            long current = await _data.ItemCountAsync(displayName, ct);
+            long current;
+            try { current = await _data.ItemCountAsync(displayName, ct); }
+            catch (InvalidDataException ex)
+            {
+                Log?.Invoke($"[제작] 완료창 확인 후 재고 조회 재시도 · 제작 재입력 없음 · {ex.Message}");
+                await _delay(TimeSpan.FromMilliseconds(500), ct);
+                continue;
+            }
             if (current < before)
                 throw new InvalidOperationException(
                     $"{displayName} 제작 완료창 확인 후 보유량이 감소해 결과를 확정할 수 없습니다.");

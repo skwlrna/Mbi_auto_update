@@ -7,6 +7,8 @@ internal static class CraftingFoodMaterialIntegrationTests
     internal static async Task RunAsync(Action<bool, string> check, AppLog log)
     {
         await VerifyBlockedMaterialAsync("소금", 2, 0, check, log);
+        await VerifyBlockedMaterialAsync("생강", 2, 0, check, log, "생강", enough: true);
+        await VerifyBlockedMaterialAsync("생크림", 6, 0, check, log, "생크림", enough: true);
         await VerifyBlockedMaterialAsync("치즈", 3, 0, check, log);
         await VerifyBlockedMaterialAsync("셀러리", 2, 0, check, log, "셀러리");
         await VerifyBlockedMaterialAsync("생강", 2, 0, check, log, "생강");
@@ -20,14 +22,15 @@ internal static class CraftingFoodMaterialIntegrationTests
 
     private static async Task VerifyBlockedMaterialAsync(
         string questMaterial, int required, long ownedSalt,
-        Action<bool, string> check, AppLog log, string expectedName = "소금")
+        Action<bool, string> check, AppLog log, string expectedName = "소금", bool enough = false)
     {
-        var screen = new ShopShortageScreen(questMaterial, required);
+        var screen = new ShopShortageScreen(questMaterial, required, enough);
         string ReadResponse(string command) => command switch
         {
             "get_items" => JsonSerializer.Serialize(new[]
             {
-                new { DisplayName = "야채볶음", Location = "inventory", Count = 10L },
+                new { DisplayName = "야채볶음", Location = "inventory", Count = 10L + screen.CraftCount },
+                new { DisplayName = questMaterial, Location = "inventory", Count = enough ? (long)required : 0L },
                 new { DisplayName = "소금", Location = "inventory", Count = ownedSalt }
             }),
             "get_gatherable_items" => "{\"items\":[]}",
@@ -71,7 +74,9 @@ internal static class CraftingFoodMaterialIntegrationTests
             await automation.RunAsync(
                 new CraftingPlan(CraftingCategory.Food, "야채볶음", 1, 1),
                 CancellationToken.None);
-            throw new Exception("Known purchased shortage was not skipped: " + questMaterial);
+            check(enough && screen.CraftCount == 1 && screen.GatherCount == 0 && screen.RecoveryCount == 0,
+                "real engine crafts owned " + questMaterial + " despite stale OCR shortage");
+            if (!enough) throw new Exception("Known purchased shortage was not skipped: " + questMaterial);
         }
         catch (CraftingMaterialAcquisitionException ex)
         {
@@ -86,11 +91,13 @@ internal static class CraftingFoodMaterialIntegrationTests
     {
         private readonly string _material;
         private readonly int _required;
+        private readonly bool _enough;
         internal int RecoveryCount;
         internal int GatherCount;
         internal int CraftCount;
-        internal ShopShortageScreen(string material, int required)
+        internal ShopShortageScreen(string material, int required, bool enough)
         {
+            _enough = enough;
             _material = material;
             _required = required;
         }
@@ -117,6 +124,7 @@ internal static class CraftingFoodMaterialIntegrationTests
             CraftingPlan plan, int count, CancellationToken ct)
         {
             CraftCount++;
+            if (_enough) return Task.CompletedTask;
             throw new Exception("Purchased-input shortage must block crafting");
         }
         public void Dispose() { }

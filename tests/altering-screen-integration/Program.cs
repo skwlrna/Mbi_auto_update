@@ -278,7 +278,9 @@ try
     // V3.3.00: test the actual compiled crafting station pixel detector,
     // including false-positive rejection before any Space input is authorized.
     Type craftingScreen = production.GetType("DungeonVisionBot.CraftingScreen", true)!;
-    var readQuestCalls = Calls(Method(craftingScreen, "ReadQuestDeficitsAsync", 2)).ToList();
+    Check(Has(Calls(Method(craftingScreen, "ReadQuestDeficitsAsync", 2)), "ReadQuestDeficitsOnceAsync"),
+        "Food OCR retry wrapper reads same-batch quest before failing recognition");
+    var readQuestCalls = Calls(Method(craftingScreen, "ReadQuestDeficitsOnceAsync", 2)).ToList();
     int inventoryGate = readQuestCalls.FindIndex(x => x.Contains("InventoryOnlyCountWithLoadingRetryAsync", StringComparison.Ordinal));
     int shortagePopup = readQuestCalls.FindIndex(x => x.Contains("OpenQuestPopupAsync", StringComparison.Ordinal));
     Check(inventoryGate >= 0 && shortagePopup > inventoryGate &&

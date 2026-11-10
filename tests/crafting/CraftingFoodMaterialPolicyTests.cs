@@ -43,11 +43,11 @@ internal static class CraftingFoodMaterialPolicyTests
 
         var celery = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
             new[] { Row("양배추", 0, 8), Row("셀러리", 0, 2) },
-            (_, _) => throw new Exception("no stock read for root shortage"),
+            Stock(new Dictionary<string, long> { ["카레 가루"] = 1 }),
             CancellationToken.None);
         var curryPowder = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
             new[] { Row("카레 가루", 1, 3) },
-            (_, _) => throw new Exception("no stock read for root shortage"),
+            Stock(new Dictionary<string, long> { ["카레 가루"] = 1 }),
             CancellationToken.None);
         check(celery is { MaterialName: "셀러리", Required: 2 } &&
               curryPowder is { MaterialName: "카레 가루", Required: 2 },
@@ -85,7 +85,7 @@ internal static class CraftingFoodMaterialPolicyTests
 
         var direct = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
             new[] { Row("밀", 0, 15), Row("소금", 2, 5) },
-            (_, _) => throw new Exception("direct shop shortage requires no extra stock read"),
+            Stock(new Dictionary<string, long> { ["소금"] = 2 }),
             CancellationToken.None);
         check(direct is { MaterialName: "소금", Required: 3 },
             "shop shortage detected before harvesting even when the shop row is not first");
@@ -146,6 +146,33 @@ internal static class CraftingFoodMaterialPolicyTests
             CancellationToken.None);
         check(sharedSalt is { MaterialName: "소금", Required: 1 },
             "shared shop stock is counted once across multiple recipe shortages");
+
+        var ownedCream = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("생크림", 0, 6) },
+            (name, _) => name == "생크림" ? Task.FromResult(6L)
+                : throw new Exception("sufficient cream must not inspect sugar"), CancellationToken.None);
+        check(ownedCream is null, "fresh sufficient cream bypasses stale OCR and every child check");
+        var ownedGinger = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("생강", 0, 2) }, Stock(new Dictionary<string, long> { ["생강"] = 3 }),
+            CancellationToken.None);
+        check(ownedGinger is null, "owned non-gatherable ginger is usable despite OCR zero");
+        var partialCream = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("생크림", 0, 6) },
+            Stock(new Dictionary<string, long> { ["생크림"] = 3, ["설탕"] = 2 }), CancellationToken.None);
+        check(partialCream is null, "only missing half of cream consumes sugar");
+        var reservedSalt = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+            new[] { Row("치즈", 0, 3), Row("소금", 0, 2) },
+            Stock(new Dictionary<string, long> { ["소금"] = 2 }), CancellationToken.None);
+        check(reservedSalt is { MaterialName: "소금", Required: 1 },
+            "salt reserved for root recipe cannot also be consumed for cheese");
+        bool readFailed = false;
+        try
+        {
+            await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(new[] { Row("소금", 0, 2) },
+                (_, _) => throw new InvalidDataException("CLI unavailable"), CancellationToken.None);
+        }
+        catch (InvalidDataException) { readFailed = true; }
+        check(readFailed, "failed inventory query propagates instead of reporting material shortage");
 
         var noName = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
             new[] { Row("", 0, 10) },

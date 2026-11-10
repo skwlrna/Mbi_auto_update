@@ -11,6 +11,34 @@ namespace DungeonVisionBot;
 /// </summary>
 internal static class CraftingQuestMaterialRecoveryPolicy
 {
+    // Same-quest names and Required establish identity; OCR Current is advisory.
+    internal static CraftingQuestDeficit? IdentifyUniqueFromInventory(
+        IReadOnlyList<CraftingQuestDeficit> previouslyNamed,
+        IReadOnlyList<CraftingQuestDeficit> currentlyVisible,
+        IReadOnlyDictionary<string, long> freshInventory)
+    {
+        if (previouslyNamed.Count == 0 || currentlyVisible.Count == 0 ||
+            currentlyVisible.Count > previouslyNamed.Count ||
+            previouslyNamed.Any(x => string.IsNullOrWhiteSpace(x.DisplayName)) ||
+            previouslyNamed.Select(x => x.DisplayName).Distinct(StringComparer.Ordinal).Count() != previouslyNamed.Count)
+            return null;
+        var unknown = currentlyVisible.Where(x => string.IsNullOrWhiteSpace(x.DisplayName)).ToArray();
+        if (unknown.Length != 1 || unknown[0].Required <= 0) return null;
+        var known = currentlyVisible.Where(x => !string.IsNullOrWhiteSpace(x.DisplayName)).ToArray();
+        if (known.Select(x => x.DisplayName).Distinct(StringComparer.Ordinal).Count() != known.Length ||
+            known.Any(x => !previouslyNamed.Any(p => p.DisplayName == x.DisplayName && p.Required == x.Required)))
+            return null;
+        if (previouslyNamed.Any(p => !freshInventory.TryGetValue(p.DisplayName, out long stock) || stock < 0))
+            return null;
+        var remaining = previouslyNamed.Where(p =>
+            !known.Any(k => k.DisplayName == p.DisplayName) &&
+            freshInventory[p.DisplayName] < p.Required).ToArray();
+        if (remaining.Length != 1 || remaining[0].Required != unknown[0].Required)
+            return null;
+        return unknown[0] with { DisplayName = remaining[0].DisplayName,
+            Current = freshInventory[remaining[0].DisplayName] };
+    }
+
     internal static CraftingQuestDeficit? IdentifyUnique(
         IReadOnlyList<CraftingQuestDeficit> previouslyNamed,
         IReadOnlyList<CraftingQuestDeficit> currentlyVisible,
