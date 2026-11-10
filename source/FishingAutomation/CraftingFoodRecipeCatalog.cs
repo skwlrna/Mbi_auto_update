@@ -1,7 +1,8 @@
 namespace FishingAutomation;
 
 // Direct inputs per ONE craft, not expanded raw materials or output quantity.
-// External reference data reviewed 2026-11-10; not a live game observation.
+// External references reviewed 2026-11-10; user-game-screen sources identify
+// recipes independently confirmed from supplied one-craft game screenshots.
 internal sealed record CraftingFoodRecipe(
     string DisplayName,
     IReadOnlyList<CraftingFoodIngredient> Ingredients,
@@ -22,14 +23,10 @@ internal static class CraftingFoodRecipeCatalog
     private const string Wiki = "https://d.namu.moe/w/마비노기 모바일/생활 스킬";
     private static readonly IReadOnlyDictionary<string, CraftingFoodRecipe> Recipes = Build();
 
-    // Conflicting published quantities are deliberately unavailable to callers.
+    // Previously conflicting quantities were resolved by user game screenshots.
     internal static IReadOnlyDictionary<string, string> Unresolved { get; } =
         new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["매콤 파프리카 스튜"] = "밥 3/4개 출처 불일치 · 게임 상세 확인 필요",
-                ["파이크퍼치 필레 리소토"] = "치즈 3/12개 출처 불일치 · 게임 상세 확인 필요"
-            });
+            new Dictionary<string, string>(StringComparer.Ordinal));
 
     internal static IEnumerable<CraftingFoodRecipe> All => Recipes.Values;
 
@@ -156,6 +153,12 @@ internal static class CraftingFoodRecipeCatalog
             ("사과", 4), ("허브", 2), ("물이 든 병", 1), ("설탕", 2));
         Add("흰살생선 뫼니에르", new[] { "https://mobile.mabi.zip/huinsalsaengseonmoeniereu" },
             ("브리흐네 잉어", 5), ("은붕어", 3), ("감자", 5), ("밀가루", 3), ("레몬", 5), ("소금", 3));
+
+        // One-craft game detail screenshots supplied by the user on 2026-11-10.
+        Add("매콤 파프리카 스튜", new[] { "user-game-screen:2026-11-10/IMG_1110.jpeg", Wiki },
+            ("담백한 고기", 10), ("밥", 4), ("파프리카", 2), ("양파", 4), ("고춧가루", 1));
+        Add("파이크퍼치 필레 리소토", new[] { "user-game-screen:2026-11-10/IMG_1111.png", Wiki },
+            ("파이크퍼치", 4), ("물에 불린 쌀", 4), ("완두콩", 8), ("치즈", 12), ("양파", 6), ("소금", 4));
 
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, CraftingFoodRecipe>(rows);
     }

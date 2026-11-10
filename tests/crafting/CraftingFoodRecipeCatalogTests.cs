@@ -5,7 +5,7 @@ internal static class CraftingFoodRecipeCatalogTests
     internal static void Run(Action<bool, string> check)
     {
         var recipes = CraftingFoodRecipeCatalog.All.ToArray();
-        check(recipes.Length == 52 && recipes.All(x =>
+        check(recipes.Length == 54 && recipes.All(x =>
             CraftingQueries.IsVerifiedFoodRecipe(x.DisplayName) &&
             x.Ingredients.Count > 0 && x.Sources.Count > 0 &&
             x.Ingredients.All(i => i.Amount > 0 && !string.IsNullOrWhiteSpace(i.Name)) &&
@@ -32,10 +32,18 @@ internal static class CraftingFoodRecipeCatalogTests
               !CraftingFoodRecipeCatalog.TryGet("호박", out _) &&
               !CraftingFoodRecipeCatalog.TryGet(null, out _),
             "only explicit recipe aliases resolve; partial names and null never guess");
-        check(CraftingFoodRecipeCatalog.Unresolved.Count == 2 &&
-              CraftingFoodRecipeCatalog.Unresolved.Keys.All(x =>
-                  !CraftingFoodRecipeCatalog.TryGet(x, out _)),
-            "conflicting published quantities never enter the usable recipe catalog");
+        check(CraftingFoodRecipeCatalog.Unresolved.Count == 0 &&
+              CraftingFoodRecipeCatalog.TryGet("매콤 파프리카 스튜", out var stew) &&
+              stew.Ingredients.Count == 5 &&
+              stew.ForBatch(10).Single(x => x.Name == "밥").Amount == 40 &&
+              stew.Sources.Contains("user-game-screen:2026-11-10/IMG_1110.jpeg"),
+            "game screenshot resolves stew rice to four per craft, forty per batch");
+        check(CraftingFoodRecipeCatalog.TryGet("파이크퍼치 필레 리소토", out var pike) &&
+              pike.Ingredients.Count == 6 &&
+              pike.ForBatch(10).Single(x => x.Name == "치즈").Amount == 120 &&
+              pike.ForBatch(10).Single(x => x.Name == "물에 불린 쌀").Amount == 40 &&
+              pike.Sources.Contains("user-game-screen:2026-11-10/IMG_1111.png"),
+            "game screenshot resolves risotto cheese to twelve without confusing rice and soaked rice");
         foreach (int crafts in new[] { 0, -1, 11, int.MaxValue })
         {
             bool rejected = false;
