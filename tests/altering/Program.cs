@@ -3130,9 +3130,10 @@ Check(nestedRawResult == AlteringRunResult.RawMaterialExhausted &&
     "missing nested raw hide ends only leather recipe before input with zero wings");
 
 // Food intermediates must drain the proven lane without recreating a quest.
-foreach (bool full in new[] { true, false })
+foreach (var scenario in new[] { (Full: true, Reject: false), (Full: false, Reject: false), (Full: true, Reject: true) })
 {
-    var queueWorld = new RecursiveProductionWorld { MaskQueueFull = true };
+    bool full = scenario.Full;
+    var queueWorld = new RecursiveProductionWorld { MaskQueueFull = true, RejectReceipt = scenario.Reject };
     if (full)
         for (int i = 0; i < 7; i++)
             queueWorld.AddExternalWork("철괴(철 광석)", "금속 가공 시설", "Processing", false, 5);
@@ -3142,10 +3143,13 @@ foreach (bool full in new[] { true, false })
     bool mismatch = false;
     try { await queueResolver.ResolveExternalAsync("철괴", 3, CancellationToken.None); }
     catch (AlteringQueueUnavailableException) { mismatch = true; }
-    Check(full
+    Check(scenario.Reject
+        ? mismatch && queueWorld.CollectionCalls > 0 && queueWorld.Queued.Count == 0
+        : full
         ? !mismatch && waits == 1 && queueWorld.CollectionCalls == 1 && queueWorld.Queued.Count == 0 && queueWorld.Count("철괴") >= 3
         : mismatch && waits == 2 && queueWorld.CollectionCalls == 0 && queueWorld.Queued.Count == 0,
-        full ? "intermediate queue_full waits and collects existing output without duplicate production"
+        scenario.Reject ? "intermediate receipt failure exits as queue-specific error without quest replay"
+        : full ? "intermediate queue_full waits and collects existing output without duplicate production"
              : "contradictory queue_full stops after bounded reads with facility diagnostics and no input");
 }
 

@@ -1,6 +1,7 @@
 namespace FishingAutomation;
 
-internal sealed class AlteringQueueUnavailableException(string message) : InvalidOperationException(message);
+internal sealed class AlteringQueueUnavailableException(string message, Exception? inner = null)
+    : InvalidOperationException(message, inner);
 
 internal sealed record MultiAlteringSupplyPreflight(
     AlteringPlan Plan,
@@ -552,46 +553,55 @@ internal sealed class RecursiveAlteringSupplyResolver : IAlteringSupplyResolver
             // rather than recreate an unrelated food quest on queue_full.
             if (_dependencyScheduler is null && producer.Reason == "queue_full")
             {
-                long beforeQueue = await _altering.ItemCountAsync(itemName, ct);
-                int contradictoryReads = 0;
-                while (!producer.Alterable && producer.Reason == "queue_full")
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
-                    var lane = (await _altering.WorksAsync(ct))
-                        .Where(x => x.FacilityName == facility).ToArray();
-                    int completed = lane.Count(x => x.IsCompleted);
-                    Log?.Invoke($"[재료 해결][대기열] {itemName} · {facility} · {lane.Length}/7칸 · 완료 {completed} · 진행 {lane.Length - completed} · CLI={producer.Reason}");
-                    if (lane.Length > 0 && completed == lane.Length)
+                    long beforeQueue = await _altering.ItemCountAsync(itemName, ct);
+                    int contradictoryReads = 0;
+                    while (!producer.Alterable && producer.Reason == "queue_full")
                     {
-                        var receiver = new AlteringAutomation(_altering, _alteringScreen,
-                            _delay, _verificationAttempts, this);
-                        receiver.Log += text => Log?.Invoke(text);
-                        if (!await receiver.CollectReadyBatchAsync(subPlan, ct))
-                            throw new AlteringQueueUnavailableException($"{itemName} · {facility} 완료품 수령 미확인 · 퀘스트 재생성 없이 정지");
-                        contradictoryReads = 0;
+                        ct.ThrowIfCancellationRequested();
+                        var lane = (await _altering.WorksAsync(ct))
+                            .Where(x => x.FacilityName == facility).ToArray();
+                        int completed = lane.Count(x => x.IsCompleted);
+                        Log?.Invoke($"[재료 해결][대기열] {itemName} · {facility} · {lane.Length}/7칸 · 완료 {completed} · 진행 {lane.Length - completed} · CLI={producer.Reason}");
+                        if (lane.Length > 0 && completed == lane.Length)
+                        {
+                            var receiver = new AlteringAutomation(_altering, _alteringScreen,
+                                _delay, _verificationAttempts, this);
+                            receiver.Log += text => Log?.Invoke(text);
+                            if (!await receiver.CollectReadyBatchAsync(subPlan, ct))
+                                throw new AlteringQueueUnavailableException($"{itemName} · {facility} 완료품 수령 미확인 · 퀘스트 재생성 없이 정지");
+                            contradictoryReads = 0;
+                        }
+                        else if (lane.Length == 7)
+                        {
+                            contradictoryReads = 0;
+                            await (_delay ?? Task.Delay)(TimeSpan.FromSeconds(5), ct);
+                        }
+                        else
+                        {
+                            if (++contradictoryReads >= 3)
+                                throw new AlteringQueueUnavailableException(
+                                    $"{itemName} · {facility} · queue_full/실제 {lane.Length}/7칸 불일치 · 완료 {completed} · 진행 {lane.Length - completed} · 퀘스트 재생성 없이 정지");
+                            await (_delay ?? Task.Delay)(TimeSpan.FromMilliseconds(500), ct);
+                        }
+                        long received = Math.Max(0, await _altering.ItemCountAsync(itemName, ct) - beforeQueue);
+                        if (received >= minimum) return;
+                        recipes = await _altering.RecipesAsync(ct);
+                        producer = recipes.Single(x => x.DisplayName == subPlan.DisplayName);
                     }
-                    else if (lane.Length == 7)
-                    {
-                        contradictoryReads = 0;
-                        await (_delay ?? Task.Delay)(TimeSpan.FromSeconds(5), ct);
-                    }
-                    else
-                    {
-                        if (++contradictoryReads >= 3)
-                            throw new AlteringQueueUnavailableException(
-                                $"{itemName} · {facility} · queue_full/실제 {lane.Length}/7칸 불일치 · 완료 {completed} · 진행 {lane.Length - completed} · 퀘스트 재생성 없이 정지");
-                        await (_delay ?? Task.Delay)(TimeSpan.FromMilliseconds(500), ct);
-                    }
-                    long received = Math.Max(0, await _altering.ItemCountAsync(itemName, ct) - beforeQueue);
-                    if (received >= minimum) return;
-                    recipes = await _altering.RecipesAsync(ct);
-                    producer = recipes.Single(x => x.DisplayName == subPlan.DisplayName);
+                    long gained = Math.Max(0, await _altering.ItemCountAsync(itemName, ct) - beforeQueue);
+                    quantity = Math.Max(0, quantity - gained);
+                    minimum = Math.Max(0, minimum - gained);
+                    if (minimum == 0) return;
+                    subPlan = subPlan with { TargetQuantity = checked((int)quantity) };
                 }
-                long gained = Math.Max(0, await _altering.ItemCountAsync(itemName, ct) - beforeQueue);
-                quantity = Math.Max(0, quantity - gained);
-                minimum = Math.Max(0, minimum - gained);
-                if (minimum == 0) return;
-                subPlan = subPlan with { TargetQuantity = checked((int)quantity) };
+                catch (AlteringQueueUnavailableException) { throw; }
+                catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or IOException)
+                {
+                    throw new AlteringQueueUnavailableException(
+                        $"{itemName} · {facility} 대기열 처리 실패 · 퀘스트 재생성 없이 정지 · {ex.Message}", ex);
+                }
             }
 
             if (!producer.Alterable)
