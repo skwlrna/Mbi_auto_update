@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.11",
+  "purpose": "registered_food_quest_stage_transition_fix",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

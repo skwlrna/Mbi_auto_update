@@ -548,6 +548,9 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         if (_directCraftPendingName == plan.DisplayName)
             return Array.Empty<CraftingQuestDeficit>();
+        // CLI replaces shortage OCR, but must still enter the shared quest-read
+        // stage before gathering, intermediate processing, or station travel.
+        _stage.Move(ProductionStage.ReadQuest, $"{plan.DisplayName} 레시피/CLI 부족 재료 확인");
         var stock = await ReadMaterialCountsAsync(
             _registeredFoodBatch!.Select(x => x.Name), ct, Log);
         var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
