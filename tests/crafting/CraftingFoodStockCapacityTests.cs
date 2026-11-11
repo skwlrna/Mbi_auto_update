@@ -25,6 +25,15 @@ internal static class CraftingFoodStockCapacityTests
             new HashSet<string>(new[] {"감자","양파"},StringComparer.Ordinal));
         check(storageRow?.Targets.Count==2,
             "bag-only displayed counters do not block a safe all-gatherable group tracked by combined stock");
+        CraftingFoodRecipeCatalog.TryGet("호박 수프", out var soup);
+        foreach (var test in new[] { (Cream: 30L, Crafts: 6), (Cream: 5L, Crafts: 1) })
+        {
+            var ready = await CraftingFoodBatchPolicy.SelectBatchAsync(soup, 10, (names, _) =>
+                Task.FromResult<IReadOnlyDictionary<string, long>>(names.ToDictionary(x => x,
+                    x => x == "생크림" ? test.Cream : 1000L)), CancellationToken.None);
+            check(ready.Crafts == test.Crafts && ready.Blocker?.MaterialName == "생크림",
+                $"soup uses ready cream before processing despite sufficient sugar: {test.Cream} cream -> {test.Crafts} crafts");
+        }
         CraftingFoodRecipeCatalog.TryGet("카레라이스", out var curry);
         foreach (var test in new (long Meat, long Powder, int Expected)[] { (106L,20L,10), (78L,20L,7), (10L,20L,1), (9L,20L,0), (106L,2L,1), (106L,0L,0) })
         {

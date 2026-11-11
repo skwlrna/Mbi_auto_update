@@ -3129,6 +3129,30 @@ Check(nestedRawResult == AlteringRunResult.RawMaterialExhausted &&
       nestedRawAuto.ReservedWings == 0,
     "missing nested raw hide ends only leather recipe before input with zero wings");
 
+// Food intermediates must drain the proven lane without recreating a quest.
+foreach (var scenario in new[] { (Full: true, Reject: false), (Full: false, Reject: false), (Full: true, Reject: true) })
+{
+    bool full = scenario.Full;
+    var queueWorld = new RecursiveProductionWorld { MaskQueueFull = true, RejectReceipt = scenario.Reject };
+    if (full)
+        for (int i = 0; i < 7; i++)
+            queueWorld.AddExternalWork("철괴(철 광석)", "금속 가공 시설", "Processing", false, 5);
+    int waits = 0;
+    var queueResolver = new RecursiveAlteringSupplyResolver(queueWorld, queueWorld, queueWorld, queueWorld,
+        delay: (_, _) => { waits++; if (full) queueWorld.CompleteAllWorks(); return Task.CompletedTask; });
+    bool mismatch = false;
+    try { await queueResolver.ResolveExternalAsync("철괴", 3, CancellationToken.None); }
+    catch (AlteringQueueUnavailableException) { mismatch = true; }
+    Check(scenario.Reject
+        ? mismatch && queueWorld.CollectionCalls > 0 && queueWorld.Queued.Count == 0
+        : full
+        ? !mismatch && waits == 1 && queueWorld.CollectionCalls == 1 && queueWorld.Queued.Count == 0 && queueWorld.Count("철괴") >= 3
+        : mismatch && waits == 2 && queueWorld.CollectionCalls == 0 && queueWorld.Queued.Count == 0,
+        scenario.Reject ? "intermediate receipt failure exits as queue-specific error without quest replay"
+        : full ? "intermediate queue_full waits and collects existing output without duplicate production"
+             : "contradictory queue_full stops after bounded reads with facility diagnostics and no input");
+}
+
 var rawGuardWorld = new RecursiveProductionWorld();
 var rawGuardResolver = new RecursiveAlteringSupplyResolver(
     rawGuardWorld, rawGuardWorld, rawGuardWorld, rawGuardWorld);
@@ -5646,6 +5670,7 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
     internal readonly List<AlteringFacilityEntryDirective> LaneDirectivesAtGatherStart = new();
     internal FacilityLaneState? ManagerObservedDuringGather;
     internal int GatherStarts, ReserveCallbackCalls, FieldExitCalls, CatalogCalls;
+    internal bool MaskQueueFull;
     internal bool NestedSameFacilityChain, InjectResidualAfterReceipt,
         HideGatheringCatalogOnFirstQuery, FailFieldExit, IncludeRice, IncludeLeather,
         DelayLeatherCompletion, StaleRawOwnedWhenShort, RejectReceipt, SuppressReceiptCredit;
@@ -5727,6 +5752,8 @@ internal sealed class RecursiveProductionWorld : IAlteringData, IAlteringScreen,
 
     private AlteringRecipe MakeRecipe(string display, int produced, string facility, IReadOnlyDictionary<string,long> ingredients)
     {
+        if (MaskQueueFull)
+            return new(display, false, produced, "queue_full", Array.Empty<AlteringIngredient>(), facility);
         var missing = ingredients
             .Where(x => Count(x.Key) < x.Value)
             .Select(x => new AlteringIngredient(x.Key, x.Value,
