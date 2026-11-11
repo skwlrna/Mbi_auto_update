@@ -209,7 +209,7 @@ internal sealed class CraftingAutomation
             {
                 // Row geometry failure is retried in the existing popup by the screen.
                 // Recreating the same quest cannot repair it, including after completed batches.
-                if (ex is CraftingQuestRowRecognitionException) throw;
+                if (ex is CraftingQuestRowRecognitionException or AlteringQueueUnavailableException) throw;
                 if (ex is CraftingMaterialAcquisitionException materialFailure)
                 {
                         Log?.Invoke($"[제작][건너뛰기 사유] {plan.DisplayName} · {materialFailure.Message}");

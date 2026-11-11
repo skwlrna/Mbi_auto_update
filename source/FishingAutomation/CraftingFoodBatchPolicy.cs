@@ -25,6 +25,21 @@ internal static class CraftingFoodBatchPolicy
                     if (names.Add(input.Name)) pending.Enqueue(input.Name);
         }
         var stock = await readStock(names, ct);
+        // Consume ready ingredients before planning any gathering or processing.
+        int ready = maximum;
+        CraftingFoodPurchaseShortage? readyLimit = null;
+        foreach (var input in recipe.Ingredients)
+        {
+            if (!stock.TryGetValue(input.Name, out long owned) || owned < 0)
+                throw new InvalidDataException("레시피 재료 CLI 재고 누락/형식 오류: " + input.Name);
+            int capacity = (int)Math.Min(maximum, owned / input.Amount);
+            if (capacity < ready)
+            {
+                ready = capacity;
+                readyLimit = new(input.Name, input.Amount * maximum - owned, owned, recipe.DisplayName);
+            }
+        }
+        if (ready > 0) return (ready, readyLimit);
         CraftingFoodPurchaseShortage? blocker = null;
         for (int count = maximum; count >= 1; count--)
         {
