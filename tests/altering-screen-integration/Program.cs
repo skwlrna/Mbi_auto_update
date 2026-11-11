@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using FishingAutomation;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -287,6 +287,57 @@ try
           Has(registeredCalls, "Deficits") && !Has(registeredCalls, "ReadLinesAsync") &&
           !Has(registeredCalls, "ReadDimLinesAsync"),
         "Production registered-food shortages and completion use full recipe CLI stock without material OCR");
+    // Replay the real registered-food entry that failed at 14:35 on V3.3.10.
+    // Cancel at the stock boundary: no game input or live CLI is necessary.
+    {
+        object probe = RuntimeHelpers.GetUninitializedObject(craftingScreen);
+        var stages = new ProductionStageMachine("incident");
+        craftingScreen.GetField("_stage", all)!.SetValue(probe, stages);
+        craftingScreen.GetField("_data", all)!.SetValue(probe, new CraftingCliData(null!));
+        craftingScreen.GetField("_materialCategory", all)!.SetValue(probe, CraftingCategory.Food);
+        var plan = new CraftingPlan(CraftingCategory.Food, "가든 샐러드", 30, 1);
+        craftingScreen.GetField("_registeredFoodPlan", all)!.SetValue(probe, plan);
+        craftingScreen.GetField("_registeredFoodBatch", all)!.SetValue(probe,
+            new[] { new CraftingFoodIngredient("양배추", 80) });
+        stages.Move(ProductionStage.OpenHub, "hub");
+        stages.Move(ProductionStage.Detail, "detail");
+        stages.Move(ProductionStage.CreateQuest, "quest");
+        async Task ReadCancelled()
+        {
+            try
+            {
+                await (Task)Method(craftingScreen, "ReadQuestDeficitsAsync", 2)
+                    .Invoke(probe, new object[] { plan, new CancellationToken(true) })!;
+                throw new InvalidOperationException("Expected cancelled stock read");
+            }
+            catch (OperationCanceledException) { }
+        }
+        await ReadCancelled();
+        Check(stages.Current == ProductionStage.ReadQuest,
+            "Registered food CLI entry records ReadQuest after quest creation before querying stock");
+        stages.Move(ProductionStage.AcquireMaterial, "양배추");
+        stages.Move(ProductionStage.Travel, "gather");
+        stages.Move(ProductionStage.VerifyInventory, "stock");
+        await ReadCancelled();
+        Check(stages.Current == ProductionStage.ReadQuest,
+            "Registered food rereads stock through ReadQuest after gathering");
+        stages.Move(ProductionStage.ResolveIntermediate, "processing");
+        await ReadCancelled();
+        Check(stages.Current == ProductionStage.ReadQuest,
+            "Registered food rereads stock through ReadQuest after intermediate processing");
+        stages.Move(ProductionStage.Travel, "station");
+        Check(stages.Current == ProductionStage.Travel,
+            "Registered food completed shortage check allows station travel");
+        stages.Reset();
+        stages.Move(ProductionStage.OpenHub, "hub");
+        stages.Move(ProductionStage.Detail, "detail");
+        stages.Move(ProductionStage.Travel, "direct");
+        craftingScreen.GetField("_directCraftPendingName", all)!.SetValue(probe, plan.DisplayName);
+        await (Task)Method(craftingScreen, "ReadQuestDeficitsAsync", 2)
+            .Invoke(probe, new object[] { plan, CancellationToken.None })!;
+        Check(stages.Current == ProductionStage.Travel,
+            "Direct food craft preserves Travel and does not enter quest material stages");
+    }
     var readQuestCalls = Calls(Method(craftingScreen, "ReadQuestDeficitsOnceAsync", 2)).ToList();
     int inventoryGate = readQuestCalls.FindIndex(x => x.Contains("ReadMaterialCountAsync", StringComparison.Ordinal));
     int shortagePopup = readQuestCalls.FindIndex(x => x.Contains("OpenQuestPopupAsync", StringComparison.Ordinal));
