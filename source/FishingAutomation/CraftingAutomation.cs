@@ -94,6 +94,26 @@ internal sealed class CraftingAutomation
             long remainingOutput = plan.TargetQuantity - Gained;
             int remainingCrafts = CraftingQueries.RequiredCrafts(remainingOutput, plan.ProducedPerCraft);
             int batchCrafts = CraftingQueries.NextBatchCrafts(remainingCrafts);
+            if (plan.Category == CraftingCategory.Food &&
+                CraftingFoodRecipeCatalog.TryGet(plan.DisplayName, out var recipe))
+            {
+                var selection = await CraftingFoodBatchPolicy.SelectBatchAsync(recipe, batchCrafts,
+                    (names, token) => _data.MaterialCountsWithLoadingRetryAsync(names, token, Log), ct);
+                if (selection.Crafts == 0)
+                {
+                    string reason = $"{plan.DisplayName} 1회도 제작 불가 · " +
+                        $"{selection.Blocker?.MaterialName} 가방/보관함 합계 {selection.Blocker?.Owned}개 · " +
+                        $"부족 {selection.Blocker?.Required}개 · 완료 {CompletedCrafts}회 유지";
+                    Log?.Invoke("[제작][건너뛰기 사유] " + reason);
+                    await _screen.RecoverBatchPreparationAsync(plan, ct);
+                    throw new CraftingMaterialAcquisitionException(selection.Blocker?.MaterialName, reason);
+                }
+                if (selection.Crafts < batchCrafts)
+                    Log?.Invoke($"[제작][배치 축소] {plan.DisplayName} · {batchCrafts}→{selection.Crafts}회 · " +
+                        $"제한 재료={selection.Blocker?.MaterialName} · 합계={selection.Blocker?.Owned} · " +
+                        "가방+보관함 합산 · 채집/가공 재료는 필요한 부족량만 확보");
+                batchCrafts = selection.Crafts;
+            }
             int beforeCompletedCrafts = CompletedCrafts;
 
             Progress?.Invoke(new(
@@ -332,7 +352,7 @@ internal sealed class CraftingAutomation
                 if (deficits.Any(x => string.IsNullOrWhiteSpace(x.DisplayName)))
                     throw new InvalidOperationException(
                         "음식 재료명 OCR 미확인 · 실제 재료 부족으로 건너뛰지 않고 화면 재인식");
-                var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                var stock = await _data.MaterialCountsWithLoadingRetryAsync(
                     deficits.Select(x => x.DisplayName), ct, Log);
                 foreach (var row in deficits)
                     Log?.Invoke($"[제작][CLI 재료 판정] {row.DisplayName} · " +
@@ -355,7 +375,7 @@ internal sealed class CraftingAutomation
                 IReadOnlyDictionary<string, long>? recipeStock = null;
                 if (_screen.RegisteredFoodBatch is { } batch)
                 {
-                    recipeStock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+                    recipeStock = await _data.MaterialCountsWithLoadingRetryAsync(
                         batch.Select(x => x.Name), ct, Log);
                     preflightInputs = batch.Select(x => new CraftingQuestDeficit(
                         x.Name, recipeStock[x.Name], x.Amount, 0)).ToArray();
@@ -364,7 +384,7 @@ internal sealed class CraftingAutomation
                     preflightInputs,
                     (name, token) => recipeStock is not null && recipeStock.TryGetValue(name, out long owned)
                         ? Task.FromResult(owned)
-                        : _data.InventoryOnlyCountWithLoadingRetryAsync(name, token, Log), ct);
+                        : _data.MaterialCountWithLoadingRetryAsync(name, token, Log), ct);
                 if (purchaseShortage is not null)
                 {
                     Log?.Invoke(

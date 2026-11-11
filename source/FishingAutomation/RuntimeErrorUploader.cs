@@ -137,6 +137,22 @@ public sealed class RuntimeErrorUploader
             if (!string.IsNullOrWhiteSpace(recent))
                 await PutFileAsync(repo, branch, token, $"{folder}/recent.log", Encoding.UTF8.GetBytes(recent), $"runtime log: {report.Title}");
 
+            string foodSummary = "";
+            try
+            {
+                string path = _runtimeLogPath + ".food-summary.log";
+                if (File.Exists(path))
+                {
+                    using var reader = new StreamReader(new FileStream(path,
+                        FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+                    foodSummary = reader.ReadToEnd();
+                }
+            }
+            catch { /* Optional summary read cannot prevent screenshot/error upload. */ }
+            if (!string.IsNullOrWhiteSpace(foodSummary))
+                await PutFileAsync(repo, branch, token, $"{folder}/food-summary.log",
+                    Encoding.UTF8.GetBytes(foodSummary), $"food run summary: {report.Title}");
+
             if (requestedScreenshot && settings.SendScreenshot)
             {
                 byte[]? screenshot = CaptureGameWindowPng();

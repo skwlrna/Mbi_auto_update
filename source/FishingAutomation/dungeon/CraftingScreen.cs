@@ -46,9 +46,22 @@ internal sealed class CraftingScreen : ICraftingScreen
 
     private Bitmap Capture(CancellationToken ct) => _ui.Capture(ct);
 
+    private CraftingCategory _materialCategory;
+    private Task<long> ReadMaterialCountAsync(string name, CancellationToken ct, Action<string>? log = null)
+        => _materialCategory == CraftingCategory.Food
+            ? _data.MaterialCountWithLoadingRetryAsync(name, ct, log)
+            : _data.InventoryOnlyCountWithLoadingRetryAsync(name, ct, log);
+    private Task<IReadOnlyDictionary<string, long>> ReadMaterialCountsAsync(
+        IEnumerable<string> names, CancellationToken ct, Action<string>? log = null)
+        => _materialCategory == CraftingCategory.Food
+            ? _data.MaterialCountsWithLoadingRetryAsync(names, ct, log)
+            : _data.InventoryOnlyCountsWithLoadingRetryAsync(names, ct, log);
+
+
     public async Task CreateQuestAsync(CraftingPlan plan, int craftCount, CancellationToken ct)
     {
         plan.Validate();
+        _materialCategory = plan.Category;
         if (craftCount is < 1 or > 10)
             throw new InvalidDataException("제작은 한 번에 1~10회만 설정할 수 있습니다.");
         if (!CraftingHubLayout.IsSafeCraftDetailGeometry())
@@ -84,7 +97,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             _registeredFoodPlan = plan;
             _registeredFoodBatch = recipe.ForBatch(craftCount);
             _questRecipeMaterialNames = recipe.Ingredients.Select(x => x.Name).ToArray();
-            var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+            var stock = await ReadMaterialCountsAsync(
                 _questRecipeMaterialNames, ct, Log);
             var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
             materialState = (true, deficits.Count == 0,
@@ -182,6 +195,15 @@ internal sealed class CraftingScreen : ICraftingScreen
             $"[제작] 재료 부족 · 퀘스트 만들기 · 고정좌표 " +
             $"({CraftingHubLayout.CraftQuestButtonPoint.X},{CraftingHubLayout.CraftQuestButtonPoint.Y})");
         await Task.Delay(800, ct);
+        if (_registeredFoodBatch is not null)
+        {
+            // A newly created quest must be opened before material routing.
+            await CloseOverlayAsync(ct);
+            await Task.Delay(CraftingHubLayout.ProductionQuestListSettleDelayMs, ct);
+            _ui.ClickFresh(CraftingHubLayout.ProductionQuestTopPoint, ct);
+            Log?.Invoke("[제작] 새 제작 퀘스트 생성 직후 클릭 · 재료 수급 검사 전에 실행");
+            await Task.Delay(CraftingHubLayout.ProductionQuestOpenDelayMs, ct);
+        }
     }
 
     private async Task<(bool Parsed, bool AllEnough, string Summary, IReadOnlyList<string> MaterialNames)> ReadSelectedBatchMaterialStateAsync(
@@ -281,7 +303,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                 // Required comes from selected count; Owned comes from CLI.
                 if (materialNames.Count != ratios.Count)
                     return (false, false, "재료명 재인식 필요 · 퀘스트 경로 사용", materialNames);
-                var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(materialNames, ct, Log);
+                var stock = await ReadMaterialCountsAsync(materialNames, ct, Log);
                 allEnough = materialNames.Select((name, index) =>
                     stock[name] >= ratios[index].Required).All(x => x);
                 summary = string.Join(", ", materialNames.Select((name, index) =>
@@ -526,7 +548,7 @@ internal sealed class CraftingScreen : ICraftingScreen
     {
         if (_directCraftPendingName == plan.DisplayName)
             return Array.Empty<CraftingQuestDeficit>();
-        var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+        var stock = await ReadMaterialCountsAsync(
             _registeredFoodBatch!.Select(x => x.Name), ct, Log);
         var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
         Log?.Invoke($"[제작][CLI 부족량] {plan.DisplayName} · " +
@@ -573,7 +595,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                     long.TryParse(match.Groups["req"].Value, out long required) && required > 0)
                     visible.Add(new(line.ReadText ?? "", current, required, line.Center.Y));
             }
-            var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+            var stock = await ReadMaterialCountsAsync(
                 _registeredFoodBatch.Select(x => x.Name), ct, Log);
             var deficits = CraftingFoodBatchPolicy.Deficits(_registeredFoodBatch, stock);
             if (!deficits.Any(x => x.DisplayName == requested.DisplayName))
@@ -623,7 +645,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             bool allReady = true;
             foreach (var deficit in _lastNamedDeficits)
             {
-                long inventory = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                long inventory = await ReadMaterialCountAsync(
                     deficit.DisplayName, ct, Log);
                 if (inventory < deficit.Required) allReady = false;
             }
@@ -684,7 +706,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             // and current inventory independently proves that material is now enough.
             if (_lastSingleQuestDeficit is CraftingQuestDeficit verified)
             {
-                long current = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                long current = await ReadMaterialCountAsync(
                     verified.DisplayName, ct, Log);
                 if (current >= verified.Required)
                 {
@@ -766,7 +788,7 @@ internal sealed class CraftingScreen : ICraftingScreen
             long currentQuantity = ratio.Current;
             if (plan.Category == CraftingCategory.Food && !string.IsNullOrWhiteSpace(name))
             {
-                currentQuantity = await _data.InventoryOnlyCountWithLoadingRetryAsync(name!, ct, Log);
+                currentQuantity = await ReadMaterialCountAsync(name!, ct, Log);
                 Log?.Invoke($"[제작][수량 기준=CLI] {name} · OCR={ratio.Current}/{ratio.Required} · CLI={currentQuantity}/{ratio.Required} · 행Y={ratio.Y}");
             }
             if (currentQuantity < ratio.Required ||
@@ -795,7 +817,7 @@ internal sealed class CraftingScreen : ICraftingScreen
                 var fresh = new Dictionary<string, long>(StringComparer.Ordinal);
                 foreach (string name in _lastNamedDeficits.Select(x => x.DisplayName)
                              .Distinct(StringComparer.Ordinal))
-                    fresh[name] = await _data.InventoryOnlyCountWithLoadingRetryAsync(
+                    fresh[name] = await ReadMaterialCountAsync(
                         name, ct, Log);
 
                 var recovered = CraftingQuestMaterialRecoveryPolicy.IdentifyUniqueFromInventory(
@@ -1041,7 +1063,7 @@ internal sealed class CraftingScreen : ICraftingScreen
         }
         async Task<(string Name, long Current, long Required)> ReadGatherStockAsync()
         {
-            var stock = await _data.InventoryOnlyCountsWithLoadingRetryAsync(
+            var stock = await ReadMaterialCountsAsync(
                 gatherTargets.Select(x => x.DisplayName), ct, Log);
             var reached = gatherTargets.FirstOrDefault(x => stock[x.DisplayName] >= x.Required)
                 ?? gatherTargets[0];

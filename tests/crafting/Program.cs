@@ -644,6 +644,7 @@ try
     await CraftingFoodMaterialPolicyTests.RunAsync(Check);
     await CraftingFoodMaterialIntegrationTests.RunAsync(Check, log);
     await CraftingFoodBatchPolicyTests.RunAsync(Check, log);
+    await CraftingFoodStockCapacityTests.RunAsync(Check, log);
     await CraftingFlowTests.RunAsync(Check, log);
     await BulkGatheringFlowTests.RunAsync(Check);
     if (args.Length == 1 && args[0] == "--live-readonly") await LiveReadOnlyTests.RunAsync(Check, log);

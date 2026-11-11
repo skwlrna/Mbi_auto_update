@@ -9,6 +9,36 @@ internal sealed record CraftingFoodQuestRow(
 
 internal static class CraftingFoodBatchPolicy
 {
+    internal static async Task<(int Crafts, CraftingFoodPurchaseShortage? Blocker)> SelectBatchAsync(
+        CraftingFoodRecipe recipe, int maximum,
+        Func<IEnumerable<string>, CancellationToken, Task<IReadOnlyDictionary<string, long>>> readStock,
+        CancellationToken ct)
+    {
+        if (maximum is < 1 or > 10) throw new ArgumentOutOfRangeException(nameof(maximum));
+        var names = recipe.Ingredients.Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
+        var pending = new Queue<string>(names);
+        while (pending.Count > 0)
+        {
+            string name = pending.Dequeue();
+            if (CraftingFoodMaterialPolicy.TryGetProcessing(name, out var processing))
+                foreach (var input in processing.Ingredients)
+                    if (names.Add(input.Name)) pending.Enqueue(input.Name);
+        }
+        var stock = await readStock(names, ct);
+        CraftingFoodPurchaseShortage? blocker = null;
+        for (int count = maximum; count >= 1; count--)
+        {
+            ct.ThrowIfCancellationRequested();
+            var roots = recipe.ForBatch(count).Select(x =>
+                new CraftingQuestDeficit(x.Name, stock[x.Name], x.Amount, 0)).ToArray();
+            var shortage = await CraftingFoodMaterialPolicy.FindFirstPurchaseShortageAsync(
+                roots, (name, _) => Task.FromResult(stock[name]), ct);
+            if (shortage is null) return (count, blocker);
+            blocker = shortage;
+        }
+        return (0, blocker);
+    }
+
     internal static IReadOnlyList<CraftingQuestDeficit> Deficits(
         IReadOnlyList<CraftingFoodIngredient> batch, IReadOnlyDictionary<string, long> inventory)
     {
@@ -39,9 +69,10 @@ internal static class CraftingFoodBatchPolicy
                 .Contains("제작대", StringComparison.Ordinal)) continue;
             var sameRequired = deficits.Where(x => x.Required == row.Required).ToArray();
             var candidates = sameRequired.Where(x => x.Current == row.Current).ToArray();
-            // Current-count OCR is only a positioning aid; a unique requirement
-            // still identifies a recipe input when its current digits are unreadable.
-            if (candidates.Length == 0 && sameRequired.Length == 1)
+            // Displayed counts can differ from bag+storage totals. Current OCR
+            // is only a positioning aid; allow the whole same-requirement group
+            // only when the supported-input check below accepts every candidate.
+            if (candidates.Length == 0)
                 candidates = sameRequired;
             if (candidates.Length == 0 || candidates.Any(x => !supported.Contains(x.DisplayName)))
                 continue;

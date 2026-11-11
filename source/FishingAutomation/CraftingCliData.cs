@@ -45,11 +45,25 @@ internal sealed class CraftingCliData
         return counts[displayName];
     }
 
+    internal async Task<long> MaterialCountWithLoadingRetryAsync(
+        string name, CancellationToken ct, Action<string>? log = null)
+        => (await MaterialCountsWithLoadingRetryAsync(new[] { name }, ct, log))[name];
+
+    // Food inputs include the bag, character storage and shared account storage.
+    internal Task<IReadOnlyDictionary<string, long>> MaterialCountsWithLoadingRetryAsync(
+        IEnumerable<string> names, CancellationToken ct, Action<string>? log = null)
+        => CountsWithLoadingRetryAsync(names, ct, log, 20, true);
+
     // One fresh get_items response for all materials; never mix snapshots or
     // interpret a failed read as zero stock.
     internal async Task<IReadOnlyDictionary<string, long>> InventoryOnlyCountsWithLoadingRetryAsync(
         IEnumerable<string> displayNames, CancellationToken ct,
         Action<string>? log = null, int maxTransientRejects = 20)
+        => await CountsWithLoadingRetryAsync(displayNames, ct, log, maxTransientRejects, false);
+
+    private async Task<IReadOnlyDictionary<string, long>> CountsWithLoadingRetryAsync(
+        IEnumerable<string> displayNames, CancellationToken ct,
+        Action<string>? log, int maxTransientRejects, bool includeStorage)
     {
         if (maxTransientRejects < 1)
             throw new ArgumentOutOfRangeException(nameof(maxTransientRejects));
@@ -62,8 +76,25 @@ internal sealed class CraftingCliData
             var response = await _cli.GetItemsAsync(ct);
             if (response.Success && response.Data is not null &&
                 response.Data.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
-                return names.ToDictionary(name => name,
-                    name => ParseInventoryOnlyCount(response.Data.Value, name), StringComparer.Ordinal);
+            {
+                if (!includeStorage)
+                    return names.ToDictionary(name => name,
+                        name => ParseInventoryOnlyCount(response.Data.Value, name), StringComparer.Ordinal);
+                var aliases = names.ToDictionary(x => x, x => x, StringComparer.Ordinal);
+                var totals = InventoryLootTracker.Parse(response.Data.Value, aliases)
+                    ?? throw new InvalidDataException("가방/보관함 재료 수량 형식 오류 · 부족/0개로 판정하지 않습니다.");
+                foreach (string name in names)
+                {
+                    long At(string location) => response.Data.Value.EnumerateArray()
+                        .Where(x => System.Text.RegularExpressions.Regex.Replace(x.GetProperty("DisplayName").GetString()!,
+                            @"</?color(?:=[^<>]*)?>", "").Trim() == name &&
+                                    x.GetProperty("Location").GetString() == location)
+                        .Sum(x => x.GetProperty("Count").GetInt64());
+                    log?.Invoke($"[제작][재료 합산] {name} · 가방={At("inventory")} · " +
+                        $"캐릭터 보관함={At("character_storage")} · 공용 보관함={At("account_storage")} · 합계={totals[name]}");
+                }
+                return totals;
+            }
 
             if (!CliAutomationGuards.IsTransientLoadingRejection(response))
                 throw new InvalidDataException("가방 품목 수량 조회 실패 · 재료 부족/0개로 판정하지 않습니다.");

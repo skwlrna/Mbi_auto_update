@@ -283,12 +283,12 @@ try
     Check(Has(Calls(Method(craftingScreen, "ReadQuestDeficitsAsync", 2)), "ReadRegisteredFoodDeficitsAsync"),
         "Registered foods bypass the legacy OCR name retry wrapper");
     var registeredCalls = Calls(Method(craftingScreen, "ReadRegisteredFoodDeficitsAsync", 2)).ToList();
-    Check(Has(registeredCalls, "InventoryOnlyCountsWithLoadingRetryAsync") &&
+    Check(Has(registeredCalls, "ReadMaterialCountsAsync") &&
           Has(registeredCalls, "Deficits") && !Has(registeredCalls, "ReadLinesAsync") &&
           !Has(registeredCalls, "ReadDimLinesAsync"),
         "Production registered-food shortages and completion use full recipe CLI stock without material OCR");
     var readQuestCalls = Calls(Method(craftingScreen, "ReadQuestDeficitsOnceAsync", 2)).ToList();
-    int inventoryGate = readQuestCalls.FindIndex(x => x.Contains("InventoryOnlyCountWithLoadingRetryAsync", StringComparison.Ordinal));
+    int inventoryGate = readQuestCalls.FindIndex(x => x.Contains("ReadMaterialCountAsync", StringComparison.Ordinal));
     int shortagePopup = readQuestCalls.FindIndex(x => x.Contains("OpenQuestPopupAsync", StringComparison.Ordinal));
     Check(inventoryGate >= 0 && shortagePopup > inventoryGate &&
           Has(readQuestCalls, "HasCraftActionLabelAsync") &&

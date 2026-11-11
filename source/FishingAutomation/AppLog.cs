@@ -40,6 +40,19 @@ public sealed class AppLog
                 if (fi.Exists && fi.Length > _maxBytes)
                     File.WriteAllText(_path, string.Empty);
                 File.AppendAllText(_path, line + Environment.NewLine);
+                string summaryPath = _path + ".food-summary.log";
+                if (text.StartsWith("[스케줄러] 시작 ·", StringComparison.Ordinal) ||
+                    text.StartsWith("[제작] 시작(F9)", StringComparison.Ordinal))
+                    File.WriteAllText(summaryPath, line + Environment.NewLine);
+                else if (text.StartsWith("[스케줄러]", StringComparison.Ordinal) ||
+                         text.StartsWith("[스케줄러 통계]", StringComparison.Ordinal) ||
+                         text.StartsWith("[제작][순차]", StringComparison.Ordinal) ||
+                         text.StartsWith("[제작][건너뛰기 사유]", StringComparison.Ordinal) ||
+                         text.StartsWith("[제작][배치 축소]", StringComparison.Ordinal) ||
+                         text.StartsWith("[제작] 시작 ·", StringComparison.Ordinal) ||
+                         text.StartsWith("[제작] 오류:", StringComparison.Ordinal))
+                    File.AppendAllText(summaryPath, line + Environment.NewLine);
+
             }
             catch { }
         }

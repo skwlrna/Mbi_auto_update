@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.10",
+  "purpose": "food_storage_partial_batches_and_run_summary",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}
