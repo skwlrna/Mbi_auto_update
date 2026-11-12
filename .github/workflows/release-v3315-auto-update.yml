@@ -125,7 +125,8 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3315_abyss_space_entry.py' -v
+          if(-not (Test-Path 'tests/release/test_v3314_abyss_space_entry.py')){throw 'Missing Abyss Space regression suite'}
+          python -m unittest discover -s tests/release -p 'test_v3314_abyss_space_entry.py' -v
           if($LASTEXITCODE-ne0){throw 'Initial Abyss entry must use Space and retain combat verification'}
 
       - name: Verify V3.3.15 bounded Abyss entry retries and selection-screen veto
