@@ -14,6 +14,10 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
         project = read("source/FishingAutomation/FishingAutomation.csproj")
         if 'CurrentVersion = "V3.3.01"' in current:
             expected = ("3.3.1", "3.3.1.0", "3.3.1.0")
+        elif 'CurrentVersion = "V3.3.15"' in current:
+            expected = ("3.3.15", "3.3.15.0", "3.3.15.0")
+            self.assertIn("gh release create V3.3.15",
+                          read(".github/workflows/release-v3315-auto-update.yml"))
         elif 'CurrentVersion = "V3.3.14"' in current:
             expected = ("3.3.14", "3.3.14.0", "3.3.14.0")
             self.assertIn("gh release create V3.3.14",

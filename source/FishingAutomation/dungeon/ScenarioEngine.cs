@@ -1109,12 +1109,17 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                                 using var entryFrame = await CaptureGameWindowAsync(ct);
                                 found = await _detector.DetectAsync(step.Target, entryFrame, ct);
                                 if (!found.Found) continue;
+                                // The UI can still be animating when the template first appears.
+                                // Do not send Space until two FRESH later frames agree after settling.
+                                if (!await VerifyStableAbyssEntryReadyAsync(ct))
+                                    continue;
                                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                                 NativeMethods.SetForegroundWindow(_hwnd);
-                                // The confirmed Abyss entry screen advertises Space. Use
-                                // keyboard input rather than a mouse click on its artwork.
-                                Log?.Invoke($"[어비스 입장] 버튼 재확인 -> Space 입력 @ {found.Bounds}");
+                                // The confirmed Abyss entry screen advertises Space.
+                                Log?.Invoke($"[어비스 입장] 버튼 재확인 -> Space 입력 · 안정화 2프레임 (1/3) @ {found.Bounds}");
                                 _input.TapScanCode(0x39, ct);
+                                _abyssEntrySpaceCount = 1;
+                                _abyssEntryLastSpaceAt = Environment.TickCount64;
                             }
                             else
                             {
