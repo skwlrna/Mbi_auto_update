@@ -30,8 +30,13 @@ class AbyssInitialEntrySpaceRegression(unittest.TestCase):
     def test_combat_timer_requires_actual_dungeon_evidence(self):
         timeout = (ROOT / "source/FishingAutomation/dungeon/ScenarioEngine.AbyssTimeout.cs").read_text(encoding="utf-8")
         self.assertIn('await HasAbyssCombatEvidenceAsync(frame, ct)', timeout)
-        self.assertIn('if (++gone < 3)', timeout)
-        self.assertIn('어비스 입장 화면 이탈을 확인하지 못해 전투 타이머를 시작하지 않습니다.', timeout)
+        # V3.3.15 still needs three consecutive dungeon frames but starts
+        # the combat clock on the third one, instead of skipping the first two.
+        self.assertTrue('if (++gone < 3)' in timeout or 'if (++gone >= 3)' in timeout)
+        self.assertTrue(
+            '어비스 입장 화면 이탈을 확인하지 못해 전투 타이머를 시작하지 않습니다.' in timeout
+            or '60초 내 어비스 입장 화면 이탈과 실제 던전 내부 3프레임을 확인하지 못해 전투 타이머를 시작하지 않습니다.' in timeout
+        )
 
     def test_non_abyss_space_and_other_mouse_clicks_stay_unmodified(self):
         code = (ROOT / "source/FishingAutomation/dungeon/ScenarioEngine.cs").read_text(encoding="utf-8")
