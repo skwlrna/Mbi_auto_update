@@ -420,6 +420,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             if (_scheduledResultExit && _scheduledExitClicked)
             {
                 outsideCheckArmed = true;
+                if (await TryDismissPostExitStellagramAsync(frame, ct))
+                {
+                    outsideConsecutive = 0;
+                    exitPendingRecovery.Restart();
+                    Log?.Invoke("[병행 복구] 스텔라그램 ESC 닫힘 확인 -> 필드 HUD 검증 재개");
+                    continue;
+                }
                 if (await TryAcknowledgeScheduledMissionCompleteAsync(frame, ct))
                 {
                     outsideConsecutive = 0;
@@ -1472,11 +1479,18 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         Log?.Invoke("[어비스] 나가기 클릭 완료 -> 던전 밖 고정 HUD 복귀 확인 중");
         var sw = Stopwatch.StartNew();
         int outsideConsecutive = 0;
+        if (!_scheduledResultExit) _postExitStellagramEscAttempted = false;
 
         while (sw.Elapsed < TimeSpan.FromSeconds(60))
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
+            if (await TryDismissPostExitStellagramAsync(frame, ct))
+            {
+                outsideConsecutive = 0;
+                sw.Restart(); // ESC closing is not proof of outside HUD.
+                continue;
+            }
             // The live 2026-10-13 capture shows a separate full-screen
             // "협동 미션 완료" reward panel AFTER clicking 나가기.
             // A one-time, guarded 확인 click is needed before field HUD returns.
