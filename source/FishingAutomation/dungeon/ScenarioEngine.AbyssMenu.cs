@@ -18,6 +18,7 @@ internal sealed partial class ScenarioEngine
             return DetectionResult.NotFound;
 
         var icon = await _detector.DetectAsync("abyss_icon", frame, ct);
+        DiagnosticObserveDetection("abyss_icon_raw", icon);
         if (icon.Found && AbyssMenuEntryPolicy.IconEvidence(icon.Bounds))
             return icon;
 
@@ -30,8 +31,8 @@ internal sealed partial class ScenarioEngine
         // The "길드" icon is below the "어비스" row in the same menu, and
         // independently disambiguates a bare '어비스' label in other screens.
         var guild = await _abyssMenuOcr.FindCompactLabelAsync(
-            frame, AbyssMenuEntryPolicy.GuildLabel, "길드", ct);
-        if (!guild.Found || !AbyssMenuEntryPolicy.ContextEvidence(guild.Bounds))
+            frame, AbyssMenuEntryPolicy.GuildLabelFor(abyss.Bounds), "길드", ct);
+        if (!guild.Found || !AbyssMenuEntryPolicy.ContextEvidence(abyss.Bounds, guild.Bounds))
             return DetectionResult.NotFound;
 
         return abyss;

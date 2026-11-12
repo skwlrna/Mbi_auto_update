@@ -63,22 +63,36 @@ Assert(passiveAbyssWait.Observe(AbyssPassiveWaitKind.Recruiting) == TimeSpan.Fro
 // visibly open, but step 1 searched only the CLOSED-menu ESC template
 // until it timed out. Two independent frames of the Abyss item in the
 // correct right-side menu must bypass the ESC click.
+// Existing menu layout is still supported.
 var menuA = new DetectionResult(true, new Rectangle(495, 315, 64, 68), 0.91, null);
 var menuB = new DetectionResult(true, new Rectangle(497, 316, 64, 68), 0.90, null);
 Assert(AbyssMenuEntryPolicy.IconEvidence(menuA.Bounds) &&
        AbyssMenuEntryPolicy.Stable(menuA, menuB),
-    "already-open menu: two stable Abyss-icon frames skip ESC and advance");
+    "legacy already-open menu: two stable frames");
 Assert(!AbyssMenuEntryPolicy.Stable(DetectionResult.NotFound, menuA),
-    "one menu frame cannot authorize skip or click");
+    "one menu frame cannot authorize click");
 Assert(!AbyssMenuEntryPolicy.Stable(menuA,
        new DetectionResult(true, new Rectangle(170, 315, 64, 68), 0.97, null)),
-    "similar icon in field or wrong screen must not authorize menu click");
-Assert(!AbyssMenuEntryPolicy.Stable(menuA,
-       new DetectionResult(true, new Rectangle(489, 440, 64, 68), 0.99, null)),
-    "other rows in the open menu are not Abyss");
-Assert(AbyssMenuEntryPolicy.ContextEvidence(new Rectangle(498, 575, 48, 18)) &&
-       !AbyssMenuEntryPolicy.ContextEvidence(new Rectangle(498, 360, 48, 18)),
-    "OCR fallback requires independent Guild label below Abyss in menu");
+    "other screen cannot authorize click");
+Assert(AbyssMenuEntryPolicy.ContextEvidence(menuA.Bounds, new Rectangle(498, 575, 48, 18)) &&
+       !AbyssMenuEntryPolicy.ContextEvidence(menuA.Bounds, new Rectangle(498, 360, 48, 18)),
+    "legacy OCR needs matching Guild label");
+// 2026-11-12 incident: event banner shifts right-hand Abyss and Guild cells.
+var eventMenuA = new DetectionResult(true, new Rectangle(495, 440, 68, 68), 0.91, null);
+var eventMenuB = new DetectionResult(true, new Rectangle(498, 441, 68, 68), 0.90, null);
+Assert(AbyssMenuEntryPolicy.IconEvidence(eventMenuA.Bounds) &&
+       AbyssMenuEntryPolicy.Stable(eventMenuA, eventMenuB),
+    "event-banner menu accepts two fresh Abyss icon frames");
+Assert(!AbyssMenuEntryPolicy.Stable(menuA, eventMenuA),
+    "mixed legacy/event frames never authorize click");
+Assert(!AbyssMenuEntryPolicy.IconEvidence(new Rectangle(625, 440, 64, 68)) &&
+       !AbyssMenuEntryPolicy.IconEvidence(new Rectangle(500, 565, 64, 68)),
+    "neighbor and unrelated menu cells remain excluded");
+Assert(AbyssMenuEntryPolicy.ContextEvidence(eventMenuA.Bounds, new Rectangle(585, 720, 39, 20)) &&
+       !AbyssMenuEntryPolicy.ContextEvidence(eventMenuA.Bounds, new Rectangle(498, 575, 48, 18)) &&
+       !AbyssMenuEntryPolicy.ContextEvidence(menuA.Bounds, new Rectangle(585, 720, 39, 20)),
+    "Guild OCR context must match recognized Abyss menu layout");
+
 Assert(AbyssMenuEntryPolicy.ShouldRunAnotherCycle(false, true, false, 1, 6),
     "non-repeating scheduled Abyss continues after verified entry recovery");
 Assert(!AbyssMenuEntryPolicy.ShouldRunAnotherCycle(false, true, true, 1, 6),

@@ -15,16 +15,16 @@
     "Id": "abyss_icon",
     "Kind": "template",
     "Roi": {
-      "X": 0,
-      "Y": 0,
-      "Width": 800,
-      "Height": 1000
+      "X": 470,
+      "Y": 280,
+      "Width": 195,
+      "Height": 270
     },
     "TemplatePath": "templates/abyss.png",
     "Threshold": 0.8,
-    "TemplateScaleMin": 1,
-    "TemplateScaleMax": 1,
-    "TemplateScaleStep": 0.1
+    "TemplateScaleMin": 0.75,
+    "TemplateScaleMax": 1.2,
+    "TemplateScaleStep": 0.05
   },
   {
     "Id": "abyss_dungeon_hallucination_anchorage",
