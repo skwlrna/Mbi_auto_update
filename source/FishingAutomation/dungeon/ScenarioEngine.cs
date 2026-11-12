@@ -14,6 +14,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private readonly GuardedInputController _input;
     private readonly string _baseDir;
     private readonly bool _scheduledResultExit;
+    private readonly Func<CancellationToken, Task<bool>>? _shouldExitForProcessingAfterRound;
     private bool _scheduledOutsideExitVerified;
     // An explicit, visually verified LEFT result exit is required before
     // acknowledging an optional post-exit mission reward panel.
@@ -46,13 +47,17 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     public string InputMode => _input.ModeName;
 
     public ScenarioEngine(nint hwnd, AppSettings settings, ScenarioDefinition scenario, List<TargetDefinition> targets, string baseDir, FishingAutomation.MabinogiMobileCli? cli = null,
-        bool scheduledResultExit = false)
+        bool scheduledResultExit = false,
+        Func<CancellationToken, Task<bool>>? shouldExitForProcessingAfterRound = null)
     {
         _hwnd = hwnd;
         _settings = settings;
         _scenario = scenario;
         _baseDir = baseDir;
         _scheduledResultExit = scheduledResultExit;
+        _shouldExitForProcessingAfterRound = shouldExitForProcessingAfterRound;
+        if (scheduledResultExit && shouldExitForProcessingAfterRound is null)
+            throw new InvalidOperationException("병행 어비스 결과 CLI 가공 판단 콜백이 없습니다.");
         if (scheduledResultExit && (!string.Equals(new DirectoryInfo(baseDir).Name, "abyss", StringComparison.OrdinalIgnoreCase) || scenario.Repeat))
             throw new InvalidOperationException("병행 어비스는 어비스 1판 후 종료 설정에서만 허용됩니다.");
         if (cli is not null)
@@ -270,6 +275,14 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 "병행 어비스 자동복구 반복 한도 도달 -> 던전 밖 미확인, 가공 입력권 반환 금지");
     }
 
+    private async Task<bool> ShouldExitScheduledAbyssAfterRoundAsync(CancellationToken ct)
+    {
+        if (!_scheduledResultExit || _shouldExitForProcessingAfterRound is null)
+            throw new InvalidOperationException("병행 어비스 가공 필요 조회가 설정되지 않았습니다.");
+        ct.ThrowIfCancellationRequested();
+        return await _shouldExitForProcessingAfterRound(ct);
+    }
+
     private int FindDungeonStepIndex(string targetId)
     {
         for (int i = 0; i < _scenario.Steps.Count; i++)
@@ -453,17 +466,17 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
             if ((await DetectAbyssResultRetryAsync(frame, ct)).Found)
             {
-                if (ScheduledAbyssReturnPolicy.RecoveryResultAction(_scheduledResultExit) ==
-                    AbyssRecoveryResultAction.ExitForProcessing)
+                // Recovery must use the same fresh CLI decision as the normal
+                // result path, never force an exit just because this is scheduled.
+                if (_scheduledResultExit && await ShouldExitScheduledAbyssAfterRoundAsync(ct))
                 {
-                    // Processing scheduler must never press "다시 하기" during
-                    // Smart Recovery. Use the guarded LEFT exit path instead.
-                    Log?.Invoke("[병행 복구] 결과 화면 확인 -> 다시 하기 금지 · 검증된 나가기 수행");
+                    Log?.Invoke("[병행 복구] 가공 필요 확인 -> 검증된 왼쪽 나가기");
                     await ExitAbyssResultForScheduledProcessingAsync(ct);
                     _resumeStepIndex = 0;
                 }
                 else
                 {
+                    Log?.Invoke("[병행 복구] 가공 대기 유지 -> 검증된 가운데 다시 하기");
                     await RetryAbyssResultAsync(ct);
                     _resumeStepIndex = AbyssCombatStepIndex;
                 }
@@ -943,7 +956,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
         if (IsAbyss && step.Target == "abyss_result_retry")
         {
-            if (_scheduledResultExit)
+            if (_scheduledResultExit && await ShouldExitScheduledAbyssAfterRoundAsync(ct))
                 await ExitAbyssResultForScheduledProcessingAsync(ct);
             else
                 await RetryAbyssResultAsync(ct);

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.17",
+  "purpose": "scheduled_abyss_conditional_exit_on_processing",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "맞아 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

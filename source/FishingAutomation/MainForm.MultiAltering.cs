@@ -853,8 +853,38 @@ public sealed partial class MainForm
                     // recipe/facility/hub UI and never blindly clicks unknown UI.
                     await screen.ExitToFieldAsync(coordinatorToken);
                     laneState.InvalidateOnsite("병행 어비스 이동 · 이전 가공시설 현장권한 무효화");
+                    // Coordinator is paused and owns no inputs until outside
+                    // proof; both reads are independent CLI-only snapshots.
+                    // No background screen actor may use these observations.
+                    var selectedFacilities = plans.Select(p => p.FacilityName)
+                        .Distinct(StringComparer.Ordinal).ToArray();
+                    async Task<bool> NeedsProcessingAtResultAsync(CancellationToken queryToken)
+                    {
+                        queryToken.ThrowIfCancellationRequested();
+                        var first = await managerState.ReadWithRecoveryAsync(
+                            LifeSkillStage.Altering, "abyss-result-works",
+                            rawAlteringData.WorksAsync, queryToken);
+                        bool needed = AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(
+                            selectedFacilities, first);
+                        if (!needed)
+                        {
+                            // Before another Abyss run, repeat the read instead
+                            // of relying on an earlier 10-minute-old queue.
+                            await Task.Delay(250, queryToken);
+                            var fresh = await managerState.ReadWithRecoveryAsync(
+                                LifeSkillStage.Altering, "abyss-result-works-confirm",
+                                rawAlteringData.WorksAsync, queryToken);
+                            needed = AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(
+                                selectedFacilities, fresh);
+                        }
+                        _log.Write(needed
+                            ? "[병행] 결과 CLI 가공 필요 확인 -> 어비스 나가기 후 가공 관리"
+                            : "[병행] 결과 CLI 모든 선택 시설 가공 중 -> 나가지 않고 어비스 다시 하기");
+                        return needed;
+                    }
                     await RunCombinedAbyssRoundAsync(coordinatorToken,
-                        combinedAbyssDungeonName, combinedAbyssTargetId);
+                        combinedAbyssDungeonName, combinedAbyssTargetId,
+                        NeedsProcessingAtResultAsync);
                 }
                 : null;
 

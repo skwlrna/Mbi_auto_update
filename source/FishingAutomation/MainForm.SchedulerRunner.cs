@@ -158,7 +158,7 @@ public sealed partial class MainForm
                 _combinedAlteringRequested = runAbyss;
                 _schedulerMonitor.Advance("altering");
                 _log.Write("[스케줄러] 2단계 다중가공 시작" +
-                    (runAbyss ? " · 가공 대기 중 어비스 1판씩" : ""));
+                    (runAbyss ? " · 가공 필요할 때까지 어비스 연속" : ""));
                 // This call waits for coordinator completion and exclusively
                 // owns registration, collection, durable ledger and idle Abyss.
                 await StartMultiAlteringAsync(
