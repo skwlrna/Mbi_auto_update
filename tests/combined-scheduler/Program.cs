@@ -117,6 +117,52 @@ Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(-1) }),
 Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(0, true) }),
     "all slots complete: process before abyss");
 
+// Post-round work selection: the manager collects a whole facility batch,
+// not one finished slot. Read-only CLI does not authorize UI processing.
+var leatherOnly = new[] { "가죽 가공 시설" };
+var woodLeather = new[] { "가죽 가공 시설", "목재 가공 시설" };
+Assert(!AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(leatherOnly, new[] { Work(360) }),
+    "running queue only -> scheduled Abyss result must retry, not exit");
+Assert(!AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(leatherOnly,
+    new[] { Work(0, true), Work(280) }),
+    "partially completed facility batch -> stay in Abyss, no premature collection");
+Assert(!AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(woodLeather,
+    new[] { Work(240), WoodWork(420) }),
+    "all selected facilities running -> retry Abyss without field trip");
+Assert(!AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(leatherOnly,
+    new[] { Work(350), WoodWork(0, true) }),
+    "unselected completed facility does not force exit");
+Assert(AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(leatherOnly,
+    new[] { Work(0, true), Work(0, true) }),
+    "whole leather facility completed -> exit for receipt/registration");
+Assert(AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(woodLeather,
+    new[] { Work(360), WoodWork(0, true) }),
+    "one facility batch completed -> exit even if other facility runs");
+Assert(AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(woodLeather,
+    new[] { Work(250) }),
+    "selected empty facility needs processing reconciliation, not Abyss repeat");
+Assert(AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(leatherOnly,
+    new[] { new AlteringWork("가죽", "가죽 가공 시설", "NotStarted", false, 0) }),
+    "unstarted facility queue requires manager to decide next registration");
+bool invalidAfterRoundBlocked = false;
+try
+{
+    _ = AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(leatherOnly,
+        new[] { new AlteringWork("가죽", "가죽 가공 시설", "Unknown", false, 0) });
+}
+catch (InvalidDataException) { invalidAfterRoundBlocked = true; }
+Assert(invalidAfterRoundBlocked,
+    "unrecognized CLI state cannot authorize another Abyss round");
+bool missingFacilitiesBlocked = false;
+try
+{
+    _ = AbyssAlteringSchedulePolicy.NeedsProcessingAfterRound(
+        Array.Empty<string>(), new[] { Work(300) });
+}
+catch (InvalidOperationException) { missingFacilitiesBlocked = true; }
+Assert(missingFacilitiesBlocked,
+    "missing selected facilities cannot authorize another Abyss round");
+
 // Departure is an efficiency gate, NOT an Abyss battle duration limit.
 Assert(!AbyssAlteringSchedulePolicy.CanRun(new[] { Work(120) }, 180),
     "180s selectable departure gate rejects a shorter processing wait");

@@ -2,7 +2,8 @@ using System.Diagnostics;
 
 namespace DungeonVisionBot;
 
-// Optional one-cycle-only mode; ordinary Abyss always uses RetryAbyssResultAsync.
+// Optional scheduled exit action. The result decision is made on each round by
+// fresh processing CLI reads; ordinary Abyss keeps RetryAbyssResultAsync.
 internal sealed partial class ScenarioEngine
 {
     private async Task ExitAbyssResultForScheduledProcessingAsync(CancellationToken ct)
