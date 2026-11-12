@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.15",
+  "purpose": "abyss_initial_entry_stable_space_bounded_retry",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}
