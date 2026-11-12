@@ -1111,8 +1111,15 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                                 if (!found.Found) continue;
                                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                                 NativeMethods.SetForegroundWindow(_hwnd);
+                                // The confirmed Abyss entry screen advertises Space. Use
+                                // keyboard input rather than a mouse click on its artwork.
+                                Log?.Invoke($"[어비스 입장] 버튼 재확인 -> Space 입력 @ {found.Bounds}");
+                                _input.TapScanCode(0x39, ct);
                             }
-                            _input.ClickClientPoint(_hwnd, found.Center);
+                            else
+                            {
+                                _input.ClickClientPoint(_hwnd, found.Center);
+                            }
                             await Task.Delay(_settings.ClickSettleMs, ct);
                         }
                     }
