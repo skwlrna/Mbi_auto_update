@@ -8,7 +8,8 @@ public sealed partial class MainForm
     // It owns the game window exclusively until the exit HUD is verified.
     // No normal dungeon task or second input worker is started.
     private async Task RunCombinedAbyssRoundAsync(
-        CancellationToken token, string dungeonName, string dungeonTargetId)
+        CancellationToken token, string dungeonName, string dungeonTargetId,
+        Func<CancellationToken, Task<bool>> shouldExitForProcessingAfterRound)
     {
         token.ThrowIfCancellationRequested();
         var windows = WindowTools.EnumerateVisibleWindows();
@@ -30,10 +31,11 @@ public sealed partial class MainForm
             if (step.Target.Equals("abyss_selected_dungeon", StringComparison.OrdinalIgnoreCase))
                 step.Target = dungeonTargetId;
 
-        _log.Write("[병행] 대기 시간 활용 어비스 1판 시작 · " + dungeonName);
+        _log.Write("[병행] 가공 대기 중 어비스 연속 진행 시작 · 결과마다 CLI 확인 후 가공 필요 시 퇴장 · " + dungeonName);
         using var engine = new ScenarioEngine(
             windows[0].Handle, settings, scenario, targets, baseDir, _cli,
-            scheduledResultExit: true);
+            scheduledResultExit: true,
+            shouldExitForProcessingAfterRound: shouldExitForProcessingAfterRound);
 
         engine.Log += message => Ui(() => _log.Write("[병행 어비스] " + message));
         await engine.RunAsync(token);

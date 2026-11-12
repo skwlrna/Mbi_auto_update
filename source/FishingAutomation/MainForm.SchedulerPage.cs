@@ -508,7 +508,7 @@ public sealed partial class MainForm
             layout.Controls.Add(Txt("실행 순서 및 사용 설정", TitleText, 20, true), 0, 0);
             LayoutCheck(_crafts, "1. 제작  ·  선택한 음식 / 아이템 목표 수량까지 작업", layout, 1);
             LayoutCheck(_alters, "2. 다중가공  ·  시설별 다중 작업 등록 / 수령 / 재료 해결", layout, 2);
-            LayoutCheck(_abyss, "3. 어비스  ·  가공 대기 중 한 판 실행 후 퇴장 검증", layout, 3);
+            LayoutCheck(_abyss, "3. 어비스  ·  가공이 필요할 때만 어비스 나가기", layout, 3);
             layout.Controls.Add(BuildSequencePreview(), 0, 4);
             layout.Controls.Add(Txt("제작은 먼저 완료하며, 제작 중 어비스로 전환하지 않습니다.", Muted, 15), 0, 5);
             layout.Controls.Add(Txt("각 작업 설정을 확인한 뒤 F9 시작 · F10 정지", Muted, 15), 0, 6);
@@ -619,7 +619,7 @@ public sealed partial class MainForm
             _minimumWaitChoice.Font = new Font("맑은 고딕", 17f, FontStyle.Regular, GraphicsUnit.Pixel);
             layout.Controls.Add(_minimumWaitChoice, 0, 3);
             layout.Controls.Add(_abyssSummary, 0, 4);
-            layout.Controls.Add(Txt("어비스 중 가공 감시만 일시 정지하며, 복귀 후 작업 목록을 재조회합니다.", Muted, 16), 0, 5);
+            layout.Controls.Add(Txt("어비스 결과마다 CLI 가공 대기열을 조회하며, 실제 가공 작업이 필요하면 나갑니다.", Muted, 16), 0, 5);
             layout.Controls.Add(Txt("실제 게임에서 던전 종료 및 복귀 확인이 필요합니다.", Color.DarkOrange, 16), 0, 6);
             tab.Controls.Add(layout);
             return tab;
@@ -641,7 +641,7 @@ public sealed partial class MainForm
                 : "제작 상세에서 음식 또는 아이템을 검색하고 선택하세요.";
 
             _abyssSummary.Text = "선택 던전 : " + AbyssDungeon + "  ·  출발 기준 " +
-                MinimumAbyssWaitSeconds + "초 · 어비스 종료/필드 복귀 시 가공 재조회";
+                MinimumAbyssWaitSeconds + "초 · 매 판 종료 시 CLI 가공 확인 · 필요 시 나가기";
 
             bool running = _owner._schedulerRunning;
             if (running) ClearStartFeedback();
