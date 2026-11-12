@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.14",
+  "purpose": "abyss_initial_entry_space_input_fix",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "마우스 클릭을 스페이스로 바꿔",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}
