@@ -104,6 +104,24 @@ internal sealed partial class ScenarioEngine
             Log?.Invoke($"[어비스 상태] {previous} -> {next} · {reason}");
     }
 
+    // V3.3.19: a ResultConfirmed entered from reward OCR is not permission
+    // to skip an independently verified, still-visible clear touch overlay.
+    // The caller must prove both clear-title and bottom touch prompt in TWO
+    // consecutive fresh frames before this narrowly scoped reversal.
+    private void AbyssRestoreVerifiedClearTouchFromPrematureResult(string reason)
+    {
+        if (!IsAbyss) throw new InvalidOperationException("어비스 클리어 복구는 어비스에서만 허용됩니다.");
+        lock (_abyssFlowStateLock)
+        {
+            if (_abyssFlowState != AbyssFlowState.ResultConfirmed)
+                throw new InvalidOperationException(
+                    $"검증된 클리어 터치 복귀 상태 불일치: {_abyssFlowState}");
+            _abyssFlowState = AbyssFlowState.ClearConfirmed;
+        }
+        _abyssClearPairedEvidenceFrames = 0;
+        Log?.Invoke("[어비스 상태] ResultConfirmed -> ClearConfirmed · " + reason);
+    }
+
     private void AbyssRequireState(AbyssFlowState expected, string operation)
     {
         if (!IsAbyss)

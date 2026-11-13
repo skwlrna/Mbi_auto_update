@@ -34,9 +34,23 @@ namespace DungeonVisionBot
  internal sealed partial class ScenarioEngine
  {
   readonly string _baseDir="abyss";readonly Settings _settings=new();readonly Definition _scenario=new();readonly Detector _detector=new();readonly Input _input=new();nint _hwnd;
-  enum AbyssFlowState {ResultConfirmed,RetryClicked,Reentering,Recruiting,CombatClearWait}
+  enum AbyssFlowState {ResultConfirmed,ClearConfirmed,RetryClicked,Reentering,Recruiting,CombatClearWait}
   AbyssFlowState flow;
   void AbyssTransitionTo(AbyssFlowState s,string r){flow=s;}void AbyssRequireState(AbyssFlowState s,string r){}
+  // The production V3.3.19 rescue uses methods supplied by other partial
+  // files. This isolated retry harness needs equivalent stubs to compile.
+  AbyssFlowState GetAbyssFlowState()=>flow;
+  void AbyssRestoreVerifiedClearTouchFromPrematureResult(string reason)
+  {
+   if(flow!=AbyssFlowState.ResultConfirmed)throw new InvalidOperationException("unexpected mock flow");
+   flow=AbyssFlowState.ClearConfirmed;
+  }
+  Task AdvanceAbyssClearScreenAsync(DetectionResult touch,CancellationToken ct)
+  {
+   if(flow!=AbyssFlowState.ClearConfirmed)throw new InvalidOperationException("mock touch flow");
+   flow=AbyssFlowState.ResultConfirmed;
+   return Task.CompletedTask;
+  }
   void DiagnosticObserveDetection(string s,DetectionResult r){}void DiagnosticObserveClick(string s,Point p){}void DiagnosticPersistFailure(string s){}string DiagnosticSummary()=>"test";string AbyssFlowStateText()=>"test";
   // The production competition modal handler lives in a different partial
   // file. This isolated retry harness only models its absent-screen result.
