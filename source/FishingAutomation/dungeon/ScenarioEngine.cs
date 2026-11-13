@@ -972,6 +972,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         var sw = Stopwatch.StartNew();
         bool alternativeClicked = false;
         int abyssClearConsecutive = 0;
+        long lastAbyssCompletedResultProbeAt = 0;
         var abyssIconRejected = new List<Rectangle>();
 
         while (IsAbyss && step.Target == "abyss_touch_screen"
@@ -986,6 +987,18 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             DetectionResult found;
             if (step.Target.Equals("abyss_touch_screen", StringComparison.OrdinalIgnoreCase))
             {
+                // V3.3.18: a finished reward screen may arrive without the
+                // transient clear-title/touch overlay. Confirm it BEFORE
+                // scene-skip monitors and BEFORE the ten-minute timeout.
+                if (Environment.TickCount64 - lastAbyssCompletedResultProbeAt >= 1250)
+                {
+                    lastAbyssCompletedResultProbeAt = Environment.TickCount64;
+                    if (await ConfirmAbyssCompletedResultAsync(frame, ct))
+                    {
+                        MarkAbyssCompletedResult("전투 대기 중 완료 결과 화면 2프레임 확인");
+                        return; // Let the existing result step decide Retry vs Processing Exit.
+                    }
+                }
                 found = await DetectAbyssConfirmedClearAsync(frame, ct);
                 if (!found.Found)
                 {
