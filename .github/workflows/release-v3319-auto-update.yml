@@ -1,4 +1,4 @@
-name: Publish V3.3.19 Completed Abyss Result Timeout Fix After Main CI
+name: Publish V3.3.19 Abyss Clear Touch Recovery After Main CI
 
 # Final row binding excludes station progress counters (0/1).
 # User-approved release; game acceptance for V3.3.19 remains pending.
@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/release-v3318-auto-update.yml'
+      - '.github/workflows/release-v3319-auto-update.yml'
   workflow_dispatch:
 
 permissions:
@@ -340,7 +340,7 @@ jobs:
           Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
           Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
           'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
-          'MABI AUTO V3.3.19 - Abyss entry stabilization and bounded Space retries' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          'MABI AUTO V3.3.19 - verified clear touch priority and result recovery' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
           $required=@(
             'release/FishingAutomation.exe','release/MacroWatchdog.exe',
             'release/abyss/config/targets.json','release/abyss/config/scenario.json',
