@@ -518,6 +518,27 @@ class V3275ReleaseSafety(unittest.TestCase):
             self.assertIn('배포해', authorization['request'])
             self.assertIs(authorization['realGameTested'], False)
             self.assertIs(authorization['mainCiRequired'], True)
+        elif 'CurrentVersion = "V3.3.19"' in current:
+            # V3.2.75 historical release artifacts remain unchanged.
+            # Validate the newest separately authorized, CI-gated release.
+            for tag, version in [('Version', '3.3.19'),
+                                 ('AssemblyVersion', '3.3.19.0'),
+                                 ('FileVersion', '3.3.19.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            workflow = (ROOT / '.github/workflows/release-v3319-auto-update.yml').read_text(encoding='utf-8')
+            for token in ('No successful production CI for current main SHA',
+                          'main changed since CI; abort release',
+                          'MabiAuto_V3.3.19_Windows_Lite.zip.sha256',
+                          'gh release create V3.3.19',
+                          'gh release edit V3.3.19 --draft=false',
+                          'test_v3319_clear_touch_priority.py'):
+                self.assertIn(token, workflow)
+            auth = json.loads((ROOT / 'source/V3.3.19_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertEqual(auth['purpose'], 'abyss_clear_touch_precedence_guarded_result_recovery')
+            self.assertIn('수정하고 배포해', auth['request'])
+            self.assertFalse(auth['realGameTested'])
+            self.assertTrue(auth['mainCiRequired'])
+            self.assertTrue(auth['rollbackProvided'])
         elif 'CurrentVersion = "V3.3.18"' in current:
             for tag, version in [('Version', '3.3.18'),
                                  ('AssemblyVersion', '3.3.18.0'),
