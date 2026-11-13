@@ -16,6 +16,22 @@ internal sealed partial class ScenarioEngine
     {
         if (!IsAbyss || AbyssMissionCompletePolicy.HasVisualEvidence(frame))
             return false;
+        // V3.3.19: never classify the still-visible '던전 클리어!' and
+        // '화면을 터치해 주세요' overlay as a ready result. This guard
+        // must run BEFORE the green row and alternative rewards OCR paths.
+        var pendingTitle = await _detector.DetectAsync(
+            "abyss_dungeon_clear_visual", frame, ct);
+        var pendingTouch = await _detector.DetectAsync(
+            "abyss_touch_screen", frame, ct);
+        var touchArea = ScaleAbyssResultRoi(
+            AbyssClearTouchRecoverySafeRoi, frame.Size);
+        if (pendingTitle.Found && pendingTouch.Found &&
+            touchArea.Contains(pendingTouch.Bounds))
+        {
+            Log?.Invoke("[어비스 완료결과] 클리어 제목+화면 터치가 아직 표시됨 -> 결과 단계 승격 보류");
+            return false;
+        }
+
         // Existing three-green-button proof is still authoritative.
         if (TryDetectAbyssResultButtonRow(frame, out _))
         {

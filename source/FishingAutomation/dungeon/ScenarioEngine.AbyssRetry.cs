@@ -344,16 +344,79 @@ internal sealed partial class ScenarioEngine
         return new HashSet<string>(StringComparer.Ordinal) { winner.Key };
     }
 
+    // V3.3.19: a transient reward result classification can race the
+    // actual clear-touch overlay. Never click an arbitrary point or skip
+    // this original touch flow. Require a 2-frame stable title AND touch
+    // prompt in the canonical lower safe ROI before restoring the state.
+    private static readonly Rectangle AbyssClearTouchRecoverySafeRoi =
+        new(245, 890, 310, 105);
+
+    private async Task<bool> TryRecoverVerifiedClearTouchAfterResultAsync(
+        Bitmap firstFrame, CancellationToken ct)
+    {
+        if (GetAbyssFlowState() != AbyssFlowState.ResultConfirmed)
+            return false;
+
+        async Task<(DetectionResult Title, DetectionResult Touch)> EvidenceAsync(Bitmap frame)
+        {
+            var title = await _detector.DetectAsync(
+                "abyss_dungeon_clear_visual", frame, ct);
+            var touch = await _detector.DetectAsync(
+                "abyss_touch_screen", frame, ct);
+            return (title, touch);
+        }
+
+        var first = await EvidenceAsync(firstFrame);
+        var safe = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, firstFrame.Size);
+        if (!first.Title.Found || !first.Touch.Found ||
+            !safe.Contains(first.Touch.Bounds))
+            return false;
+
+        await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+        using var secondFrame = await CaptureGameWindowAsync(ct);
+        var second = await EvidenceAsync(secondFrame);
+        var secondSafe = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, secondFrame.Size);
+        if (secondFrame.Size != firstFrame.Size ||
+            !second.Title.Found || !second.Touch.Found ||
+            !secondSafe.Contains(second.Touch.Bounds) ||
+            !first.Title.Bounds.IntersectsWith(second.Title.Bounds) ||
+            !first.Touch.Bounds.IntersectsWith(second.Touch.Bounds))
+            return false;
+
+        ct.ThrowIfCancellationRequested();
+        _hwnd = await ResolveRequiredGameWindowAsync(ct);
+        VerifyAbyssClickClientGeometry(_hwnd, secondFrame.Size);
+        AbyssRestoreVerifiedClearTouchFromPrematureResult(
+            "실제 클리어 제목+화면 터치 2프레임 재확인");
+        Log?.Invoke("[어비스 복구] 결과 버튼 없음 + 클리어 제목/터치 2프레임 일치 -> 기존 터치 문구 클릭 절차 복귀");
+        await AdvanceAbyssClearScreenAsync(second.Touch, ct);
+        return true;
+    }
+
     private async Task RetryAbyssResultAsync(CancellationToken ct)
     {
         if (!IsAbyss) throw new InvalidOperationException("어비스 결과 전용 처리입니다.");
         var timer = Stopwatch.StartNew();
         DetectionResult previous = DetectionResult.NotFound;
+        int clearTouchRecoveries = 0;
         while (timer.Elapsed < TimeSpan.FromSeconds(120))
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
+
+            // Only when the genuine result row is ABSENT, allow ONE
+            // two-frame verified return to the old clear-touch flow.
+            if (!retry.Found && clearTouchRecoveries == 0 &&
+                GetAbyssFlowState() == AbyssFlowState.ResultConfirmed &&
+                await TryRecoverVerifiedClearTouchAfterResultAsync(frame, ct))
+            {
+                clearTouchRecoveries++;
+                previous = DetectionResult.NotFound;
+                timer.Restart(); // New verified result transition gets its own wait.
+                continue;
+            }
+
             if (retry.Found && previous.Found && retry.Bounds.IntersectsWith(previous.Bounds))
             {
                 // Two consecutive production detections are the authority for ResultConfirmed.
