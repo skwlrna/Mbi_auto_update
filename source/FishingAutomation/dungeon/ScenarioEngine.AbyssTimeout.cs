@@ -251,6 +251,7 @@ internal sealed partial class ScenarioEngine
                 throw new InvalidOperationException(
                     "퇴장 확인창 ESC 후에도 표시됨 · Space/추가 입력 없이 안전 정지");
 
+            DetectionResult firstCombatLeaveIcon;
             using (var afterCancel = await CaptureGameWindowAsync(ct))
             {
                 if (await ConfirmAbyssCompletedResultAsync(afterCancel, ct))
@@ -259,11 +260,13 @@ internal sealed partial class ScenarioEngine
                     return;
                 }
 
-                // A failed or ambiguous result recognition must never cause
-                // an irreversible exit from a completed dungeon.
-                if (!await HasAbyssCombatEvidenceAsync(afterCancel, ct))
+                // Clear/touch-like images can occur on a completed reward
+                // screen. Require the ACTUAL in-dungeon leave icon instead.
+                firstCombatLeaveIcon = await _detector.DetectAsync(
+                    "abyss_leave_dungeon", afterCancel, ct);
+                if (!firstCombatLeaveIcon.Found)
                     throw new InvalidOperationException(
-                        "ESC 후 완료 결과/전투 화면 구분 불가 · 추가 퇴장 입력 없이 안전 정지");
+                        "ESC 후 실제 던전 내부 퇴장 아이콘 없음 · 완료 결과 오인 방지 안전 정지");
             }
             await Task.Delay(300, ct);
             using (var freshCombat = await CaptureGameWindowAsync(ct))
@@ -273,9 +276,13 @@ internal sealed partial class ScenarioEngine
                     MarkAbyssCompletedResult("퇴장 재시도 직전 완료 결과 재확인");
                     return;
                 }
-                if (!await HasAbyssCombatEvidenceAsync(freshCombat, ct))
+                var secondCombatLeaveIcon = await _detector.DetectAsync(
+                    "abyss_leave_dungeon", freshCombat, ct);
+                if (!secondCombatLeaveIcon.Found ||
+                    !secondCombatLeaveIcon.Bounds.IntersectsWith(firstCombatLeaveIcon.Bounds))
                     throw new InvalidOperationException(
-                        "ESC 후 던전 내부 증거 2프레임 불충분 · 무조건 퇴장 금지");
+                        "ESC 후 던전 퇴장 아이콘 2프레임 불일치 · 미완료 확인 전 퇴장 금지");
+                Log?.Invoke("[어비스 타임아웃] 실제 던전 퇴장 아이콘 2프레임 재확인 -> 퇴장 재시도 허용");
             }
 
             // Only verified incomplete combat may reopen a confirmation once.
