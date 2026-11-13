@@ -152,71 +152,170 @@ internal sealed partial class ScenarioEngine
         return false;
     }
 
+    // The first timeout action is an in-dungeon HUD control, not a result
+    // screen button. Two independent captures must agree before clicking.
+    // A finished reward screen takes priority even after 10 minutes.
+    private async Task<bool> ClickAbyssTimeoutLeaveControlAsync(
+        int waitSeconds, CancellationToken ct)
+    {
+        var wait = Stopwatch.StartNew();
+        DetectionResult previous = DetectionResult.NotFound;
+        while (wait.Elapsed < TimeSpan.FromSeconds(waitSeconds))
+        {
+            ct.ThrowIfCancellationRequested();
+            _hwnd = await ResolveRequiredGameWindowAsync(ct);
+            NativeMethods.SetForegroundWindow(_hwnd);
+            using var frame = await CaptureGameWindowAsync(ct);
+            if ((await DetectAbyssEntryPanelAsync(frame, ct)).Found)
+                throw new InvalidOperationException(
+                    "10분 경계에서 입장하기 화면 확인 -> 던전 퇴장 입력 금지");
+
+            if (await ConfirmAbyssCompletedResultAsync(frame, ct))
+            {
+                MarkAbyssCompletedResult("10분 경계에서 완료 보상 화면 직접 확인");
+                return false;
+            }
+            if (await HandleAbyssLateClearAsync(frame, ct)) return false;
+            if (AbyssClearPairedEvidencePending)
+            {
+                previous = DetectionResult.NotFound;
+                Log?.Invoke("[어비스 타임아웃] 클리어 후보 확인 중 -> 퇴장 입력 보류");
+                await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+                continue;
+            }
+
+            var target = await _detector.DetectAsync("abyss_leave_dungeon", frame, ct);
+            if (target.Found && previous.Found &&
+                target.Bounds.IntersectsWith(previous.Bounds))
+            {
+                ct.ThrowIfCancellationRequested();
+                _input.ClickClientPoint(_hwnd, target.Center);
+                _abyssExitInProgress = true;
+                DiagnosticObserveClick("abyss_timeout_leave", target.Center);
+                Log?.Invoke($"[어비스 타임아웃] 던전 퇴장 아이콘 2프레임 확인 -> 클릭 @ {target.Center}");
+                await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
+                return true;
+            }
+            previous = target;
+            await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+        }
+        throw new InvalidOperationException(
+            "10분 초과 후 던전 퇴장 아이콘 2프레임을 확인하지 못해 안전 정지합니다.");
+    }
+
+    private async Task<bool> IsAbyssTimeoutExitDialogVisibleAsync(
+        CancellationToken ct)
+    {
+        using var frame = await CaptureGameWindowAsync(ct);
+        return (await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
+    }
+
     private async Task ExitAbyssAfterCombatTimeoutAsync(ScenarioStep step, CancellationToken ct)
     {
         if (!_abyssCombatStartedAt.HasValue ||
             Environment.TickCount64 - _abyssCombatStartedAt.Value < 600_000)
             throw new InvalidOperationException("전투 10분 초과가 확인되지 않아 퇴장을 차단합니다.");
 
+        if (string.IsNullOrWhiteSpace(step.TimeoutClickTarget) ||
+            step.TimeoutClickTarget != "abyss_leave_dungeon" ||
+            step.TimeoutFollowupClickTarget != "abyss_exit")
+            throw new InvalidOperationException("예상하지 못한 강제 퇴장 구성. 안전 정지합니다.");
+
         try
         {
-            foreach (var action in new[] {
-                (Target: step.TimeoutClickTarget, Seconds: step.TimeoutClickTargetWaitSeconds),
-                (Target: step.TimeoutFollowupClickTarget, Seconds: step.TimeoutFollowupWaitSeconds) })
+            // Late completion is always handled before a forced exit.
+            using (var before = await CaptureGameWindowAsync(ct))
             {
-                if (string.IsNullOrWhiteSpace(action.Target))
-                    throw new InvalidOperationException("어비스 퇴장 대상 설정이 없습니다.");
-                var wait = Stopwatch.StartNew();
-                bool clicked = false;
-                DetectionResult previous = DetectionResult.NotFound;
-                while (wait.Elapsed < TimeSpan.FromSeconds(action.Seconds))
+                if (await ConfirmAbyssCompletedResultAsync(before, ct))
                 {
-                    ct.ThrowIfCancellationRequested();
-                    _hwnd = await ResolveRequiredGameWindowAsync(ct);
-                    NativeMethods.SetForegroundWindow(_hwnd);
-                    using var frame = await CaptureGameWindowAsync(ct);
-                    // A failed/returned entry is NOT a live dungeon. Never click
-                    // an apparent leave control on the selection screen.
-                    if ((await DetectAbyssEntryPanelAsync(frame, ct)).Found)
-                        throw new InvalidOperationException(
-                            "10분 경계에서 입장하기 화면 확인 -> 던전 퇴장 클릭 없이 안전 정지합니다.");
-                    if (await HandleAbyssLateClearAsync(frame, ct)) return;
-
-                    // One strong clear-title frame is enough to veto this frame's exit input.
-                    // The next fresh frame must confirm 2/2 before the safe clear touch is sent.
-                    if (AbyssClearPairedEvidencePending)
-                    {
-                        previous = DetectionResult.NotFound;
-                        Log?.Invoke("[어비스 타임아웃] 클리어 타이틀 후보 확인 중 -> 퇴장 입력 보류");
-                        await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
-                        continue;
-                    }
-
-                    var target = await _detector.DetectAsync(action.Target, frame, ct);
-                    if (target.Found && previous.Found && target.Bounds.IntersectsWith(previous.Bounds))
-                    {
-                        // Detection and the input share this fresh frame. No monitor inputs intervene.
-                        ct.ThrowIfCancellationRequested();
-                        _input.ClickClientPoint(_hwnd, target.Center);
-                        if (!_abyssExitInProgress)
-                        {
-                            _abyssExitInProgress = true;
-                            Log?.Invoke("[어비스 타임아웃] 퇴장 입력 시작");
-                        }
-                        clicked = true;
-                        await Task.Delay(_settings.ClickSettleMs, ct);
-                        break;
-                    }
-                    previous = target;
-                    await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+                    MarkAbyssCompletedResult("10분 종료 직전 완료 결과 재확인");
+                    return;
                 }
-                if (!clicked)
-                    throw new InvalidOperationException("10분 초과 후 어비스 퇴장 버튼을 확인하지 못해 정지합니다.");
             }
+
+            if (!await ClickAbyssTimeoutLeaveControlAsync(
+                step.TimeoutClickTargetWaitSeconds, ct)) return;
+            if (!await WaitForAbyssTimeoutExitDialogAsync(
+                step.TimeoutFollowupWaitSeconds, ct)) return;
+
+            // A late result can already be underneath the darkened exit
+            // dialog. Cancel ONCE, expose the underlying screen, then inspect.
+            // Never send Space just because '나가기' is visible somewhere.
+            ct.ThrowIfCancellationRequested();
+            _hwnd = await ResolveRequiredGameWindowAsync(ct);
+            NativeMethods.SetForegroundWindow(_hwnd);
+            Log?.Invoke("[어비스 타임아웃] 확인창 2프레임 확인 -> ESC 1회로 결과 화면 재점검");
+            _input.TapScanCode(0x01, ct);
+            await Task.Delay(650, ct);
+            if (await IsAbyssTimeoutExitDialogVisibleAsync(ct))
+                throw new InvalidOperationException(
+                    "퇴장 확인창 ESC 후에도 표시됨 · Space/추가 입력 없이 안전 정지");
+
+            DetectionResult firstCombatLeaveIcon;
+            using (var afterCancel = await CaptureGameWindowAsync(ct))
+            {
+                if (await ConfirmAbyssCompletedResultAsync(afterCancel, ct))
+                {
+                    MarkAbyssCompletedResult("퇴장 확인창 ESC 취소 후 완료 보상 화면 확인");
+                    return;
+                }
+
+                // Clear/touch-like images can occur on a completed reward
+                // screen. Require the ACTUAL in-dungeon leave icon instead.
+                firstCombatLeaveIcon = await _detector.DetectAsync(
+                    "abyss_leave_dungeon", afterCancel, ct);
+                if (!firstCombatLeaveIcon.Found)
+                    throw new InvalidOperationException(
+                        "ESC 후 실제 던전 내부 퇴장 아이콘 없음 · 완료 결과 오인 방지 안전 정지");
+            }
+            await Task.Delay(300, ct);
+            using (var freshCombat = await CaptureGameWindowAsync(ct))
+            {
+                if (await ConfirmAbyssCompletedResultAsync(freshCombat, ct))
+                {
+                    MarkAbyssCompletedResult("퇴장 재시도 직전 완료 결과 재확인");
+                    return;
+                }
+                var secondCombatLeaveIcon = await _detector.DetectAsync(
+                    "abyss_leave_dungeon", freshCombat, ct);
+                if (!secondCombatLeaveIcon.Found ||
+                    !secondCombatLeaveIcon.Bounds.IntersectsWith(firstCombatLeaveIcon.Bounds))
+                    throw new InvalidOperationException(
+                        "ESC 후 던전 퇴장 아이콘 2프레임 불일치 · 미완료 확인 전 퇴장 금지");
+                Log?.Invoke("[어비스 타임아웃] 실제 던전 퇴장 아이콘 2프레임 재확인 -> 퇴장 재시도 허용");
+            }
+
+            // Only verified incomplete combat may reopen a confirmation once.
+            if (!await ClickAbyssTimeoutLeaveControlAsync(
+                step.TimeoutClickTargetWaitSeconds, ct)) return;
+            if (!await WaitForAbyssTimeoutExitDialogAsync(
+                step.TimeoutFollowupWaitSeconds, ct)) return;
+            ct.ThrowIfCancellationRequested();
+            _hwnd = await ResolveRequiredGameWindowAsync(ct);
+            NativeMethods.SetForegroundWindow(_hwnd);
+            Log?.Invoke("[어비스 타임아웃] 미완료 전투 + 퇴장 확인창 2프레임 -> Space 1회");
+            _input.TapScanCode(0x39, ct);
+            var confirmWait = Stopwatch.StartNew();
+            int disappeared = 0;
+            while (confirmWait.Elapsed < TimeSpan.FromSeconds(8))
+            {
+                ct.ThrowIfCancellationRequested();
+                await Task.Delay(350, ct);
+                if (await IsAbyssTimeoutExitDialogVisibleAsync(ct))
+                {
+                    disappeared = 0;
+                    continue;
+                }
+                if (++disappeared >= 2) break;
+            }
+            if (disappeared < 2)
+                throw new InvalidOperationException(
+                    "확인창 Space 1회 후 8초간 팝업 유지 · Space 반복 없이 안전 정지");
+
             await WaitForAbyssHomeAfterNormalExitAsync(ct);
             ResetAbyssExitState();
             _abyssCombatStartedAt = null;
-            Log?.Invoke($"[어비스] 강제 퇴장 완료 및 밖 확인 -> {step.TimeoutRestartDelaySeconds}초 대기 후 처음부터 재시작");
+            Log?.Invoke($"[어비스] 미완료 던전 강제 퇴장 및 밖 확인 -> {step.TimeoutRestartDelaySeconds}초 후 재시작");
             await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, step.TimeoutRestartDelaySeconds)), ct);
             throw new RestartCycleException();
         }
