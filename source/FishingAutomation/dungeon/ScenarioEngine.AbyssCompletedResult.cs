@@ -17,8 +17,12 @@ internal sealed partial class ScenarioEngine
         if (!IsAbyss || AbyssMissionCompletePolicy.HasVisualEvidence(frame))
             return false;
         // Existing three-green-button proof is still authoritative.
-        if ((await DetectAbyssResultRetryAsync(frame, ct)).Found)
-            return true;
+        if (TryDetectAbyssResultButtonRow(frame, out _))
+        {
+            // Before accepting even a strong result row, make sure no
+            // pending exit-confirmation dialog is covering the game.
+            return !(await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
+        }
 
         // Separate anchored OCR labels support the alternate rewards layout
         // where the standard three-green-button detector cannot see the row.
@@ -31,7 +35,9 @@ internal sealed partial class ScenarioEngine
             return false;
         var loot = await _abyssResultOcr.FindCompactLabelAsync(
             frame, lootArea, "발견한 전리품", ct);
-        return loot.Found && lootArea.Contains(loot.Bounds);
+        if (!loot.Found || !lootArea.Contains(loot.Bounds))
+            return false;
+        return !(await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
     }
 
     // Recognition authorizes navigation to the normal result-processing state,
@@ -70,17 +76,13 @@ internal sealed partial class ScenarioEngine
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
-            if (await ConfirmAbyssCompletedResultAsync(frame, ct))
-            {
-                // The modal may not have appeared; a result screen is never
-                // mistaken for its bottom '나가기' action.
-                MarkAbyssCompletedResult("강제퇴장 확인창 대기 중 정상 완료 결과 확인");
-                return false;
-            }
+            // Check the modal FIRST: dimmed underlying rewards text must
+            // never authorize a transition without dismissing this dialog.
             var title = await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct);
             var exitArea = ScaleAbyssResultRoi(AbyssTimeoutConfirmExitRoi, frame.Size);
-            var exitLabel = await _abyssResultOcr.FindCompactLabelAsync(
-                frame, exitArea, "나가기", ct);
+            var exitLabel = title.Found
+                ? await _abyssResultOcr.FindCompactLabelAsync(frame, exitArea, "나가기", ct)
+                : DetectionResult.NotFound;
             bool valid = title.Found && exitLabel.Found &&
                 exitArea.Contains(exitLabel.Bounds);
             if (valid && oldTitle.Found && oldExit.Found &&
@@ -92,6 +94,11 @@ internal sealed partial class ScenarioEngine
             }
             oldTitle = valid ? title : DetectionResult.NotFound;
             oldExit = valid ? exitLabel : DetectionResult.NotFound;
+            if (!title.Found && await ConfirmAbyssCompletedResultAsync(frame, ct))
+            {
+                MarkAbyssCompletedResult("강제퇴장 확인창 대기 중 정상 완료 결과 확인");
+                return false;
+            }
             await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
         }
         throw new InvalidOperationException(
