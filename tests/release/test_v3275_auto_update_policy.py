@@ -518,6 +518,22 @@ class V3275ReleaseSafety(unittest.TestCase):
             self.assertIn('배포해', authorization['request'])
             self.assertIs(authorization['realGameTested'], False)
             self.assertIs(authorization['mainCiRequired'], True)
+        elif 'CurrentVersion = "V3.3.18"' in current:
+            for tag, version in [('Version', '3.3.18'),
+                                 ('AssemblyVersion', '3.3.18.0'),
+                                 ('FileVersion', '3.3.18.0')]:
+                self.assertIn(f'<{tag}>{version}</{tag}>', project)
+            workflow=(ROOT/'.github/workflows/release-v3318-auto-update.yml').read_text(encoding='utf-8')
+            for token in ('No successful production CI for current main SHA',
+                          'main changed since CI; abort release',
+                          'MabiAuto_V3.3.18_Windows_Lite.zip.sha256',
+                          'gh release create V3.3.18',
+                          'gh release edit V3.3.18 --draft=false'):
+                self.assertIn(token,workflow)
+            auth=json.loads((ROOT/'source/V3.3.18_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
+            self.assertIn('수정하고 배포해',auth['request'])
+            self.assertFalse(auth['realGameTested'])
+            self.assertTrue(auth['mainCiRequired'])
         elif 'CurrentVersion = "V3.3.17"' in current:
             for tag, version in [('Version', '3.3.17'),
                                  ('AssemblyVersion', '3.3.17.0'),
