@@ -83,6 +83,15 @@ internal sealed partial class ScenarioEngine
             var exitLabel = title.Found
                 ? await _abyssResultOcr.FindCompactLabelAsync(frame, exitArea, "나가기", ct)
                 : DetectionResult.NotFound;
+            if (title.Found && (!exitLabel.Found || !exitArea.Contains(exitLabel.Bounds)))
+            {
+                // The existing green exit.png is a legitimate OCR fallback
+                // ONLY inside the modal's right-hand button rectangle.
+                var templated = await _detector.DetectAsync("abyss_exit", frame, ct);
+                exitLabel = templated.Found && exitArea.Contains(templated.Bounds)
+                    ? templated
+                    : DetectionResult.NotFound;
+            }
             bool valid = title.Found && exitLabel.Found &&
                 exitArea.Contains(exitLabel.Bounds);
             if (valid && oldTitle.Found && oldExit.Found &&
