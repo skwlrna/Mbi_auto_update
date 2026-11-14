@@ -531,7 +531,7 @@ class V3275ReleaseSafety(unittest.TestCase):
                           'MabiAuto_V3.3.21_Windows_Lite.zip.sha256',
                           'gh release create V3.3.21',
                           'gh release edit V3.3.21 --draft=false',
-                          'test_v3321_combat_result_veto.py'):
+                          'test_v3321_clear_overlay_veto.py'):
                 self.assertIn(token, workflow)
             auth = json.loads((ROOT / 'source/V3.3.21_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
             self.assertEqual(auth['purpose'], 'abyss_clear_overlay_result_veto')
