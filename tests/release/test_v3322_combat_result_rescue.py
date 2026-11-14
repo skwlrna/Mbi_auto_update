@@ -91,7 +91,7 @@ class CombatResultRescue(unittest.TestCase):
     def test_release_workflow_uses_only_existing_historical_regression_files(self):
         import re
         workflow = read(".github/workflows/release-v3322-auto-update.yml")
-        patterns = re.findall(r"-p '([^']+\\.py)'", workflow)
+        patterns = re.findall(r"-p '([^']+\.py)'", workflow)
         self.assertGreaterEqual(len(patterns), 8)
         for filename in patterns:
             self.assertTrue((ROOT / "tests/release" / filename).is_file(),
