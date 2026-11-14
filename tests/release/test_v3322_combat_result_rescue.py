@@ -88,6 +88,17 @@ class CombatResultRescue(unittest.TestCase):
         self.assertIn('touchArea.Contains(ocrTouch.Bounds)',result)
         self.assertIn("await AdvanceAbyssClearScreenAsync(found, ct)", engine)
 
+    def test_release_workflow_uses_only_existing_historical_regression_files(self):
+        import re
+        workflow = read(".github/workflows/release-v3322-auto-update.yml")
+        patterns = re.findall(r"-p '([^']+\\.py)'", workflow)
+        self.assertGreaterEqual(len(patterns), 8)
+        for filename in patterns:
+            self.assertTrue((ROOT / "tests/release" / filename).is_file(),
+                            f"release workflow test does not exist: {filename}")
+        self.assertIn("test_v3321_clear_overlay_veto.py", patterns)
+        self.assertIn("test_v3322_combat_result_rescue.py", patterns)
+
     def test_physical_button_color_not_sufficient_for_click(self):
         retry = read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs")
         b = retry.split("private async Task<DetectionResult> DetectAbyssResultRetryAsync(",1)[1].split(
