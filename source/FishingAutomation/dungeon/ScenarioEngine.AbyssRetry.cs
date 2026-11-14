@@ -11,6 +11,9 @@ internal sealed partial class ScenarioEngine
     private static readonly Rectangle AbyssExitButtonRoi = new(160, 905, 180, 85);
     private static readonly Rectangle AbyssRetryButtonRoi = new(310, 905, 180, 85);
     private static readonly Rectangle AbyssOtherButtonRoi = new(460, 905, 180, 85);
+    // 02:28 reward screen: the open glowing chest is centered near (400,155).
+    // This is independent of the 3 physically separated green result buttons.
+    private static readonly Rectangle AbyssFinishedTreasureRoi = new(310, 80, 180, 180);
     private string _lastAbyssResultDiagnostic = "no-frame";
 
     // V0168_ABYSS_LOOT_TRACKING
