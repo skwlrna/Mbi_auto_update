@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.21",
+  "purpose": "abyss_clear_overlay_result_veto",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-14 22:14 오류만 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

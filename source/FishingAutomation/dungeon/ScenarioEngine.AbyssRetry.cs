@@ -129,14 +129,22 @@ internal sealed partial class ScenarioEngine
         double exitGreen = GetGreenButtonRatio(frame, exit);
         double retryGreen = GetGreenButtonRatio(frame, retry);
         double otherGreen = GetGreenButtonRatio(frame, other);
+        // V3.3.21 (22:14 incident): the three broad green regions can be
+        // satisfied by the clear animation, even when the actual retry button
+        // does not exist. Require the SAME 48px center-patch proof as the
+        // guarded fixed-coordinate click, before declaring a result row.
+        var retryCenter = AbyssResultLayout.FixedButtonCenter(false, frame.Size);
+        double retryCenterGreen = GetAbyssFixedButtonGreenRatio(frame, retryCenter);
 
         _lastAbyssResultDiagnostic =
             $"frame={frame.Width}x{frame.Height} green(exit/retry/other)=" +
-            $"{exitGreen:0.000}/{retryGreen:0.000}/{otherGreen:0.000}";
+            $"{exitGreen:0.000}/{retryGreen:0.000}/{otherGreen:0.000}" +
+            $" retryCenter={retryCenterGreen:0.000}";
 
         // User result captures are around 0.48~0.52. Keep a comfortable margin for
         // compression/gamma differences while still requiring all three button regions.
-        if (exitGreen < 0.18 || retryGreen < 0.18 || otherGreen < 0.18)
+        if (exitGreen < 0.18 || retryGreen < 0.18 || otherGreen < 0.18 ||
+            retryCenterGreen < 0.25)
             return false;
 
         retryRoi = retry;
@@ -350,6 +358,10 @@ internal sealed partial class ScenarioEngine
     // prompt in the canonical lower safe ROI before restoring the state.
     private static readonly Rectangle AbyssClearTouchRecoverySafeRoi =
         new(245, 890, 310, 105);
+    // Read only inside an already-entered result state; never OCR-tap at
+    // unverified fixed coordinates.
+    private static readonly Rectangle AbyssClearTitleRecoverySafeRoi =
+        new(240, 170, 345, 135);
 
     private async Task<bool> TryRecoverVerifiedClearTouchAfterResultAsync(
         Bitmap firstFrame, CancellationToken ct)
@@ -363,6 +375,30 @@ internal sealed partial class ScenarioEngine
                 "abyss_dungeon_clear_visual", frame, ct);
             var touch = await _detector.DetectAsync(
                 "abyss_touch_screen", frame, ct);
+            // The 22:14 screenshot visibly shows the clear title and bottom
+            // touch prompt, but image templates may miss one while its glow
+            // animates. OCR is a bounded SECOND signal, never a solo tap:
+            // both title and touch must still match across two fresh frames.
+            var titleArea = ScaleAbyssResultRoi(AbyssClearTitleRecoverySafeRoi, frame.Size);
+            var touchArea = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
+            if (!title.Found || !touch.Found || !touchArea.Contains(touch.Bounds))
+            {
+                _abyssResultOcr ??= new OcrRecognizer();
+                if (!title.Found)
+                {
+                    var ocrTitle = await _abyssResultOcr.FindCompactLabelAsync(
+                        frame, titleArea, "던전 클리어", ct);
+                    if (ocrTitle.Found && titleArea.Contains(ocrTitle.Bounds))
+                        title = ocrTitle;
+                }
+                if (!touch.Found || !touchArea.Contains(touch.Bounds))
+                {
+                    var ocrTouch = await _abyssResultOcr.FindCompactLabelAsync(
+                        frame, touchArea, "화면을 터치해 주세요", ct);
+                    if (ocrTouch.Found && touchArea.Contains(ocrTouch.Bounds))
+                        touch = ocrTouch;
+                }
+            }
             return (title, touch);
         }
 
@@ -403,11 +439,10 @@ internal sealed partial class ScenarioEngine
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
-            var retry = await DetectAbyssResultRetryAsync(frame, ct);
-
-            // Only when the genuine result row is ABSENT, allow ONE
-            // two-frame verified return to the old clear-touch flow.
-            if (!retry.Found && clearTouchRecoveries == 0 &&
+            // Clear overlay has precedence over a green-row false positive.
+            // This must run BEFORE retry detection, otherwise the mistaken
+            // result-row candidate suppresses the only safe recovery path.
+            if (clearTouchRecoveries == 0 &&
                 GetAbyssFlowState() == AbyssFlowState.ResultConfirmed &&
                 await TryRecoverVerifiedClearTouchAfterResultAsync(frame, ct))
             {
@@ -417,6 +452,7 @@ internal sealed partial class ScenarioEngine
                 continue;
             }
 
+            var retry = await DetectAbyssResultRetryAsync(frame, ct);
             if (retry.Found && previous.Found && retry.Bounds.IntersectsWith(previous.Bounds))
             {
                 // Two consecutive production detections are the authority for ResultConfirmed.

@@ -59,6 +59,9 @@ internal sealed partial class ScenarioEngine
             return false;
         }
 
+        // V3.3.21: the row classifier now requires the *physical* retry-center
+        // green patch. A 22:14 clear overlay with greenPatch=0.144 is not a
+        // result row and must remain eligible for the normal touch flow.
         // Existing three-green-button proof is still authoritative.
         if (TryDetectAbyssResultButtonRow(frame, out _))
         {

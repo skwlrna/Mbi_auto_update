@@ -41,7 +41,11 @@ class ClearTouchPriority(unittest.TestCase):
         flow = retry.split('private async Task RetryAbyssResultAsync(',1)[1].split(
             'private async Task<bool> HasAbyssRecruitmentEvidenceAsync(',1)[0]
         self.assertIn('clearTouchRecoveries == 0', flow)
-        self.assertIn('!retry.Found', flow)
+        # V3.3.21: the recovery must run *before* even a visually false
+        # retry candidate; the old !retry.Found guard caused the 22:14 stall.
+        self.assertNotIn('!retry.Found && clearTouchRecoveries == 0', flow)
+        self.assertLess(flow.index('await TryRecoverVerifiedClearTouchAfterResultAsync(frame, ct)'),
+                        flow.index('var retry = await DetectAbyssResultRetryAsync(frame, ct)'))
         self.assertIn('GetAbyssFlowState() == AbyssFlowState.ResultConfirmed',flow)
         self.assertIn('await TryRecoverVerifiedClearTouchAfterResultAsync(frame, ct)',flow)
         self.assertIn('clearTouchRecoveries++',flow)

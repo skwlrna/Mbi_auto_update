@@ -84,6 +84,13 @@ jobs:
           dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'N03 input cancellation regressions failed' }
 
+      - name: V3.3.21 22:14 clear-overlay result veto and touch-first recovery regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3321_clear_overlay_veto.py' -v
+          if ($LASTEXITCODE -ne 0) { throw '22:14 clear overlay must not become result; safe touch rescue must take priority' }
+
       - name: V3.3.20 combat-to-result OCR false positive regression
         shell: pwsh
         run: |
