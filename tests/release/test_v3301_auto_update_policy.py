@@ -14,6 +14,11 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
         project = read("source/FishingAutomation/FishingAutomation.csproj")
         if 'CurrentVersion = "V3.3.01"' in current:
             expected = ("3.3.1", "3.3.1.0", "3.3.1.0")
+        elif 'CurrentVersion = "V3.3.21"' in current:
+            expected = ("3.3.21", "3.3.21.0", "3.3.21.0")
+            workflow = read(".github/workflows/release-v3321-auto-update.yml")
+            self.assertIn("gh release create V3.3.21", workflow)
+            self.assertIn("test_v3321_clear_overlay_veto.py", workflow)
         elif 'CurrentVersion = "V3.3.20"' in current:
             expected = ("3.3.20", "3.3.20.0", "3.3.20.0")
             workflow = read(".github/workflows/release-v3320-auto-update.yml")
