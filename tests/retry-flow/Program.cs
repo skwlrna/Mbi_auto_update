@@ -20,7 +20,14 @@ namespace DungeonVisionBot
  {
   public static bool Recruiting;
   public static IReadOnlyList<DetectionResult> Lines=Array.Empty<DetectionResult>();
-  public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)=>Task.FromResult(Recruiting ? new DetectionResult(true,r,1,t) : DetectionResult.NotFound);
+  public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)
+  {
+   // Isolated harness: a real solid green middle result button exposes the
+   // exact '다시 하기' text; recruitment OCR exists only on recruitment frames.
+   bool retry = t=="다시 하기" && b.GetPixel(Math.Min(400,b.Width-1),Math.Min(930,b.Height-1)).G>=200;
+   bool recruiting = Recruiting && t=="우연한 만남";
+   return Task.FromResult(retry || recruiting ? new DetectionResult(true,r,1,t) : DetectionResult.NotFound);
+  }
   public Task<IReadOnlyList<DetectionResult>> ReadLinesAsync(Bitmap b,Rectangle r,int scale,CancellationToken ct)=>Task.FromResult<IReadOnlyList<DetectionResult>>(Recruiting ? new[]{new DetectionResult(true,r,1,"모든 플레이어가 모이면 자동 입장합니다.")} : Lines);
  }
  class Detector {public bool Hallucination;public Task<DetectionResult> DetectAsync(string id,Bitmap b,CancellationToken ct)=>Task.FromResult(Hallucination && id=="abyss_loot_hallucination_stone" ? new DetectionResult(true,new(100,300,40,40),.95,null) : DetectionResult.NotFound);}
@@ -36,6 +43,18 @@ namespace DungeonVisionBot
   readonly string _baseDir="abyss";readonly Settings _settings=new();readonly Definition _scenario=new();readonly Detector _detector=new();readonly Input _input=new();nint _hwnd;
   enum AbyssFlowState {ResultConfirmed,ClearConfirmed,RetryClicked,Reentering,Recruiting,CombatClearWait}
   AbyssFlowState flow;
+  long? _abyssCombatStartedAt;
+  bool mockActiveCombat;
+  private static readonly Rectangle AbyssFinishedTimeRoi = new(320,222,270,80);
+  private static readonly Rectangle AbyssFinishedLootRoi = new(295,450,265,100);
+  private sealed class AbyssResumeVerifiedCombatException:Exception{}
+  Task<bool> HasAbyssActiveCombatHudAsync(Bitmap frame,CancellationToken ct)=>Task.FromResult(mockActiveCombat);
+  void AbyssRestoreVerifiedCombatFromPrematureResult(string reason)
+  {
+   if(flow!=AbyssFlowState.ResultConfirmed||!_abyssCombatStartedAt.HasValue)
+    throw new InvalidOperationException("mock combat reversal requires result and timer");
+   flow=AbyssFlowState.CombatClearWait;
+  }
   void AbyssTransitionTo(AbyssFlowState s,string r){flow=s;}void AbyssRequireState(AbyssFlowState s,string r){}
   // The production V3.3.19 rescue uses methods supplied by other partial
   // files. This isolated retry harness needs equivalent stubs to compile.
@@ -112,6 +131,19 @@ namespace DungeonVisionBot
    using(var ct=new CancellationTokenSource(15000))await e.RetryAbyssResultAsync(ct.Token);
    Check(FishingAutomation.LootStats.Recorded.GetValueOrDefault("h")==3,"production retry records actual CLI quantity before clicking");
    Check(e._input.Clicks==1&&!e._inventoryNextRoundClicked&&!e._abyssLootCountedForCurrentResult,"production retry commits next baseline only after combat transition");
+   // V3.3.22: a real fight after premature ResultConfirmed must resume
+   // without any retry click, preserving its original timer value.
+   long originalCombatStart=Environment.TickCount64-9000;
+   e=new ScenarioEngine(){mockActiveCombat=true,_abyssCombatStartedAt=originalCombatStart,flow=AbyssFlowState.ResultConfirmed};
+   bool resumed=false;
+   using(var ct=new CancellationTokenSource(8000))
+   {
+    try{await e.RetryAbyssResultAsync(ct.Token);}
+    catch(AbyssResumeVerifiedCombatException){resumed=true;}
+   }
+   Check(resumed && e.flow==AbyssFlowState.CombatClearWait &&
+         e._abyssCombatStartedAt==originalCombatStart && e._input.Clicks==0,
+         "22:58 false result resumes active combat after 3 fresh HUD frames without resetting timer or clicking");
   }
  }
 }
