@@ -11,9 +11,6 @@ internal sealed partial class ScenarioEngine
     private static readonly Rectangle AbyssFinishedTimeRoi = new(320, 222, 270, 80);
     // 2026-11-15 02:28 screenshot: the loot HEADING is at y~420, not y450+.
     private static readonly Rectangle AbyssFinishedLootRoi = new(295, 385, 265, 105);
-    // 02:28 reward screen: the open glowing chest is centered near (400,155).
-    // This is independent of the 3 physically separated green result buttons.
-    private static readonly Rectangle AbyssFinishedTreasureRoi = new(310, 80, 180, 180);
     private static readonly Rectangle AbyssTimeoutConfirmExitRoi = new(392, 863, 238, 100);
 
 
