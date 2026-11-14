@@ -240,6 +240,11 @@ internal sealed partial class ScenarioEngine
                 var lootArea = ScaleAbyssResultRoi(AbyssFinishedLootRoi, frame.Size);
                 var time = await _abyssResultOcr.FindCompactLabelAsync(frame, timeArea, "전투 시간", ct);
                 var loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
+                if (!loot.Found || !lootArea.Contains(loot.Bounds))
+                {
+                    lootArea = ScaleAbyssResultRoi(AbyssFinishedLootEarlyRoi, frame.Size);
+                    loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
+                }
                 rewardsTextProof = time.Found && timeArea.Contains(time.Bounds) &&
                                    loot.Found && lootArea.Contains(loot.Bounds);
                 if (!rewardsTextProof)
