@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.23",
+  "purpose": "abyss_0228_completed_reward_result_detection",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-15 02:28 오류만 수정하고 배포해 (사용자 원문: 수정하고 배포해)",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

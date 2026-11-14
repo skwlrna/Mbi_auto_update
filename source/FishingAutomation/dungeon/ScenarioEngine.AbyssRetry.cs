@@ -220,28 +220,40 @@ internal sealed partial class ScenarioEngine
         // both spatially anchored rewards headings. Keep all green/center
         // guards and the final two-frame click validation unchanged.
         bool rewardsTextProof = false;
+        bool treasureProof = false;
         if (!ocrSignal)
         {
-            var timeArea = ScaleAbyssResultRoi(AbyssFinishedTimeRoi, frame.Size);
-            var lootArea = ScaleAbyssResultRoi(AbyssFinishedLootRoi, frame.Size);
-            var time = await _abyssResultOcr.FindCompactLabelAsync(frame, timeArea, "전투 시간", ct);
-            var loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
-            rewardsTextProof = time.Found && timeArea.Contains(time.Bounds) &&
-                               loot.Found && lootArea.Contains(loot.Bounds);
-            if (!rewardsTextProof)
+            // 02:28: the real result showed the anchored treasure chest and all
+            // three green actions, but retry OCR missed and the loot heading sat
+            // above the old text ROI. Independent chest evidence can rescue it.
+            // NEVER accept the chest without a real three-button row and its
+            // green middle click patch (verified above), or during combat HUD.
+            var treasureArea = ScaleAbyssResultRoi(AbyssFinishedTreasureRoi, frame.Size);
+            var treasure = await _detector.DetectAsync("abyss_treasure_chest", frame, ct);
+            treasureProof = treasure.Found && treasureArea.Contains(treasure.Bounds);
+            if (!treasureProof)
             {
-                _lastAbyssResultDiagnostic =
-                    "result row color alone rejected; retry OCR=0 rewardTitlePair=0; " +
-                    _lastAbyssResultDiagnostic;
-                DiagnosticObserveDetection("abyss_result_text_authority", DetectionResult.NotFound);
-                return DetectionResult.NotFound;
+                var timeArea = ScaleAbyssResultRoi(AbyssFinishedTimeRoi, frame.Size);
+                var lootArea = ScaleAbyssResultRoi(AbyssFinishedLootRoi, frame.Size);
+                var time = await _abyssResultOcr.FindCompactLabelAsync(frame, timeArea, "전투 시간", ct);
+                var loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
+                rewardsTextProof = time.Found && timeArea.Contains(time.Bounds) &&
+                                   loot.Found && lootArea.Contains(loot.Bounds);
+                if (!rewardsTextProof)
+                {
+                    _lastAbyssResultDiagnostic =
+                        "result row color alone rejected; retry OCR=0 chest=0 rewardTitlePair=0; " +
+                        _lastAbyssResultDiagnostic;
+                    DiagnosticObserveDetection("abyss_result_text_authority", DetectionResult.NotFound);
+                    return DetectionResult.NotFound;
+                }
             }
         }
 
         var acceptedBounds = visualRetry;
         string source = ocrSignal
             ? "ocr+visual_result_button_row"
-            : "visual_result_button_row_3signal";
+            : treasureProof ? "visual_result_button_row_anchored_chest" : "visual_result_button_row_3signal";
 
         // If OCR also agrees, retain its exact text bounds only when its center
         // is inside the independently confirmed retry-button region.
@@ -251,7 +263,7 @@ internal sealed partial class ScenarioEngine
         var accepted = new DetectionResult(true, acceptedBounds, 0.95, source);
         _lastAbyssResultDiagnostic =
             $"frame={frame.Width}x{frame.Height} result-multisignal accepted " +
-            $"ocr={(ocrSignal ? 1 : 0)} rewardsPair={(rewardsTextProof ? 1 : 0)} visualRow=1 retry={acceptedBounds}";
+            $"ocr={(ocrSignal ? 1 : 0)} chest={(treasureProof ? 1 : 0)} rewardsPair={(rewardsTextProof ? 1 : 0)} visualRow=1 retry={acceptedBounds}";
         DiagnosticObserveDetection("abyss_result_visual_row", accepted);
         return accepted;
     }
