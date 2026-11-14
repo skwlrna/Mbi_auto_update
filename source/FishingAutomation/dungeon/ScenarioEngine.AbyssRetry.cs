@@ -183,6 +183,16 @@ internal sealed partial class ScenarioEngine
             return DetectionResult.NotFound;
         }
 
+        // V3.3.22: active combat may flash green in the result-button areas.
+        // Reject retry while a separately verified in-dungeon leave HUD is
+        // present. This check sends no keyboard/mouse input.
+        if (await HasAbyssActiveCombatHudAsync(frame, ct))
+        {
+            _lastAbyssResultDiagnostic = "active-combat HUD vetoed retry candidate";
+            DiagnosticObserveDetection("abyss_result_combat_veto", DetectionResult.NotFound);
+            return DetectionResult.NotFound;
+        }
+
         // V0160_ABYSS_RESULT_MULTI_SIGNAL
         // Signal A: exact retry OCR inside the fixed safe ROI.
         _abyssResultOcr ??= new OcrRecognizer();
@@ -204,6 +214,30 @@ internal sealed partial class ScenarioEngine
             return DetectionResult.NotFound;
         }
 
+        // A green row alone is never enough: the 22:58 fight produced false
+        // results earlier despite the old color checks. Require independent
+        // visible text on the SAME frame: either exact middle retry OCR, or
+        // both spatially anchored rewards headings. Keep all green/center
+        // guards and the final two-frame click validation unchanged.
+        bool rewardsTextProof = false;
+        if (!ocrSignal)
+        {
+            var timeArea = ScaleAbyssResultRoi(AbyssFinishedTimeRoi, frame.Size);
+            var lootArea = ScaleAbyssResultRoi(AbyssFinishedLootRoi, frame.Size);
+            var time = await _abyssResultOcr.FindCompactLabelAsync(frame, timeArea, "전투 시간", ct);
+            var loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
+            rewardsTextProof = time.Found && timeArea.Contains(time.Bounds) &&
+                               loot.Found && lootArea.Contains(loot.Bounds);
+            if (!rewardsTextProof)
+            {
+                _lastAbyssResultDiagnostic =
+                    "result row color alone rejected; retry OCR=0 rewardTitlePair=0; " +
+                    _lastAbyssResultDiagnostic;
+                DiagnosticObserveDetection("abyss_result_text_authority", DetectionResult.NotFound);
+                return DetectionResult.NotFound;
+            }
+        }
+
         var acceptedBounds = visualRetry;
         string source = ocrSignal
             ? "ocr+visual_result_button_row"
@@ -217,7 +251,7 @@ internal sealed partial class ScenarioEngine
         var accepted = new DetectionResult(true, acceptedBounds, 0.95, source);
         _lastAbyssResultDiagnostic =
             $"frame={frame.Width}x{frame.Height} result-multisignal accepted " +
-            $"ocr={(ocrSignal ? 1 : 0)} visualRow=1 retry={acceptedBounds}";
+            $"ocr={(ocrSignal ? 1 : 0)} rewardsPair={(rewardsTextProof ? 1 : 0)} visualRow=1 retry={acceptedBounds}";
         DiagnosticObserveDetection("abyss_result_visual_row", accepted);
         return accepted;
     }
@@ -435,6 +469,7 @@ internal sealed partial class ScenarioEngine
         var timer = Stopwatch.StartNew();
         DetectionResult previous = DetectionResult.NotFound;
         int clearTouchRecoveries = 0;
+        int consecutiveCombatHudFrames = 0;
         while (timer.Elapsed < TimeSpan.FromSeconds(120))
         {
             ct.ThrowIfCancellationRequested();
@@ -453,6 +488,29 @@ internal sealed partial class ScenarioEngine
             }
 
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
+            // If stage 6 was entered from a false rewards result while a
+            // fight is still in progress, independently confirm active combat
+            // on THREE consecutive fresh frames. Do not treat generic Abyss
+            // evidence (which includes clear-title/touch templates) as combat.
+            if (!retry.Found &&
+                GetAbyssFlowState() == AbyssFlowState.ResultConfirmed &&
+                _abyssCombatStartedAt.HasValue &&
+                await HasAbyssActiveCombatHudAsync(frame, ct))
+            {
+                consecutiveCombatHudFrames++;
+                if (consecutiveCombatHudFrames >= 3)
+                {
+                    AbyssRestoreVerifiedCombatFromPrematureResult(
+                        "다시 하기 버튼 없음 + 전투 전용 HUD 3프레임 확인");
+                    throw new AbyssResumeVerifiedCombatException();
+                }
+                Log?.Invoke($"[어비스 복구] 결과 오인식 의심 · 실제 전투 HUD {consecutiveCombatHudFrames}/3 · 입력 보류");
+            }
+            else
+            {
+                consecutiveCombatHudFrames = 0;
+            }
+
             if (retry.Found && previous.Found && retry.Bounds.IntersectsWith(previous.Bounds))
             {
                 // Two consecutive production detections are the authority for ResultConfirmed.
