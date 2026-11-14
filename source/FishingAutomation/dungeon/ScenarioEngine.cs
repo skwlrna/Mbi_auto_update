@@ -166,6 +166,18 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 _resumeStepIndex = IsAbyss ? AbyssCombatStepIndex : 0;
                 Log?.Invoke($"===== {_cycle}판 완료 =====");
             }
+            catch (AbyssResumeVerifiedCombatException)
+            {
+                // Stage 6 falsely promoted an ongoing fight. Resume the SAME
+                // round at stage 5, preserving the existing ten-minute timer,
+                // loot journal, scheduler ownership and input state.
+                _resumeStepIndex = AbyssCombatStepIndex;
+                recoveryFailures = 0;
+                repeatedRecoveryStep = -1;
+                repeatedRecoveryCount = 0;
+                if (_scheduledResultExit) scheduledRecoveryCycles++;
+                Log?.Invoke("[어비스 복구] 실제 전투 3프레임 확정 -> 원래 5단계 재개 · 타이머 초기화 금지");
+            }
             catch (RestartCycleException)
             {
                 if (_scheduledResultExit) scheduledRecoveryCycles++;
@@ -1263,8 +1275,35 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
         DiagnosticObserveDetection("abyss_touch_screen", touch);
 
+        // V3.3.22: an animating clear screen may temporarily lose the title
+        // or prompt template (the 22:53 screenshot shows both words).
+        // OCR is bounded to the actual title/prompt regions, and NEVER
+        // authorizes a click without the same two-frame pair policy.
+        var clearTitleArea = ScaleAbyssResultRoi(AbyssClearTitleRecoverySafeRoi, frame.Size);
+        var clearTouchArea = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
+        if (!clearTitle.Found || !touch.Found || !clearTouchArea.Contains(touch.Bounds))
+        {
+            _abyssResultOcr ??= new OcrRecognizer();
+            if (!clearTitle.Found)
+            {
+                var ocrTitle = await _abyssResultOcr.FindCompactLabelAsync(
+                    frame, clearTitleArea, "던전 클리어", ct);
+                if (ocrTitle.Found && clearTitleArea.Contains(ocrTitle.Bounds))
+                    clearTitle = ocrTitle;
+            }
+            if (!touch.Found || !clearTouchArea.Contains(touch.Bounds))
+            {
+                var ocrTouch = await _abyssResultOcr.FindCompactLabelAsync(
+                    frame, clearTouchArea, "화면을 터치해 주세요", ct);
+                if (ocrTouch.Found && clearTouchArea.Contains(ocrTouch.Bounds))
+                    touch = ocrTouch;
+            }
+        }
+
         // Preferred path: both independent clear signals are visible in the same frame.
-        if (clearTitle.Found && touch.Found)
+        if (clearTitle.Found && touch.Found &&
+            clearTouchArea.Contains(touch.Bounds) &&
+            !await HasAbyssActiveCombatHudAsync(frame, ct))
         {
             _abyssClearPairedEvidenceFrames = AbyssClearEvidencePolicy.Next(
                 _abyssClearPairedEvidenceFrames, clearTitle.Found, touch.Found);

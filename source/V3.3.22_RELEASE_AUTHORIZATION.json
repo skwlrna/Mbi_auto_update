@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.22",
+  "purpose": "abyss_combat_false_result_state_recovery",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-14 전투 중 결과 화면 오인식 수정하고 배포해주세요 (사용자 원문: 수정하고 배포)",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

@@ -84,6 +84,13 @@ jobs:
           dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'N03 input cancellation regressions failed' }
 
+      - name: V3.3.22 22:58 active-combat result veto and same-round recovery regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3322_combat_result_rescue.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.3.22 live combat must not become a result; preserve timer on rescue' }
+
       - name: V3.3.21 22:14 clear-overlay result veto and touch-first recovery regression
         shell: pwsh
         run: |

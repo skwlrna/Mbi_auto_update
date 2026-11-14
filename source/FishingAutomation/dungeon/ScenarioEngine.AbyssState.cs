@@ -15,6 +15,8 @@ internal sealed partial class ScenarioEngine
         Recruiting
     }
 
+    private sealed class AbyssResumeVerifiedCombatException : Exception { }
+    private int _abyssFalseResultCombatRecoveries;
     private readonly object _abyssFlowStateLock = new();
     private AbyssFlowState _abyssFlowState = AbyssFlowState.Unknown;
 
@@ -70,6 +72,7 @@ internal sealed partial class ScenarioEngine
 
         ResetAbyssExitState();
         _abyssCombatStartedAt = null;
+        _abyssFalseResultCombatRecoveries = 0;
         AbyssFlowState previous;
         lock (_abyssFlowStateLock)
         {
@@ -97,7 +100,12 @@ internal sealed partial class ScenarioEngine
 
             _abyssFlowState = next;
             if (next == AbyssFlowState.CombatClearWait && (previous == AbyssFlowState.Reentering || previous == AbyssFlowState.Recruiting))
+            {
+                // A verified re-entry starts a NEW fight; only now may the
+                // old round's recovery budget/timer be cleared.
                 _abyssCombatStartedAt = null;
+                _abyssFalseResultCombatRecoveries = 0;
+            }
         }
 
         if (previous != next)
@@ -120,6 +128,27 @@ internal sealed partial class ScenarioEngine
         }
         _abyssClearPairedEvidenceFrames = 0;
         Log?.Invoke("[어비스 상태] ResultConfirmed -> ClearConfirmed · " + reason);
+    }
+
+    // V3.3.22: ResultConfirmed was reached by a false screen classification.
+    // Only the result step may call this after THREE independent, consecutive
+    // active-combat HUD frames, with no valid retry button. Never reset the
+    // original ten-minute clock, inventory journal, or scheduler input lease.
+    private void AbyssRestoreVerifiedCombatFromPrematureResult(string reason)
+    {
+        if (!IsAbyss || !_abyssCombatStartedAt.HasValue)
+            throw new InvalidOperationException("전투 상태 복귀에는 기존 어비스 전투 타이머가 필요합니다.");
+        lock (_abyssFlowStateLock)
+        {
+            if (_abyssFlowState != AbyssFlowState.ResultConfirmed)
+                throw new InvalidOperationException(
+                    $"검증된 전투 복귀 상태 불일치: {_abyssFlowState}");
+            if (++_abyssFalseResultCombatRecoveries > 3)
+                throw new InvalidOperationException("한 판에서 결과 오인식 복구 3회 초과 -> 안전 정지합니다.");
+            _abyssFlowState = AbyssFlowState.CombatClearWait;
+        }
+        _abyssClearPairedEvidenceFrames = 0;
+        Log?.Invoke($"[어비스 상태] ResultConfirmed -> CombatClearWait · {reason} · 기존 전투 타이머 유지 · 복구={_abyssFalseResultCombatRecoveries}/3");
     }
 
     private void AbyssRequireState(AbyssFlowState expected, string operation)
