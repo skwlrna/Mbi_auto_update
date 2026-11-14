@@ -1270,40 +1270,12 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
     private async Task<DetectionResult> DetectAbyssConfirmedClearAsync(Bitmap frame, CancellationToken ct)
     {
-        var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
-        DiagnosticObserveDetection("abyss_dungeon_clear_visual", clearTitle);
-        var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-        DiagnosticObserveDetection("abyss_touch_screen", touch);
-
-        // V3.3.22: an animating clear screen may temporarily lose the title
-        // or prompt template (the 22:53 screenshot shows both words).
-        // OCR is bounded to the actual title/prompt regions, and NEVER
-        // authorizes a click without the same two-frame pair policy.
-        var clearTitleArea = ScaleAbyssResultRoi(AbyssClearTitleRecoverySafeRoi, frame.Size);
+        var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
         var clearTouchArea = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
-        if (!clearTitle.Found || !touch.Found || !clearTouchArea.Contains(touch.Bounds))
-        {
-            _abyssResultOcr ??= new OcrRecognizer();
-            if (!clearTitle.Found)
-            {
-                var ocrTitle = await _abyssResultOcr.FindCompactLabelAsync(
-                    frame, clearTitleArea, "던전 클리어", ct);
-                if (ocrTitle.Found && clearTitleArea.Contains(ocrTitle.Bounds))
-                    clearTitle = ocrTitle;
-            }
-            if (!touch.Found || !clearTouchArea.Contains(touch.Bounds))
-            {
-                var ocrTouch = await _abyssResultOcr.FindCompactLabelAsync(
-                    frame, clearTouchArea, "화면을 터치해 주세요", ct);
-                if (ocrTouch.Found && clearTouchArea.Contains(ocrTouch.Bounds))
-                    touch = ocrTouch;
-            }
-        }
 
         // Preferred path: both independent clear signals are visible in the same frame.
         if (clearTitle.Found && touch.Found &&
-            clearTouchArea.Contains(touch.Bounds) &&
-            !await HasAbyssActiveCombatHudAsync(frame, ct))
+            clearTouchArea.Contains(touch.Bounds))
         {
             _abyssClearPairedEvidenceFrames = AbyssClearEvidencePolicy.Next(
                 _abyssClearPairedEvidenceFrames, clearTitle.Found, touch.Found);
@@ -1360,8 +1332,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 return DetectionResult.NotFound;
             }
 
-            var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-            var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
+            var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
                 clearTitleConsecutive, clearTitle.Found, touch.Found);
             if (AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive))
@@ -1412,8 +1383,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
             previousResult = DetectionResult.NotFound;
 
-            var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-            var clearTitle = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
+            var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
 
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
                 clearTitleConsecutive, clearTitle.Found, touch.Found);

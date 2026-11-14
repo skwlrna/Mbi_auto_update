@@ -426,40 +426,7 @@ internal sealed partial class ScenarioEngine
         if (GetAbyssFlowState() != AbyssFlowState.ResultConfirmed)
             return false;
 
-        async Task<(DetectionResult Title, DetectionResult Touch)> EvidenceAsync(Bitmap frame)
-        {
-            var title = await _detector.DetectAsync(
-                "abyss_dungeon_clear_visual", frame, ct);
-            var touch = await _detector.DetectAsync(
-                "abyss_touch_screen", frame, ct);
-            // The 22:14 screenshot visibly shows the clear title and bottom
-            // touch prompt, but image templates may miss one while its glow
-            // animates. OCR is a bounded SECOND signal, never a solo tap:
-            // both title and touch must still match across two fresh frames.
-            var titleArea = ScaleAbyssResultRoi(AbyssClearTitleRecoverySafeRoi, frame.Size);
-            var touchArea = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
-            if (!title.Found || !touch.Found || !touchArea.Contains(touch.Bounds))
-            {
-                _abyssResultOcr ??= new OcrRecognizer();
-                if (!title.Found)
-                {
-                    var ocrTitle = await _abyssResultOcr.FindCompactLabelAsync(
-                        frame, titleArea, "던전 클리어", ct);
-                    if (ocrTitle.Found && titleArea.Contains(ocrTitle.Bounds))
-                        title = ocrTitle;
-                }
-                if (!touch.Found || !touchArea.Contains(touch.Bounds))
-                {
-                    var ocrTouch = await _abyssResultOcr.FindCompactLabelAsync(
-                        frame, touchArea, "화면을 터치해 주세요", ct);
-                    if (ocrTouch.Found && touchArea.Contains(ocrTouch.Bounds))
-                        touch = ocrTouch;
-                }
-            }
-            return (title, touch);
-        }
-
-        var first = await EvidenceAsync(firstFrame);
+        var first = await ReadAbyssClearEvidenceAsync(firstFrame, ct);
         var safe = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, firstFrame.Size);
         if (!first.Title.Found || !first.Touch.Found ||
             !safe.Contains(first.Touch.Bounds))
@@ -467,7 +434,7 @@ internal sealed partial class ScenarioEngine
 
         await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
         using var secondFrame = await CaptureGameWindowAsync(ct);
-        var second = await EvidenceAsync(secondFrame);
+        var second = await ReadAbyssClearEvidenceAsync(secondFrame, ct);
         var secondSafe = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, secondFrame.Size);
         if (secondFrame.Size != firstFrame.Size ||
             !second.Title.Found || !second.Touch.Found ||

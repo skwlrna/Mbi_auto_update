@@ -47,34 +47,8 @@ internal sealed partial class ScenarioEngine
         // V3.3.19: never classify the still-visible '던전 클리어!' and
         // '화면을 터치해 주세요' overlay as a ready result. This guard
         // must run BEFORE the green row and alternative rewards OCR paths.
-        var pendingTitle = await _detector.DetectAsync(
-            "abyss_dungeon_clear_visual", frame, ct);
-        var pendingTouch = await _detector.DetectAsync(
-            "abyss_touch_screen", frame, ct);
-        var touchArea = ScaleAbyssResultRoi(
-            AbyssClearTouchRecoverySafeRoi, frame.Size);
-        // Animated clear title/prompt can escape the image templates.
-        // Exact bounded OCR is a second channel, not single-signal authority.
-        if (!pendingTitle.Found || !pendingTouch.Found ||
-            !touchArea.Contains(pendingTouch.Bounds))
-        {
-            _abyssResultOcr ??= new OcrRecognizer();
-            var titleArea = ScaleAbyssResultRoi(AbyssClearTitleRecoverySafeRoi, frame.Size);
-            if (!pendingTitle.Found)
-            {
-                var ocrTitle = await _abyssResultOcr.FindCompactLabelAsync(
-                    frame, titleArea, "던전 클리어", ct);
-                if (ocrTitle.Found && titleArea.Contains(ocrTitle.Bounds))
-                    pendingTitle = ocrTitle;
-            }
-            if (!pendingTouch.Found || !touchArea.Contains(pendingTouch.Bounds))
-            {
-                var ocrTouch = await _abyssResultOcr.FindCompactLabelAsync(
-                    frame, touchArea, "화면을 터치해 주세요", ct);
-                if (ocrTouch.Found && touchArea.Contains(ocrTouch.Bounds))
-                    pendingTouch = ocrTouch;
-            }
-        }
+        var (pendingTitle, pendingTouch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        var touchArea = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
         if (pendingTitle.Found && pendingTouch.Found &&
             touchArea.Contains(pendingTouch.Bounds))
         {
