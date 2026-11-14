@@ -83,9 +83,9 @@ class CombatResultRescue(unittest.TestCase):
         for mark in ('"던전 클리어", ct','"화면을 터치해 주세요", ct',
                      "clearTouchArea.Contains(touch.Bounds)",
                      "AbyssClearEvidencePolicy.Confirmed("):
-            self.assertIn(mark,b)
-        self.assertIn('titleArea.Contains(ocrTitle.Bounds)',result)
-        self.assertIn('touchArea.Contains(ocrTouch.Bounds)',result)
+            self.assertIn(mark,b + read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssClearEvidence.cs"))
+        self.assertIn('clearTitleArea.Contains(ocrTitle.Bounds)',read('source/FishingAutomation/dungeon/ScenarioEngine.AbyssClearEvidence.cs'))
+        self.assertIn('clearTouchArea.Contains(ocrTouch.Bounds)',read('source/FishingAutomation/dungeon/ScenarioEngine.AbyssClearEvidence.cs'))
         self.assertIn("await AdvanceAbyssClearScreenAsync(found, ct)", engine)
 
     def test_release_retains_exact_historical_overlay_test_path(self):

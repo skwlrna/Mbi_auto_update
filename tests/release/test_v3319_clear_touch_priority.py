@@ -9,8 +9,10 @@ class ClearTouchPriority(unittest.TestCase):
         s = read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssCompletedResult.cs")
         method = s.split("private async Task<bool> HasAbyssCompletedResultEvidenceAsync(", 1)[1].split(
             "private async Task<bool> ConfirmAbyssCompletedResultAsync(", 1)[0]
-        self.assertIn('"abyss_dungeon_clear_visual", frame, ct', method)
-        self.assertIn('"abyss_touch_screen", frame, ct', method)
+        self.assertIn("ReadAbyssClearEvidenceAsync(frame, ct)", method)
+        shared = read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssClearEvidence.cs")
+        self.assertIn('"abyss_dungeon_clear_visual", frame, ct', shared)
+        self.assertIn('"abyss_touch_screen", frame, ct', shared)
         self.assertIn('touchArea.Contains(pendingTouch.Bounds)', method)
         self.assertIn('pendingTitle.Found && pendingTouch.Found', method)
         self.assertLess(method.index('pendingTitle.Found && pendingTouch.Found'),

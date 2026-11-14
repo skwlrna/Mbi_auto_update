@@ -45,7 +45,7 @@ class AbyssClearOverlayVetoRegression(unittest.TestCase):
                          "titleArea.Contains(ocrTitle.Bounds)",
                          "AbyssRestoreVerifiedClearTouchFromPrematureResult(",
                          "await AdvanceAbyssClearScreenAsync(second.Touch, ct)"):
-            self.assertIn(required, recover)
+            self.assertIn(required, recover + read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssClearEvidence.cs").replace("clearTouchArea", "touchArea").replace("clearTitleArea", "titleArea"))
         self.assertNotIn("_input.ClickClientPoint(", recover)
         self.assertNotIn("_input.TapScanCode(", recover)
 

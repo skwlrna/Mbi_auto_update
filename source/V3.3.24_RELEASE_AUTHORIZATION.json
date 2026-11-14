@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.24",
+  "purpose": "abyss_shared_clear_evidence",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-15 던전 클리어 화면에서 진행되지 않는 문제: 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

@@ -47,10 +47,8 @@ internal sealed partial class ScenarioEngine
         if ((await _detector.DetectAsync("abyss_enter", frame, ct)).Found ||
             AbyssMissionCompletePolicy.HasVisualEvidence(frame))
             return false;
-        var title = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
-        var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
-        var touchRoi = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
-        bool clearOverlay = title.Found && touch.Found && touchRoi.Contains(touch.Bounds);
+        var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        bool clearOverlay = title.Found && touch.Found;
         return !clearOverlay;
     }
 

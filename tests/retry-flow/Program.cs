@@ -19,18 +19,21 @@ namespace DungeonVisionBot
  class OcrRecognizer
  {
   public static bool Recruiting;
+  public static bool ClearTitle, ClearTouch, OutsideClear;
   public static IReadOnlyList<DetectionResult> Lines=Array.Empty<DetectionResult>();
   public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)
   {
    // Isolated harness: a real solid green middle result button exposes the
    // exact '다시 하기' text; recruitment OCR exists only on recruitment frames.
+   if ((t=="던전 클리어" && ClearTitle) || (t=="화면을 터치해 주세요" && ClearTouch))
+    return Task.FromResult(new DetectionResult(true,OutsideClear ? new Rectangle(0,0,20,20) : r,1,t));
    bool retry = t=="다시 하기" && b.GetPixel(Math.Min(400,b.Width-1),Math.Min(930,b.Height-1)).G>=200;
    bool recruiting = Recruiting && t=="우연한 만남";
    return Task.FromResult(retry || recruiting ? new DetectionResult(true,r,1,t) : DetectionResult.NotFound);
   }
   public Task<IReadOnlyList<DetectionResult>> ReadLinesAsync(Bitmap b,Rectangle r,int scale,CancellationToken ct)=>Task.FromResult<IReadOnlyList<DetectionResult>>(Recruiting ? new[]{new DetectionResult(true,r,1,"모든 플레이어가 모이면 자동 입장합니다.")} : Lines);
  }
- class Detector {public bool Hallucination;public Task<DetectionResult> DetectAsync(string id,Bitmap b,CancellationToken ct)=>Task.FromResult(Hallucination && id=="abyss_loot_hallucination_stone" ? new DetectionResult(true,new(100,300,40,40),.95,null) : DetectionResult.NotFound);}
+ class Detector {public bool Hallucination; public Dictionary<string,DetectionResult> Hits=new(); public Task<DetectionResult> DetectAsync(string id,Bitmap b,CancellationToken ct)=>Task.FromResult(Hits.TryGetValue(id,out var hit) ? hit : Hallucination && id=="abyss_loot_hallucination_stone" ? new DetectionResult(true,new(100,300,40,40),.95,null) : DetectionResult.NotFound);}
  class Settings {public int PollIntervalMs=1,ClickSettleMs=1;}
  class Step {public string Target="abyss_touch_screen";}
  class Definition {public List<Step> Steps=new(){new()};}
@@ -94,8 +97,45 @@ namespace DungeonVisionBot
    return Task.FromResult(b);
   }
   static void Check(bool v,string s){if(!v)throw new Exception(s);Console.WriteLine("PASS "+s);}
-  static async Task Main()
+  static async Task Main(string[] args)
   {
+   // Execute the production shared reader with deterministic detector/OCR seams.
+   using (var frame = new Bitmap(800,1000))
+   {
+    var clear = new ScenarioEngine();
+    OcrRecognizer.ClearTitle=true; OcrRecognizer.ClearTouch=true;
+    var pair = await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(pair.Title.Found && pair.Touch.Found,"OCR-only clear pair survives missing image templates");
+    int count=AbyssClearEvidencePolicy.Next(0,pair.Title.Found,pair.Touch.Found);
+    Check(!AbyssClearEvidencePolicy.Confirmed(count),"one OCR pair cannot authorize touch");
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    count=AbyssClearEvidencePolicy.Next(count,pair.Title.Found,pair.Touch.Found);
+    Check(AbyssClearEvidencePolicy.Confirmed(count),"two fresh bounded OCR pairs confirm clear");
+    OcrRecognizer.ClearTouch=false;
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(pair.Title.Found && !pair.Touch.Found,"title-only combat lookalike remains rejected");
+    count=AbyssClearEvidencePolicy.Next(count,pair.Title.Found,pair.Touch.Found);
+    Check(count==0,"missing touch resets prior paired evidence");
+    OcrRecognizer.ClearTitle=false; OcrRecognizer.ClearTouch=true;
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(!pair.Title.Found && pair.Touch.Found,"prompt-only evidence remains rejected");
+    OcrRecognizer.ClearTitle=true; OcrRecognizer.OutsideClear=true;
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(!pair.Title.Found && !pair.Touch.Found,"out-of-area OCR cannot authorize clear");
+    OcrRecognizer.ClearTitle=false; OcrRecognizer.ClearTouch=false; OcrRecognizer.OutsideClear=false;
+    clear._detector.Hits["abyss_dungeon_clear_visual"]=new(true,new(300,200,210,47),.9,null);
+    clear._detector.Hits["abyss_touch_screen"]=new(true,new(291,913,218,63),.9,null);
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(pair.Title.Found && pair.Touch.Found,"original in-area image pair still works");
+    clear._detector.Hits["abyss_touch_screen"]=new(true,new(0,300,200,60),1,null);
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(!pair.Touch.Found,"out-of-area image prompt is rejected");
+    OcrRecognizer.ClearTouch=true;
+    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(pair.Title.Found && pair.Touch.Found,"bounded OCR rescues wrong-area top image match");
+    OcrRecognizer.ClearTouch=false;
+   }
+   if(args.Contains("--clear-only")) return;
    Check(!AbyssOutsidePolicy.CanAccept(false,4,false,false),"outside HUD cannot count without explicit exit");
    Check(AbyssOutsidePolicy.CanAccept(true,3,false,false),"outside HUD accepted only after exit is armed");
    Check(!AbyssOutsidePolicy.CanAccept(true,4,true,false),"clear screen blocks outside acceptance");
