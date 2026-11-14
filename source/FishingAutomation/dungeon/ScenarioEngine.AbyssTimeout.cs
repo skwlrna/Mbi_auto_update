@@ -199,8 +199,19 @@ internal sealed partial class ScenarioEngine
             previous = target;
             await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
         }
+        // At the 02:28 boundary the user was ALREADY on a completed reward
+        // screen. Re-check before reporting a missing combat-only exit icon.
+        // Only fresh two-frame reward evidence may bypass the safe stop.
+        using (var finalFrame = await CaptureGameWindowAsync(ct))
+        {
+            if (await ConfirmAbyssCompletedResultAsync(finalFrame, ct))
+            {
+                MarkAbyssCompletedResult("02:28: 퇴장 아이콘 없음 · 실제 완료 보상 화면 확인");
+                return false;
+            }
+        }
         throw new InvalidOperationException(
-            "10분 초과 후 던전 퇴장 아이콘 2프레임을 확인하지 못해 안전 정지합니다.");
+            "10분 초과 후 결과 화면 2프레임 및 던전 퇴장 아이콘 2프레임 모두 미확인 · 안전 정지합니다.");
     }
 
     private async Task<bool> IsAbyssTimeoutExitDialogVisibleAsync(

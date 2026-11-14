@@ -9,6 +9,7 @@ internal sealed partial class ScenarioEngine
     // finished-rewards labels even while a confirmation modal darkens them.
     // Never use either text alone to authorize a click.
     private static readonly Rectangle AbyssFinishedTimeRoi = new(320, 222, 270, 80);
+    // Preserve 2026-11-13 reward OCR region and its historical regression.
     private static readonly Rectangle AbyssFinishedLootRoi = new(295, 450, 265, 100);
     private static readonly Rectangle AbyssTimeoutConfirmExitRoi = new(392, 863, 238, 100);
 
@@ -115,7 +116,14 @@ internal sealed partial class ScenarioEngine
         var loot = await _abyssResultOcr.FindCompactLabelAsync(
             frame, lootArea, "발견한 전리품", ct);
         if (!loot.Found || !lootArea.Contains(loot.Bounds))
-            return false;
+        {
+            // Also support the visually confirmed 02:28 higher heading.
+            lootArea = ScaleAbyssResultRoi(AbyssFinishedLootEarlyRoi, frame.Size);
+            loot = await _abyssResultOcr.FindCompactLabelAsync(
+                frame, lootArea, "발견한 전리품", ct);
+            if (!loot.Found || !lootArea.Contains(loot.Bounds))
+                return false;
+        }
         // OCR-only proof is unsafe: the two actual 2026-11-14 incident
         // captures were still in combat with no physical retry button.
         if (!HasAbyssFinishedFallbackActionRow(frame))

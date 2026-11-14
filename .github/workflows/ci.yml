@@ -84,6 +84,12 @@ jobs:
           dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'N03 input cancellation regressions failed' }
 
+      - name: V3.3.23 02:28 completed reward result before timeout regression
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests/release -p 'test_v3323_result_reward_timeout.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.3.23 result must override combat-only timeout exit on real reward screen' }
+
       - name: V3.3.22 22:58 active-combat result veto and same-round recovery regression
         shell: pwsh
         run: |
