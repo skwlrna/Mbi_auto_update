@@ -244,7 +244,8 @@ internal sealed partial class ScenarioEngine
                 var loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
                 if (!loot.Found || !lootArea.Contains(loot.Bounds))
                 {
-                    lootArea = ScaleAbyssResultRoi(AbyssFinishedLootEarlyRoi, frame.Size);
+                    // The standalone retry-flow harness does not include the completed-result partial.
+                    lootArea = ScaleAbyssResultRoi(new Rectangle(295, 385, 265, 105), frame.Size);
                     loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
                 }
                 rewardsTextProof = time.Found && timeArea.Contains(time.Bounds) &&
