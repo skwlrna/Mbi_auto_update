@@ -532,7 +532,8 @@ class V3275ReleaseSafety(unittest.TestCase):
                           'gh release create V3.3.23',
                           'gh release edit V3.3.23 --draft=false',
                           'test_v3321_clear_overlay_veto.py',
-                          'test_v3323_combat_result_rescue.py'):
+                          'test_v3322_combat_result_rescue.py',
+                          'test_v3323_result_reward_timeout.py'):
                 self.assertIn(token, workflow)
             auth = json.loads((ROOT / 'source/V3.3.23_RELEASE_AUTHORIZATION.json').read_text(encoding='utf-8'))
             self.assertEqual(auth['purpose'], 'abyss_0228_completed_reward_result_detection')
