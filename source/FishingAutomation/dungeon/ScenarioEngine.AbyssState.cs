@@ -100,7 +100,12 @@ internal sealed partial class ScenarioEngine
 
             _abyssFlowState = next;
             if (next == AbyssFlowState.CombatClearWait && (previous == AbyssFlowState.Reentering || previous == AbyssFlowState.Recruiting))
+            {
+                // A verified re-entry starts a NEW fight; only now may the
+                // old round's recovery budget/timer be cleared.
                 _abyssCombatStartedAt = null;
+                _abyssFalseResultCombatRecoveries = 0;
+            }
         }
 
         if (previous != next)
