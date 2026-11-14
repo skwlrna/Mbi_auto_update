@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.20",
+  "purpose": "abyss_combat_false_result_ocr_button_proof",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

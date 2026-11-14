@@ -84,6 +84,13 @@ jobs:
           dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'N03 input cancellation regressions failed' }
 
+      - name: V3.3.20 combat-to-result OCR false positive regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3320_combat_result_veto.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Live combat cannot be promoted by rewards OCR without result buttons' }
+
       - name: V3.3.19 completed-result touch-screen precedence and rescue regression
         shell: pwsh
         run: |

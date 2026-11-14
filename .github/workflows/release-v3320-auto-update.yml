@@ -1,0 +1,442 @@
+name: Publish V3.3.20 Abyss Clear Touch Recovery After Main CI
+
+# Final row binding excludes station progress counters (0/1).
+# User-approved release; game acceptance for V3.3.20 remains pending.
+# Publish from exact CI-approved main only, once. Preserve rollback and
+# SHA256-verified updater ZIP, source archive, and executable smoke test.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v3320-auto-update.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: v3320-auto-update-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Require user-approved V3.3.20 bounded rollout and rollback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $a=Get-Content 'source/V3.3.20_RELEASE_AUTHORIZATION.json' -Raw | ConvertFrom-Json
+          if($a.schema -ne 1 -or $a.version -ne 'V3.3.20' -or
+             $a.purpose -ne 'abyss_combat_false_result_ocr_button_proof' -or
+             $a.approvedBy -ne 'user_direct_request_in_conversation' -or
+             $a.request -notmatch '수정하고 배포해' -or
+             $a.realGameTested -ne $false -or
+             $a.rollbackProvided -ne $true -or
+             $a.offlineRegressionRequired -ne $true -or
+             $a.mainCiRequired -ne $true -or
+             $a.postUpdateGameTestingPending -ne $true){
+             throw 'V3.3.20 authorized rollout, PR trace or game-acceptance metadata missing'
+          }
+          foreach($p in @('source/RELEASE_NOTES_V3.3.20.md',
+                          'source/tools/ApplyUpdate.ps1','source/tools/RollbackPrevious.ps1',
+                          'source/ROLLBACK_PREVIOUS.cmd','source/START.cmd')){
+            if(-not (Test-Path $p)){throw "Missing V3.3.20 rollback/release artifact: $p"}
+          }
+          Write-Warning 'V3.3.20 real-game acceptance pending. CI and rollback are mandatory.'
+
+      - name: Require V3.3.20 medicine F07 selection evidence without duplicate title OCR
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $screen=Get-Content 'source/FishingAutomation/dungeon/AlteringScreen.cs' -Raw
+          $find=[regex]::Match($screen,'private async Task<DetectionResult\?> FindRecipeAsync[\s\S]*?(?=\r?\n    private async Task<bool> IsRecipeDetailStructureAsync)').Value
+          $medicine=[regex]::Match($screen,'private async Task<bool> TrySelectMedicineRecipeBySearchAsync[\s\S]*?(?=\r?\n    private async Task SelectRecipeAsync)').Value
+          $queue=[regex]::Match($screen,'public async Task QueueAsync[\s\S]*?(?=\r?\n    public async Task<bool> CollectAsyncAtBoundary)').Value
+          if($find -notmatch '_selectedMedicineSearchKey' -or
+             $find -notmatch 'TryFindFreeProcessButtonVisual' -or
+             $medicine -notmatch '_selectedMedicineSearchKey = RecipeCacheKey\(plan\)' -or
+             $medicine -notmatch 'if \(!secondFirstOnly \|\| secondPopupVisible\)' -or
+             $queue -notmatch '_selectedMedicineSearchKey = null' -or
+             $queue -notmatch 'VerifyTwoFreshObservationsWithRetriesAsync' -or
+             $queue -notmatch 'ClickVerifiedFreshAsync' -or
+             $queue -notmatch 'IsStableFreshFreeActionTarget' -or
+             $queue -notmatch 'DetectRemoteProcessStateAsync'){
+            throw 'V3.3.20 medicine selection-bound F07 waiver or retained safety checks missing'
+          }
+          dotnet run --project tests/altering/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Alteration regression failed'}
+
+      - name: Require V3.3.20 food and item craft-ready fresh pixel proof
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $craft=Get-Content 'source/FishingAutomation/dungeon/CraftingScreen.cs' -Raw
+          $return=[regex]::Match($craft,'public async Task ReturnToStationAndCraftAsync[\s\S]*?(?=\r?\n    private async Task FinishDirectCraftAsync)').Value
+          $direct=[regex]::Match($craft,'private async Task FinishDirectCraftAsync[\s\S]*?(?=\r?\n    private DetectionResult\? FindQuestTitleCandidate)').Value
+          if($craft -notmatch 'HasCraftReadyActionVisual\(Bitmap frame\)' -or
+             $craft -notmatch 'HasTwoFreshCraftReadyFramesAsync' -or
+             $return -notmatch 'HasTwoFreshCraftReadyFramesAsync' -or
+             $direct -notmatch 'HasTwoFreshCraftReadyFramesAsync' -or
+             $return -notmatch 'HasCraftReadyWithStationTransition\(immediate\)' -or
+             $direct -notmatch 'HasCraftReadyWithStationTransition\(immediate\)' -or
+             $return -match 'FindUniqueAsync\([\s\S]*?"제작하기"' -or
+             $direct -match 'FindUniqueAsync\([\s\S]*?"제작하기"'){
+            throw 'V3.3.20 crafting must use 2 fresh button pixels plus final frame, not OCR hard gate'
+          }
+          dotnet run --project tests/crafting/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Crafting regression failed'}
+          dotnet run --project tests/altering-screen-integration/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Compiled production screen/visual test failed'}
+          dotnet run --project tests/combined-scheduler/Regression.csproj -c Release
+          if($LASTEXITCODE-ne0){throw 'Bounded recovery regression failed'}
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3301_auto_update_policy.py' -v
+          if($LASTEXITCODE-ne0){throw 'V3.3.20 release regression failed'}
+          python -m unittest discover -s tests/release -p 'test_v3299_auto_update_policy.py' -v
+          if($LASTEXITCODE-ne0){throw 'Inherited V3.2.99 Enter-search guard failed'}
+
+      - name: Verify V3.3.20 Abyss menu event geometry regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content source/FishingAutomation/dungeon/AbyssMenuEntryPolicy.cs -Raw
+          $menu=Get-Content source/FishingAutomation/dungeon/ScenarioEngine.AbyssMenu.cs -Raw
+          $test=Get-Content tests/combined-scheduler/Program.cs -Raw
+          if($policy -notmatch 'AbyssCellEvent' -or
+             $policy -notmatch 'GuildLabelEvent' -or
+             $policy -notmatch 'sameEvent' -or
+             $menu -notmatch 'GuildLabelFor' -or
+             $test -notmatch 'event-banner menu accepts two fresh Abyss icon frames'){
+            throw 'Event menu regression is absent'
+          }
+
+      - name: Verify Abyss initial entry Space input regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3314_abyss_space_entry.py' -v
+          if($LASTEXITCODE-ne0){throw 'Initial Abyss entry must use Space and retain combat verification'}
+
+      - name: Verify V3.3.20 bounded Abyss entry retries and selection-screen veto
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3315_abyss_entry_stability.py' -v
+          if($LASTEXITCODE-ne0){throw 'Abyss entry stability regression failed'}
+
+      - name: Verify V3.3.20 post-exit Stellagram one-ESC regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3316_post_exit_stellagram_esc.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Stellagram ESC verification gate failed' }
+
+      - name: Verify V3.3.20 conditional processing handoff and retry regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3317_conditional_abyss_exit.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Conditional Abyss exit regression failed' }
+          dotnet run --project tests/combined-scheduler/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Combined scheduler processing handoff policy failed' }
+
+      - name: Verify V3.3.20 completed rewards priority and safe timeout dialog
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3318_completed_result_timeout.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Completed rewards must never be mistaken for an unfinished Abyss'}
+          python -m unittest discover -s tests/release -p 'test_v3317_conditional_abyss_exit.py' -v
+          if($LASTEXITCODE -ne 0){throw 'Inherited V3.3.17 scheduled processing handoff failed'}
+
+      - name: Verify V3.3.20 live-combat reward OCR false positive veto
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3320_combat_result_veto.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Result OCR-only combat false-positive regression failed' }
+
+      - name: Verify V3.3.20 clear-touch precedence and safe result-stage rescue
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3319_clear_touch_priority.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'V3.3.20 guarded clear-touch recovery regression failed' }
+          python -m unittest discover -s tests/release -p 'test_v3318_completed_result_timeout.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Inherited completed rewards/timeout safety regression failed' }
+
+      - name: Require CI-approved current main and exact V3.3.20 version
+        id: eligibility
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_HEAD_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha=(git rev-parse HEAD).Trim()
+          if($LASTEXITCODE-ne0 -or $sha -ne $env:CI_HEAD_SHA){throw 'Wrong CI checkout SHA'}
+          $remote=(git ls-remote origin refs/heads/main | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or [string]::IsNullOrWhiteSpace($remote)){throw 'main unavailable'}
+          if((($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main moved since CI; abort'}
+          # Automatic and manual promotion both require an already CI-approved main commit.
+          # The path-scoped push event may arrive before main CI finishes.
+          # Wait for that exact SHA; never publish from PR CI or a stale main.
+          $deadline=(Get-Date).AddMinutes(25)
+          do {
+            $remote=(git ls-remote origin refs/heads/main | Select-Object -First 1)
+            if($LASTEXITCODE-ne0 -or (($remote -split "\s+")[0]).Trim() -ne $sha) {
+              throw 'main changed since CI; abort release'
+            }
+            $ci=gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$sha&per_page=20" | ConvertFrom-Json
+            if($LASTEXITCODE-ne0 -or -not $ci){throw 'Cannot verify main CI'}
+            $observed=@($ci.workflow_runs | Where-Object {
+              $_.head_sha -eq $sha -and $_.event -eq 'push'
+            })
+            $passed=@($observed | Where-Object {
+              $_.status -eq 'completed' -and $_.conclusion -eq 'success'
+            })
+            if($passed.Count -ge 1){break}
+            $bad=@($observed | Where-Object {
+              $_.status -eq 'completed' -and
+              $_.conclusion -in @('failure','cancelled','timed_out','action_required')
+            })
+            if($bad.Count -gt 0){throw 'Main production CI did not pass; refuse release'}
+            if((Get-Date) -ge $deadline){throw 'No successful production CI for current main SHA'}
+            Write-Host 'Waiting for CI on exact main SHA (no publication until success)'
+            Start-Sleep -Seconds 20
+          } while ($true)
+          $u=Get-Content source/FishingAutomation/UpdateManager.cs -Raw
+          if(-not $u.Contains('CurrentVersion = "V3.3.20"')){
+            "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Host 'Not V3.3.20 any more; skip'
+            exit 0
+          }
+          $p=Get-Content source/FishingAutomation/FishingAutomation.csproj -Raw
+          foreach($tag in @('<Version>3.3.20</Version>','<AssemblyVersion>3.3.20.0</AssemblyVersion>','<FileVersion>3.3.20.0</FileVersion>')){
+            if(-not $p.Contains($tag)){throw "Version mismatch: $tag"}
+          }
+          if(-not (Test-Path source/RELEASE_NOTES_V3.3.20.md)){throw 'Release notes missing'}
+          $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Release list check failed'}
+          if(@($releases | Where-Object { $_.tag_name -eq 'V3.3.20' }).Count -gt 0){
+            "publish=false" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Host 'V3.3.20 release exists: no automatic overwrite'
+            exit 0
+          }
+          $tag=(git ls-remote --tags origin refs/tags/V3.3.20 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0){throw 'Tag lookup failed'}
+          if(-not [string]::IsNullOrWhiteSpace($tag)){throw 'Tag exists without release; manual recovery required'}
+          "publish=true" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Host "Eligible V3.3.20 CI-approved SHA: $sha"
+
+      - name: Verify shared production confirmation and observation fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $screen=Get-Content source/FishingAutomation/dungeon/AlteringScreen.cs -Raw
+          $visual=Get-Content source/FishingAutomation/dungeon/ProductionConfirmationVisual.cs -Raw
+          $ui=Get-Content source/FishingAutomation/dungeon/ProductionUiRuntime.cs -Raw
+          if($screen -notmatch 'ProductionConfirmationVisual.HasBoundedGreenButton' -or
+             $visual -notmatch 'width is >= 110 and <= 480' -or
+             $visual -notmatch 'height is >= 22 and <= 100' -or
+             $ui -notmatch 'const int maxObservations = 6'){
+            throw 'V3.3.20 shared production recognition fix missing'
+          }
+
+      - name: Require F9 shortcut regression suite and merged source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($required in @('tests/altering-screen-integration','source/FishingAutomation')) { if(-not (Test-Path $required)){throw "Missing F9 field recovery: $required"} }
+          if(-not (Test-Path 'source/V3.3.20_RELEASE_AUTHORIZATION.json')){throw 'Release authorization missing'}
+          $f9=Get-Content 'source/FishingAutomation/dungeon/AlteringScreen.cs' -Raw
+          $field=[regex]::Match($f9,
+            'Func<Bitmap, Task<bool>>\? verifyManagedK = null;[\s\S]*?(?=await RequireManagedIdleAsync\(plan, directive, "가공 메뉴 K 직전")').Value
+          $scene=[regex]::Match($f9,
+            'private async Task<ManagedProductionSceneKind> ClassifyManagedProductionSceneAsync[\s\S]*?(?=\r?\n    private async Task EnterFacilityAsync)').Value
+          $last=[regex]::Match($f9,
+            'private async Task<bool> VerifyManagedKFrameAsync[\s\S]*?(?=\r?\n    internal static bool HasManagedFoodCraftingNavigationVisual)').Value
+          $space=[regex]::Match($f9,
+            'private async Task<bool> HasManagedKISpaceFieldHudAsync[\s\S]*?(?=\r?\n    private async Task<ManagedWorldHudKeys> FindManagedWorldHudKeysAsync)').Value
+          if([string]::IsNullOrWhiteSpace($field) -or [string]::IsNullOrWhiteSpace($scene) -or
+             [string]::IsNullOrWhiteSpace($last) -or [string]::IsNullOrWhiteSpace($space) -or
+             $field -notmatch 'CanAuthorizeManagedKSpaceFallback' -or
+             $field -notmatch 'HasManagedKISpaceFieldHudAsync' -or
+             $field -notmatch 'Task.Delay\(180, ct\)' -or
+             $f9 -notmatch 'TapVerifiedFreshAsync' -or
+             $field -match 'DetectManagedWorldHudTemplates|CanAuthorizeManagedKEntry|CanAuthorizeManagedKFieldFallback|CanAuthorizeManagedKHomeEndFieldFallback|FindManagedWorldHudKeysAsync' -or
+             $scene -notmatch 'HasManagedKISpaceFieldHudAsync' -or
+             $scene -match 'DetectManagedWorldHudTemplates|DetectManagedWorldHudKeys|HasManagedKEntryFieldHudVisual' -or
+             $last -notmatch 'ClassifyManagedProductionSceneAsync' -or
+             $last -match 'DetectManagedWorldHudTemplates|HasManagedKEntryFieldHudVisual|DetectManagedWorldHudKeys' -or
+             $space -notmatch 'HasManagedKIShortcutGlyphs' -or
+             $space -notmatch 'FindCompactAsync' -or
+             $space -match 'DetectManagedWorldHudTemplates|HasManagedKEntryFieldHudVisual'){
+            throw 'F9 K-I-Space exclusive preflight/classifier/final-screen contract missing'
+          }
+          foreach($x in @(
+            'tests/altering-screen-integration/Program.cs',
+            'source/RELEASE_NOTES_V3.3.20.md',
+            'tests/release/test_v3301_auto_update_policy.py')){
+            if(-not (Test-Path $x)){throw "V3.3.20 required F9/regression/release artifact missing: $x"}
+          }
+
+      - name: Publish verified Windows binaries
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          dotnet restore source/FishingAutomation/FishingAutomation.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'app restore failed'}
+          dotnet restore source/MacroWatchdog/MacroWatchdog.csproj -r win-x64
+          if($LASTEXITCODE-ne0){throw 'watchdog restore failed'}
+          New-Item artifacts/app,artifacts/watchdog -ItemType Directory -Force | Out-Null
+          dotnet publish source/FishingAutomation/FishingAutomation.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/app
+          if($LASTEXITCODE-ne0){throw 'app publish failed'}
+          dotnet publish source/MacroWatchdog/MacroWatchdog.csproj -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishAot=false -p:DebugType=None -p:DebugSymbols=false -o artifacts/watchdog
+          if($LASTEXITCODE-ne0){throw 'watchdog publish failed'}
+          if((Get-Item artifacts/app/FishingAutomation.exe).VersionInfo.FileVersion -ne '3.3.20.0'){throw 'EXE version mismatch'}
+          if(-not (Test-Path artifacts/watchdog/MacroWatchdog.exe)){throw 'Missing watchdog'}
+
+      - name: Smoke test executable
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path artifacts/app/FishingAutomation.exe).Path
+          $p=Start-Process $exe -WorkingDirectory (Resolve-Path artifacts/app).Path -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep 5
+            $p.Refresh()
+            if($p.HasExited){throw "App exited early: $($p.ExitCode)"}
+          } finally {
+            Stop-Process $p.Id -Force -ErrorAction SilentlyContinue
+            Get-Process MacroWatchdog -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Build updater-compatible Windows Lite, checksum, source
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $pkg=Join-Path $PWD 'artifacts/package'
+          $rel=Join-Path $pkg 'release'
+          $tools=Join-Path $pkg 'tools'
+          $compat=Join-Path $pkg 'FishingAutomation'
+          New-Item $rel,$tools,$compat -ItemType Directory -Force | Out-Null
+          Copy-Item artifacts/app/* $rel -Recurse -Force
+          Copy-Item source/FishingAutomation/interception.dll (Join-Path $rel 'interception.dll') -Force
+          Copy-Item artifacts/watchdog/MacroWatchdog.exe (Join-Path $rel 'MacroWatchdog.exe') -Force
+          Copy-Item source/tools/ApplyUpdate.ps1 (Join-Path $tools 'ApplyUpdate.ps1') -Force
+          Copy-Item source/tools/RetireAutoRepair.ps1 (Join-Path $tools 'RetireAutoRepair.ps1') -Force
+          Copy-Item source/tools/RollbackPrevious.ps1 (Join-Path $tools 'RollbackPrevious.ps1') -Force
+          Copy-Item source/ROLLBACK_PREVIOUS.cmd (Join-Path $pkg 'ROLLBACK_PREVIOUS.cmd') -Force
+          Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
+          Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
+          'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
+          'MABI AUTO V3.3.20 - verified clear touch priority and result recovery' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          $required=@(
+            'release/FishingAutomation.exe','release/MacroWatchdog.exe',
+            'release/abyss/config/targets.json','release/abyss/config/scenario.json',
+            'release/abyss/templates/managed_home_key.png','release/abyss/templates/managed_home_mail_key.png',
+            'release/abyss/templates/managed_end_key.png','release/abyss/templates/managed_escape_key.png',
+            'release/abyss/templates/managed_k_key.png','release/abyss/templates/managed_i_key.png',
+            'release/abyss/templates/loot_v173/loot_hallucination_stone.png',
+            'release/abyss/templates/loot_v173/loot_mor_corsair_tricorne.png',
+            'release/interception.dll','START.cmd','tools/ApplyUpdate.ps1',
+            'ROLLBACK_PREVIOUS.cmd','tools/RollbackPrevious.ps1',
+             'tools/RetireAutoRepair.ps1')
+          foreach($x in $required){if(-not (Test-Path (Join-Path $pkg $x))){throw "Missing package file: $x"}}
+          if(Test-Path (Join-Path $rel 'ai-autopilot')){throw 'Legacy AutoFix accidentally packaged'}
+          if(Test-Path (Join-Path $pkg 'tools/mabi-auto-repair')){throw 'Dedicated AI repair still packaged'}
+          $sha=(git rev-parse HEAD).Trim()
+          $sha | Set-Content (Join-Path $pkg 'BUILD_COMMIT.txt') -Encoding ASCII
+          $zip=Join-Path $PWD 'artifacts/MabiAuto_V3.3.20_Windows_Lite.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($pkg,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MabiAuto_V3.3.20_Windows_Lite.zip" | Set-Content "$zip.sha256" -Encoding ASCII
+          $stage=Join-Path $PWD 'artifacts/source-package'
+          New-Item $stage -ItemType Directory -Force | Out-Null
+          Copy-Item source (Join-Path $stage 'source') -Recurse -Force
+          Copy-Item changes (Join-Path $stage 'changes') -Recurse -Force
+          Copy-Item tests (Join-Path $stage 'tests') -Recurse -Force
+          Copy-Item .github (Join-Path $stage '.github') -Recurse -Force
+          Copy-Item BUILD_VERIFY.ps1,README.txt,GITHUB_MIGRATION.md $stage -Force
+          $sha | Set-Content (Join-Path $stage 'BUILD_COMMIT.txt') -Encoding ASCII
+          $buildDirs=@(Get-ChildItem $stage -Directory -Recurse | Where-Object { $_.Name -in @('bin','obj') })
+          foreach($d in ($buildDirs | Sort-Object { $_.FullName.Length } -Descending)){
+            if(Test-Path -LiteralPath $d.FullName){
+              $safe=(Resolve-Path -LiteralPath $d.FullName).Path
+              if(-not $safe.StartsWith($stage + [IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe cleanup'}
+              Remove-Item -LiteralPath $safe -Recurse -Force
+            }
+          }
+          $sourceZip=Join-Path $PWD 'artifacts/MabiAuto_V3.3.20_Source.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($stage,$sourceZip,[IO.Compression.CompressionLevel]::Optimal,$false)
+          foreach($n in @('MabiAuto_V3.3.20_Windows_Lite.zip','MabiAuto_V3.3.20_Windows_Lite.zip.sha256','MabiAuto_V3.3.20_Source.zip')){
+            if((Get-Item (Join-Path 'artifacts' $n)).Length -lt 64){throw "Bad asset: $n"}
+          }
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names=@($archive.Entries | ForEach-Object FullName)
+            foreach($n in $required){if($n -notin $names){throw "ZIP missing: $n"}}
+            if(@($names | Where-Object { $_ -like 'release/ai-autopilot/*' -or $_ -like 'tools/mabi-auto-repair/*' }).Count -gt 0){throw 'Auto-repair found in updater ZIP'}
+            if('BUILD_COMMIT.txt' -notin $names){throw 'ZIP has no build provenance'}
+          } finally { $archive.Dispose() }
+          Write-Host "V3.3.20 ZIP SHA256: $hash"
+
+      - name: Retain test-release assets in Actions
+        if: steps.eligibility.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: V3.3.20-verified-release-packages
+          path: |
+            artifacts/MabiAuto_V3.3.20_Windows_Lite.zip
+            artifacts/MabiAuto_V3.3.20_Windows_Lite.zip.sha256
+            artifacts/MabiAuto_V3.3.20_Source.zip
+
+      - name: Publish public auto-update Release
+        if: steps.eligibility.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_HEAD_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha=(git rev-parse HEAD).Trim()
+          if($sha -ne $env:CI_HEAD_SHA){throw 'Wrong package source SHA'}
+          $remote=(git ls-remote origin refs/heads/main | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or (($remote -split "\s+")[0]).Trim() -ne $sha){throw 'main changed since CI; abort release'}
+          $tag=(git ls-remote --tags origin refs/tags/V3.3.20 | Select-Object -First 1)
+          if($LASTEXITCODE-ne0 -or -not [string]::IsNullOrWhiteSpace($tag)){throw 'V3.3.20 tag already exists'}
+          git tag V3.3.20 $sha
+          if($LASTEXITCODE-ne0){throw 'tag creation failed'}
+          git push origin refs/tags/V3.3.20
+          if($LASTEXITCODE-ne0){throw 'tag push failed'}
+          gh release create V3.3.20 artifacts/MabiAuto_V3.3.20_Windows_Lite.zip artifacts/MabiAuto_V3.3.20_Windows_Lite.zip.sha256 artifacts/MabiAuto_V3.3.20_Source.zip --draft --verify-tag --title 'Mabi Auto V3.3.20' --notes-file source/RELEASE_NOTES_V3.3.20.md
+          if($LASTEXITCODE-ne0){throw 'Draft release failed'}
+          $expected=@('MabiAuto_V3.3.20_Windows_Lite.zip','MabiAuto_V3.3.20_Windows_Lite.zip.sha256','MabiAuto_V3.3.20_Source.zip')
+          $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0){throw 'Draft release lookup failed'}
+          $draft=@($releases | Where-Object { $_.tag_name -eq 'V3.3.20' }) | Select-Object -First 1
+          if(-not $draft -or -not $draft.draft -or $draft.prerelease){throw 'Draft release invalid'}
+          foreach($n in $expected){if($n -notin $draft.assets.name){throw "Missing release asset: $n"}}
+          gh release edit V3.3.20 --draft=false
+          if($LASTEXITCODE-ne0){throw 'Release publication failed'}
+          $published=gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/V3.3.20" | ConvertFrom-Json
+          if($LASTEXITCODE-ne0 -or -not $published -or $published.draft -or $published.prerelease){throw 'Public auto-update not verified'}
+          foreach($n in $expected){if($n -notin $published.assets.name){throw "Published release missing asset: $n"}}
+          Write-Host "Auto-update V3.3.20 publicly published from commit $sha"

@@ -12,6 +12,33 @@ internal sealed partial class ScenarioEngine
     private static readonly Rectangle AbyssFinishedLootRoi = new(295, 450, 265, 100);
     private static readonly Rectangle AbyssTimeoutConfirmExitRoi = new(392, 863, 238, 100);
 
+
+    // V3.3.20: the two rewards OCR labels can be false positives during
+    // live combat. They are never sufficient by themselves. Require a
+    // separate, physically present bottom action row before promoting.
+    // These conservative partial-row ratios reject the two 2026-11-14
+    // combat incidents (retry area green 0.201 and 0.119 respectively).
+    private static bool HasAbyssFinishedFallbackActionRow(Bitmap frame)
+    {
+        if (frame.Width <= 0 || frame.Height <= 0)
+            return false;
+        double aspect = frame.Width / (double)frame.Height;
+        if (aspect < 0.74 || aspect > 0.92)
+            return false;
+
+        double retryGreen = GetGreenButtonRatio(
+            frame, ScaleAbyssResultRoi(AbyssRetryButtonRoi, frame.Size));
+        double leftGreen = GetGreenButtonRatio(
+            frame, ScaleAbyssResultRoi(AbyssExitButtonRoi, frame.Size));
+        double rightGreen = GetGreenButtonRatio(
+            frame, ScaleAbyssResultRoi(AbyssOtherButtonRoi, frame.Size));
+        var retryCenter = AbyssResultLayout.FixedButtonCenter(false, frame.Size);
+        double centerGreen = GetAbyssFixedButtonGreenRatio(frame, retryCenter);
+        return retryGreen >= 0.28 &&
+            centerGreen >= 0.30 &&
+            Math.Max(leftGreen, rightGreen) >= 0.25;
+    }
+
     private async Task<bool> HasAbyssCompletedResultEvidenceAsync(Bitmap frame, CancellationToken ct)
     {
         if (!IsAbyss || AbyssMissionCompletePolicy.HasVisualEvidence(frame))
@@ -40,8 +67,9 @@ internal sealed partial class ScenarioEngine
             return !(await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
         }
 
-        // Separate anchored OCR labels support the alternate rewards layout
-        // where the standard three-green-button detector cannot see the row.
+        // Two anchored OCR labels may support an alternate rewards layout,
+        // but cannot override missing physical result action buttons (live
+        // combat can produce both OCR false positives).
         _abyssResultOcr ??= new OcrRecognizer();
         var timeArea = ScaleAbyssResultRoi(AbyssFinishedTimeRoi, frame.Size);
         var lootArea = ScaleAbyssResultRoi(AbyssFinishedLootRoi, frame.Size);
@@ -52,6 +80,10 @@ internal sealed partial class ScenarioEngine
         var loot = await _abyssResultOcr.FindCompactLabelAsync(
             frame, lootArea, "발견한 전리품", ct);
         if (!loot.Found || !lootArea.Contains(loot.Bounds))
+            return false;
+        // OCR-only proof is unsafe: the two actual 2026-11-14 incident
+        // captures were still in combat with no physical retry button.
+        if (!HasAbyssFinishedFallbackActionRow(frame))
             return false;
         return !(await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
     }
