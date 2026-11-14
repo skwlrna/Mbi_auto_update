@@ -14,6 +14,8 @@ internal sealed partial class ScenarioEngine
     // 02:28 reward screen: the open glowing chest is centered near (400,155).
     // This is independent of the 3 physically separated green result buttons.
     private static readonly Rectangle AbyssFinishedTreasureRoi = new(310, 80, 180, 180);
+    // 2026-11-15 02:28: "발견한 전리품" is near y420 (above the old region).
+    private static readonly Rectangle AbyssFinishedLootEarlyRoi = new(295, 385, 265, 105);
     private string _lastAbyssResultDiagnostic = "no-frame";
 
     // V0168_ABYSS_LOOT_TRACKING
