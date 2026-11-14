@@ -52,10 +52,39 @@ internal sealed partial class ScenarioEngine
             "abyss_touch_screen", frame, ct);
         var touchArea = ScaleAbyssResultRoi(
             AbyssClearTouchRecoverySafeRoi, frame.Size);
+        // Animated clear title/prompt can escape the image templates.
+        // Exact bounded OCR is a second channel, not single-signal authority.
+        if (!pendingTitle.Found || !pendingTouch.Found ||
+            !touchArea.Contains(pendingTouch.Bounds))
+        {
+            _abyssResultOcr ??= new OcrRecognizer();
+            var titleArea = ScaleAbyssResultRoi(AbyssClearTitleRecoverySafeRoi, frame.Size);
+            if (!pendingTitle.Found)
+            {
+                var ocrTitle = await _abyssResultOcr.FindCompactLabelAsync(
+                    frame, titleArea, "던전 클리어", ct);
+                if (ocrTitle.Found && titleArea.Contains(ocrTitle.Bounds))
+                    pendingTitle = ocrTitle;
+            }
+            if (!pendingTouch.Found || !touchArea.Contains(pendingTouch.Bounds))
+            {
+                var ocrTouch = await _abyssResultOcr.FindCompactLabelAsync(
+                    frame, touchArea, "화면을 터치해 주세요", ct);
+                if (ocrTouch.Found && touchArea.Contains(ocrTouch.Bounds))
+                    pendingTouch = ocrTouch;
+            }
+        }
         if (pendingTitle.Found && pendingTouch.Found &&
             touchArea.Contains(pendingTouch.Bounds))
         {
             Log?.Invoke("[어비스 완료결과] 클리어 제목+화면 터치가 아직 표시됨 -> 결과 단계 승격 보류");
+            return false;
+        }
+
+        // V3.3.22: fighting may flash green under the nominal result row.
+        if (await HasAbyssActiveCombatHudAsync(frame, ct))
+        {
+            Log?.Invoke("[어비스 완료결과] 전투 전용 HUD 확인 -> 결과 화면 승격 차단");
             return false;
         }
 
@@ -65,8 +94,11 @@ internal sealed partial class ScenarioEngine
         // Existing three-green-button proof is still authoritative.
         if (TryDetectAbyssResultButtonRow(frame, out _))
         {
-            // Before accepting even a strong result row, make sure no
-            // pending exit-confirmation dialog is covering the game.
+            // A green row alone is NOT a result screen: require physical
+            // buttons plus matching "다시 하기" or two anchored reward labels.
+            var retry = await DetectAbyssResultRetryAsync(frame, ct);
+            if (!retry.Found)
+                return false;
             return !(await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
         }
 
@@ -88,6 +120,14 @@ internal sealed partial class ScenarioEngine
         // captures were still in combat with no physical retry button.
         if (!HasAbyssFinishedFallbackActionRow(frame))
             return false;
+        // The OCR fallback must also see the actual middle retry text.
+        // Rewards words alone were false positives during active combat.
+        var retryArea = ScaleAbyssResultRoi(AbyssRetrySafeRoi, frame.Size);
+        var retryLabel = await _abyssResultOcr.FindCompactLabelAsync(
+            frame, retryArea, "다시 하기", ct);
+        if (!retryLabel.Found || !retryArea.Contains(retryLabel.Bounds))
+            return false;
+        Log?.Invoke("[어비스 완료결과] 전투 시간+전리품+정확 다시 하기/버튼 확인");
         return !(await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found;
     }
 
@@ -98,7 +138,8 @@ internal sealed partial class ScenarioEngine
     {
         if (!await HasAbyssCompletedResultEvidenceAsync(firstFrame, ct))
             return false;
-        await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+        // Ensure the second frame is not the same transient combat VFX.
+        await Task.Delay(Math.Max(700, _settings.PollIntervalMs), ct);
         using var fresh = await CaptureGameWindowAsync(ct);
         bool confirmed = await HasAbyssCompletedResultEvidenceAsync(fresh, ct);
         if (confirmed)
