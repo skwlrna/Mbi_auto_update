@@ -88,6 +88,12 @@ class CombatResultRescue(unittest.TestCase):
         self.assertIn('touchArea.Contains(ocrTouch.Bounds)',result)
         self.assertIn("await AdvanceAbyssClearScreenAsync(found, ct)", engine)
 
+    def test_release_retains_exact_historical_overlay_test_path(self):
+        workflow = read(".github/workflows/release-v3322-auto-update.yml")
+        self.assertIn("test_v3321_clear_overlay_veto.py", workflow)
+        self.assertIn("test_v3322_combat_result_rescue.py", workflow)
+        self.assertNotIn("test_v3322_clear_overlay_veto.py", workflow)
+
     def test_physical_button_color_not_sufficient_for_click(self):
         retry = read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssRetry.cs")
         b = retry.split("private async Task<DetectionResult> DetectAbyssResultRetryAsync(",1)[1].split(
