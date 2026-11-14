@@ -16,7 +16,8 @@ def read(p): return (ROOT / p).read_text(encoding="utf-8")
 class V3323RewardResultTimeout(unittest.TestCase):
     def test_incident_loot_heading_and_chest_are_in_safe_rois(self):
         completed = read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssCompletedResult.cs")
-        m = re.search(r"AbyssFinishedLootRoi = new\((\d+), (\d+), (\d+), (\d+)\)", completed)
+        self.assertIn("AbyssFinishedLootRoi = new(295, 450, 265, 100)", completed)
+        m = re.search(r"AbyssFinishedLootEarlyRoi = new\((\d+), (\d+), (\d+), (\d+)\)", completed)
         self.assertIsNotNone(m)
         x,y,w,h = map(int, m.groups())
         self.assertTrue(x <= 356 and x+w >= 444 and y <= 420 < y+h)
