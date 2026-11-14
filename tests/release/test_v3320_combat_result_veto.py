@@ -11,7 +11,6 @@ class CombatFalseResultVeto(unittest.TestCase):
         code = source("source/FishingAutomation/dungeon/ScenarioEngine.AbyssCompletedResult.cs")
         method = code.split("private async Task<bool> HasAbyssCompletedResultEvidenceAsync(",1)[1].split(
             "private async Task<bool> ConfirmAbyssCompletedResultAsync(",1)[0]
-        )
         self.assertIn('TryDetectAbyssResultButtonRow(frame, out _)', method)
         self.assertIn('"전투 시간", ct', method)
         self.assertIn('"발견한 전리품", ct', method)
@@ -24,7 +23,6 @@ class CombatFalseResultVeto(unittest.TestCase):
         code = source("source/FishingAutomation/dungeon/ScenarioEngine.AbyssCompletedResult.cs")
         check = code.split("private static bool HasAbyssFinishedFallbackActionRow(",1)[1].split(
             "private async Task<bool> HasAbyssCompletedResultEvidenceAsync(",1)[0]
-        )
         for anchor in ('AbyssRetryButtonRoi','AbyssExitButtonRoi','AbyssOtherButtonRoi',
                        'AbyssResultLayout.FixedButtonCenter(false, frame.Size)',
                        'GetAbyssFixedButtonGreenRatio(frame, retryCenter)'):
