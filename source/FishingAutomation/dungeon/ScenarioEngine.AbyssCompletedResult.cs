@@ -11,8 +11,6 @@ internal sealed partial class ScenarioEngine
     private static readonly Rectangle AbyssFinishedTimeRoi = new(320, 222, 270, 80);
     // Preserve 2026-11-13 reward OCR region and its historical regression.
     private static readonly Rectangle AbyssFinishedLootRoi = new(295, 450, 265, 100);
-    // 2026-11-15 02:28: "발견한 전리품" is near y420 (above the old region).
-    private static readonly Rectangle AbyssFinishedLootEarlyRoi = new(295, 385, 265, 105);
     private static readonly Rectangle AbyssTimeoutConfirmExitRoi = new(392, 863, 238, 100);
 
 
