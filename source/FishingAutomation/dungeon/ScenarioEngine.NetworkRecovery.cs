@@ -28,6 +28,32 @@ internal sealed partial class ScenarioEngine
             (await _detector.DetectAsync("network_retry_button", frame, ct)).Found;
     }
 
+    // V3.3.22: active-COMBAT evidence must be independent of generic
+    // "inside Abyss" evidence: the latter intentionally accepts clear/title
+    // templates and is unsafe to use as a ResultConfirmed veto.
+    // The physical in-dungeon leave control is a separate HUD element.
+    // No input is sent by this read-only check.
+    private async Task<bool> HasAbyssActiveCombatHudAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (!IsAbyss) return false;
+        var leave = await _detector.DetectAsync("abyss_leave_dungeon", frame, ct);
+        DiagnosticObserveDetection("abyss_active_combat_leave_hud", leave);
+        if (!leave.Found) return false;
+
+        // The same generic leave template can be visible behind overlays.
+        // Do not call a confirmed clear overlay, entry screen or mission panel
+        // "active combat". A result candidate will still require independent
+        // rewards/three-button proof even if this HUD is absent.
+        if ((await _detector.DetectAsync("abyss_enter", frame, ct)).Found ||
+            AbyssMissionCompletePolicy.HasVisualEvidence(frame))
+            return false;
+        var title = await _detector.DetectAsync("abyss_dungeon_clear_visual", frame, ct);
+        var touch = await _detector.DetectAsync("abyss_touch_screen", frame, ct);
+        var touchRoi = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
+        bool clearOverlay = title.Found && touch.Found && touchRoi.Contains(touch.Bounds);
+        return !clearOverlay;
+    }
+
     private async Task<bool> HasAbyssCombatEvidenceAsync(Bitmap frame, CancellationToken ct)
     {
         if ((await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
