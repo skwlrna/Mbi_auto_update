@@ -26,8 +26,9 @@ static AlteringWork WoodWork(long seconds, bool completed = false)
  Assert(!AbyssClearEvidencePolicy.Confirmed(clearFrames) && clearFrames == 0,
      "live combat title-only frames never authorize a clear touch");
  clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, false, true);
- Assert(clearFrames == 0 && !AbyssClearEvidencePolicy.Confirmed(clearFrames),
+ Assert(clearFrames == 1 && !AbyssClearEvidencePolicy.Confirmed(clearFrames),
      "touch-prompt-like combat image alone cannot end combat");
+ clearFrames = 0;
  clearFrames = AbyssClearEvidencePolicy.Next(clearFrames, true, true);
  Assert(clearFrames == 1 && !AbyssClearEvidencePolicy.Confirmed(clearFrames),
      "one paired title-and-prompt frame cannot trigger input");

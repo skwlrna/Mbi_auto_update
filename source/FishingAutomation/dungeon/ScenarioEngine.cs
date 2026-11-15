@@ -1015,8 +1015,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 if (!found.Found)
                 {
                     abyssClearConsecutive = 0;
-                    if (!AbyssClearPairedEvidencePending && await CheckMonitorsAsync(frame, ct))
-                        continue;
+                    // Await clear/rewards without speculative scene-skip clicks.
                 }
                 else
                 {
@@ -1270,39 +1269,15 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
     private async Task<DetectionResult> DetectAbyssConfirmedClearAsync(Bitmap frame, CancellationToken ct)
     {
-        var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
-        var clearTouchArea = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, frame.Size);
-
-        // Preferred path: both independent clear signals are visible in the same frame.
-        if (clearTitle.Found && touch.Found &&
-            clearTouchArea.Contains(touch.Bounds))
-        {
-            _abyssClearPairedEvidenceFrames = AbyssClearEvidencePolicy.Next(
-                _abyssClearPairedEvidenceFrames, clearTitle.Found, touch.Found);
-            if (!AbyssClearEvidencePolicy.Confirmed(_abyssClearPairedEvidenceFrames))
-            {
-                Log?.Invoke("[어비스] 클리어 제목+터치 문구 후보 1/2 · 입력 보류, 새 프레임에서 재검증");
-                return DetectionResult.NotFound;
-            }
-            _abyssClearPairedEvidenceFrames = 0;
-            ResetAbyssExitState(true);
-            AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "클리어 타이틀 + 화면 터치 문구 동시 확인");
-            return touch;
-        }
-
-        // A title-like image while combat is running is not a confirmed clear.
-        // Reset partial evidence; never use the historical fixed-coordinate
-        // title-only touch fallback or mark the fight complete.
+        var (_, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        _abyssClearPairedEvidenceFrames = AbyssClearEvidencePolicy.Next(
+            _abyssClearPairedEvidenceFrames, false, touch.Found);
+        if (!AbyssClearEvidencePolicy.Confirmed(_abyssClearPairedEvidenceFrames))
+            return DetectionResult.NotFound;
         _abyssClearPairedEvidenceFrames = 0;
-        if (clearTitle.Found && !touch.Found)
-            Log?.Invoke("[어비스] 클리어 제목 유사 신호만 감지 · 화면 터치 금지");
-
-        // V0164_ABYSS_CLEAR_LOG_SIMPLIFIED:
-        // Suppress ordinary combat similarity noise. This affects logging only.
-        const double ClearCandidateLogThreshold = 0.65;
-        if (clearTitle.Score >= ClearCandidateLogThreshold || touch.Score >= ClearCandidateLogThreshold)
-            Log?.Invoke($"[어비스] 강한 클리어 후보: title={clearTitle.Score:0.000}, touch={touch.Score:0.000}");
-        return DetectionResult.NotFound;
+        ResetAbyssExitState(true);
+        AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "하단 터치 문구 2프레임 확인");
+        return touch;
     }
 
     private async Task<DetectionResult> DetectAbyssClearVisualAsync(Bitmap frame, CancellationToken ct)
@@ -1316,6 +1291,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     {
         var sw = Stopwatch.StartNew();
         int clearTitleConsecutive = 0;
+        bool previousResult = false;
 
         while (sw.Elapsed < TimeSpan.FromSeconds(20))
         {
@@ -1325,20 +1301,21 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             // The only valid reason to finish waiting without a touch click is that
             // the actual result screen is already visible.
             var result = await DetectAbyssResultRetryAsync(frame, ct);
-            if (result.Found)
+            if (result.Found && previousResult)
             {
-                AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "터치 대기 중 실제 결과 화면 확인");
+                AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "터치 대기 중 실제 결과 화면 2프레임 확인");
                 Log?.Invoke("[어비스] 터치 문구 대기 중 실제 결과 화면 확인 -> 추가 터치 없이 결과 단계 진행");
                 return DetectionResult.NotFound;
             }
 
+            previousResult = result.Found;
             var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
-                clearTitleConsecutive, clearTitle.Found, touch.Found);
+                clearTitleConsecutive, false, touch.Found);
             if (AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive))
             {
-                AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 제목+터치 문구 2프레임 확인");
-                Log?.Invoke($"[어비스] 두 신호 2/2 확인 -> 실제 터치 문구 위치 사용 @ {touch.Bounds}");
+                AbyssTransitionTo(AbyssFlowState.TouchReady, "하단 터치 문구 2프레임 확인");
+                Log?.Invoke($"[어비스] 터치 문구 2/2 확인 -> 실제 터치 문구 위치 사용 @ {touch.Bounds}");
                 return touch;
             }
 
@@ -1368,8 +1345,6 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             // frames. The next state must be the actual Abyss result screen.
             var result = await DetectAbyssResultRetryAsync(frame, ct);
             if (!result.Found)
-                result = await DetectAbyssPostTouchVisualResultAsync(frame, ct);
-            if (!result.Found)
                 Log?.Invoke($"[어비스 결과 대기] {_lastAbyssResultDiagnostic}");
             if (result.Found)
             {
@@ -1390,7 +1365,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
 
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
-                clearTitleConsecutive, clearTitle.Found, touch.Found);
+                clearTitleConsecutive, false, touch.Found);
 
             if (retryClicks < 1 && sw.Elapsed >= TimeSpan.FromSeconds(2))
             {
