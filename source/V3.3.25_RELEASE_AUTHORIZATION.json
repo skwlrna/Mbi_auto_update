@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.25",
+  "purpose": "abyss_confirmed_result_visual_retry",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-15 17:52 정상 결과 화면에서 다시 하기 OCR/보물상자 인식 실패 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}
