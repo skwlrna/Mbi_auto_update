@@ -44,7 +44,7 @@ namespace DungeonVisionBot
  internal sealed partial class ScenarioEngine
  {
   readonly string _baseDir="abyss";readonly Settings _settings=new();readonly Definition _scenario=new();readonly Detector _detector=new();readonly Input _input=new();nint _hwnd;
-  enum AbyssFlowState {ResultConfirmed,ClearConfirmed,RetryClicked,Reentering,Recruiting,CombatClearWait}
+  enum AbyssFlowState {TouchClicked,ResultConfirmed,ClearConfirmed,RetryClicked,Reentering,Recruiting,CombatClearWait}
   AbyssFlowState flow;
   long? _abyssCombatStartedAt;
   bool mockActiveCombat;
@@ -99,6 +99,37 @@ namespace DungeonVisionBot
   static void Check(bool v,string s){if(!v)throw new Exception(s);Console.WriteLine("PASS "+s);}
   static async Task Main(string[] args)
   {
+   using (var b = new Bitmap(800,1000))
+   {
+    var e = new ScenarioEngine();
+    e.flow=AbyssFlowState.TouchClicked;
+    OcrRecognizer.ForceRetryOcrMiss=true;
+    using(var g=Graphics.FromImage(b))
+    {
+     g.Clear(Color.Black);
+     g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
+     g.FillRectangle(Brushes.Lime,180,922,140,56);
+     g.FillRectangle(Brushes.Lime,330,922,140,56);
+     g.FillRectangle(Brushes.Lime,480,922,140,56);
+    }
+    Check((await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"post-touch result survives all OCR/template misses");
+    using(var g=Graphics.FromImage(b))g.FillRectangle(Brushes.Black,350,105,100,100);
+    Check(!(await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"three buttons without chest rejected");
+    using(var g=Graphics.FromImage(b))g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
+    e._detector.Hits["abyss_exit_confirm_title"]=new(true,new(100,100,100,100),1,null);
+    Check(!(await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"exit modal vetoes post-touch rescue");
+    e._detector.Hits.Clear();
+    e.flow=AbyssFlowState.CombatClearWait;
+    Check(!(await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"visual rescue unavailable before verified touch");
+    e.flow=AbyssFlowState.TouchClicked;e.mockActiveCombat=true;
+    Check(!(await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"combat HUD vetoes post-touch rescue");
+    e.mockActiveCombat=false;OcrRecognizer.ClearTouch=true;
+    Check(!(await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"clear overlay vetoes post-touch rescue");
+    OcrRecognizer.ClearTouch=false;
+    using(var g=Graphics.FromImage(b))g.FillRectangle(Brushes.Lime,180,922,440,56);
+    Check(!(await e.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"full-width green button rejected");
+    OcrRecognizer.ForceRetryOcrMiss=false;
+   }
    // Execute the production shared reader with deterministic detector/OCR seams.
    using (var frame = new Bitmap(800,1000))
    {

@@ -192,6 +192,47 @@ internal sealed partial class ScenarioEngine
         return accepted;
     }
 
+    // V3.3.26: bounded to a previously verified clear-touch transition.
+    // Independent chest pixels + separated button geometry rescue OCR/template misses.
+    // This reader never sends input or changes state.
+    private async Task<DetectionResult> DetectAbyssPostTouchVisualResultAsync(
+        Bitmap frame, CancellationToken ct)
+    {
+        if (!IsAbyss || GetAbyssFlowState() != AbyssFlowState.TouchClicked)
+            return DetectionResult.NotFound;
+        if (AbyssMissionCompletePolicy.HasVisualEvidence(frame) ||
+            (await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found ||
+            (await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
+            return DetectionResult.NotFound;
+        var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        if (title.Found || touch.Found || await HasAbyssActiveCombatHudAsync(frame, ct))
+            return DetectionResult.NotFound;
+        if (!TryDetectAbyssResultButtonRow(frame, out var retry))
+            return DetectionResult.NotFound;
+
+        // Real 23:35 rewards: gold chest at top, dark gaps between three actions.
+        // Reject a single full-width green mission/entry button.
+        double leftGap = GetGreenButtonRatio(frame,
+            ScaleAbyssResultRoi(new Rectangle(320, 935, 9, 30), frame.Size));
+        double rightGap = GetGreenButtonRatio(frame,
+            ScaleAbyssResultRoi(new Rectangle(471, 935, 9, 30), frame.Size));
+        var chest = ScaleAbyssResultRoi(new Rectangle(350, 105, 100, 100), frame.Size);
+        int gold = 0, samples = 0;
+        for (int y = chest.Top; y < chest.Bottom; y += 2)
+            for (int x = chest.Left; x < chest.Right; x += 2)
+            {
+                var c = frame.GetPixel(x, y);
+                samples++;
+                if (c.R >= 130 && c.G >= 95 && c.R > c.B + 35 && c.G > c.B + 20)
+                    gold++;
+            }
+        double goldRatio = samples == 0 ? 0 : gold / (double)samples;
+        _lastAbyssResultDiagnostic += $" postTouch chestGold={goldRatio:0.000} gaps={leftGap:0.000}/{rightGap:0.000}";
+        if (goldRatio < 0.15 || leftGap > 0.15 || rightGap > 0.15)
+            return DetectionResult.NotFound;
+        return new DetectionResult(true, retry, 0.90, "post_touch_chest_and_separate_result_buttons");
+    }
+
     private int AbyssCombatStepIndex
     {
         get
