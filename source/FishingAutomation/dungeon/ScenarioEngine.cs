@@ -1367,6 +1367,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             // Do not advance merely because the clear templates disappeared for a few
             // frames. The next state must be the actual Abyss result screen.
             var result = await DetectAbyssResultRetryAsync(frame, ct);
+            if (!result.Found)
+                result = await DetectAbyssPostTouchVisualResultAsync(frame, ct);
+            if (!result.Found)
+                Log?.Invoke($"[어비스 결과 대기] {_lastAbyssResultDiagnostic}");
             if (result.Found)
             {
                 if (previousResult.Found && result.Bounds.IntersectsWith(previousResult.Bounds))
@@ -1408,7 +1412,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
         }
 
-        throw new TimeoutException("어비스 클리어 화면 클릭 후 실제 결과 화면을 30초 안에 확인하지 못했습니다. 다시 하기 단계로 넘어가지 않습니다.");
+        throw new TimeoutException("어비스 클리어 화면 클릭 후 실제 결과 화면을 30초 안에 확인하지 못했습니다. 다시 하기 단계로 넘어가지 않습니다. " + _lastAbyssResultDiagnostic);
     }
 
     private async Task AdvanceAbyssClearScreenAsync(DetectionResult firstDetection, CancellationToken ct)
