@@ -38,7 +38,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $a=Get-Content 'source/V3.3.25_RELEASE_AUTHORIZATION.json' -Raw | ConvertFrom-Json
           if($a.schema -ne 1 -or $a.version -ne 'V3.3.25' -or
-             $a.purpose -ne 'abyss_shared_clear_evidence' -or
+             $a.purpose -ne 'abyss_confirmed_result_visual_retry' -or
              $a.approvedBy -ne 'user_direct_request_in_conversation' -or
              $a.request -notmatch '수정하고 배포해' -or
              $a.realGameTested -ne $false -or
