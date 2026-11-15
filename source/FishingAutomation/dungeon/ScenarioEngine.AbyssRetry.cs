@@ -155,6 +155,43 @@ internal sealed partial class ScenarioEngine
         retryRoi = retry;
         return true;
     }
+    // V3.3.25: only the *already confirmed* result-processing step may
+    // survive a temporary result OCR/chest/reward-heading miss. This proof
+    // is NEVER used for initial result discovery, combat timeout, network
+    // recovery or a scheduled exit click. All click-frame guards remain.
+    private async Task<DetectionResult> DetectAbyssConfirmedResultVisualRetryAsync(
+        Bitmap frame, CancellationToken ct)
+    {
+        if (!IsAbyss || GetAbyssFlowState() != AbyssFlowState.ResultConfirmed)
+            return DetectionResult.NotFound;
+
+        // A single wide mission-confirm button, entry panel or exit modal must
+        // not impersonate three separate result actions.
+        if (AbyssMissionCompletePolicy.HasVisualEvidence(frame) ||
+            (await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found ||
+            (await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
+            return DetectionResult.NotFound;
+
+        // Treat the clear-title OR touch overlay as a veto, not a click prompt.
+        // Exact bounded OCR here is advisory negative evidence, never a
+        // required positive result signal.
+        var (clearTitle, clearTouch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        if (clearTitle.Found || clearTouch.Found)
+            return DetectionResult.NotFound;
+
+        if (await HasAbyssActiveCombatHudAsync(frame, ct) ||
+            !TryDetectAbyssResultButtonRow(frame, out var retryRoi))
+            return DetectionResult.NotFound;
+
+        var accepted = new DetectionResult(
+            true, retryRoi, 0.90, "confirmed_result_visual_retry_without_ocr");
+        _lastAbyssResultDiagnostic =
+            "confirmed ResultConfirmed + 3 green buttons + retry center; " +
+            _lastAbyssResultDiagnostic;
+        DiagnosticObserveDetection("abyss_result_confirmed_visual_retry", accepted);
+        return accepted;
+    }
+
     private int AbyssCombatStepIndex
     {
         get
@@ -478,6 +515,8 @@ internal sealed partial class ScenarioEngine
             }
 
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
+            if (!retry.Found)
+                retry = await DetectAbyssConfirmedResultVisualRetryAsync(frame, ct);
             // If stage 6 was entered from a false rewards result while a
             // fight is still in progress, independently confirm active combat
             // on THREE consecutive fresh frames. Do not treat generic Abyss
@@ -536,6 +575,8 @@ internal sealed partial class ScenarioEngine
                 // Inventory queries can take time. Revalidate before sending input.
                 using var fresh = await CaptureGameWindowAsync(ct);
                 var freshRetry = await DetectAbyssResultRetryAsync(fresh, ct);
+                if (!freshRetry.Found)
+                    freshRetry = await DetectAbyssConfirmedResultVisualRetryAsync(fresh, ct);
                 if (!freshRetry.Found || !freshRetry.Bounds.IntersectsWith(retry.Bounds))
                 { previous = DetectionResult.NotFound; continue; }
                 // One more post-loot independent frame. The position used for
@@ -544,6 +585,8 @@ internal sealed partial class ScenarioEngine
                 await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
                 using var confirmedFrame = await CaptureGameWindowAsync(ct);
                 var confirmedRetry = await DetectAbyssResultRetryAsync(confirmedFrame, ct);
+                if (!confirmedRetry.Found)
+                    confirmedRetry = await DetectAbyssConfirmedResultVisualRetryAsync(confirmedFrame, ct);
                 if (!confirmedRetry.Found || !confirmedRetry.Bounds.IntersectsWith(freshRetry.Bounds))
                 { previous = DetectionResult.NotFound; continue; }
 

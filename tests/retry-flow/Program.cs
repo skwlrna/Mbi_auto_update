@@ -19,7 +19,7 @@ namespace DungeonVisionBot
  class OcrRecognizer
  {
   public static bool Recruiting;
-  public static bool ClearTitle, ClearTouch, OutsideClear;
+  public static bool ClearTitle, ClearTouch, OutsideClear, ForceRetryOcrMiss;
   public static IReadOnlyList<DetectionResult> Lines=Array.Empty<DetectionResult>();
   public Task<DetectionResult> FindCompactLabelAsync(Bitmap b,Rectangle r,string t,CancellationToken ct)
   {
@@ -27,7 +27,7 @@ namespace DungeonVisionBot
    // exact '다시 하기' text; recruitment OCR exists only on recruitment frames.
    if ((t=="던전 클리어" && ClearTitle) || (t=="화면을 터치해 주세요" && ClearTouch))
     return Task.FromResult(new DetectionResult(true,OutsideClear ? new Rectangle(0,0,20,20) : r,1,t));
-   bool retry = t=="다시 하기" && b.GetPixel(Math.Min(400,b.Width-1),Math.Min(930,b.Height-1)).G>=200;
+   bool retry = t=="다시 하기" && !ForceRetryOcrMiss && b.GetPixel(Math.Min(400,b.Width-1),Math.Min(930,b.Height-1)).G>=200;
    bool recruiting = Recruiting && t=="우연한 만남";
    return Task.FromResult(retry || recruiting ? new DetectionResult(true,r,1,t) : DetectionResult.NotFound);
   }
@@ -135,6 +135,42 @@ namespace DungeonVisionBot
     Check(pair.Title.Found && pair.Touch.Found,"bounded OCR rescues wrong-area top image match");
     OcrRecognizer.ClearTouch=false;
    }
+   // 2026-11-15 17:52: three visibly separate result buttons survive total
+   // retry OCR + treasure + reward-heading misses only AFTER result confirmation.
+   {
+    var visualEngine=new ScenarioEngine(){flow=AbyssFlowState.ResultConfirmed};
+    OcrRecognizer.ForceRetryOcrMiss=true;
+    using(var frame=new Bitmap(800,1000))
+    {
+     using(var g=Graphics.FromImage(frame))
+     {
+      g.Clear(Color.Black);
+      g.FillRectangle(Brushes.Lime,new Rectangle(180,910,140,70));
+      g.FillRectangle(Brushes.Lime,new Rectangle(330,910,140,70));
+      g.FillRectangle(Brushes.Lime,new Rectangle(490,910,140,70));
+     }
+     var strict=await visualEngine.DetectAbyssResultRetryAsync(frame,default);
+     var rescued=await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default);
+     Check(!strict.Found && rescued.Found && rescued.Bounds.Contains(new Point(400,930)) &&
+           visualEngine._input.Clicks==0,
+           "17:52 confirmed result 3-button visual proof succeeds when all OCR/chest/rewards evidence misses");
+     visualEngine.mockActiveCombat=true;
+     Check(!(await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default)).Found &&
+           visualEngine._input.Clicks==0,
+           "17:52 fallback never authorizes click with actual combat HUD");
+     visualEngine.mockActiveCombat=false;
+     visualEngine.flow=AbyssFlowState.CombatClearWait;
+     Check(!(await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default)).Found,
+           "17:52 fallback cannot discover a new result from green buttons alone");
+     visualEngine.flow=AbyssFlowState.ResultConfirmed;
+     visualEngine._detector.Hits["abyss_exit_confirm_title"]=
+       new DetectionResult(true,new Rectangle(285,300,230,80),1,null);
+     Check(!(await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default)).Found,
+           "17:52 fallback refuses a modal instead of misclicking under it");
+    }
+    OcrRecognizer.ForceRetryOcrMiss=false;
+   }
+   if(args.Contains("--visual-confirmed-only")) return;
    if(args.Contains("--clear-only")) return;
    Check(!AbyssOutsidePolicy.CanAccept(false,4,false,false),"outside HUD cannot count without explicit exit");
    Check(AbyssOutsidePolicy.CanAccept(true,3,false,false),"outside HUD accepted only after exit is armed");
