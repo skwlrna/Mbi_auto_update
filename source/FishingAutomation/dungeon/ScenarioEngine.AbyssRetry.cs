@@ -115,124 +115,6 @@ internal sealed partial class ScenarioEngine
                 $"현재={rect.Width}x{rect.Height}. 오클릭 방지를 위해 안전 정지합니다.");
     }
 
-    // V0161_ABYSS_RESULT_ASPECT_092: real client captures can be ~815x920 (aspect ~0.886).
-    private bool TryDetectAbyssResultButtonRow(Bitmap frame, out Rectangle retryRoi)
-    {
-        retryRoi = Rectangle.Empty;
-
-        double aspect = frame.Height == 0 ? 0 : frame.Width / (double)frame.Height;
-        if (aspect < 0.74 || aspect > 0.92)
-        {
-            _lastAbyssResultDiagnostic = $"frame={frame.Width}x{frame.Height} aspect={aspect:0.000} outside-safe-range";
-            return false;
-        }
-
-        var exit = ScaleAbyssResultRoi(AbyssExitButtonRoi, frame.Size);
-        var retry = ScaleAbyssResultRoi(AbyssRetryButtonRoi, frame.Size);
-        var other = ScaleAbyssResultRoi(AbyssOtherButtonRoi, frame.Size);
-
-        double exitGreen = GetGreenButtonRatio(frame, exit);
-        double retryGreen = GetGreenButtonRatio(frame, retry);
-        double otherGreen = GetGreenButtonRatio(frame, other);
-        // V3.3.21 (22:14 incident): the three broad green regions can be
-        // satisfied by the clear animation, even when the actual retry button
-        // does not exist. Require the SAME 48px center-patch proof as the
-        // guarded fixed-coordinate click, before declaring a result row.
-        var retryCenter = AbyssResultLayout.FixedButtonCenter(false, frame.Size);
-        double retryCenterGreen = GetAbyssFixedButtonGreenRatio(frame, retryCenter);
-
-        _lastAbyssResultDiagnostic =
-            $"frame={frame.Width}x{frame.Height} green(exit/retry/other)=" +
-            $"{exitGreen:0.000}/{retryGreen:0.000}/{otherGreen:0.000}" +
-            $" retryCenter={retryCenterGreen:0.000}";
-
-        // User result captures are around 0.48~0.52. Keep a comfortable margin for
-        // compression/gamma differences while still requiring all three button regions.
-        if (exitGreen < 0.18 || retryGreen < 0.18 || otherGreen < 0.18 ||
-            retryCenterGreen < 0.25)
-            return false;
-
-        retryRoi = retry;
-        return true;
-    }
-    // V3.3.25: only the *already confirmed* result-processing step may
-    // survive a temporary result OCR/chest/reward-heading miss. This proof
-    // is NEVER used for initial result discovery, combat timeout, network
-    // recovery or a scheduled exit click. All click-frame guards remain.
-    private async Task<DetectionResult> DetectAbyssConfirmedResultVisualRetryAsync(
-        Bitmap frame, CancellationToken ct)
-    {
-        if (!IsAbyss || GetAbyssFlowState() != AbyssFlowState.ResultConfirmed)
-            return DetectionResult.NotFound;
-
-        // A single wide mission-confirm button, entry panel or exit modal must
-        // not impersonate three separate result actions.
-        if (AbyssMissionCompletePolicy.HasVisualEvidence(frame) ||
-            (await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found ||
-            (await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
-            return DetectionResult.NotFound;
-
-        // Treat the clear-title OR touch overlay as a veto, not a click prompt.
-        // Exact bounded OCR here is advisory negative evidence, never a
-        // required positive result signal.
-        var (clearTitle, clearTouch) = await ReadAbyssClearEvidenceAsync(frame, ct);
-        if (clearTitle.Found || clearTouch.Found)
-            return DetectionResult.NotFound;
-
-        if (await HasAbyssActiveCombatHudAsync(frame, ct) ||
-            !TryDetectAbyssResultButtonRow(frame, out var retryRoi))
-            return DetectionResult.NotFound;
-
-        var accepted = new DetectionResult(
-            true, retryRoi, 0.90, "confirmed_result_visual_retry_without_ocr");
-        _lastAbyssResultDiagnostic =
-            "confirmed ResultConfirmed + 3 green buttons + retry center; " +
-            _lastAbyssResultDiagnostic;
-        DiagnosticObserveDetection("abyss_result_confirmed_visual_retry", accepted);
-        return accepted;
-    }
-
-    // V3.3.26: bounded to a previously verified clear-touch transition.
-    // Independent chest pixels + separated button geometry rescue OCR/template misses.
-    // This reader never sends input or changes state.
-    private async Task<DetectionResult> DetectAbyssPostTouchVisualResultAsync(
-        Bitmap frame, CancellationToken ct)
-    {
-        if (!IsAbyss || GetAbyssFlowState() != AbyssFlowState.TouchClicked)
-            return DetectionResult.NotFound;
-        if (AbyssMissionCompletePolicy.HasVisualEvidence(frame) ||
-            (await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found ||
-            (await _detector.DetectAsync("abyss_enter", frame, ct)).Found)
-            return DetectionResult.NotFound;
-        var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
-        if (title.Found || touch.Found || await HasAbyssActiveCombatHudAsync(frame, ct))
-            return DetectionResult.NotFound;
-        if (!TryDetectAbyssResultButtonRow(frame, out var retry))
-            return DetectionResult.NotFound;
-
-        // Real 23:35 rewards: gold chest at top, dark gaps between three actions.
-        // Reject a single full-width green mission/entry button.
-        double leftGap = GetGreenButtonRatio(frame,
-            ScaleAbyssResultRoi(new Rectangle(320, 935, 9, 30), frame.Size));
-        double rightGap = GetGreenButtonRatio(frame,
-            ScaleAbyssResultRoi(new Rectangle(471, 935, 9, 30), frame.Size));
-        var chest = ScaleAbyssResultRoi(new Rectangle(350, 105, 100, 100), frame.Size);
-        int gold = 0, samples = 0;
-        for (int y = chest.Top; y < chest.Bottom; y += 2)
-            for (int x = chest.Left; x < chest.Right; x += 2)
-            {
-                var c = frame.GetPixel(x, y);
-                samples++;
-                if (c.R >= 130 && c.G >= 95 && c.R > c.B + 35 && c.G > c.B + 20)
-                    gold++;
-            }
-        double goldRatio = samples == 0 ? 0 : gold / (double)samples;
-        _lastAbyssResultDiagnostic += $" postTouch chestGold={goldRatio:0.000} gaps={leftGap:0.000}/{rightGap:0.000}";
-        if (goldRatio < 0.15 || leftGap > 0.15 || rightGap > 0.15)
-            return DetectionResult.NotFound;
-        return new DetectionResult(true, retry, 0.90, "post_touch_chest_and_separate_result_buttons");
-    }
-
     private int AbyssCombatStepIndex
     {
         get
@@ -249,112 +131,17 @@ internal sealed partial class ScenarioEngine
     private async Task<DetectionResult> DetectAbyssResultRetryAsync(Bitmap frame, CancellationToken ct)
     {
         if (!IsAbyss) return DetectionResult.NotFound;
-
-        double aspect = frame.Height == 0 ? 0 : frame.Width / (double)frame.Height;
-        if (aspect < 0.74 || aspect > 0.92)
+        bool found = AbyssRewardVisualPolicy.TryDetect(frame, out var retry, out var diagnostic);
+        _lastAbyssResultDiagnostic = diagnostic;
+        DiagnosticObserveDetection("abyss_reward_visual", new(found, retry, found ? 1 : 0, diagnostic));
+        if (!found) return DetectionResult.NotFound;
+        // A verified confirmation modal must be handled before clicking underneath it.
+        if ((await _detector.DetectAsync("abyss_exit_confirm_title", frame, ct)).Found)
         {
-            _lastAbyssResultDiagnostic = $"frame={frame.Width}x{frame.Height} aspect={aspect:0.000} outside-safe-range";
+            _lastAbyssResultDiagnostic += "; exit modal visible";
             return DetectionResult.NotFound;
         }
-
-        // A post-exit 협동 미션 완료 panel also contains a green bottom row.
-        // The old 3-region green test incorrectly classified its ONE long
-        // 확인 button as three result buttons. Never admit that screen here.
-        if (AbyssMissionCompletePolicy.HasVisualEvidence(frame))
-        {
-            _lastAbyssResultDiagnostic = "post-exit mission completion panel, not result retry";
-            return DetectionResult.NotFound;
-        }
-
-        // V3.3.22: active combat may flash green in the result-button areas.
-        // Reject retry while a separately verified in-dungeon leave HUD is
-        // present. This check sends no keyboard/mouse input.
-        if (await HasAbyssActiveCombatHudAsync(frame, ct))
-        {
-            _lastAbyssResultDiagnostic = "active-combat HUD vetoed retry candidate";
-            DiagnosticObserveDetection("abyss_result_combat_veto", DetectionResult.NotFound);
-            return DetectionResult.NotFound;
-        }
-
-        // V0160_ABYSS_RESULT_MULTI_SIGNAL
-        // Signal A: exact retry OCR inside the fixed safe ROI.
-        _abyssResultOcr ??= new OcrRecognizer();
-        var safeRetry = ScaleAbyssResultRoi(AbyssRetrySafeRoi, frame.Size);
-        var retryOcr = await _abyssResultOcr.FindCompactLabelAsync(frame, safeRetry, "다시 하기", ct);
-        bool ocrSignal = retryOcr.Found && safeRetry.Contains(retryOcr.Center);
-        DiagnosticObserveDetection("abyss_result_retry_ocr", retryOcr);
-
-        // Signal B/C/D: the production visual-row detector requires all three
-        // canonical green result-button regions (exit/retry/other). OCR alone
-        // is deliberately not authority for ResultConfirmed.
-        bool visualSignal = TryDetectAbyssResultButtonRow(frame, out var visualRetry);
-        if (!visualSignal)
-        {
-            _lastAbyssResultDiagnostic =
-                $"frame={frame.Width}x{frame.Height} result-multisignal rejected " +
-                $"ocr={(ocrSignal ? 1 : 0)} visualRow=0; {_lastAbyssResultDiagnostic}";
-            DiagnosticObserveDetection("abyss_result_visual_row", DetectionResult.NotFound);
-            return DetectionResult.NotFound;
-        }
-
-        // A green row alone is never enough: the 22:58 fight produced false
-        // results earlier despite the old color checks. Require independent
-        // visible text on the SAME frame: either exact middle retry OCR, or
-        // both spatially anchored rewards headings. Keep all green/center
-        // guards and the final two-frame click validation unchanged.
-        bool rewardsTextProof = false;
-        bool treasureProof = false;
-        if (!ocrSignal)
-        {
-            // 02:28: the real result showed the anchored treasure chest and all
-            // three green actions, but retry OCR missed and the loot heading sat
-            // above the old text ROI. Independent chest evidence can rescue it.
-            // NEVER accept the chest without a real three-button row and its
-            // green middle click patch (verified above), or during combat HUD.
-            var treasureArea = ScaleAbyssResultRoi(AbyssFinishedTreasureRoi, frame.Size);
-            var treasure = await _detector.DetectAsync("abyss_treasure_chest", frame, ct);
-            treasureProof = treasure.Found && treasureArea.Contains(treasure.Bounds);
-            if (!treasureProof)
-            {
-                var timeArea = ScaleAbyssResultRoi(AbyssFinishedTimeRoi, frame.Size);
-                var lootArea = ScaleAbyssResultRoi(AbyssFinishedLootRoi, frame.Size);
-                var time = await _abyssResultOcr.FindCompactLabelAsync(frame, timeArea, "전투 시간", ct);
-                var loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
-                if (!loot.Found || !lootArea.Contains(loot.Bounds))
-                {
-                    // The standalone retry-flow harness does not include the completed-result partial.
-                    lootArea = ScaleAbyssResultRoi(new Rectangle(295, 385, 265, 105), frame.Size);
-                    loot = await _abyssResultOcr.FindCompactLabelAsync(frame, lootArea, "발견한 전리품", ct);
-                }
-                rewardsTextProof = time.Found && timeArea.Contains(time.Bounds) &&
-                                   loot.Found && lootArea.Contains(loot.Bounds);
-                if (!rewardsTextProof)
-                {
-                    _lastAbyssResultDiagnostic =
-                        "result row color alone rejected; retry OCR=0 chest=0 rewardTitlePair=0; " +
-                        _lastAbyssResultDiagnostic;
-                    DiagnosticObserveDetection("abyss_result_text_authority", DetectionResult.NotFound);
-                    return DetectionResult.NotFound;
-                }
-            }
-        }
-
-        var acceptedBounds = visualRetry;
-        string source = ocrSignal
-            ? "ocr+visual_result_button_row"
-            : treasureProof ? "visual_result_button_row_anchored_chest" : "visual_result_button_row_3signal";
-
-        // If OCR also agrees, retain its exact text bounds only when its center
-        // is inside the independently confirmed retry-button region.
-        if (ocrSignal && visualRetry.Contains(retryOcr.Center))
-            acceptedBounds = retryOcr.Bounds;
-
-        var accepted = new DetectionResult(true, acceptedBounds, 0.95, source);
-        _lastAbyssResultDiagnostic =
-            $"frame={frame.Width}x{frame.Height} result-multisignal accepted " +
-            $"ocr={(ocrSignal ? 1 : 0)} chest={(treasureProof ? 1 : 0)} rewardsPair={(rewardsTextProof ? 1 : 0)} visualRow=1 retry={acceptedBounds}";
-        DiagnosticObserveDetection("abyss_result_visual_row", accepted);
-        return accepted;
+        return new DetectionResult(true, retry, 1, "chest_and_three_separate_buttons");
     }
 
     private async Task<Dictionary<string, DetectionResult>> DetectAbyssLootTemplateFrameAsync(
@@ -498,89 +285,16 @@ internal sealed partial class ScenarioEngine
     private static readonly Rectangle AbyssClearTitleRecoverySafeRoi =
         new(240, 170, 345, 135);
 
-    private async Task<bool> TryRecoverVerifiedClearTouchAfterResultAsync(
-        Bitmap firstFrame, CancellationToken ct)
-    {
-        if (GetAbyssFlowState() != AbyssFlowState.ResultConfirmed)
-            return false;
-
-        var first = await ReadAbyssClearEvidenceAsync(firstFrame, ct);
-        var safe = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, firstFrame.Size);
-        if (!first.Title.Found || !first.Touch.Found ||
-            !safe.Contains(first.Touch.Bounds))
-            return false;
-
-        await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
-        using var secondFrame = await CaptureGameWindowAsync(ct);
-        var second = await ReadAbyssClearEvidenceAsync(secondFrame, ct);
-        var secondSafe = ScaleAbyssResultRoi(AbyssClearTouchRecoverySafeRoi, secondFrame.Size);
-        if (secondFrame.Size != firstFrame.Size ||
-            !second.Title.Found || !second.Touch.Found ||
-            !secondSafe.Contains(second.Touch.Bounds) ||
-            !first.Title.Bounds.IntersectsWith(second.Title.Bounds) ||
-            !first.Touch.Bounds.IntersectsWith(second.Touch.Bounds))
-            return false;
-
-        ct.ThrowIfCancellationRequested();
-        _hwnd = await ResolveRequiredGameWindowAsync(ct);
-        VerifyAbyssClickClientGeometry(_hwnd, secondFrame.Size);
-        AbyssRestoreVerifiedClearTouchFromPrematureResult(
-            "실제 클리어 제목+화면 터치 2프레임 재확인");
-        Log?.Invoke("[어비스 복구] 결과 버튼 없음 + 클리어 제목/터치 2프레임 일치 -> 기존 터치 문구 클릭 절차 복귀");
-        await AdvanceAbyssClearScreenAsync(second.Touch, ct);
-        return true;
-    }
-
     private async Task RetryAbyssResultAsync(CancellationToken ct)
     {
         if (!IsAbyss) throw new InvalidOperationException("어비스 결과 전용 처리입니다.");
         var timer = Stopwatch.StartNew();
         DetectionResult previous = DetectionResult.NotFound;
-        int clearTouchRecoveries = 0;
-        int consecutiveCombatHudFrames = 0;
         while (timer.Elapsed < TimeSpan.FromSeconds(120))
         {
             ct.ThrowIfCancellationRequested();
             using var frame = await CaptureGameWindowAsync(ct);
-            // Clear overlay has precedence over a green-row false positive.
-            // This must run BEFORE retry detection, otherwise the mistaken
-            // result-row candidate suppresses the only safe recovery path.
-            if (clearTouchRecoveries == 0 &&
-                GetAbyssFlowState() == AbyssFlowState.ResultConfirmed &&
-                await TryRecoverVerifiedClearTouchAfterResultAsync(frame, ct))
-            {
-                clearTouchRecoveries++;
-                previous = DetectionResult.NotFound;
-                timer.Restart(); // New verified result transition gets its own wait.
-                continue;
-            }
-
             var retry = await DetectAbyssResultRetryAsync(frame, ct);
-            if (!retry.Found)
-                retry = await DetectAbyssConfirmedResultVisualRetryAsync(frame, ct);
-            // If stage 6 was entered from a false rewards result while a
-            // fight is still in progress, independently confirm active combat
-            // on THREE consecutive fresh frames. Do not treat generic Abyss
-            // evidence (which includes clear-title/touch templates) as combat.
-            if (!retry.Found &&
-                GetAbyssFlowState() == AbyssFlowState.ResultConfirmed &&
-                _abyssCombatStartedAt.HasValue &&
-                await HasAbyssActiveCombatHudAsync(frame, ct))
-            {
-                consecutiveCombatHudFrames++;
-                if (consecutiveCombatHudFrames >= 3)
-                {
-                    AbyssRestoreVerifiedCombatFromPrematureResult(
-                        "다시 하기 버튼 없음 + 전투 전용 HUD 3프레임 확인");
-                    throw new AbyssResumeVerifiedCombatException();
-                }
-                Log?.Invoke($"[어비스 복구] 결과 오인식 의심 · 실제 전투 HUD {consecutiveCombatHudFrames}/3 · 입력 보류");
-            }
-            else
-            {
-                consecutiveCombatHudFrames = 0;
-            }
-
             if (retry.Found && previous.Found && retry.Bounds.IntersectsWith(previous.Bounds))
             {
                 // Two consecutive production detections are the authority for ResultConfirmed.
@@ -616,8 +330,6 @@ internal sealed partial class ScenarioEngine
                 // Inventory queries can take time. Revalidate before sending input.
                 using var fresh = await CaptureGameWindowAsync(ct);
                 var freshRetry = await DetectAbyssResultRetryAsync(fresh, ct);
-                if (!freshRetry.Found)
-                    freshRetry = await DetectAbyssConfirmedResultVisualRetryAsync(fresh, ct);
                 if (!freshRetry.Found || !freshRetry.Bounds.IntersectsWith(retry.Bounds))
                 { previous = DetectionResult.NotFound; continue; }
                 // One more post-loot independent frame. The position used for
@@ -626,8 +338,6 @@ internal sealed partial class ScenarioEngine
                 await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
                 using var confirmedFrame = await CaptureGameWindowAsync(ct);
                 var confirmedRetry = await DetectAbyssResultRetryAsync(confirmedFrame, ct);
-                if (!confirmedRetry.Found)
-                    confirmedRetry = await DetectAbyssConfirmedResultVisualRetryAsync(confirmedFrame, ct);
                 if (!confirmedRetry.Found || !confirmedRetry.Bounds.IntersectsWith(freshRetry.Bounds))
                 { previous = DetectionResult.NotFound; continue; }
 

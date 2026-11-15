@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.27",
+  "purpose": "abyss_simple_clear_reward_flow",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-15 23:35 클리어 터치 후 정상 결과 화면 인식 실패 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

@@ -93,112 +93,45 @@ namespace DungeonVisionBot
    if(recruitmentClock != null) OcrRecognizer.Recruiting = !loading && recruitmentClock.Elapsed < TimeSpan.FromSeconds(31);
    if(captures==2)detectedAt=Stopwatch.GetTimestamp();
    var b=new Bitmap(800,1000);using var g=Graphics.FromImage(b);g.Clear(Color.Black);
-   if(recruitmentClock==null&&_input.Clicks==0&&(!disappear||captures<=2))g.FillRectangle(Brushes.Lime,new Rectangle(160,905,480,85));
+   if(recruitmentClock==null&&_input.Clicks==0&&(!disappear||captures<=2))
+   {
+    g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
+    g.FillRectangle(Brushes.Lime,180,922,140,56);
+    g.FillRectangle(Brushes.Lime,330,922,140,56);
+    g.FillRectangle(Brushes.Lime,480,922,140,56);
+   }
    return Task.FromResult(b);
   }
   static void Check(bool v,string s){if(!v)throw new Exception(s);Console.WriteLine("PASS "+s);}
   static async Task Main(string[] args)
   {
-   using (var b = new Bitmap(800,1000))
+   using(var frame=new Bitmap(800,1000))
    {
-    var postTouchEngine = new ScenarioEngine();
-    postTouchEngine.flow=AbyssFlowState.TouchClicked;
-    OcrRecognizer.ForceRetryOcrMiss=true;
-    using(var g=Graphics.FromImage(b))
+    var reader=new ScenarioEngine();
+    OcrRecognizer.ClearTouch=true;
+    var pair=await reader.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(pair.Touch.Found && !pair.Title.Found,"touch prompt accepted without animated title");
+    Check(!AbyssClearEvidencePolicy.Confirmed(AbyssClearEvidencePolicy.Next(0,false,true)),"one prompt frame never clicks");
+    Check(AbyssClearEvidencePolicy.Confirmed(AbyssClearEvidencePolicy.Next(1,false,true)),"two prompt frames without title confirm clear");
+    Check(AbyssClearEvidencePolicy.Next(1,true,false)==0,"missing prompt resets counter");
+    OcrRecognizer.OutsideClear=true;
+    pair=await reader.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(!pair.Touch.Found,"out of bounds prompt rejected");
+    OcrRecognizer.OutsideClear=false;OcrRecognizer.ClearTouch=false;
+    using(var g=Graphics.FromImage(frame))
     {
-     g.Clear(Color.Black);
-     g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
+     g.Clear(Color.Black);g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
      g.FillRectangle(Brushes.Lime,180,922,140,56);
      g.FillRectangle(Brushes.Lime,330,922,140,56);
      g.FillRectangle(Brushes.Lime,480,922,140,56);
     }
-    Check((await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"post-touch result survives all OCR/template misses");
-    using(var g=Graphics.FromImage(b))g.FillRectangle(Brushes.Black,350,105,100,100);
-    Check(!(await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"three buttons without chest rejected");
-    using(var g=Graphics.FromImage(b))g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
-    postTouchEngine._detector.Hits["abyss_exit_confirm_title"]=new(true,new(100,100,100,100),1,null);
-    Check(!(await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"exit modal vetoes post-touch rescue");
-    postTouchEngine._detector.Hits.Clear();
-    postTouchEngine.flow=AbyssFlowState.CombatClearWait;
-    Check(!(await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"visual rescue unavailable before verified touch");
-    postTouchEngine.flow=AbyssFlowState.TouchClicked;postTouchEngine.mockActiveCombat=true;
-    Check(!(await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"combat HUD vetoes post-touch rescue");
-    postTouchEngine.mockActiveCombat=false;OcrRecognizer.ClearTouch=true;
-    Check(!(await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"clear overlay vetoes post-touch rescue");
-    OcrRecognizer.ClearTouch=false;
-    using(var g=Graphics.FromImage(b))g.FillRectangle(Brushes.Lime,180,922,440,56);
-    Check(!(await postTouchEngine.DetectAbyssPostTouchVisualResultAsync(b,default)).Found,"full-width green button rejected");
-    OcrRecognizer.ForceRetryOcrMiss=false;
-   }
-   // Execute the production shared reader with deterministic detector/OCR seams.
-   using (var frame = new Bitmap(800,1000))
-   {
-    var clear = new ScenarioEngine();
-    OcrRecognizer.ClearTitle=true; OcrRecognizer.ClearTouch=true;
-    var pair = await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(pair.Title.Found && pair.Touch.Found,"OCR-only clear pair survives missing image templates");
-    int count=AbyssClearEvidencePolicy.Next(0,pair.Title.Found,pair.Touch.Found);
-    Check(!AbyssClearEvidencePolicy.Confirmed(count),"one OCR pair cannot authorize touch");
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    count=AbyssClearEvidencePolicy.Next(count,pair.Title.Found,pair.Touch.Found);
-    Check(AbyssClearEvidencePolicy.Confirmed(count),"two fresh bounded OCR pairs confirm clear");
-    OcrRecognizer.ClearTouch=false;
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(pair.Title.Found && !pair.Touch.Found,"title-only combat lookalike remains rejected");
-    count=AbyssClearEvidencePolicy.Next(count,pair.Title.Found,pair.Touch.Found);
-    Check(count==0,"missing touch resets prior paired evidence");
-    OcrRecognizer.ClearTitle=false; OcrRecognizer.ClearTouch=true;
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(!pair.Title.Found && pair.Touch.Found,"prompt-only evidence remains rejected");
-    OcrRecognizer.ClearTitle=true; OcrRecognizer.OutsideClear=true;
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(!pair.Title.Found && !pair.Touch.Found,"out-of-area OCR cannot authorize clear");
-    OcrRecognizer.ClearTitle=false; OcrRecognizer.ClearTouch=false; OcrRecognizer.OutsideClear=false;
-    clear._detector.Hits["abyss_dungeon_clear_visual"]=new(true,new(300,200,210,47),.9,null);
-    clear._detector.Hits["abyss_touch_screen"]=new(true,new(291,913,218,63),.9,null);
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(pair.Title.Found && pair.Touch.Found,"original in-area image pair still works");
-    clear._detector.Hits["abyss_touch_screen"]=new(true,new(0,300,200,60),1,null);
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(!pair.Touch.Found,"out-of-area image prompt is rejected");
-    OcrRecognizer.ClearTouch=true;
-    pair=await clear.ReadAbyssClearEvidenceAsync(frame,default);
-    Check(pair.Title.Found && pair.Touch.Found,"bounded OCR rescues wrong-area top image match");
-    OcrRecognizer.ClearTouch=false;
-   }
-   // 2026-11-15 17:52: three visibly separate result buttons survive total
-   // retry OCR + treasure + reward-heading misses only AFTER result confirmation.
-   {
-    var visualEngine=new ScenarioEngine(){flow=AbyssFlowState.ResultConfirmed};
-    OcrRecognizer.ForceRetryOcrMiss=true;
-    using(var frame=new Bitmap(800,1000))
-    {
-     using(var g=Graphics.FromImage(frame))
-     {
-      g.Clear(Color.Black);
-      g.FillRectangle(Brushes.Lime,new Rectangle(180,910,140,70));
-      g.FillRectangle(Brushes.Lime,new Rectangle(330,910,140,70));
-      g.FillRectangle(Brushes.Lime,new Rectangle(490,910,140,70));
-     }
-     var strict=await visualEngine.DetectAbyssResultRetryAsync(frame,default);
-     var rescued=await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default);
-     Check(!strict.Found && rescued.Found && rescued.Bounds.Contains(new Point(400,930)) &&
-           visualEngine._input.Clicks==0,
-           "17:52 confirmed result 3-button visual proof succeeds when all OCR/chest/rewards evidence misses");
-     visualEngine.mockActiveCombat=true;
-     Check(!(await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default)).Found &&
-           visualEngine._input.Clicks==0,
-           "17:52 fallback never authorizes click with actual combat HUD");
-     visualEngine.mockActiveCombat=false;
-     visualEngine.flow=AbyssFlowState.CombatClearWait;
-     Check(!(await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default)).Found,
-           "17:52 fallback cannot discover a new result from green buttons alone");
-     visualEngine.flow=AbyssFlowState.ResultConfirmed;
-     visualEngine._detector.Hits["abyss_exit_confirm_title"]=
-       new DetectionResult(true,new Rectangle(285,300,230,80),1,null);
-     Check(!(await visualEngine.DetectAbyssConfirmedResultVisualRetryAsync(frame,default)).Found,
-           "17:52 fallback refuses a modal instead of misclicking under it");
-    }
+    reader.mockActiveCombat=true;OcrRecognizer.ForceRetryOcrMiss=true;
+    Check((await reader.DetectAbyssResultRetryAsync(frame,default)).Found,"reward proof independent of false combat flag and missing OCR");
+    reader._detector.Hits["abyss_exit_confirm_title"]=new(true,new(100,100,100,100),1,null);
+    Check(!(await reader.DetectAbyssResultRetryAsync(frame,default)).Found,"exit modal blocks underlying reward click");
+    reader._detector.Hits.Clear();
+    using(var g=Graphics.FromImage(frame))g.FillRectangle(Brushes.Black,350,105,100,100);
+    Check(!(await reader.DetectAbyssResultRetryAsync(frame,default)).Found,"buttons alone do not establish rewards");
     OcrRecognizer.ForceRetryOcrMiss=false;
    }
    if(args.Contains("--visual-confirmed-only")) return;
@@ -238,19 +171,7 @@ namespace DungeonVisionBot
    using(var ct=new CancellationTokenSource(15000))await e.RetryAbyssResultAsync(ct.Token);
    Check(FishingAutomation.LootStats.Recorded.GetValueOrDefault("h")==3,"production retry records actual CLI quantity before clicking");
    Check(e._input.Clicks==1&&!e._inventoryNextRoundClicked&&!e._abyssLootCountedForCurrentResult,"production retry commits next baseline only after combat transition");
-   // V3.3.22: a real fight after premature ResultConfirmed must resume
-   // without any retry click, preserving its original timer value.
-   long originalCombatStart=Environment.TickCount64-9000;
-   e=new ScenarioEngine(){mockActiveCombat=true,_abyssCombatStartedAt=originalCombatStart,flow=AbyssFlowState.ResultConfirmed};
-   bool resumed=false;
-   using(var ct=new CancellationTokenSource(8000))
-   {
-    try{await e.RetryAbyssResultAsync(ct.Token);}
-    catch(AbyssResumeVerifiedCombatException){resumed=true;}
-   }
-   Check(resumed && e.flow==AbyssFlowState.CombatClearWait &&
-         e._abyssCombatStartedAt==originalCombatStart && e._input.Clicks==0,
-         "22:58 false result resumes active combat after 3 fresh HUD frames without resetting timer or clicking");
+
   }
  }
 }

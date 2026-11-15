@@ -84,63 +84,15 @@ jobs:
           dotnet run --project tests/n03-input/Regression.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw 'N03 input cancellation regressions failed' }
 
-      - name: V3.3.25 17:52 confirmed-result visual retry without OCR
+      - name: V3.3.27 simplified Abyss common flow and actual incident pixels
         shell: pwsh
         run: |
-          $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3325_confirmed_result_visual_retry.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.3.25 17:52 confirmed-result OCR failure regression' }
-          dotnet run --project tests/retry-flow/Regression.csproj -c Release -- --visual-confirmed-only
-          if ($LASTEXITCODE -ne 0) { throw 'V3.3.25 17:52 runtime visual result fallback regression' }
-
-      - name: V3.3.24 shared clear evidence integration
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3324_shared_clear_evidence.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'Shared clear evidence regression failed' }
+          python -m unittest discover -s tests/release -p 'test_v3327_simple_abyss.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Simple Abyss contract failed' }
+          dotnet run --project tests/simple-abyss/Regression.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Actual incident image recognition failed' }
           dotnet run --project tests/retry-flow/Regression.csproj -c Release -- --clear-only
-          if ($LASTEXITCODE -ne 0) { throw 'Production clear/retry integration failed' }
-
-      - name: V3.3.23 02:28 completed reward result before timeout regression
-        shell: pwsh
-        run: |
-          python -m unittest discover -s tests/release -p 'test_v3323_result_reward_timeout.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.3.23 result must override combat-only timeout exit on real reward screen' }
-
-      - name: V3.3.22 22:58 active-combat result veto and same-round recovery regression
-        shell: pwsh
-        run: |
-          $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3322_combat_result_rescue.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'V3.3.22 live combat must not become a result; preserve timer on rescue' }
-
-      - name: V3.3.21 22:14 clear-overlay result veto and touch-first recovery regression
-        shell: pwsh
-        run: |
-          $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3321_clear_overlay_veto.py' -v
-          if ($LASTEXITCODE -ne 0) { throw '22:14 clear overlay must not become result; safe touch rescue must take priority' }
-
-      - name: V3.3.20 combat-to-result OCR false positive regression
-        shell: pwsh
-        run: |
-          $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3320_combat_result_veto.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'Live combat cannot be promoted by rewards OCR without result buttons' }
-
-      - name: V3.3.19 completed-result touch-screen precedence and rescue regression
-        shell: pwsh
-        run: |
-          $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3319_clear_touch_priority.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'Abyss clear-touch precedence / guarded result recovery failed' }
-
-      - name: V3.3.18 finished rewards preempt timeout and modal ESC regression
-        shell: pwsh
-        run: |
-          $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3318_completed_result_timeout.py' -v
-          if ($LASTEXITCODE -ne 0) { throw 'Completed Abyss rewards must preempt timeout and exit confirmation' }
+          if ($LASTEXITCODE -ne 0) { throw 'Touch/retry input guards failed' }
 
       - name: V3.3.17 conditional Abyss result and processing handoff regression
         shell: pwsh
@@ -660,6 +612,12 @@ jobs:
           if ((Get-WindowsCapability -Online -Name $name).State -ne 'Installed') {
             throw 'Korean OCR is required before releasing V3.2.65'
           }
+
+      - name: Actual Abyss touch prompt OCR without title
+        shell: pwsh
+        run: |
+          dotnet run --project tests/simple-abyss/Regression.csproj -c Release -- --ocr
+          if ($LASTEXITCODE -ne 0) { throw 'Actual Abyss prompt OCR regression failed' }
 
       - name: Herb bottom-row OCR incident and safety regressions
         shell: pwsh

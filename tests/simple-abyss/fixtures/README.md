@@ -1,0 +1,1 @@
+Actual runtime screenshots: 2026-11-14 20:06 (combat), 22:58 (combat), 22:53 (clear); 2026-11-15 23:35 and 2026-11-16 00:20 (rewards). Only chest and lower action/prompt recognition regions are retained; all other pixels are black. Tests invoke the compiled production visual policy and Korean OCR.
