@@ -1861,6 +1861,36 @@ try
                   !Safe(new Point(original.X, original.Y + 4)),
                 "facility retry uses a distinct bounded body point, never original title or off-card click: " + facility);
         }
+        // V3.3.31 21:32 real failure: first hub selection was not yet issued.
+        // The old one-card recovery guard correctly rejects zero previous clicks,
+        // but a NEW positive six-card hub after verified Esc->WorldHud->K
+        // is permitted ONE FIRST card selection, without a second K.
+        var firstCardMethod = Method(layout, "CanSelectFirstCardAfterVerifiedKReturn", 4);
+        bool MaySelectFirst(bool kAfterForeignExit, int previousClicks,
+            bool exactHub, bool blocked) =>
+            (bool)firstCardMethod.Invoke(null,
+                new object[] { kAfterForeignExit, previousClicks, exactHub, blocked })!;
+        Check(MaySelectFirst(true, 0, true, false) &&
+              !CanRecover(true, 0, true, false) &&
+              !MaySelectFirst(false, 0, true, false) &&
+              !MaySelectFirst(true, 1, true, false) &&
+              !MaySelectFirst(true, 2, true, false) &&
+              !MaySelectFirst(true, 0, false, false) &&
+              !MaySelectFirst(true, 0, true, true),
+            "V3.3.31 21:32 Esc-WorldHud-final-K positive hub permits ONLY the first verified facility card");
+        foreach (int previousClicks in new[] { 0, 1, 2 })
+        foreach (bool K in new[] { false, true })
+        foreach (bool hub in new[] { false, true })
+        foreach (bool modal in new[] { false, true })
+            Check(MaySelectFirst(K, previousClicks, hub, modal) ==
+                  (K && previousClicks == 0 && hub && !modal),
+                "V3.3.31 first-card recovery preserves zero-click/modal/hub authority");
+        Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3), "CanSelectFirstCardAfterVerifiedKReturn") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "foreignFacilityEscConfirmedWorld") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "verifiedKAfterForeignFacilityExit") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "ManagedProductionSceneKind.WorldHud") &&
+              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "ManagedProductionSceneKind.ProcessingHub"),
+            "V3.3.31 final first-card approval ties proven foreign Esc, fresh guarded K and exact hub");
         var retryMethod = Method(layout, "CanRetryFixedHubSelection", 4);
         for (int clicks = 0; clicks <= 3; clicks++)
         foreach (bool previous in new[] { false, true })
