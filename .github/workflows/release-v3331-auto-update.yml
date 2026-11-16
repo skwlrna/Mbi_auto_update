@@ -67,7 +67,7 @@ jobs:
           dotnet run --project tests/gathering/Regression.csproj -c Release
           if($LASTEXITCODE-ne0){throw 'V3.3.31 multigathering regression failed'}
           $env:PYTHONUTF8='1'
-          python -m unittest discover -s tests/release -p 'test_v3331_gathering_stock_queue.py' -v
+          python -m unittest discover -s tests/release -p 'test_v3330_gathering_stock_queue.py' -v
           if($LASTEXITCODE-ne0){throw 'V3.3.31 standalone gather UI/release contract failed'}
 
       - name: V3.3.31 three-work leather mismatch independent F9 regression
@@ -393,7 +393,7 @@ jobs:
           Copy-Item source/START.cmd (Join-Path $pkg 'START.cmd') -Force
           Copy-Item source/REPAIR_AUTO_UPDATE.cmd (Join-Path $pkg 'REPAIR_AUTO_UPDATE.cmd') -Force
           'Compatibility directory for legacy updater notification restore.' | Set-Content (Join-Path $compat '.update_compat') -Encoding ASCII
-          'MABI AUTO V3.3.31 - five-item standalone total-stock gathering' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
+          'MABI AUTO V3.3.31 - guarded F9 facility K first-card recovery' | Set-Content (Join-Path $pkg 'WINDOWS_LITE.txt') -Encoding UTF8
           $required=@(
             'release/FishingAutomation.exe','release/MacroWatchdog.exe',
             'release/abyss/config/targets.json','release/abyss/config/scenario.json',
