@@ -215,7 +215,15 @@ internal static class Program
             Check(!All(gathering).Any(x => x.Visible), "home to altering does not require gathering first");
             Menu("홈"); Check(!altering.Visible && !gathering.Visible, "home restores existing central content");
             Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ListBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
-            var gi = All(gathering).OfType<ListBox>().Single();
+            // V3.3.30 gathering also has a separate total-stock queue list.
+            // The main material catalog remains the one labelled "채집 품목".
+            var gi = All(gathering).OfType<ListBox>()
+                .Single(x => x.AccessibleName == "채집 품목");
+            var gatherQueue = All(gathering).OfType<ListBox>()
+                .Single(x => x.AccessibleName == "순차채집 목표 보유량 목록");
+            Check(gatherQueue.Items.Count == 0 &&
+                  All(gathering).OfType<Button>().Any(x => x.AccessibleName == "순차채집 목표 추가"),
+                "V3.3.30 standalone gathering has an empty five-target queue by default");
             var gq = QuantityInput(gathering);
             Check(!All(gathering).OfType<NumericUpDown>().Any(),
                 "gathering target quantity uses no native spinner control");

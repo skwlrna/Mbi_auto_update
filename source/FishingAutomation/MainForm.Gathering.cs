@@ -54,14 +54,31 @@ public sealed partial class MainForm
         _starting = true; _cancelStart = false;
         try
         {
-            var plan = SelectedGatheringPlan();
+            // Snapshot the standalone five-item queue on the UI thread before any awaits.
+            // With no queue the historical single-item ADDITIONAL quantity is unchanged.
+            var queuedTargets = _gatheringPage.QueuedGatheringPlans.ToArray();
+            bool multiple = queuedTargets.Length > 0;
+            if (queuedTargets.Length > 5)
+                throw new InvalidOperationException("단독 순차채집은 최대 5종입니다.");
+            var plan = multiple
+                ? new GatheringPlan(queuedTargets[0].DisplayName, queuedTargets[0].TargetTotal)
+                : SelectedGatheringPlan();
             plan.Validate();
-            if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(plan.DisplayName))
-                throw new InvalidOperationException(
-                    $"{plan.DisplayName}은(는) 곤충채집 퀘스트 전용 재료라 단독 자동채집에서는 시작하지 않습니다. 제작 퀘스트의 추천 획득처에서만 처리합니다.");
-            if (!LivingSkillGatheringCatalog.TryResolveBulk(plan.DisplayName, out _))
-                throw new InvalidOperationException(
-                    $"{plan.DisplayName}은(는) 생활 스킬 대량채집 매핑이 아직 확정되지 않아 단독 자동채집에서 임의 경로를 선택하지 않습니다.");
+            var selected = multiple
+                ? queuedTargets
+                : new[] { new GatheringQueueChoice(plan.DisplayName, plan.TargetQuantity) };
+            if (selected.Select(x => x.DisplayName).Distinct(StringComparer.Ordinal).Count() != selected.Length)
+                throw new InvalidOperationException("순차채집 목록에 중복 품목이 있습니다.");
+            foreach (var item in selected)
+            {
+                new GatheringPlan(item.DisplayName, item.TargetTotal).Validate();
+                if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(item.DisplayName))
+                    throw new InvalidOperationException(
+                        $"{item.DisplayName}은(는) 곤충채집 퀘스트 전용 재료라 단독 자동채집에서는 시작하지 않습니다.");
+                if (!LivingSkillGatheringCatalog.TryResolveBulk(item.DisplayName, out _))
+                    throw new InvalidOperationException(
+                        $"{item.DisplayName}은(는) 생활 스킬 대량채집 매핑이 확정되지 않아 시작하지 않습니다.");
+            }
             string[] requiredCommands =
             {
                 "get_my_info", "get_currencies", "get_gatherable_items", "get_activity",
@@ -74,18 +91,24 @@ public sealed partial class MainForm
                 _log.Write("[자동 채집] requiresConfirm 명령 · " + string.Join(", ", confirmCommands) + " · 메인 화면 시작 버튼을 사용자 승인으로 사용합니다.");
 
             var data = new GatheringCliData(_cli);
-            // Read-only exact filter search; paid execute_gathering is never used.
-            var filtered = await _cli.GetGatherableItemsAsync(plan.DisplayName, CancellationToken.None);
-            var exact = GatheringQueries.ParseCatalog(filtered)
-                .SingleOrDefault(x => x.DisplayName == plan.DisplayName);
-            if (exact is null || !exact.ToolOk)
-                throw new InvalidOperationException("CLI 직접검색에서 대상 품목 또는 채집 도구를 확인하지 못했습니다.");
-            _log.Write($"[자동 채집][CLI 직접검색] query={plan.DisplayName} · exact=1 · ToolOk=true");
-            plan = await AttachFreeGatheringSourceAsync(plan, CancellationToken.None);
+            // Verify EVERY queued name and tool from the fresh CLI catalog before game input.
+            foreach (var item in selected)
+            {
+                var filtered = await _cli.GetGatherableItemsAsync(item.DisplayName, CancellationToken.None);
+                var exact = GatheringQueries.ParseCatalog(filtered)
+                    .SingleOrDefault(x => x.DisplayName == item.DisplayName);
+                if (exact is null || !exact.ToolOk)
+                    throw new InvalidOperationException($"CLI 직접검색에서 {item.DisplayName} 또는 채집 도구를 확인하지 못했습니다.");
+                _log.Write($"[자동 채집][CLI 직접검색] query={item.DisplayName} · exact=1 · ToolOk=true");
+            }
+            // Preserve the original single-item source preflight. Multi targets use
+            // the already-confirmed direct 100-action life-skill route, without recipe input.
+            if (!multiple)
+                plan = await AttachFreeGatheringSourceAsync(plan, CancellationToken.None);
             if (_cancelStart || IsDisposed) return;
             _productionLastMode = "채집";
-            _productionDisplayName = plan.DisplayName;
-            _productionTargetQuantity = plan.TargetQuantity;
+            _productionDisplayName = multiple ? $"{selected.Length}종 순차채집" : plan.DisplayName;
+            _productionTargetQuantity = multiple ? 0 : plan.TargetQuantity;
             _productionCurrentQuantity = 0;
             _productionFacilityName = "자동 채집 경로";
             RefreshProductionDashboard();
@@ -109,10 +132,13 @@ public sealed partial class MainForm
             managerState.Log += text => Ui(() => _log.Write(text));
             var automation = new GatheringAutomation(
                 data, screen, managerState: managerState);
+            var coordinator = new MultiGatheringCoordinator(data, screen, managerState: managerState);
             _dungeonCts?.Dispose(); _dungeonCts = new CancellationTokenSource();
             var token = _dungeonCts.Token;
             _activeMode = "채집"; _mode.Enabled = false;
-            _gatheringDisplay = $"{plan.DisplayName} {plan.TargetQuantity}개";
+            _gatheringDisplay = multiple
+                ? $"{selected.Length}종 순차채집 · 목표 보유량 기준"
+                : $"{plan.DisplayName} 추가 {plan.TargetQuantity}개";
             _dungeonStartedAt = DateTime.Now; _dungeonStoppedAt = null;
             _dungeonCycles = _dungeonCompleted = 0; _runError = null;
             _inputValue.Text = _dungeonInputName = visual.InputMode;
@@ -121,6 +147,7 @@ public sealed partial class MainForm
             screen.Log += text=>Ui(()=>_log.Write(text));
             automation.Log += text => Ui(() =>
             {
+                if (multiple) return;
                 _log.Write(text);
                 _dungeonCycles = checked((int)Math.Min(automation.Gained,int.MaxValue));
                 _productionCurrentQuantity = automation.Gained;
@@ -128,6 +155,32 @@ public sealed partial class MainForm
                 UpdateStats();
                 RefreshProductionDashboard();
             });
+            coordinator.Log += text => Ui(() =>
+            {
+                _log.Write(text);
+                SetStatus(text.Replace("[다중 채집] ", "").Replace("[자동 채집] ", ""), Blue);
+            });
+            coordinator.Progress += (name, gained) => Ui(() =>
+            {
+                _dungeonCycles = checked((int)Math.Min(gained, int.MaxValue));
+                _productionCurrentQuantity = gained;
+                UpdateStats();
+                RefreshProductionDashboard();
+            });
+            // Total-stock targets are backed by fresh get_items (inventory+both storage
+            // locations). Existing single-item F9 still means ADD this many.
+            if (multiple)
+            {
+                long remainingTotal = 0;
+                foreach (var item in selected)
+                {
+                    long current = await data.ItemCountAsync(item.DisplayName, CancellationToken.None);
+                    remainingTotal = checked(remainingTotal + Math.Max(0L, (long)item.TargetTotal - current));
+                    _log.Write($"[순차채집] 목표 보유량 · {item.DisplayName} 현재 {current}, 목표 {item.TargetTotal}");
+                }
+                _productionTargetQuantity = checked((int)remainingTotal);
+                RefreshProductionDashboard();
+            }
             _log.Write("[자동 채집] 시작(F9) · " + _gatheringDisplay + " · CLI 조회 전용 / 일반 이동");
             _dungeonTask = Task.Run(async () =>
             {
@@ -136,22 +189,38 @@ public sealed partial class MainForm
                 {
                     try
                     {
-                        managerState.BeginStage(LifeSkillStage.Gathering,
-                            "단독 채집 시작");
-                        _ = await managerState.ReadFreshCountAsync(
-                            LifeSkillStage.Gathering, plan.DisplayName,
-                            data.ItemCountAsync, token);
-                        await automation.RunAsync(plan, token);
-                        _ = await managerState.ReadFreshCountAsync(
-                            LifeSkillStage.Gathering, plan.DisplayName,
-                            data.ItemCountAsync, token);
-                        Ui(() =>
+                        if (multiple)
                         {
-                            _dungeonCompleted = checked((int)Math.Min(automation.Gained,int.MaxValue));
-                            _productionCurrentQuantity = automation.Gained;
-                            _log.Write("[자동 채집] 목표 작업 완료");
-                            RefreshProductionDashboard();
-                        });
+                            // One existing coordinator and one guarded Stop path, never
+                            // one independent screen runner per queued material.
+                            var requests = selected.Select(x =>
+                                new MultiGatheringRequest(x.DisplayName, x.TargetTotal)).ToArray();
+                            await coordinator.RunAsync(requests, token);
+                            Ui(() =>
+                            {
+                                _dungeonCompleted = checked((int)Math.Min(_productionCurrentQuantity, int.MaxValue));
+                                _log.Write("[순차채집] 전체 목표 보유량 확인 완료");
+                                RefreshProductionDashboard();
+                            });
+                        }
+                        else
+                        {
+                            managerState.BeginStage(LifeSkillStage.Gathering, "단독 채집 시작");
+                            _ = await managerState.ReadFreshCountAsync(
+                                LifeSkillStage.Gathering, plan.DisplayName,
+                                data.ItemCountAsync, token);
+                            await automation.RunAsync(plan, token);
+                            _ = await managerState.ReadFreshCountAsync(
+                                LifeSkillStage.Gathering, plan.DisplayName,
+                                data.ItemCountAsync, token);
+                            Ui(() =>
+                            {
+                                _dungeonCompleted = checked((int)Math.Min(automation.Gained, int.MaxValue));
+                                _productionCurrentQuantity = automation.Gained;
+                                _log.Write("[자동 채집] 목표 작업 완료");
+                                RefreshProductionDashboard();
+                            });
+                        }
                     }
                     catch (OperationCanceledException)
                     { Ui(() => _log.Write("[자동 채집] 정지되었습니다. 게임의 채집/이동 정지 여부를 확인하세요.")); }

@@ -11,6 +11,12 @@ public sealed partial class MainForm
     private long? _productionBaseline;
     private string _productionProgressSummary = "";
 
+    // Independent of the altering queue. Added standalone gathering entries are total-stock targets.
+    private sealed record GatheringQueueChoice(string DisplayName, int TargetTotal)
+    {
+        public override string ToString() => $"{DisplayName} · 목표 보유 {TargetTotal:N0}개";
+    }
+
     private GatheringPlan SelectedGatheringPlan()
     {
         if (_gatheringPage.Items.SelectedItem is not GatheringChoice choice)
@@ -151,7 +157,11 @@ public sealed partial class MainForm
         internal string CliStatus = "확인 전", CharacterStatus = "확인 전";
         internal int? CompletedWorks;
         internal IReadOnlyList<AlteringPlan> QueuedAlteringPlans
-            => _alteringQueue.Items.Cast<AlteringQueueChoice>().Select(x => x.Plan).ToArray();
+            => IsAltering ? _alteringQueue.Items.Cast<AlteringQueueChoice>().Select(x => x.Plan).ToArray()
+                : Array.Empty<AlteringPlan>();
+        internal IReadOnlyList<GatheringQueueChoice> QueuedGatheringPlans
+            => !IsAltering ? _alteringQueue.Items.Cast<GatheringQueueChoice>().ToArray()
+                : Array.Empty<GatheringQueueChoice>();
         // F9 reads the exact user-selected CLI shortage snapshot on the UI thread.
         // This is a planning hint only; the F9 CLI identity and live inventory
         // remain authoritative before any free gathering action.
@@ -199,11 +209,9 @@ public sealed partial class MainForm
 
             Items.AccessibleName = altering ? "가공 제법" : "채집 품목";
             StyleListBox(Items);
-            if (altering)
-            {
-                _alteringQueue.AccessibleName = "다중가공 작업 목록";
-                StyleListBox(_alteringQueue);
-            }
+            // Each page owns a separate queue instance; gathering entries never enter the altering page.
+            _alteringQueue.AccessibleName = altering ? "다중가공 작업 목록" : "순차채집 목표 보유량 목록";
+            StyleListBox(_alteringQueue);
             Quantity.AccessibleName = AccessibleName + " 목표 수량"; StyleField(Quantity);
             Facility.DropDownStyle = ComboBoxStyle.DropDownList;
             Facility.Items.AddRange(FacilityUiOrder); Facility.SelectedIndex = 0;
@@ -250,14 +258,14 @@ public sealed partial class MainForm
 
             var right = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = altering ? 3 : 2, Margin = Padding.Empty,
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty,
                 BackColor = Color.Transparent, AccessibleName = "실행 상태"
             };
             right.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
-            right.RowStyles.Add(new RowStyle(altering ? SizeType.Absolute : SizeType.Percent, altering ? 294 : 100));
-            if (altering) right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 294));
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             var goalCard = new LauncherCard { Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 10) };
-            goalCard.Controls.Add(BuildLabeledField("목표 수량", Quantity, "production-field"));
+            goalCard.Controls.Add(BuildLabeledField(altering ? "목표 수량" : "채집 수량", Quantity, "production-field"));
             right.Controls.Add(goalCard, 0, 0);
             var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = new Padding(0, 0, 0, 10) };
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
@@ -282,7 +290,6 @@ public sealed partial class MainForm
             status.Controls.Add(_progress, 0, 4); status.Controls.Add(_elapsed, 0, 5); status.Controls.Add(_collection, 0, 6);
             status.Controls.Add(_character, 0, 7); status.Controls.Add(_cli, 0, 8);
             statusCard.Controls.Add(status); right.Controls.Add(statusCard, 0, 1);
-            if (altering)
             {
                 var queueCard = new LauncherCard { Padding = new Padding(12, 8, 12, 8), Margin = Padding.Empty };
                 queueCard.Controls.Add(BuildAlteringQueueArea());
@@ -290,8 +297,7 @@ public sealed partial class MainForm
             }
             body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
 
-            // Keep the original page and controls. Altering alone gains ONE
-            // bottom-row action; gathering keeps its original two buttons.
+            // Both pages preserve their existing start/stop shortcuts; queue editing is read-only.
             var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = altering ? 3 : 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 이어하기 정지" };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 40 : 70));
             if (altering) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
@@ -345,7 +351,7 @@ public sealed partial class MainForm
                 foreach (var x in rows) x.Style.Height = x.Size * scale; foreach (var x in columns) x.Style.Width = x.Size * scale;
                 _reload.Width = Math.Max(70, (int)(110 * scale)); if (_inspect is not null) _inspect.Width = Math.Max(64, (int)(90 * scale));
                 Items.ItemHeight = Math.Max(26, Items.Font.Height + Math.Max(7, (int)(8 * scale)));
-                if (IsAltering) _alteringQueue.ItemHeight = Math.Max(26, _alteringQueue.Font.Height + Math.Max(7, (int)(8 * scale)));
+                _alteringQueue.ItemHeight = Math.Max(26, _alteringQueue.Font.Height + Math.Max(7, (int)(8 * scale)));
                 foreach (var field in Descendants(root).Where(c => c.Tag is string tag && tag == "production-field")) LayoutField(field);
                 root.ResumeLayout(true); fitting = false;
             }
@@ -463,7 +469,7 @@ public sealed partial class MainForm
             {
                 Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
                 Margin = Padding.Empty, BackColor = Color.Transparent,
-                AccessibleName = "다중가공 작업 목록 영역"
+                AccessibleName = IsAltering ? "다중가공 작업 목록 영역" : "순차채집 목표 보유량 목록 영역"
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
@@ -471,7 +477,7 @@ public sealed partial class MainForm
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.Controls.Add(new Label
             {
-                Text = "다중가공 작업 목록", Dock = DockStyle.Fill,
+                Text = IsAltering ? "다중가공 작업 목록" : "순차채집 목록 (최대 5종)", Dock = DockStyle.Fill,
                 ForeColor = TitleText, TextAlign = ContentAlignment.MiddleLeft,
                 AutoEllipsis = false,
                 Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel)
@@ -481,22 +487,24 @@ public sealed partial class MainForm
             {
                 Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
                 Margin = Padding.Empty, Padding = Padding.Empty,
-                BackColor = Color.Transparent, AccessibleName = "다중가공 작업 관리"
+                BackColor = Color.Transparent, AccessibleName = IsAltering ? "다중가공 작업 관리" : "순차채집 목표 관리"
             };
             for (int i = 0; i < 3; i++)
                 buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3f));
-            _addQueue = PageButton("+ 추가", AddCurrentAlteringQueue);
-            _removeQueue = PageButton("삭제", RemoveSelectedAlteringQueue);
-            _clearQueue = PageButton("비우기", ClearQueuedAlteringPlans);
-            _addQueue.AccessibleName = "다중가공 작업 추가";
-            _removeQueue.AccessibleName = "다중가공 작업 삭제";
-            _clearQueue.AccessibleName = "다중가공 작업 비우기";
+            _addQueue = PageButton("+ 추가", () => { if (IsAltering) AddCurrentAlteringQueue(); else AddCurrentGatheringQueue(); });
+            _removeQueue = PageButton("삭제", () => { if (IsAltering) RemoveSelectedAlteringQueue(); else RemoveSelectedGatheringQueue(); });
+            _clearQueue = PageButton("비우기", () => { if (IsAltering) ClearQueuedAlteringPlans(); else ClearQueuedGatheringPlans(); });
+            _addQueue.AccessibleName = IsAltering ? "다중가공 작업 추가" : "순차채집 목표 추가";
+            _removeQueue.AccessibleName = IsAltering ? "다중가공 작업 삭제" : "순차채집 목표 삭제";
+            _clearQueue.AccessibleName = IsAltering ? "다중가공 작업 비우기" : "순차채집 목표 비우기";
             buttons.Controls.Add(_addQueue, 0, 0);
             buttons.Controls.Add(_removeQueue, 1, 0);
             buttons.Controls.Add(_clearQueue, 2, 0);
             layout.Controls.Add(buttons, 0, 1);
-            _queueFeedback.AccessibleName = "다중가공 작업 추가 안내";
-            _queueFeedback.Text = "품목과 목표 수량을 선택한 다음 + 추가를 누르세요.";
+            _queueFeedback.AccessibleName = IsAltering ? "다중가공 작업 추가 안내" : "순차채집 목표 보유량 안내";
+            _queueFeedback.Text = IsAltering
+                ? "품목과 목표 수량을 선택한 다음 + 추가를 누르세요."
+                : "목록은 총보유 목표(가방+보관함) · 목록 없이 F9는 추가 채집";
             _queueFeedback.Dock = DockStyle.Fill;
             _queueFeedback.TextAlign = ContentAlignment.MiddleLeft;
             _queueFeedback.AutoEllipsis = true;
@@ -520,7 +528,7 @@ public sealed partial class MainForm
             // Always visible on the configuration page; not a game action.
             _queueFeedback.Text = message;
             _queueFeedback.ForeColor = success ? Green : Color.DarkOrange;
-            _owner._log.Write("[다중가공 설정] " + message);
+            _owner._log.Write((IsAltering ? "[다중가공 설정] " : "[순차채집 설정] ") + message);
         }
 
         private void AddCurrentAlteringQueue()
@@ -584,6 +592,65 @@ public sealed partial class MainForm
                 // later verification; never mistake queue editing for approval to run.
                 ShowQueueFeedback("추가 실패 · " + ex.Message);
             }
+        }
+
+        // The five-entry standalone list is intentionally separate from F9 altering.
+        // Queue edits cannot authorize game input, and quantities are TOTAL owned stock.
+        private void AddCurrentGatheringQueue()
+        {
+            if (IsAltering) return;
+            if (_owner.AnyRunning || _owner._starting || _loading)
+            {
+                ShowQueueFeedback("작업 중에는 순차채집 목록을 수정할 수 없습니다.");
+                return;
+            }
+            if (Items.SelectedItem is not GatheringChoice choice || !choice.Item.ToolOk)
+            {
+                ShowQueueFeedback("채집 품목과 도구 상태를 확인하세요.");
+                return;
+            }
+            string name = choice.Item.DisplayName;
+            if (LivingSkillGatheringCatalog.IsQuestOnlyMaterial(name) ||
+                !LivingSkillGatheringCatalog.TryResolveBulk(name, out _))
+            {
+                ShowQueueFeedback("직접 생활 스킬 채집이 확인된 재료만 등록할 수 있습니다.");
+                return;
+            }
+            var entry = new GatheringQueueChoice(name, (int)Quantity.Value);
+            var items = _alteringQueue.Items.Cast<GatheringQueueChoice>().ToArray();
+            int existing = Array.FindIndex(items, x => x.DisplayName == name);
+            if (existing >= 0)
+                _alteringQueue.Items[existing] = entry;
+            else if (items.Length >= 5)
+            {
+                ShowQueueFeedback("순차채집은 최대 5종까지 등록할 수 있습니다.");
+                return;
+            }
+            else
+                _alteringQueue.Items.Add(entry);
+            _alteringQueue.SelectedIndex = existing >= 0 ? existing : _alteringQueue.Items.Count - 1;
+            ShowQueueFeedback($"목표 보유량 등록 · {name} {entry.TargetTotal:N0}개 (가방+보관함 합산)", true);
+            UpdateExecution();
+        }
+
+        private void RemoveSelectedGatheringQueue()
+        {
+            if (IsAltering) return;
+            if (_owner.AnyRunning || _owner._starting) { ShowQueueFeedback("F10 정지 후 목록을 수정하세요."); return; }
+            if (_alteringQueue.SelectedIndex < 0) { ShowQueueFeedback("삭제할 품목을 선택하세요."); return; }
+            string name = _alteringQueue.SelectedItem?.ToString() ?? "채집 품목";
+            _alteringQueue.Items.RemoveAt(_alteringQueue.SelectedIndex);
+            ShowQueueFeedback("삭제 완료 · " + name, true);
+            UpdateExecution();
+        }
+
+        private void ClearQueuedGatheringPlans()
+        {
+            if (IsAltering) return;
+            if (_owner.AnyRunning || _owner._starting) { ShowQueueFeedback("F10 정지 후 목록을 수정하세요."); return; }
+            _alteringQueue.Items.Clear();
+            ShowQueueFeedback("순차채집 목록 비움 · 목록 없이 F9는 기존 추가 채집 방식", true);
+            UpdateExecution();
         }
 
         private void RemoveSelectedAlteringQueue()
@@ -989,10 +1056,13 @@ public sealed partial class MainForm
             if (_clearQueue is not null) _clearQueue.Enabled = !busy;
             _alteringQueue.Enabled = !busy;
             bool hasBatch = IsAltering && _alteringQueue.Items.Count > 0;
+            bool hasGatherBatch = !IsAltering && _alteringQueue.Items.Count > 0;
             _start.Text = hasBatch
                 ? $"▶   다중가공 {_alteringQueue.Items.Count}종 시작 (F9)"
-                : "▶   " + AccessibleName + " 시작 (F9)";
-            _start.Enabled = !busy && !_loading && (available || hasBatch);
+                : hasGatherBatch
+                    ? $"▶   순차채집 {_alteringQueue.Items.Count}종 시작 (F9)"
+                    : "▶   " + AccessibleName + " 시작 (F9)";
+            _start.Enabled = !busy && !_loading && (available || hasBatch || hasGatherBatch);
             if (_resume is not null) _resume.Enabled = !busy && !_loading;
             _stop.Enabled = running;
             bool ownRun = _owner._activeMode == (IsAltering ? "가공" : "채집");

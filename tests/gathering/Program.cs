@@ -658,6 +658,54 @@ if(args.Contains("--live"))
     var weight=await data.WeightAsync(default); Check(weight.Maximum>0,"live free bag weight parsed");
     Check(await data.ItemCountAsync("철 광석",default)>=0,"live free inventory quantity parsed");
 }
+// V3.3.30 standalone multigather: total-stock targets, ordered progression,
+// already-satisfied entries, and no subsequent input after an uncertain material.
+var stock = new MultiStockFakeWorld(new Dictionary<string, long> {
+    ["철 광석"] = 100, ["석탄"] = 25, ["새초롱꽃"] = 10,
+    ["통나무"] = 150, ["물"] = 0
+});
+var multiRun = new MultiGatheringCoordinator(stock, stock, (_, _) => Task.CompletedTask);
+var observed = new List<(string Name, long Gain)>();
+multiRun.Progress += (item, gained) => observed.Add((item, gained));
+await multiRun.RunAsync(new[] {
+    new MultiGatheringRequest("철 광석", 100),
+    new MultiGatheringRequest("석탄", 80),
+    new MultiGatheringRequest("새초롱꽃", 50),
+    new MultiGatheringRequest("통나무", 160),
+    new MultiGatheringRequest("물", 10)
+}, CancellationToken.None);
+Check(stock.Starts.SequenceEqual(new[] { "석탄", "새초롱꽃", "통나무", "물" }),
+    "V3.3.30 five total-stock targets skip already owned materials in queue order");
+Check(stock.Counts["철 광석"] == 100 && stock.Counts["석탄"] == 80 &&
+      stock.Counts["새초롱꽃"] == 50 && stock.Counts["통나무"] == 160 &&
+      stock.Counts["물"] == 10,
+    "V3.3.30 queue requests only each remaining stock difference");
+Check(observed.Count > 0 && observed[^1].Gain == 115,
+    "V3.3.30 queue reports verified accumulated gained count, not total owned");
+var blockedStock = new MultiStockFakeWorld(new Dictionary<string, long> {
+    ["석탄"] = 5, ["통나무"] = 5, ["물"] = 5
+}) { FailAt = "통나무" };
+try {
+    await new MultiGatheringCoordinator(blockedStock, blockedStock, (_, _) => Task.CompletedTask)
+        .RunAsync(new[] {
+            new MultiGatheringRequest("석탄", 10),
+            new MultiGatheringRequest("통나무", 10),
+            new MultiGatheringRequest("물", 10)
+        }, CancellationToken.None);
+    throw new Exception("V3.3.30 unsafe gather unexpectedly advanced");
+}
+catch (InvalidOperationException e) when (e.Message.Contains("테스트 실패")) {}
+Check(blockedStock.Starts.SequenceEqual(new[] { "석탄", "통나무" }) &&
+      blockedStock.Counts["물"] == 5,
+    "V3.3.30 unsafe second item blocks all subsequent gather inputs");
+var already = new MultiStockFakeWorld(new Dictionary<string, long> {
+    ["석탄"] = 70
+});
+await new MultiGatheringCoordinator(already, already, (_, _) => Task.CompletedTask)
+    .RunAsync(new[] { new MultiGatheringRequest("석탄", 50) }, CancellationToken.None);
+Check(already.Starts.Count == 0,
+    "V3.3.30 fully satisfied target performs no input");
+
 Console.WriteLine($"PASS {checks} gathering checks");
 }
 catch(Exception ex){Console.Error.WriteLine(ex.Message);Environment.ExitCode=1;}
@@ -709,4 +757,39 @@ internal sealed class FakeWorld : IGatheringData, IGatheringScreen, IGatheringSt
     public Task StopAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();Stops++;if(!IgnoreStop)State=Idle;return Task.CompletedTask;}
     public Task<bool> IsStopButtonVisibleAsync(CancellationToken ct){ct.ThrowIfCancellationRequested();return Task.FromResult(StopVisible);}
     public void Dispose(){}
+}
+
+// Deliberately mimics a no-combat, immediately completed direct 100-action cycle.
+// The coordinator must not manufacture movement/Stop inputs of its own.
+internal sealed class MultiStockFakeWorld : IGatheringData, IGatheringScreen, IGatheringStopVisualProbe
+{
+    internal readonly Dictionary<string, long> Counts;
+    internal readonly List<string> Starts = new();
+    internal string? FailAt;
+    internal MultiStockFakeWorld(Dictionary<string, long> counts) => Counts = counts;
+    public Task<IReadOnlyList<GatherableItem>> CatalogAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<GatherableItem>>(
+            Counts.Keys.Select(name => new GatherableItem(name, true)).ToArray());
+    public Task<GatheringActivity> ActivityAsync(CancellationToken ct)
+        => Task.FromResult(FakeWorld.Idle);
+    public Task<(decimal Current, decimal Maximum)> WeightAsync(CancellationToken ct)
+        => Task.FromResult((1m, 100m));
+    public Task<long> ItemCountAsync(string name, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(Counts[name]);
+    }
+    public Task StartAsync(GatheringPlan plan, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Starts.Add(plan.DisplayName);
+        if (plan.DisplayName == FailAt)
+            throw new InvalidOperationException("테스트 실패: 채집 시작 미확정");
+        Counts[plan.DisplayName] += plan.TargetQuantity;
+        return Task.CompletedTask;
+    }
+    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task<bool> IsStopButtonVisibleAsync(CancellationToken ct)
+        => Task.FromResult(false);
+    public void Dispose() { }
 }
