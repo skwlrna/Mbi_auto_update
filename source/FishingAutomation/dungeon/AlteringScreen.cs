@@ -1105,7 +1105,11 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
         // hub is positively verified; never grant a fourth blind K/Esc.
         const int maxAttempts = 4;
         int hubCardClicks = 0; // At most one retry, at the unchanged fixed point.
-        bool recoveredHubAfterK = false; // Only K issued after THIS target-card click.
+        bool recoveredHubAfterK = false; // Existing one-card retry; unchanged.
+        // Keep a separate, one-use proof for the 21:32 first-card incident.
+        // Esc->WorldHud must be positively seen and K must be final-frame verified.
+        bool foreignFacilityEscConfirmedWorld = false;
+        bool verifiedKAfterForeignFacilityExit = false;
         bool foodNavigationIssued = false;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -1136,10 +1140,10 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                     ManagedProductionSceneKind.MoveDialog or
                     ManagedProductionSceneKind.ReceiptResult)
                     Fail(frame, "F9 화면 분류: 상충 화면/이동창/결과창 · 추정 복귀 입력 금지");
-                // Before ANY fourth-pass UI input (including food navigation),
-                // require a verified target facility OR the incident's proven
-                // no-modal six-card hub after one prior card click and managed K.
-                // This prevents a fourth K/Esc/tab click on an unknown screen.
+                // The final pass can ONLY select a positively confirmed hub card.
+                // Existing post-card retry and this incident's FIRST card after
+                // Esc->WorldHud->verified K are two disjoint cases. Neither
+                // allows a fourth blind K, Esc or menu-tab input.
                 if (attempt == maxAttempts)
                 {
                     if (HasVerifiedFacilityEntryScreen(frame) &&
@@ -1148,13 +1152,22 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         Log?.Invoke($"[자동 가공] 마지막 허브 복구 전 시설 진입 확인 · {plan.ScreenTitle}");
                         return;
                     }
-                    if (!AlteringFacilityLayout.CanRecoverFinalHubSelection(
-                            recoveredHubAfterK, hubCardClicks,
-                            HasFixedProcessingHubVisual(frame),
-                            HasBottomConfirmationModal(frame) ||
-                            await IsFacilityTravelDialogAsync(frame, ct)))
+                    bool exactHub = HasFixedProcessingHubVisual(frame);
+                    bool blocked = HasManagedKEntryBlockingModal(frame) ||
+                        HasBottomConfirmationModal(frame) ||
+                        await IsFacilityTravelDialogAsync(frame, ct);
+                    bool existingCardRetry = AlteringFacilityLayout.CanRecoverFinalHubSelection(
+                        recoveredHubAfterK, hubCardClicks, exactHub, blocked);
+                    bool firstCardAfterVerifiedK = directive != AlteringFacilityEntryDirective.Automatic &&
+                        AlteringFacilityLayout.CanSelectFirstCardAfterVerifiedKReturn(
+                            verifiedKAfterForeignFacilityExit, hubCardClicks,
+                            exactHub && managedScene == ManagedProductionSceneKind.ProcessingHub,
+                            blocked);
+                    if (!existingCardRetry && !firstCardAfterVerifiedK)
                         Fail(frame,
-                            "마지막 K 재진입 후 동일 가공 허브/팝업 상태를 확인하지 못했습니다. 추가 K/시설 클릭 없이 정지합니다.");
+                            "마지막 K 재진입 후 가공 허브/팝업 상태를 확인하지 못했습니다. 추가 K/시설 클릭 없이 정지합니다.");
+                    if (firstCardAfterVerifiedK)
+                        Log?.Invoke("[자동 가공] 마지막 재진입 · Esc→필드→검증 K→6카드 허브 확인 · 시설 첫 선택만 허용 · 추가 K 없음");
                 }
 
                 // Food quick-crafting has a cyan left tab, so the neutral-only
@@ -1370,6 +1383,9 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                         // Esc can close directly to WORLD instead of the hub.
                         // Observe both destinations; do not assume the hub won.
                         var destination = await WaitForManagedFacilityExitAsync(ct);
+                        foreignFacilityEscConfirmedWorld =
+                            destination == ManagedProductionSceneKind.WorldHud;
+                        verifiedKAfterForeignFacilityExit = false;
                         Log?.Invoke($"[자동 가공] Esc 후 화면 확인={destination} · 다음 단계 새 화면 재검증");
                     }
                     continue;
@@ -1488,8 +1504,13 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
                 if (directive != AlteringFacilityEntryDirective.Automatic)
                     _managedKInputIssued = true;
                 if (directive != AlteringFacilityEntryDirective.Automatic &&
-                    attempt == maxAttempts - 1 && hubCardClicks == 1)
-                    recoveredHubAfterK = true;
+                    attempt == maxAttempts - 1)
+                {
+                    if (hubCardClicks == 1)
+                        recoveredHubAfterK = true;
+                    else if (hubCardClicks == 0 && foreignFacilityEscConfirmedWorld)
+                        verifiedKAfterForeignFacilityExit = true;
+                }
                 Log?.Invoke("[자동 가공] K 입력 전송 · 가공 메뉴 화면 확인 대기");
             }
 

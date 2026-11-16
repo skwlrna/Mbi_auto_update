@@ -12,7 +12,15 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
     def test_version_and_real_game_state_are_explicit(self):
         current = read("source/FishingAutomation/UpdateManager.cs")
         project = read("source/FishingAutomation/FishingAutomation.csproj")
-        if 'CurrentVersion = "V3.3.30"' in current:
+        if 'CurrentVersion = "V3.3.31"' in current:
+            expected = ("3.3.31", "3.3.31.0", "3.3.31.0")
+            workflow = read(".github/workflows/release-v3331-auto-update.yml")
+            for marker in ("gh release create V3.3.31",
+                           "V3.3.31 21:32 verified K-first-card recovery regression",
+                           "tests/altering-screen-integration/Regression.csproj",
+                           "No successful production CI for current main SHA"):
+                self.assertIn(marker, workflow)
+        elif 'CurrentVersion = "V3.3.30"' in current:
             expected = ("3.3.30", "3.3.30.0", "3.3.30.0")
             workflow = read(".github/workflows/release-v3330-auto-update.yml")
             for marker in ("gh release create V3.3.30",
