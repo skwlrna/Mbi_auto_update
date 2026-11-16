@@ -1885,12 +1885,17 @@ try
             Check(MaySelectFirst(K, previousClicks, hub, modal) ==
                   (K && previousClicks == 0 && hub && !modal),
                 "V3.3.31 first-card recovery preserves zero-click/modal/hub authority");
-        Check(Has(ScreenCalls("EnterFacilityCoreAsync", 3), "CanSelectFirstCardAfterVerifiedKReturn") &&
-              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "foreignFacilityEscConfirmedWorld") &&
-              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "verifiedKAfterForeignFacilityExit") &&
-              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "ManagedProductionSceneKind.WorldHud") &&
-              Has(ScreenCalls("EnterFacilityCoreAsync", 3), "ManagedProductionSceneKind.ProcessingHub"),
-            "V3.3.31 final first-card approval ties proven foreign Esc, fresh guarded K and exact hub");
+        // Compiled IL contains method calls, not source-local variable names.
+        // Provenance of the two local flags and scene enums is checked by
+        // test_v3331_f9_verified_k_first_hub.py against the actual source.
+        var firstRecoveryCalls = ScreenCalls("EnterFacilityCoreAsync", 3);
+        Check(Has(firstRecoveryCalls, "CanSelectFirstCardAfterVerifiedKReturn") &&
+              Has(firstRecoveryCalls, "CanRecoverFinalHubSelection") &&
+              Has(firstRecoveryCalls, "WaitForManagedFacilityExitAsync") &&
+              Has(firstRecoveryCalls, "TapVerifiedFreshAsync") &&
+              Has(firstRecoveryCalls, "HasFixedProcessingHubVisual") &&
+              Has(firstRecoveryCalls, "IsFacilityTravelDialogAsync"),
+            "V3.3.31 compiled first-card recovery uses verified Esc, guarded K and exact-hub calls");
         var retryMethod = Method(layout, "CanRetryFixedHubSelection", 4);
         for (int clicks = 0; clicks <= 3; clicks++)
         foreach (bool previous in new[] { false, true })
