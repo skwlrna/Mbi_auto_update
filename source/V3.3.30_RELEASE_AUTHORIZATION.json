@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.30",
+  "purpose": "standalone_five_item_total_stock_gathering",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-16 모비레이·모비스카우터 검토 후 단독 자동채집 최대 5종 및 목표 보유량 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}
