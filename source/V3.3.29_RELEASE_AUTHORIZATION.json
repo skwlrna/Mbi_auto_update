@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.29",
+  "purpose": "f9_leather_material_mismatch_lane_yield",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-16 상급 가죽 재료 불일치로 약품가공과 목재가공이 막히는 문제: 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

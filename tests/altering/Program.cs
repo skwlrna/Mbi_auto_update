@@ -3362,6 +3362,43 @@ Check(heldConflict && conflictingRawWorld.QueueCalls == 0 &&
       conflictingRawAuto.ReservedWings == 0,
     "recipe says 2/3 but inventory says 10: no durable raw-exhausted decision and no input");
 
+// V3.3.29: a real three-work leather mismatch must return control to F9.
+// No partial collection, material-exhaustion checkpoint or duplicate input.
+Check(AlteringAutomation.ShouldYieldManagedMaterialMismatch(true, true, 3, false) &&
+      !AlteringAutomation.ShouldYieldManagedMaterialMismatch(true, true, 3, true) &&
+      !AlteringAutomation.ShouldYieldManagedMaterialMismatch(true, true, 0, false) &&
+      !AlteringAutomation.ShouldYieldManagedMaterialMismatch(true, false, 3, false) &&
+      !AlteringAutomation.ShouldYieldManagedMaterialMismatch(false, true, 3, false),
+    "V3.3.29 only active MAIN F9 material mismatch can yield; completed, empty, child and single lanes cannot");
+var v3329Leather = new AlteringPlan("가죽 가공 시설", "상급 가죽", 100, 3, false);
+var v3329World = new FakeWorld(v3329Leather)
+{
+    Available = false,
+    MissingIngredient = "상급 생가죽",
+    MissingIngredientOwned = 0,
+    MissingIngredientRequired = 15,
+    RawObservedOverride = 15,
+    Freeze = true
+};
+v3329World.AddCompleted(1);
+v3329World.AddPending();
+v3329World.AddPending(waitingOnly: true);
+var v3329Lane = new FacilityLaneState(await v3329World.WorksAsync(default));
+var v3329Auto = new AlteringAutomation(
+    v3329World, v3329World,
+    (_, _) => throw new Exception("material mismatch must not block F9 in a delay loop"),
+    4, facilityState: v3329Lane);
+var v3329Logs = new List<string>();
+v3329Auto.Log += v3329Logs.Add;
+var v3329Result = await v3329Auto.RunBatchAsync(v3329Leather, 1, default);
+Check(v3329Result == AlteringRunResult.BatchQueued &&
+      v3329World.QueueCalls == 0 && v3329World.CollectionCount == 0 &&
+      v3329Auto.ReservedWings == 0 &&
+      (await v3329World.WorksAsync(default)).Count == 3 &&
+      v3329Logs.Any(x => x.Contains("다른 시설 진행", StringComparison.Ordinal)) &&
+      !v3329Lane.Snapshot(v3329Leather.FacilityName).IntermediateLease,
+    "V3.3.29 1 completed + 2 active leather jobs yield immediately without receipt or registration");
+
 Check(!LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,
           new AlteringRecipe("가죽+", false, 3, "short", [new("가죽", 1, 0)], "가죽 가공 시설")) &&
       LeatherRawMaterialPolicy.EndsOnShortage(exhaustedLeather,

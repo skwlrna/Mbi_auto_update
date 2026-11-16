@@ -14,6 +14,12 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
         project = read("source/FishingAutomation/FishingAutomation.csproj")
         if 'CurrentVersion = "V3.3.01"' in current:
             expected = ("3.3.1", "3.3.1.0", "3.3.1.0")
+        elif 'CurrentVersion = "V3.3.29"' in current:
+            expected = ("3.3.29", "3.3.29.0", "3.3.29.0")
+            workflow = read(".github/workflows/release-v3329-auto-update.yml")
+            self.assertIn("gh release create V3.3.29", workflow)
+            self.assertIn("V3.3.29 three-work leather mismatch independent F9 regression", workflow)
+            self.assertIn("tests/altering/Regression.csproj", workflow)
         elif 'CurrentVersion = "V3.3.28"' in current:
             expected = ("3.3.28", "3.3.28.0", "3.3.28.0")
             workflow = read(".github/workflows/release-v3328-auto-update.yml")
