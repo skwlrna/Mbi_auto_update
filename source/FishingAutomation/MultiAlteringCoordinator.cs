@@ -856,9 +856,24 @@ internal sealed class MultiAlteringCoordinator
                         if (_laneState?.Snapshot(dependencyFacility!).IntermediateLease == true)
                             throw new InvalidOperationException(
                                 $"중간재료 {dependencyFacility} 이어받기 완료 주장 후에도 소유권이 남아 있습니다");
-                        waitingForDependency.Remove(facility);
-                        idleWatchdog.ConfirmManagerProgress(facility);
+                        // One suspended child request can be shared by several
+                        // parent lanes. Once the child has actually completed
+                        // and released its lease, every parent waiting for that
+                        // same child must stop requesting ResumeSuspendedAsync.
+                        // The manager re-reads CLI works on its next turn;
+                        // each parent still runs its normal material, recipe,
+                        // ledger and pre-input validation before registration.
+                        var releasedParents = waitingForDependency
+                            .Where(entry => string.Equals(entry.Value,
+                                dependencyFacility, StringComparison.Ordinal))
+                            .Select(entry => entry.Key).ToArray();
+                        foreach (string releasedParent in releasedParents)
+                        {
+                            waitingForDependency.Remove(releasedParent);
+                            idleWatchdog.ConfirmManagerProgress(releasedParent);
+                        }
                         Log?.Invoke($"[다중가공] {facility} 중간재료 정상 수령 및 소유권 반환 · " +
+                            $"동일 자식 대기 {releasedParents.Length}시설 해제 · " +
                             "메인 재료/제법/화면 전체 재검증 후 등록");
                     }
                     catch (IntermediateFacilityBusyException stillBusy)
