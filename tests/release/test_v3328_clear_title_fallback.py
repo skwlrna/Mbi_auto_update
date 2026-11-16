@@ -22,7 +22,7 @@ class ClearFallback(unittest.TestCase):
   # This verifies the V3.3.28 behavior is retained in later releases;
   # newer patches must not be rejected solely for advancing the app version.
   source = read("source/FishingAutomation/UpdateManager.cs")
-  match = re.search(r'CurrentVersion = "V(\\d+)\\.(\\d+)\\.(\\d+)"', source)
+  match = re.search(r'CurrentVersion = "V(\d+)\.(\d+)\.(\d+)"', source)
   self.assertIsNotNone(match)
   version = tuple(map(int, match.groups()))
   self.assertGreaterEqual(version, (3, 3, 28))
