@@ -49,8 +49,14 @@ class GatheringTotalStockV3330(unittest.TestCase):
     def test_release_version(self):
         csproj = read("source/FishingAutomation/FishingAutomation.csproj")
         updater = read("source/FishingAutomation/UpdateManager.cs")
-        self.assertIn("<Version>3.3.30</Version>", csproj)
-        self.assertIn('CurrentVersion = "V3.3.30"', updater)
+        if 'CurrentVersion = "V3.3.30"' in updater:
+            self.assertIn("<Version>3.3.30</Version>", csproj)
+        else:
+            # The stock-target feature must also remain in newer releases.
+            self.assertIn('CurrentVersion = "V3.3.31"', updater)
+            self.assertIn("<Version>3.3.31</Version>", csproj)
+            self.assertIn("test_v3330_gathering_stock_queue.py",
+                          read(".github/workflows/release-v3331-auto-update.yml"))
 
 
 if __name__ == "__main__":
