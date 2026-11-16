@@ -791,6 +791,9 @@ internal sealed class AlteringAutomation
                                     Log?.Invoke($"[자동 가공][재료 수량 불일치] {plan.DisplayName} · " +
                                         $"{raw.DisplayName} · 제법 Owned={raw.Owned}/{raw.Required} · " +
                                         $"get_items={live} · 원재료 소진 확정 금지 · 신규 입력 보류");
+                                    if (await YieldManagedMaterialMismatchAsync(
+                                        plan, yieldAtBatchBoundary, ct))
+                                        return AlteringRunResult.BatchQueued;
                                     throw await IsolateEmptyMaterialHoldAsync(plan,
                                         new MaterialSupplyHoldException(new(
                                         raw.DisplayName, raw.Required, live,
@@ -875,6 +878,9 @@ internal sealed class AlteringAutomation
                                 // No terminal raw-exhausted checkpoint for
                                 // conflicting CLI counts. Active child leases
                                 // must unwind through their dependency owner.
+                                if (await YieldManagedMaterialMismatchAsync(
+                                    plan, yieldAtBatchBoundary, ct))
+                                    return AlteringRunResult.BatchQueued;
                                 throw await IsolateEmptyMaterialHoldAsync(plan, hold, ct);
                             }
                             catch (MaterialSupplyHoldException hold)
@@ -1046,6 +1052,36 @@ internal sealed class AlteringAutomation
 
             await _delay(TimeSpan.FromSeconds(Math.Clamp(remaining, 2, 30)), ct);
         }
+    }
+
+    // A recipe/inventory conflict is NOT proof of material exhaustion.
+    // In F9, yield an occupied MAIN lane instead of blocking independent lanes
+    // while its existing works finish. The coordinator's ordinary all-complete
+    // receipt path will drain the batch and then recheck the mismatch.
+    internal static bool ShouldYieldManagedMaterialMismatch(
+        bool batchMode, bool mainLane, int facilityWorks, bool allCompleted)
+        => batchMode && mainLane && facilityWorks > 0 && !allCompleted;
+
+    private async Task<bool> YieldManagedMaterialMismatchAsync(
+        AlteringPlan plan, bool yieldAtBatchBoundary, CancellationToken ct)
+    {
+        if (!yieldAtBatchBoundary || _facilityState is null ||
+            _facilityState.Snapshot(plan.FacilityName).IntermediateLease)
+            return false;
+
+        // Read-only proof only: no receipt, registration or owner transfer.
+        var freshWorks = await _data.WorksAsync(ct);
+        _facilityState.Observe(plan.FacilityName, freshWorks, allowShrink: false);
+        _facilityState.AssertAccess(plan.FacilityName, FacilityLaneOwner.Main);
+        var local = freshWorks.Where(x => x.FacilityName == plan.FacilityName).ToArray();
+        if (!ShouldYieldManagedMaterialMismatch(
+                yieldAtBatchBoundary, true, local.Length, local.All(x => x.IsCompleted)))
+            return false;
+
+        SaveStage("재료 불일치 · 기존 작업 완료 대기 · 다른 시설 진행");
+        Log?.Invoke($"[자동 가공] 재료 불일치 신규 등록 보류 · {plan.DisplayName} · " +
+            $"기존 {local.Length}작업 전체 완료 대기 · 다른 시설 진행 · 원재료 소진 확정 아님");
+        return true;
     }
 
     private async Task<MaterialSupplyHoldException> IsolateEmptyMaterialHoldAsync(
