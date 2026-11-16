@@ -118,6 +118,18 @@ namespace DungeonVisionBot
     pair=await reader.ReadAbyssClearEvidenceAsync(frame,default);
     Check(!pair.Touch.Found,"out of bounds prompt rejected");
     OcrRecognizer.OutsideClear=false;OcrRecognizer.ClearTouch=false;
+    var strongTitle=new DetectionResult(true,new Rectangle(240,190,210,70),.94,"clear");
+    reader._detector.Hits["abyss_dungeon_clear_visual"]=strongTitle;
+    pair=await reader.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(pair.Title.Found && !pair.Touch.Found,"high-confidence title fallback despite missing OCR");
+    Check(!AbyssClearEvidencePolicy.Confirmed(AbyssClearEvidencePolicy.Next(0,false,pair.Title.Found)),"one title frame cannot click");
+    Check(AbyssClearEvidencePolicy.SameTitle(strongTitle,new DetectionResult(true,new Rectangle(244,192,210,70),.91,"clear")),"two stationary title frames agree");
+    Check(!AbyssClearEvidencePolicy.SameTitle(strongTitle,new DetectionResult(true,new Rectangle(410,400,210,70),.91,"clear")),"moved title is not stable");
+    Check(AbyssClearEvidencePolicy.TitleTouchPoint(frame.Size).Found,"bounded portrait safe click");
+    reader._detector.Hits["abyss_dungeon_clear_visual"]=new DetectionResult(true,new Rectangle(240,190,210,70),.65,"weak");
+    pair=await reader.ReadAbyssClearEvidenceAsync(frame,default);
+    Check(!pair.Title.Found,"weak title cannot click");
+    reader._detector.Hits.Clear();
     using(var g=Graphics.FromImage(frame))
     {
      g.Clear(Color.Black);g.FillRectangle(Brushes.Goldenrod,350,105,100,100);
