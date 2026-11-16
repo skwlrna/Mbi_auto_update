@@ -41,6 +41,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     // A clear title alone can appear mid-combat. Never tap on that evidence.
     // Paired title + touch prompt must persist across two fresh captures.
     private int _abyssClearPairedEvidenceFrames;
+    private DetectionResult _abyssPreviousClearTitle = DetectionResult.NotFound;
+    private bool _abyssPreviousClearWasTitle;
     private bool AbyssClearPairedEvidencePending => _abyssClearPairedEvidenceFrames > 0;
 
     public event Action<string>? Log;
@@ -1269,15 +1271,29 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
     private async Task<DetectionResult> DetectAbyssConfirmedClearAsync(Bitmap frame, CancellationToken ct)
     {
-        var (_, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+        bool titleOnly = !touch.Found && title.Found;
+        int previous = _abyssClearPairedEvidenceFrames;
+        if (titleOnly)
+            previous = _abyssPreviousClearWasTitle &&
+                AbyssClearEvidencePolicy.SameTitle(_abyssPreviousClearTitle, title) ? previous : 0;
+        else if (_abyssPreviousClearWasTitle)
+            previous = 0; // A mixed title+OCR pair is never enough.
         _abyssClearPairedEvidenceFrames = AbyssClearEvidencePolicy.Next(
-            _abyssClearPairedEvidenceFrames, false, touch.Found);
+            previous, false, touch.Found || titleOnly);
+        _abyssPreviousClearWasTitle = titleOnly;
+        _abyssPreviousClearTitle = titleOnly ? title : DetectionResult.NotFound;
         if (!AbyssClearEvidencePolicy.Confirmed(_abyssClearPairedEvidenceFrames))
             return DetectionResult.NotFound;
         _abyssClearPairedEvidenceFrames = 0;
+        _abyssPreviousClearWasTitle = false;
+        _abyssPreviousClearTitle = DetectionResult.NotFound;
+        var safeTouch = titleOnly ? AbyssClearEvidencePolicy.TitleTouchPoint(frame.Size) : touch;
+        if (!safeTouch.Found) return DetectionResult.NotFound;
         ResetAbyssExitState(true);
-        AbyssTransitionTo(AbyssFlowState.ClearConfirmed, "하단 터치 문구 2프레임 확인");
-        return touch;
+        AbyssTransitionTo(AbyssFlowState.ClearConfirmed,
+            titleOnly ? "클리어 제목 고신뢰 동일위치 2프레임 확인" : "하단 터치 문구 2프레임 확인");
+        return safeTouch;
     }
 
     private async Task<DetectionResult> DetectAbyssClearVisualAsync(Bitmap frame, CancellationToken ct)
@@ -1291,6 +1307,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     {
         var sw = Stopwatch.StartNew();
         int clearTitleConsecutive = 0;
+        int visualTitleConsecutive = 0;
+        DetectionResult previousTitle = DetectionResult.NotFound;
         bool previousResult = false;
 
         while (sw.Elapsed < TimeSpan.FromSeconds(20))
@@ -1309,14 +1327,30 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
 
             previousResult = result.Found;
-            var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+            var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
                 clearTitleConsecutive, false, touch.Found);
+            visualTitleConsecutive = title.Found
+                ? AbyssClearEvidencePolicy.Next(
+                    AbyssClearEvidencePolicy.SameTitle(previousTitle, title) ? visualTitleConsecutive : 0,
+                    false, true)
+                : 0;
+            previousTitle = title;
             if (AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive))
             {
                 AbyssTransitionTo(AbyssFlowState.TouchReady, "하단 터치 문구 2프레임 확인");
                 Log?.Invoke($"[어비스] 터치 문구 2/2 확인 -> 실제 터치 문구 위치 사용 @ {touch.Bounds}");
                 return touch;
+            }
+            if (AbyssClearEvidencePolicy.Confirmed(visualTitleConsecutive))
+            {
+                var safeTouch = AbyssClearEvidencePolicy.TitleTouchPoint(frame.Size);
+                if (safeTouch.Found)
+                {
+                    AbyssTransitionTo(AbyssFlowState.TouchReady, "클리어 제목 동일위치 2프레임 확인");
+                    Log?.Invoke("[어비스] 하단 OCR 누락 · 클리어 제목 2/2 확인 -> 안전 터치");
+                    return safeTouch;
+                }
             }
 
             // Important: missing clear/touch templates is NOT treated as a successful
@@ -1334,6 +1368,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         var sw = Stopwatch.StartNew();
         int retryClicks = 0;
         int clearTitleConsecutive = 0;
+        int visualTitleConsecutive = 0;
+        DetectionResult previousTitle = DetectionResult.NotFound;
         DetectionResult previousResult = DetectionResult.NotFound;
 
         while (sw.Elapsed < TimeSpan.FromSeconds(30))
@@ -1362,15 +1398,23 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
             previousResult = DetectionResult.NotFound;
 
-            var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+            var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
 
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
                 clearTitleConsecutive, false, touch.Found);
+            visualTitleConsecutive = title.Found
+                ? AbyssClearEvidencePolicy.Next(
+                    AbyssClearEvidencePolicy.SameTitle(previousTitle, title) ? visualTitleConsecutive : 0,
+                    false, true)
+                : 0;
+            previousTitle = title;
 
             if (retryClicks < 1 && sw.Elapsed >= TimeSpan.FromSeconds(2))
             {
                 var retryTouch = AbyssClearEvidencePolicy.Confirmed(clearTitleConsecutive)
-                    ? touch : DetectionResult.NotFound;
+                    ? touch : AbyssClearEvidencePolicy.Confirmed(visualTitleConsecutive)
+                        ? AbyssClearEvidencePolicy.TitleTouchPoint(frame.Size)
+                        : DetectionResult.NotFound;
 
                 if (retryTouch.Found)
                 {
@@ -1410,6 +1454,36 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             AbyssRequireState(AbyssFlowState.ResultConfirmed, "클리어 터치 생략");
             Log?.Invoke("[어비스] 실제 결과 화면이 이미 확인됨 -> 클리어 터치 생략");
             return;
+        }
+
+        // Revalidate title-only fallback on a fresh frame and never click
+        // after the result panel has already appeared.
+        if (touch.ReadText == "clear_title_visual_fallback")
+        {
+            using var fresh = await CaptureGameWindowAsync(ct);
+            if ((await DetectAbyssResultRetryAsync(fresh, ct)).Found)
+            {
+                await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+                using var second = await CaptureGameWindowAsync(ct);
+                if ((await DetectAbyssResultRetryAsync(second, ct)).Found)
+                {
+                    AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "제목 기반 터치 직전 보상창 2프레임 확인");
+                    Log?.Invoke("[어비스] 보상창이 먼저 나타남 -> 터치 생략");
+                    return;
+                }
+            }
+            var (freshTitle, freshPrompt) = await ReadAbyssClearEvidenceAsync(fresh, ct);
+            if (freshPrompt.Found) touch = freshPrompt;
+            else if (!freshTitle.Found)
+            {
+                Log?.Invoke("[어비스] 클릭 직전 클리어 제목 소실 -> 화면 재확인");
+                touch = await WaitForAbyssTouchPromptAsync(ct);
+                if (!touch.Found)
+                {
+                    AbyssRequireState(AbyssFlowState.ResultConfirmed, "클리어 터치 생략");
+                    return;
+                }
+            }
         }
 
         // No touch input is permitted unless the state machine reached TouchReady.

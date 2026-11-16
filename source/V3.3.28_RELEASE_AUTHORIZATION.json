@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.28",
+  "purpose": "abyss_clear_title_ocr_fallback",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-16 MMscouter OCR 및 클리어 타이틀 보조인식 개선: 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

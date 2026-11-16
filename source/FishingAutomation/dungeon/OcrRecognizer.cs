@@ -34,7 +34,11 @@ internal sealed class OcrRecognizer
             var result = await FindExactCompactAtScaleAsync(frame, roi, wanted, scale, ct);
             if (result.Found) return result;
         }
-        return DetectionResult.NotFound;
+        // Only the Abyss clear prompt receives the expensive final fallback,
+        // after normal compact OCR at 1x, 2x, 3x, and 4x has failed.
+        return wanted == "화면을 터치해 주세요"
+            ? await FindExactCompactAtScaleAsync(frame, roi, wanted, 2.8, true, ct)
+            : DetectionResult.NotFound;
     }
 
     internal async Task<IReadOnlyList<DetectionResult>> FindAlteringFacilityTitlesAsync(Bitmap frame, string title, CancellationToken ct)
@@ -141,11 +145,19 @@ internal sealed class OcrRecognizer
         return result;
     }
 
-    private async Task<DetectionResult> FindExactCompactAtScaleAsync(Bitmap frame, Rectangle roi, string wanted, int scale, CancellationToken ct)
+    private async Task<DetectionResult> FindExactCompactAtScaleAsync(
+        Bitmap frame, Rectangle roi, string wanted, double scale, CancellationToken ct)
+        => await FindExactCompactAtScaleAsync(frame, roi, wanted, scale, false, ct);
+
+    private async Task<DetectionResult> FindExactCompactAtScaleAsync(
+        Bitmap frame, Rectangle roi, string wanted, double scale, bool lanczos, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         using var crop = frame.Clone(roi, PixelFormat.Format24bppRgb);
-        using var prepared = scale == 1 ? (Bitmap)crop.Clone() : ResizeNearest(crop, crop.Width * scale, crop.Height * scale);
+        using var prepared = lanczos
+            ? ResizeLanczos3(crop, (int)Math.Round(crop.Width * scale), (int)Math.Round(crop.Height * scale))
+            : scale == 1 ? (Bitmap)crop.Clone()
+            : ResizeNearest(crop, (int)(crop.Width * scale), (int)(crop.Height * scale));
         using var software = await ToSoftwareBitmapAsync(prepared);
         var ocr = await RecognizeEngineSafeAsync(software, ct);
         ct.ThrowIfCancellationRequested();
@@ -318,6 +330,76 @@ internal sealed class OcrRecognizer
         {
             _engineGate.Release();
         }
+    }
+
+    // Separable Lanczos-3 resampling. The only caller is the failed-Abyss-
+    // touch-OCR fallback, so normal fast OCR paths are unaffected.
+    private static Bitmap ResizeLanczos3(Bitmap src, int w, int h)
+    {
+        static double Sinc(double x) =>
+            Math.Abs(x) < 1e-8 ? 1.0 : Math.Sin(Math.PI * x) / (Math.PI * x);
+        static (int Index, double Weight)[][] Weights(int input, int output)
+        {
+            var all = new (int, double)[output][];
+            for (int i = 0; i < output; i++)
+            {
+                double center = (i + 0.5) * input / output - 0.5;
+                var taps = new List<(int Index, double Weight)>();
+                double sum = 0;
+                for (int j = (int)Math.Floor(center) - 2; j <= (int)Math.Ceiling(center) + 2; j++)
+                {
+                    double distance = center - j;
+                    if (j < 0 || j >= input || Math.Abs(distance) >= 3) continue;
+                    double weight = Sinc(distance) * Sinc(distance / 3);
+                    taps.Add((j, weight)); sum += weight;
+                }
+                all[i] = taps.Select(t => (t.Index, t.Weight / sum)).ToArray();
+            }
+            return all;
+        }
+        var sourceData = src.LockBits(new Rectangle(0, 0, src.Width, src.Height),
+            ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+        byte[] sourceBytes; int sourceStride;
+        try
+        {
+            sourceStride = Math.Abs(sourceData.Stride);
+            sourceBytes = new byte[sourceStride * src.Height];
+            System.Runtime.InteropServices.Marshal.Copy(sourceData.Scan0, sourceBytes, 0, sourceBytes.Length);
+        }
+        finally { src.UnlockBits(sourceData); }
+        var xWeights = Weights(src.Width, w);
+        var yWeights = Weights(src.Height, h);
+        var intermediate = new double[src.Height * w * 3];
+        for (int y = 0; y < src.Height; y++)
+        for (int x = 0; x < w; x++)
+        for (int c = 0; c < 3; c++)
+        {
+            double value = 0;
+            foreach (var tap in xWeights[x])
+                value += sourceBytes[y * sourceStride + tap.Index * 3 + c] * tap.Weight;
+            intermediate[(y * w + x) * 3 + c] = value;
+        }
+        var result = new Bitmap(w, h, PixelFormat.Format24bppRgb);
+        var outputData = result.LockBits(new Rectangle(0, 0, w, h),
+            ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+        try
+        {
+            int stride = Math.Abs(outputData.Stride);
+            var pixels = new byte[stride * h];
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            for (int c = 0; c < 3; c++)
+            {
+                double value = 0;
+                foreach (var tap in yWeights[y])
+                    value += intermediate[(tap.Index * w + x) * 3 + c] * tap.Weight;
+                pixels[y * stride + x * 3 + c] =
+                    (byte)Math.Clamp((int)Math.Round(value), 0, 255);
+            }
+            System.Runtime.InteropServices.Marshal.Copy(pixels, 0, outputData.Scan0, pixels.Length);
+        }
+        finally { result.UnlockBits(outputData); }
+        return result;
     }
 
     private static Bitmap ResizeNearest(Bitmap src, int w, int h)
