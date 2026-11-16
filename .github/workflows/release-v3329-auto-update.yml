@@ -1,6 +1,6 @@
 name: Publish V3.3.29 Independent F9 Material Hold After Main CI
 
- # V3.3.29 rollout: high-confidence clear-title two-frame proof, OCR rescue, original result safety.
+ # V3.3.29 rollout: independent F9 leather mismatch yield; inherited OCR checks retained.
 # User-approved release; game acceptance for V3.3.29 remains pending.
 # Publish from exact CI-approved main only, once. Preserve rollback and
 # SHA256-verified updater ZIP, source archive, and executable smoke test.
