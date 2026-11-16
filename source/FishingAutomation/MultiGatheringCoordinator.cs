@@ -3,7 +3,7 @@ namespace FishingAutomation;
 internal sealed record MultiGatheringRequest(
     string DisplayName,
     long TargetTotal,
-    AlteringPlan SourceRecipe);
+    AlteringPlan? SourceRecipe = null);
 
 /// <summary>
 /// Coordinates several raw-material acquisitions while deliberately reusing the
@@ -19,6 +19,8 @@ internal sealed class MultiGatheringCoordinator
     private readonly LifeSkillManagerState? _managerState;
 
     internal event Action<string>? Log;
+    // Progress is observation only. The existing GatheringAutomation owns all input/Stop.
+    internal event Action<string, long>? Progress;
 
     internal MultiGatheringCoordinator(
         IGatheringData data,
@@ -46,13 +48,16 @@ internal sealed class MultiGatheringCoordinator
             .Select(g => new MultiGatheringRequest(
                 g.Key,
                 g.Max(x => x.TargetTotal),
-                g.First().SourceRecipe with { AllowPaidButton = false }))
+                g.First().SourceRecipe is { } source
+                    ? source with { AllowPaidButton = false }
+                    : null))
             .ToArray();
 
         Log?.Invoke(
             $"[다중 채집] 계획 확정 · {grouped.Length}종 · " +
             string.Join(", ", grouped.Select(x => $"{x.DisplayName} 목표 {x.TargetTotal}")));
 
+        long completedGain = 0;
         foreach (var request in grouped)
         {
             ct.ThrowIfCancellationRequested();
@@ -84,7 +89,9 @@ internal sealed class MultiGatheringCoordinator
 
             var plan = new GatheringPlan(request.DisplayName, checked((int)remaining))
             {
-                SourceRecipe = request.SourceRecipe with { AllowPaidButton = false }
+                SourceRecipe = request.SourceRecipe is { } source
+                    ? source with { AllowPaidButton = false }
+                    : null
             };
 
             Log?.Invoke(
@@ -92,7 +99,11 @@ internal sealed class MultiGatheringCoordinator
 
             var automation = new GatheringAutomation(
                 _data, _screen, _delay, _verificationAttempts, _managerState);
-            automation.Log += text => Log?.Invoke(text);
+            automation.Log += text =>
+            {
+                Log?.Invoke(text);
+                Progress?.Invoke(request.DisplayName, checked(completedGain + automation.Gained));
+            };
             await automation.RunAsync(plan, ct);
 
             long after = _managerState is null
@@ -104,10 +115,14 @@ internal sealed class MultiGatheringCoordinator
                 throw new InvalidOperationException(
                     $"{request.DisplayName} 다중 채집 후 재고 검증 실패: {after}/{targetTotal}");
 
+            completedGain = checked(completedGain + Math.Max(0, after - fresh));
+            Progress?.Invoke(request.DisplayName, completedGain);
             Log?.Invoke(
                 $"[다중 채집] 완료 · {request.DisplayName} · {before}→{after} · 목표 {targetTotal}");
         }
 
-        Log?.Invoke("[다중 채집] 전체 원재료 확보 완료 · 호출한 가공 단계로 복귀");
+        Log?.Invoke(requests.All(x => x.SourceRecipe is null)
+            ? "[다중 채집] 전체 목표 보유량 확인 완료"
+            : "[다중 채집] 전체 원재료 확보 완료 · 호출한 가공 단계로 복귀");
     }
 }
