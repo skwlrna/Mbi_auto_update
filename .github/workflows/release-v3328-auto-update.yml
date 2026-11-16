@@ -1,6 +1,6 @@
 name: Publish V3.3.28 Clear Title and Lanczos OCR Fallback After Main CI
 
- # Bounded fix: 2026-11-15 02:28 genuine reward screen mistaken for missing combat exit icon.
+ # V3.3.28 rollout: high-confidence clear-title two-frame proof, OCR rescue, original result safety.
 # User-approved release; game acceptance for V3.3.28 remains pending.
 # Publish from exact CI-approved main only, once. Preserve rollback and
 # SHA256-verified updater ZIP, source archive, and executable smoke test.
