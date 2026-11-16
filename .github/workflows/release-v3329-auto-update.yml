@@ -178,6 +178,7 @@ jobs:
       - name: V3.3.29 clear-title fallback regression gate
         shell: pwsh
         run: |
+          if(-not (Test-Path 'tests/release/test_v3328_clear_title_fallback.py')){throw 'Retained V3.3.28 OCR regression test file missing'}
           python -m unittest discover -s tests/release -p 'test_v3328_clear_title_fallback.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Clear fallback release contract failed' }
           dotnet run --project tests/retry-flow/Regression.csproj -c Release -- --clear-only
