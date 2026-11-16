@@ -54,6 +54,17 @@ internal static class AlteringFacilityLayout
         => managedKIssuedAfterCard && previousCardClicks == 1 &&
            exactSixCardHub && !blockingModal;
 
+    // 2026-11-16 21:32: the first target card was NEVER clicked. After a
+    // verified foreign-facility Esc -> two-frame WorldHud -> guarded K, the
+    // fourth navigation pass may select the FIRST card only on a positively
+    // identified popup-free six-card hub. A prior click or merely sending K
+    // does not authorize a retry, another K, or any blind menu input.
+    internal static bool CanSelectFirstCardAfterVerifiedKReturn(
+        bool verifiedKAfterForeignFacilityExit, int previousCardClicks,
+        bool exactSixCardHub, bool blockingModal)
+        => verifiedKAfterForeignFacilityExit && previousCardClicks == 0 &&
+           exactSixCardHub && !blockingModal;
+
     internal static bool CanRetryFixedHubSelection(
         int previousCardClicks, bool previousHub, bool freshHub, bool blockingModal)
         => previousCardClicks == 1 && previousHub && freshHub && !blockingModal;
