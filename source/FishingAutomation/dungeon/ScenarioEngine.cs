@@ -1327,7 +1327,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
 
             previousResult = result.Found;
-            var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+            var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
                 clearTitleConsecutive, false, touch.Found);
             visualTitleConsecutive = title.Found
@@ -1398,7 +1398,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
             previousResult = DetectionResult.NotFound;
 
-            var (clearTitle, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
+            var (title, touch) = await ReadAbyssClearEvidenceAsync(frame, ct);
 
             clearTitleConsecutive = AbyssClearEvidencePolicy.Next(
                 clearTitleConsecutive, false, touch.Found);
