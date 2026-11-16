@@ -1,0 +1,64 @@
+"""V3.3.31: 21:32 real F9 facility switch must not dead-end before its FIRST card."""
+from pathlib import Path
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def load(path):
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+class F9FirstHubAfterKRecovery(unittest.TestCase):
+    def test_two_disjoint_recovery_branches(self):
+        layout = load("source/FishingAutomation/AlteringFacilityLayout.cs")
+        screen = load("source/FishingAutomation/dungeon/AlteringScreen.cs")
+        self.assertIn("CanRecoverFinalHubSelection(", layout)
+        self.assertIn("CanSelectFirstCardAfterVerifiedKReturn(", layout)
+        self.assertIn("verifiedKAfterForeignFacilityExit && previousCardClicks == 0", layout)
+        self.assertIn("exactSixCardHub && !blockingModal", layout)
+        self.assertIn("CanSelectFirstCardAfterVerifiedKReturn(", screen)
+        self.assertIn("CanRecoverFinalHubSelection(", screen)
+        self.assertIn("hubCardClicks == 1", screen)
+        self.assertIn("hubCardClicks == 0 && foreignFacilityEscConfirmedWorld", screen)
+
+    def test_verified_esc_to_world_and_input_provenance(self):
+        screen = load("source/FishingAutomation/dungeon/AlteringScreen.cs")
+        self.assertIn("destination == ManagedProductionSceneKind.WorldHud", screen)
+        self.assertIn("verifiedKAfterForeignFacilityExit = false", screen)
+        self.assertIn("await _ui.TapVerifiedFreshAsync(0x25, verifyManagedK, ct)", screen)
+        self.assertIn("HasFixedProcessingHubVisual(frame)", screen)
+        self.assertIn("managedScene == ManagedProductionSceneKind.ProcessingHub", screen)
+        self.assertIn("HasManagedKEntryBlockingModal(frame)", screen)
+        self.assertIn("HasBottomConfirmationModal(frame)", screen)
+        self.assertIn("await IsFacilityTravelDialogAsync(frame, ct)", screen)
+        self.assertIn("if (!existingCardRetry && !firstCardAfterVerifiedK)", screen)
+        self.assertIn("추가 K 없음", screen)
+
+    def test_incident_in_compiled_visual_regressions(self):
+        compiled = load("tests/altering-screen-integration/Program.cs")
+        self.assertIn("V3.3.31 21:32", compiled)
+        self.assertIn("CanSelectFirstCardAfterVerifiedKReturn", compiled)
+        self.assertIn("CanRecover(true, 0, true, false)", compiled)
+        self.assertIn("previousClicks == 0", compiled)
+        self.assertIn("V3.3.31 first-card recovery preserves", compiled)
+
+    def test_new_version_and_ci_release_gating(self):
+        self.assertIn('<Version>3.3.31</Version>',
+                      load("source/FishingAutomation/FishingAutomation.csproj"))
+        self.assertIn('CurrentVersion = "V3.3.31"',
+                      load("source/FishingAutomation/UpdateManager.cs"))
+        workflow = load(".github/workflows/release-v3331-auto-update.yml")
+        for required in ("V3.3.31 21:32 verified K-first-card recovery regression",
+                         "tests/altering-screen-integration/Regression.csproj",
+                         "No successful production CI for current main SHA",
+                         "MabiAuto_V3.3.31_Windows_Lite.zip.sha256",
+                         "gh release create V3.3.31",
+                         "gh release edit V3.3.31 --draft=false"):
+            self.assertIn(required, workflow)
+        self.assertIn("test_v3331_f9_verified_k_first_hub.py",
+                      load(".github/workflows/ci.yml"))
+
+
+if __name__ == "__main__":
+    unittest.main()
