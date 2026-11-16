@@ -1,4 +1,5 @@
 import unittest
+import re
 from pathlib import Path
 R=Path(__file__).resolve().parents[2]
 def read(p):return (R/p).read_text(encoding="utf-8")
@@ -18,5 +19,12 @@ class ClearFallback(unittest.TestCase):
   o=read("source/FishingAutomation/dungeon/OcrRecognizer.cs")
   for term in ("2.8, true, ct","ResizeLanczos3","Sinc","Math.Clamp",'wanted == "화면을 터치해 주세요"'): self.assertIn(term,o)
  def test_version(self):
-  self.assertIn('CurrentVersion = "V3.3.28"',read("source/FishingAutomation/UpdateManager.cs"))
-  self.assertIn("<Version>3.3.28</Version>",read("source/FishingAutomation/FishingAutomation.csproj"))
+  # This verifies the V3.3.28 behavior is retained in later releases;
+  # newer patches must not be rejected solely for advancing the app version.
+  source = read("source/FishingAutomation/UpdateManager.cs")
+  match = re.search(r'CurrentVersion = "V(\\d+)\\.(\\d+)\\.(\\d+)"', source)
+  self.assertIsNotNone(match)
+  version = tuple(map(int, match.groups()))
+  self.assertGreaterEqual(version, (3, 3, 28))
+  project = read("source/FishingAutomation/FishingAutomation.csproj")
+  self.assertIn(f"<Version>{'.'.join(map(str, version))}</Version>", project)
