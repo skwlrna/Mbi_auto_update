@@ -238,6 +238,13 @@ jobs:
           python -m unittest discover -s tests/release -p 'test_v3295_auto_update_policy.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'V3.2.95 release policy failed; do not publish' }
 
+      - name: V3.3.31 verified K reentry first-card after foreign facility regression
+        shell: pwsh
+        run: |
+          $env:PYTHONUTF8='1'
+          python -m unittest discover -s tests/release -p 'test_v3331_f9_verified_k_first_hub.py' -v
+          if($LASTEXITCODE-ne0){throw 'V3.3.31 21:32 first-card K recovery contract failed'}
+
       - name: V3.3.01 consecutive medicine reuse and replacement policy
         shell: pwsh
         run: |
