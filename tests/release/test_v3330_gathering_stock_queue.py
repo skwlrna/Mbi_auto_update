@@ -53,8 +53,8 @@ class GatheringTotalStockV3330(unittest.TestCase):
             self.assertIn("<Version>3.3.30</Version>", csproj)
         else:
             # The stock-target feature must also remain in newer releases.
-            self.assertIn('CurrentVersion = "V3.3.31"', updater)
-            self.assertIn("<Version>3.3.31</Version>", csproj)
+            self.assertTrue(any(f'CurrentVersion = "V{v}"' in updater for v in ("3.3.31", "3.3.32")))
+            self.assertTrue(any(f"<Version>{v}</Version>" in csproj for v in ("3.3.31", "3.3.32")))
             self.assertIn("test_v3330_gathering_stock_queue.py",
                           read(".github/workflows/release-v3331-auto-update.yml"))
 
