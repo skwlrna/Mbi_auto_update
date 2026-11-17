@@ -44,10 +44,18 @@ class F9FirstHubAfterKRecovery(unittest.TestCase):
         self.assertIn("V3.3.31 first-card recovery preserves", compiled)
 
     def test_new_version_and_ci_release_gating(self):
-        self.assertIn('<Version>3.3.31</Version>',
-                      load("source/FishingAutomation/FishingAutomation.csproj"))
-        self.assertIn('CurrentVersion = "V3.3.31"',
-                      load("source/FishingAutomation/UpdateManager.cs"))
+        # Historical V3.3.31 publisher stays immutable; newer versions
+        # are validated by their own version-specific release gates.
+        project = load("source/FishingAutomation/FishingAutomation.csproj")
+        updater = load("source/FishingAutomation/UpdateManager.cs")
+        if 'CurrentVersion = "V3.3.31"' in updater:
+            self.assertIn('<Version>3.3.31</Version>', project)
+        elif 'CurrentVersion = "V3.3.32"' in updater:
+            self.assertIn('<Version>3.3.32</Version>', project)
+            self.assertIn("gh release create V3.3.32",
+                          load(".github/workflows/release-v3332-auto-update.yml"))
+        else:
+            self.fail("Unrecognized current version; update historical release policy")
         workflow = load(".github/workflows/release-v3331-auto-update.yml")
         for required in ("V3.3.31 21:32 verified K-first-card recovery regression",
                          "tests/altering-screen-integration/Regression.csproj",
