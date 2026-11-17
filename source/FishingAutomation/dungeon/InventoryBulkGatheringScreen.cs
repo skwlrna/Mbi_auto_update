@@ -954,8 +954,10 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
 
                 // IsGathering can become false before the actual Stop control
                 // disappears. Never skip stop inspection based on CLI flags.
-                await StopAsync(ct);
-                await ConfirmLifeSkillStoppedAsync(displayName, ct);
+                // Only a transmitted Space counts toward the bounded stop budget.
+                // The first boundary check can legitimately defer input while CLI/UI disagree.
+                bool initialStopSent = await TryStopWithVerifiedEvidenceAsync(ct);
+                await ConfirmLifeSkillStoppedAsync(displayName, initialStopSent ? 1 : 0, ct);
                 long final = await _data.ItemCountAsync(displayName, ct);
                 if (final < targetTotal)
                     throw new InvalidOperationException(
@@ -1040,11 +1042,13 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
 
     private async Task ConfirmLifeSkillStoppedAsync(
         string displayName,
+        int sentStopInputs,
         CancellationToken ct)
     {
         int stableStopped = 0;
         int stableVisibleStop = 0;
-        bool retriedStop = false;
+        var stopWatch = Stopwatch.StartNew();
+        TimeSpan? lastSpaceAt = sentStopInputs > 0 ? stopWatch.Elapsed : null;
         for (int attempt = 1; attempt <= 18; attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -1079,20 +1083,28 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 stableVisibleStop = stopVisible && activity.MainButtonState == "Stop"
                     ? stableVisibleStop + 1 : 0;
 
-                // A missed first Space may leave the genuine Stop UI active.
-                // Retry at most ONCE after a cooldown, and only with another
-                // fresh CLI + visual verification inside StopAsync.
-                if (!retriedStop && attempt >= 6 && stableVisibleStop >= 2)
+                // The boundary check may have sent ZERO inputs. Count actual
+                // transmitted Space taps, not attempts to call StopAsync.
+                // Never send more than TWO, and require a fresh CLI+Stop
+                // confirmation and a cooldown before any additional tap.
+                bool cooldownElapsed = !lastSpaceAt.HasValue ||
+                    stopWatch.Elapsed - lastSpaceAt.Value >= TimeSpan.FromSeconds(3);
+                if (attempt >= 6 &&
+                    LifeSkillStopPolicy.CanAttemptBoundedStop(
+                        sentStopInputs, stableVisibleStop, cooldownElapsed))
                 {
                     Log?.Invoke(
-                        $"[대량 채집] 정지 UI 지속 감지 · {displayName} · 안전 재확인 후 Space 1회 재시도");
+                        $"[대량 채집] 정지 UI 지속 감지 · {displayName} · 실제 Space 전송 {sentStopInputs}/2 · 추가 입력 전 안전 재확인");
                     if (await TryStopWithVerifiedEvidenceAsync(ct))
                     {
-                        retriedStop = true;
+                        sentStopInputs++;
+                        lastSpaceAt = stopWatch.Elapsed;
                         stableVisibleStop = 0;
+                        Log?.Invoke(
+                            $"[대량 채집] 정지 Space 실제 전송 {sentStopInputs}/2 · {displayName} · 채집 종료 재검증");
                     }
-                    // A refused input is NOT a consumed retry. Continue bounded
-                    // observation until the UI/CLI agree or the timeout fails closed.
+                    // Refused inputs never consume the budget. Unknown state
+                    // is still fail-closed: do not start another material.
                 }
             }
             await Task.Delay(500, ct);
@@ -1100,7 +1112,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
 
         throw new InvalidOperationException(
             $"{displayName} 목표 수량 도달 후 실제 채집 종료가 확인되지 않았습니다. " +
-            "CLI와 Stop 화면을 모두 확인했으나 정지되지 않아 다음 재료로 넘어가지 않습니다.");
+            $"실제 Space 전송={sentStopInputs}/2. CLI와 Stop 화면을 모두 확인했으나 " +
+            "정지되지 않아 다음 재료로 넘어가지 않습니다.");
     }
 
     private async Task StartInventoryHundredQuestAsync(string displayName, CancellationToken ct)
