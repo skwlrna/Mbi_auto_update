@@ -98,7 +98,11 @@ class V3293SingleReleaseSafety(unittest.TestCase):
         self.assertIn("!isGathering && !isAutoTraveling && !isFishing && !stopButtonVisible", policy)
         self.assertIn("TryStopWithVerifiedEvidenceAsync", bulk)
         self.assertIn("if (await TryStopWithVerifiedEvidenceAsync(ct))", bulk)
-        self.assertIn("await ConfirmLifeSkillStoppedAsync(displayName, ct)", bulk)
+        self.assertTrue("await ConfirmLifeSkillStoppedAsync(displayName, ct)" in bulk or
+                        "await ConfirmLifeSkillStoppedAsync(displayName, initialStopSent ? 1 : 0, ct)" in bulk)
+        if "initialStopSent ? 1 : 0" in bulk:
+            self.assertIn("CanAttemptBoundedStop", policy)
+            self.assertIn("sentStopInputs++", bulk)
         self.assertIn("2026-11-05 576/576", gather_test)
         self.assertIn("post-Space policy does not trust stale MainButtonState", stability)
         publisher = PUBLISHER.read_text(encoding="utf-8")
