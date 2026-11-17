@@ -11,6 +11,13 @@ internal enum LifeSkillStopInputDecision
 
 internal static class LifeSkillStopPolicy
 {
+    // A refused/no-input boundary probe does not consume a retry.
+    // Exactly two actually transmitted Space taps are allowed in one stop fence.
+    internal static bool CanAttemptBoundedStop(
+        int sentStopInputs, int stableVerifiedStopFrames, bool cooldownElapsed)
+        => sentStopInputs is >= 0 and < 2 &&
+           stableVerifiedStopFrames >= 2 && cooldownElapsed;
+
     internal static LifeSkillStopInputDecision DecideStopInput(
         bool stopButtonVisible, string? mainButtonState)
         => !stopButtonVisible

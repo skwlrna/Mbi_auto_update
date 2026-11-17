@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.33",
+  "purpose": "verified_gathering_stop_actual_space_budget",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-18 최근 다중가공 쌀 채집 정지 오류 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}

@@ -385,6 +385,16 @@ Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, true, false, false),
     "post-Space completion rejects active travel");
 Check(!LifeSkillStopPolicy.IsStoppedAfterSpace(false, false, true, false),
     "post-Space completion rejects active fishing");
+Check(LifeSkillStopPolicy.CanAttemptBoundedStop(0, 2, true),
+    "2026-11-18 deferred initial Space does not consume the first actual stop input");
+Check(LifeSkillStopPolicy.CanAttemptBoundedStop(1, 2, true),
+    "2026-11-18 first actual Space may be retried once after verified persistent Stop");
+Check(!LifeSkillStopPolicy.CanAttemptBoundedStop(2, 2, true),
+    "2026-11-18 never send a third stop Space");
+Check(!LifeSkillStopPolicy.CanAttemptBoundedStop(1, 1, true),
+    "2026-11-18 one Stop observation is not enough for retry");
+Check(!LifeSkillStopPolicy.CanAttemptBoundedStop(1, 2, false),
+    "2026-11-18 honor cooldown before a second actual stop Space");
 
 var revivingField = new GatheringActivity(
     false, true, false, false, false, false, false,
