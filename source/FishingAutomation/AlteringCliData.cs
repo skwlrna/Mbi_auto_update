@@ -5,7 +5,45 @@ internal sealed class AlteringCliData : IAlteringData
     private readonly MabinogiMobileCli _cli;
     internal AlteringCliData(MabinogiMobileCli cli) => _cli = cli;
     public async Task<IReadOnlyList<AlteringRecipe>> RecipesAsync(CancellationToken ct)
-        => AlteringQueries.ParseRecipes(await _cli.GetAlterableItemsAsync(ct));
+    {
+        var recipes = AlteringQueries.ParseRecipes(await _cli.GetAlterableItemsAsync(ct));
+        var ingredientNames = recipes
+            .Where(NeedsLeatherStockCheck)
+            .SelectMany(recipe => recipe.MissingIngredients)
+            .Select(ingredient => ingredient.DisplayName)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (ingredientNames.Length == 0)
+            return recipes;
+
+        // Crafting consumes stock from the bag and both warehouses.
+        // Only reconcile an explicit material veto for the leather facility.
+        var stock = await ItemCountsAsync(ingredientNames, ct);
+        return recipes.Select(recipe =>
+        {
+            if (!NeedsLeatherStockCheck(recipe))
+                return recipe;
+
+            var missing = recipe.MissingIngredients
+                .Select(ingredient => ingredient with { Owned = stock[ingredient.DisplayName] })
+                .Where(ingredient => ingredient.Owned < ingredient.Required)
+                .ToArray();
+            return recipe with
+            {
+                MissingIngredients = missing,
+                Alterable = missing.Length == 0,
+                Reason = missing.Length == 0 ? null : recipe.Reason
+            };
+        }).ToArray();
+    }
+
+    private static bool NeedsLeatherStockCheck(AlteringRecipe recipe)
+        => !recipe.Alterable &&
+           recipe.Reason == "not_enough_ingredient" &&
+           recipe.MissingIngredients.Count > 0 &&
+           recipe.MissingIngredients.All(ingredient => ingredient.Required > 0) &&
+           AlteringFacilityResolver.Resolve(recipe) == "가죽 가공 시설";
+
     public async Task<IReadOnlyList<AlteringWork>> WorksAsync(CancellationToken ct)
         => AlteringQueries.ParseWorks(await _cli.GetAlteringWorksAsync(ct));
     public async Task<long> ItemCountAsync(string name, CancellationToken ct)
