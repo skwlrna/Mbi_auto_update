@@ -774,30 +774,85 @@ internal sealed class AlteringAutomation
                         !selected[plan.RecipeOrdinal - 1].Alterable)
                     {
                         var recipe = selected.ElementAtOrDefault(plan.RecipeOrdinal - 1);
-                        // Recipe MissingIngredients is a snapshot, not proof of
-                        // completely empty inventory. Reconcile its Owned with
-                        // fresh get_items BEFORE persisting a terminal shortage.
+                        // A recipe's MissingIngredients/Owned snapshot can lag behind
+                        // get_items. Fresh sufficient raw stock is not a shortage.
+                        // Keep the current recipe's Alterable=false guard: the
+                        // filtered evidence can ONLY start a known child producer,
+                        // never authorize a registration click.
                         if (recipe is not null && plan.FacilityName == "가죽 가공 시설")
                         {
+                            var verifiedSufficientRaw = new HashSet<string>(StringComparer.Ordinal);
+                            (AlteringIngredient Raw, long Live)? firstSufficientRaw = null;
                             foreach (var raw in recipe.MissingIngredients.Where(x =>
                                 LeatherRawMaterialPolicy.IsExternalRaw(x.DisplayName)))
                             {
                                 long live = await _data.ItemCountAsync(raw.DisplayName, ct);
                                 if (live < 0)
                                     throw new InvalidDataException("가죽 원재료 음수 재고는 신뢰하지 않습니다.");
-                                if (LeatherRawMaterialPolicy.HasInventoryConflict(raw, live) ||
-                                    live >= raw.Required)
+                                if (live >= raw.Required)
+                                {
+                                    verifiedSufficientRaw.Add(raw.DisplayName);
+                                    firstSufficientRaw ??= (raw, live);
+                                    Log?.Invoke($"[자동 가공][원재료 충분 재확인] {plan.DisplayName} · " +
+                                        $"{raw.DisplayName} · 제법 Owned={raw.Owned}/{raw.Required} · " +
+                                        $"get_items={live} · 부족 목록에서만 제외 · 등록 승인 아님");
+                                    continue;
+                                }
+                                if (LeatherRawMaterialPolicy.HasInventoryConflict(raw, live))
                                 {
                                     Log?.Invoke($"[자동 가공][재료 수량 불일치] {plan.DisplayName} · " +
                                         $"{raw.DisplayName} · 제법 Owned={raw.Owned}/{raw.Required} · " +
-                                        $"get_items={live} · 원재료 소진 확정 금지 · 신규 입력 보류");
+                                        $"get_items={live} · 부족 확정 금지 · 신규 입력 보류");
                                     if (await YieldManagedMaterialMismatchAsync(
                                         plan, yieldAtBatchBoundary, ct))
                                         return AlteringRunResult.BatchQueued;
                                     throw await IsolateEmptyMaterialHoldAsync(plan,
                                         new MaterialSupplyHoldException(new(
-                                        raw.DisplayName, raw.Required, live,
-                                        "leather_recipe_inventory_mismatch")), ct);
+                                            raw.DisplayName, raw.Required, live,
+                                            "leather_recipe_inventory_mismatch")), ct);
+                                }
+                            }
+                            if (verifiedSufficientRaw.Count > 0)
+                            {
+                                // Pass only genuine missing craftable children to
+                                // the existing dependency resolver. Never give a
+                                // fake tannin shortage priority over missing 가죽.
+                                recipe = recipe with
+                                {
+                                    MissingIngredients = recipe.MissingIngredients
+                                        .Where(x => !verifiedSufficientRaw.Contains(x.DisplayName))
+                                        .ToArray()
+                                };
+                                if (recipe.MissingIngredients.Count == 0)
+                                {
+                                    // Both reads are free and fresh. Even with enough
+                                    // stock, a still-blocked recipe is NOT clickable.
+                                    var latest = await _data.RecipesAsync(ct);
+                                    var same = latest.Where(x =>
+                                        x.DisplayName == plan.DisplayName).ToArray();
+                                    if (same.Length != plan.RecipeCount ||
+                                        same.ElementAtOrDefault(plan.RecipeOrdinal - 1)?.ProducedPerWork != plan.ProducedPerWork ||
+                                        AlteringFacilityResolver.Resolve(same[plan.RecipeOrdinal - 1]) != plan.FacilityName)
+                                        throw new InvalidOperationException(
+                                            "원재료 충분 재조회 중 제법 동일성 불일치 · 추가 입력 없이 정지");
+                                    if (same[plan.RecipeOrdinal - 1].Alterable)
+                                    {
+                                        Log?.Invoke($"[자동 가공] {plan.DisplayName} 원재료 충분 · " +
+                                            "최신 제법 제작 가능 확인 · 등록 직전 정상 검증 재실행");
+                                        continue;
+                                    }
+                                    var conflict = firstSufficientRaw!.Value;
+                                    Log?.Invoke($"[자동 가공][원재료 충분·제법 불가] {plan.DisplayName} · " +
+                                        $"{conflict.Raw.DisplayName} Owned={conflict.Raw.Owned}/{conflict.Raw.Required} " +
+                                        $"get_items={conflict.Live} · Alterable=False · " +
+                                        $"Reason={same[plan.RecipeOrdinal - 1].Reason ?? "unknown"} · 강제 등록 금지");
+                                    if (await YieldManagedMaterialMismatchAsync(
+                                        plan, yieldAtBatchBoundary, ct))
+                                        return AlteringRunResult.BatchQueued;
+                                    throw await IsolateEmptyMaterialHoldAsync(plan,
+                                        new MaterialSupplyHoldException(new(
+                                            conflict.Raw.DisplayName, conflict.Raw.Required,
+                                            conflict.Live, "leather_recipe_inventory_mismatch")), ct);
                                 }
                             }
                         }
