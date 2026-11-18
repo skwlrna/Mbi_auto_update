@@ -376,7 +376,8 @@ public sealed partial class MainForm
                     var matching = refreshedRecipes.Where(x =>
                         string.Equals(x.DisplayName, plan.DisplayName,
                             StringComparison.Ordinal)).ToArray();
-                    if (matching.Length <= plan.RecipeOrdinal - 1 ||
+                    if (matching.Length != plan.RecipeCount ||
+                        matching.Length < plan.RecipeOrdinal ||
                         matching[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork ||
                         AlteringFacilityResolver.Resolve(
                             matching[plan.RecipeOrdinal - 1]) != plan.FacilityName)
