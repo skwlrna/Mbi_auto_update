@@ -3072,6 +3072,32 @@ Check(leatherRouteReady is not null &&
       leatherRouteReady.Category == "leather_recipe_inventory_mismatch" &&
       leatherRouteReady.Observed == 10,
     "stale recipe Owned=0 vs get_items=10 must HOLD, not mislabel as raw exhaustion");
+var sufficientTanninAndMissingHide = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient",
+    [new("타닌 가루", 4, 0), new("가죽", 3, 0)], "가죽 가공 시설");
+var missingHideProducer = new AlteringRecipe("가죽", false, 3,
+    "not_enough_ingredient", [new("생가죽", 10, 0)], "가죽 가공 시설");
+var tanninDeferredHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, sufficientTanninAndMissingHide,
+    [sufficientTanninAndMissingHide, missingHideProducer],
+    Array.Empty<GatherableItem>(),
+    (name, ct) => Task.FromResult(name == "타닌 가루" ? 1275L : 0L),
+    CancellationToken.None);
+Check(tanninDeferredHold is not null &&
+      tanninDeferredHold.Item == "생가죽" &&
+      tanninDeferredHold.Category == "external_leather_raw_missing",
+    "2026-11-18 sufficient tannin 1275/4 cannot mask a real missing hide");
+var tanninOnlyRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient", [new("타닌 가루", 4, 0)], "가죽 가공 시설");
+var tanninOnlyHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, tanninOnlyRecipe, [tanninOnlyRecipe],
+    Array.Empty<GatherableItem>(), (name, ct) => Task.FromResult(1275L),
+    CancellationToken.None);
+Check(tanninOnlyHold is not null &&
+      tanninOnlyHold.Category == "leather_recipe_inventory_mismatch" &&
+      tanninOnlyHold.Observed == 1275,
+    "2026-11-18 sufficient tannin without Alterable proof stays safe HOLD");
+
 var partialHideRecipe = new AlteringRecipe("가죽", false, 3,
     "not_enough_ingredient", [new("생가죽", 10, 6)], "가죽 가공 시설");
 var partialHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
