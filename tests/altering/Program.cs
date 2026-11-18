@@ -3067,11 +3067,8 @@ var leatherRouteReady = await MaterialSupplyRoutePolicy.FindHoldAsync(
     Array.Empty<GatherableItem>(),
     (name, ct) => Task.FromResult(name == "상급 생가죽" ? 10L : 0L),
     CancellationToken.None);
-Check(leatherRouteReady is not null &&
-      leatherRouteReady.Item == "상급 생가죽" &&
-      leatherRouteReady.Category == "leather_recipe_inventory_mismatch" &&
-      leatherRouteReady.Observed == 10,
-    "stale recipe Owned=0 vs get_items=10 must HOLD, not mislabel as raw exhaustion");
+Check(leatherRouteReady is null,
+    "2026-11-18 sufficient live raw stock can pass read-only leather route despite stale recipe Owned; no click authorization");
 var partialHideRecipe = new AlteringRecipe("가죽", false, 3,
     "not_enough_ingredient", [new("생가죽", 10, 6)], "가죽 가공 시설");
 var partialHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
