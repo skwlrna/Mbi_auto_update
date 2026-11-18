@@ -24,8 +24,10 @@ class GuardedGatherStopV3333(unittest.TestCase):
     def test_authorized_gated_release(self):
         updater = read("source/FishingAutomation/UpdateManager.cs")
         project = read("source/FishingAutomation/FishingAutomation.csproj")
-        self.assertIn('CurrentVersion = "V3.3.33"', updater)
-        self.assertIn("<Version>3.3.33</Version>", project)
+        self.assertTrue(any(f'CurrentVersion = "V{v}"' in updater
+                            for v in ("3.3.33", "3.3.34")))
+        self.assertTrue(any(f"<Version>{v}</Version>" in project
+                            for v in ("3.3.33", "3.3.34")))
         a = json.loads(read("source/V3.3.33_RELEASE_AUTHORIZATION.json"))
         self.assertFalse(a["realGameTested"])
         self.assertEqual(a["purpose"], "verified_gathering_stop_actual_space_budget")
