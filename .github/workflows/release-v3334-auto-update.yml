@@ -2,7 +2,7 @@ name: Publish V3.3.34 Leather Tannin Readiness After Main CI
 
  # V3.3.34 rollout: fix 21:32 managed F9 verified K first-card recovery; preserve safe stops.
 # User-approved release; game acceptance for V3.3.34 remains pending.
-# Retained V3.3.30 gathering policy now accepts V3.3.34; rerun gated publication.
+# V3.3.34 inherited V3.3.33 gathering test restored; rerun publisher on exact CI-approved main.
 # Publish from exact CI-approved main only, once. Preserve rollback and
 # SHA256-verified updater ZIP, source archive, and executable smoke test.
 on:
