@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/release-v3335-auto-update.yml'
+      - 'source/V3.3.35_RELEASE_AUTHORIZATION.json'
   workflow_dispatch:
 
 permissions:
