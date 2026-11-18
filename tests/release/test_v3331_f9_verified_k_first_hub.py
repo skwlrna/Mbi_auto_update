@@ -53,7 +53,7 @@ class F9FirstHubAfterKRecovery(unittest.TestCase):
         elif 'CurrentVersion = "V3.3.35"' in updater:
             self.assertIn('<Version>3.3.35</Version>', project)
             self.assertIn("gh release create V3.3.35",
-                          load(".github/workflows/release-v3334-auto-update.yml"))
+                          load(".github/workflows/release-v3335-auto-update.yml"))
         elif 'CurrentVersion = "V3.3.34"' in updater:
             self.assertIn('<Version>3.3.34</Version>', project)
             self.assertIn("gh release create V3.3.34",
