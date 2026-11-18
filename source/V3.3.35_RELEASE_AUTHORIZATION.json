@@ -3,7 +3,7 @@
   "version": "V3.3.35",
   "purpose": "leather_tannin_fresh_recipe_readiness_reconciliation",
   "approvedBy": "user_direct_request_in_conversation",
-  "request": "가방과 창고의 합산 재고를 가죽 가공에 반영하고 수정본을 배포해",
+  "request": "수정하고 배포해",
   "realGameTested": false,
   "rollbackProvided": true,
   "offlineRegressionRequired": true,
