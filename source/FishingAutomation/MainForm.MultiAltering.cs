@@ -356,12 +356,50 @@ public sealed partial class MainForm
                 var inspectionPlan = leather
                     ? plan with { TargetQuantity = plan.ProducedPerWork }
                     : plan;
-                return await MaterialSupplyRoutePolicy.FindHoldAsync(
+                var hold = await MaterialSupplyRoutePolicy.FindHoldAsync(
                     inspectionPlan, evidence, liveRecipes, catalog,
                     (name, token) => managerState.ReadWithRecoveryAsync(
                         LifeSkillStage.Altering, "food-route-inventory",
                         inner => rawAlteringData.ItemCountAsync(name, inner), token),
                     ct);
+                if (leather &&
+                    hold is { Category: "leather_recipe_inventory_mismatch" } &&
+                    hold.Observed >= hold.Required)
+                {
+                    // Fresh get_items is sufficient, but the recipe snapshot
+                    // still reports insufficient Owned. Read the SAME selected
+                    // recipe once again before persisting a long-running HOLD.
+                    // Only Alterable=true can lift this veto; stock alone cannot.
+                    var refreshedRecipes = await managerState.ReadWithRecoveryAsync(
+                        LifeSkillStage.Altering, "leather-sufficient-stock-recipe-recheck",
+                        rawAlteringData.RecipesAsync, ct);
+                    var matching = refreshedRecipes.Where(x =>
+                        string.Equals(x.DisplayName, plan.DisplayName,
+                            StringComparison.Ordinal)).ToArray();
+                    if (matching.Length != plan.RecipeCount ||
+                        matching.Length < plan.RecipeOrdinal ||
+                        matching[plan.RecipeOrdinal - 1].ProducedPerWork != plan.ProducedPerWork ||
+                        AlteringFacilityResolver.Resolve(
+                            matching[plan.RecipeOrdinal - 1]) != plan.FacilityName)
+                        throw new InvalidOperationException(
+                            "가죽 재고 충분 재검증에서 제법 동일성 확인 실패 · 안전 보류");
+                    var latest = matching[plan.RecipeOrdinal - 1];
+                    if (latest.Alterable)
+                    {
+                        _log.Write($"[다중가공][가죽 재고 불일치 복구] {plan.DisplayName} · " +
+                            $"{hold.Item} 실제 {hold.Observed}/{hold.Required} 충분 · " +
+                            "최신 제법 Alterable=true · 기존 등록/현장 검증으로 복귀");
+                        return null;
+                    }
+                    var shown = latest.MissingIngredients.FirstOrDefault(x =>
+                        string.Equals(x.DisplayName, hold.Item, StringComparison.Ordinal));
+                    _log.Write($"[다중가공][가죽 제법 상태 불일치] {plan.DisplayName} · " +
+                        $"{hold.Item} get_items={hold.Observed}/{hold.Required} · " +
+                        $"제법 Owned={(shown is null ? "미표시" : shown.Owned.ToString())} · " +
+                        $"Alterable={latest.Alterable} · Reason={latest.Reason ?? "unknown"} · " +
+                        "제작 가능 판정 없음 · 입력 없이 해당 시설 보류");
+                }
+                return hold;
             }
 
             // Prepare provable raw shortages across ALL selected recipes before

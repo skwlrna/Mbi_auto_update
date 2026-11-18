@@ -770,6 +770,61 @@ internal sealed class AlteringAutomation
                             plan.DisplayName, recipes.Select(x => x.DisplayName))
                     };
 
+                    // 2026-11-18 tannin incident: live inventory can be
+                    // sufficient while a prior recipe Owned snapshot is stale.
+                    // Probe ONE more fresh recipe before committing to a HOLD;
+                    // do not override an unchanged Alterable=false.
+                    if (plan.FacilityName == "가죽 가공 시설" &&
+                        selected.Length >= plan.RecipeOrdinal &&
+                        !selected[plan.RecipeOrdinal - 1].Alterable)
+                    {
+                        var blocked = selected[plan.RecipeOrdinal - 1];
+                        bool hasSufficientRawConflict = false;
+                        foreach (var raw in blocked.MissingIngredients.Where(x =>
+                            LeatherRawMaterialPolicy.IsExternalRaw(x.DisplayName)))
+                        {
+                            long live = await _data.ItemCountAsync(raw.DisplayName, ct);
+                            if (live < 0)
+                                throw new InvalidDataException("가죽 원재료 음수 재고는 신뢰하지 않습니다.");
+                            if (live >= raw.Required &&
+                                LeatherRawMaterialPolicy.HasInventoryConflict(raw, live))
+                            {
+                                hasSufficientRawConflict = true;
+                                Log?.Invoke($"[자동 가공][재고 충분 재검증] {plan.DisplayName} · " +
+                                    $"{raw.DisplayName} 제법 Owned={raw.Owned}/{raw.Required} · " +
+                                    $"get_items={live} · 새 제법 요청");
+                            }
+                        }
+                        if (hasSufficientRawConflict)
+                        {
+                            var recheckedRecipes = await _data.RecipesAsync(ct);
+                            var rechecked = recheckedRecipes.Where(x =>
+                                string.Equals(x.DisplayName, plan.DisplayName,
+                                    StringComparison.Ordinal)).ToArray();
+                            if (rechecked.Length != plan.RecipeCount ||
+                                rechecked.ElementAtOrDefault(plan.RecipeOrdinal - 1)?.ProducedPerWork !=
+                                    plan.ProducedPerWork ||
+                                AlteringFacilityResolver.Resolve(
+                                    rechecked[plan.RecipeOrdinal - 1]) != plan.FacilityName)
+                                throw new InvalidOperationException(
+                                    "가죽 제법 재확인 중 제법 동일성이 불확실합니다 · 신규 입력 금지");
+                            if (rechecked[plan.RecipeOrdinal - 1].Alterable)
+                            {
+                                recipes = recheckedRecipes;
+                                selected = rechecked;
+                                Log?.Invoke("[자동 가공] 가죽 재고 불일치 해소 · " +
+                                    "최신 제법 Alterable=true · 기존 등록 전 화면/작업 재확인");
+                            }
+                            else
+                            {
+                                Log?.Invoke($"[자동 가공][제법 보류 유지] {plan.DisplayName} · " +
+                                    $"최신 Alterable=false · Reason=" +
+                                    $"{rechecked[plan.RecipeOrdinal - 1].Reason ?? "unknown"} · " +
+                                    "실재고 충분만으로 제작 등록하지 않음");
+                            }
+                        }
+                    }
+
                     if (selected.Length < plan.RecipeOrdinal ||
                         !selected[plan.RecipeOrdinal - 1].Alterable)
                     {

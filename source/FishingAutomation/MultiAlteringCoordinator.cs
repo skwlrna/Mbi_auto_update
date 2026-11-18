@@ -157,6 +157,10 @@ internal static class MaterialSupplyRoutePolicy
         ArgumentNullException.ThrowIfNull(gathering);
         ArgumentNullException.ThrowIfNull(readCount);
         var path = new HashSet<string>(StringComparer.Ordinal);
+        // A recipe Owned conflict for an already sufficient external raw input
+        // is NOT allowed to hide a different genuinely missing ingredient.
+        // Defer its evidence until all recursive ingredients are inspected.
+        MaterialSupplyHold? sufficientRawConflict = null;
         async Task<MaterialSupplyHold?> InspectAsync(
             string item, long required, int depth, long? recipeOwned = null)
         {
@@ -172,7 +176,12 @@ internal static class MaterialSupplyRoutePolicy
             if (recipeOwned.HasValue &&
                 LeatherRawMaterialPolicy.IsExternalRaw(item) &&
                 current != recipeOwned.Value)
-                return new(item, required, current, "leather_recipe_inventory_mismatch");
+            {
+                if (current < required)
+                    return new(item, required, current, "leather_recipe_inventory_mismatch");
+                sufficientRawConflict ??= new(
+                    item, required, current, "leather_recipe_inventory_mismatch");
+            }
             if (current >= required) return null;
             // Raw hides (including higher-tier hides) and tannin must be
             // supplied by the player. They are not automatic gather/craft inputs.
@@ -233,7 +242,9 @@ internal static class MaterialSupplyRoutePolicy
             var hold = await InspectAsync(ingredient.DisplayName, needed, 0, ingredient.Owned);
             if (hold is not null) return hold;
         }
-        return null;
+        // Still fail-closed for an unverified recipe that calls sufficient
+        // tannin/hides missing. This never authorizes clicking a blocked recipe.
+        return sufficientRawConflict;
     }
 }
 

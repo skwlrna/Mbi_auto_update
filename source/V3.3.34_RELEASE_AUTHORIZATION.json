@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "V3.3.34",
+  "purpose": "leather_tannin_fresh_recipe_readiness_reconciliation",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "2026-11-18 타닌 가루 실제 재고 1275/4 제법 Owned 불일치 장기 보류 문제 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true
+}
