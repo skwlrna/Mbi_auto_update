@@ -3069,6 +3069,44 @@ var leatherRouteReady = await MaterialSupplyRoutePolicy.FindHoldAsync(
     CancellationToken.None);
 Check(leatherRouteReady is null,
     "2026-11-18 sufficient live raw stock can pass read-only leather route despite stale recipe Owned; no click authorization");
+// 2026-11-18 live incident: tannin 1275/4 is enough despite
+// get_alterable_items MissingIngredients reporting Owned=0. It must not
+// starve the craftable leather dependency or authorize an unsafe click.
+var tanninStaleRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient", [new("타닌 가루", 4, 0)], "가죽 가공 시설");
+var tanninStaleSufficient = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, tanninStaleRecipe, [tanninStaleRecipe],
+    Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(1275L), CancellationToken.None);
+Check(tanninStaleSufficient is null && !tanninStaleRecipe.Alterable,
+    "2026-11-18 tannin 1275/4 never blocks read-only route, but Alterable=false still forbids registration");
+var tanninAndLeatherRecipe = new AlteringRecipe("가죽+", false, 3,
+    "not_enough_ingredient",
+    [new("타닌 가루", 4, 0), new("가죽", 3, 0)], "가죽 가공 시설");
+var tanninWithCraftableLeather = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, tanninAndLeatherRecipe,
+    [tanninAndLeatherRecipe, new AlteringRecipe("가죽", false, 3,
+        "not_enough_ingredient", [new("생가죽", 10, 0)], "가죽 가공 시설")],
+    Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(name switch
+    {
+        "타닌 가루" => 1275L,
+        "생가죽" => 10L,
+        _ => 0L
+    }), CancellationToken.None);
+Check(tanninWithCraftableLeather is null,
+    "2026-11-18 sufficient tannin does not hide valid recursive leather production");
+var tanninWithMissingHide = await MaterialSupplyRoutePolicy.FindHoldAsync(
+    leatherRoutePlan, tanninAndLeatherRecipe,
+    [tanninAndLeatherRecipe, new AlteringRecipe("가죽", false, 3,
+        "not_enough_ingredient", [new("생가죽", 10, 0)], "가죽 가공 시설")],
+    Array.Empty<GatherableItem>(),
+    (name, token) => Task.FromResult(name == "타닌 가루" ? 1275L : 0L),
+    CancellationToken.None);
+Check(tanninWithMissingHide?.Item == "생가죽" &&
+      tanninWithMissingHide.Category == "external_leather_raw_missing",
+    "2026-11-18 sufficient tannin never masks genuine missing raw leather");
+
 var partialHideRecipe = new AlteringRecipe("가죽", false, 3,
     "not_enough_ingredient", [new("생가죽", 10, 6)], "가죽 가공 시설");
 var partialHideHold = await MaterialSupplyRoutePolicy.FindHoldAsync(
