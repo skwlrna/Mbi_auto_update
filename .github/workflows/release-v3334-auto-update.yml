@@ -85,7 +85,7 @@ jobs:
           }
           dotnet run --project tests/gathering/Regression.csproj -c Release
           if($LASTEXITCODE-ne0){throw 'Guarded life-skill stop regression failed'}
-          python -m unittest discover -s tests/release -p 'test_v3334_guarded_gather_stop.py' -v
+          python -m unittest discover -s tests/release -p 'test_v3333_guarded_gather_stop.py' -v
           if($LASTEXITCODE-ne0){throw 'V3.3.34 00:04:32 incident contract failed'}
 
       - name: V3.3.34 three-work leather mismatch independent F9 regression
