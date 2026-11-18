@@ -169,11 +169,15 @@ internal static class MaterialSupplyRoutePolicy
             // because of a stale snapshot, name/stack parsing, or in-flight
             // inventory changes. Do not turn that uncertainty into a durable
             // claim that raw hides or tannin have run out.
+            // Fresh inventory already covers this input. A stale recipe Owned
+            // value may not veto a confirmed sufficient raw-material stock.
+            // This is read-only route classification, NOT registration authority:
+            // AlteringAutomation must still see Alterable=true before any click.
+            if (current >= required) return null;
             if (recipeOwned.HasValue &&
                 LeatherRawMaterialPolicy.IsExternalRaw(item) &&
                 current != recipeOwned.Value)
                 return new(item, required, current, "leather_recipe_inventory_mismatch");
-            if (current >= required) return null;
             // Raw hides (including higher-tier hides) and tannin must be
             // supplied by the player. They are not automatic gather/craft inputs.
             if (LeatherRawMaterialPolicy.IsExternalRaw(item))
