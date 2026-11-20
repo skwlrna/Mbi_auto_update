@@ -349,13 +349,11 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 return step;
             }
 
-            // Retry recovery is allowed only after exact entry-state checks failed.
-            // Use the strict OCR-only target added in V0.1.50; never the loose hybrid retry here.
-            var retry = await _detector.DetectAsync("retry_ocr_strict", frame, ct);
+            var retry = await FindDungeonResultRetryAsync(frame, ct);
             if (retry.Found)
             {
                 int step = FindDungeonStepIndex("retry");
-                Log?.Invoke($"[던전 자동복구] 정확 OCR 다시 하기 확인 -> {step + 1}단계 재개 OCR={retry.ReadText} bounds={retry.Bounds}");
+                Log?.Invoke($"[던전 자동복구] 결과 화면과 다시 하기 버튼 확인 -> {step + 1}단계 재개 @ {retry.Bounds}");
                 return step;
             }
 
@@ -695,13 +693,22 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         catch { }
     }
 
+    private async Task<DetectionResult> FindDungeonResultRetryAsync(Bitmap frame, CancellationToken ct)
+    {
+        if (!AbyssRewardVisualPolicy.TryDetect(frame, out var retryArea, out _))
+            return DetectionResult.NotFound;
+
+        var retry = await _detector.DetectAsync("retry", frame, ct);
+        return retry.Found && retryArea.Contains(retry.Center) ? retry : DetectionResult.NotFound;
+    }
+
     // DUNGEON_CURRENT_CHALLENGE_DIRECT_ENTRY_V9
     // Current-screen rule:
     // 1) exact '도전' + exact right-bottom '입장하기' means the screen is already ready;
     //    do not require a prior '선택됨' observation.
     // 2) exact '선택됨' is clicked only inside the dungeon-card safe region to change it to '도전'.
     // 3) entry itself is still performed later by Space only; no mouse click is used for '입장하기'.
-    // 4) strict retry OCR is checked only after every entry-state signal is absent.
+    // 4) Reward layout and retry button are checked after entry signals are absent.
     private async Task VerifyChallengeBeforeEntryAsync(CancellationToken ct)
     {
         const int RequiredReadyFrames = 2;
@@ -810,41 +817,9 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 continue;
             }
 
-            // Normal result/retry fast path. Exact OCR only, and only after all entry-state
-            // signals above are absent. This prevents the party-search / entry area from
-            // ever being treated as a retry control.
-            var normalRetry = await _detector.DetectAsync("retry_ocr_strict", frame, ct);
+            var normalRetry = await FindDungeonResultRetryAsync(frame, ct);
             if (normalRetry.Found)
             {
-                Log?.Invoke($"[던전 결과] 정확 OCR 다시 하기 감지 1/2 OCR={normalRetry.ReadText} bounds={normalRetry.Bounds}");
-                await Task.Delay(220, ct);
-
-                using var retryConfirmFrame = await CaptureGameWindowAsync(ct);
-
-                var guardSelected = await _detector.DetectAsync("selected_ocr_strict", retryConfirmFrame, ct);
-                var guardChallenge = await _detector.DetectAsync("challenge_confirm_strict", retryConfirmFrame, ct);
-                var guardEnter = await _detector.DetectAsync("enter_bottom", retryConfirmFrame, ct);
-                if (guardSelected.Found || guardChallenge.Found || guardEnter.Found)
-                {
-                    Log?.Invoke(
-                        $"[던전 결과] 입장 화면 신호 재확인 -> 다시 하기 클릭 금지 " +
-                        $"selected={(guardSelected.Found ? 1 : 0)} " +
-                        $"challenge={(guardChallenge.Found ? 1 : 0)} " +
-                        $"enter={(guardEnter.Found ? 1 : 0)}");
-                    await Task.Delay(ConfirmIntervalMs, ct);
-                    continue;
-                }
-
-                var retryConfirm = await _detector.DetectAsync("retry_ocr_strict", retryConfirmFrame, ct);
-                if (!retryConfirm.Found)
-                {
-                    Log?.Invoke("[던전 결과] 정확 OCR 다시 하기 2/2 확인 실패 -> 클릭 안 함");
-                    await Task.Delay(ConfirmIntervalMs, ct);
-                    continue;
-                }
-
-                Log?.Invoke($"[던전 결과] 정확 OCR 다시 하기 2/2 연속 확인 OCR={retryConfirm.ReadText} bounds={retryConfirm.Bounds}");
-
                 if (normalResultRetryClicks >= 2)
                 {
                     Log?.Invoke("[던전 결과] 정상 다시 하기 클릭 2회 소진 -> 기존 타임아웃/자동복구에 맡김");
@@ -858,9 +833,12 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                     (await _detector.DetectAsync("challenge_confirm_strict", settledRetryFrame, ct)).Found ||
                     (await _detector.DetectAsync("enter_bottom", settledRetryFrame, ct)).Found)
                     continue;
-                var settledRetry = await _detector.DetectAsync("retry_ocr_strict", settledRetryFrame, ct);
-                if (!settledRetry.Found || !settledRetry.Bounds.IntersectsWith(retryConfirm.Bounds)) continue;
-                retryConfirm = settledRetry;
+                var retryConfirm = await FindDungeonResultRetryAsync(settledRetryFrame, ct);
+                if (!retryConfirm.Found || !retryConfirm.Bounds.IntersectsWith(normalRetry.Bounds))
+                {
+                    Log?.Invoke("[던전 결과] 다시 하기 위치 또는 결과 화면 재확인 실패");
+                    continue;
+                }
                 normalResultRetryClicks++;
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                 NativeMethods.SetForegroundWindow(_hwnd);
@@ -869,8 +847,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 await Task.Delay(Math.Max(900, _settings.ClickSettleMs), ct);
 
                 using var afterRetryFrame = await CaptureGameWindowAsync(ct);
-                var stillRetry = await _detector.DetectAsync("retry_ocr_strict", afterRetryFrame, ct);
-                if (!stillRetry.Found)
+                if (!AbyssRewardVisualPolicy.TryDetect(afterRetryFrame, out _, out _))
                 {
                     timer.Restart();
                     lastSelectedClick = 0;
@@ -1065,26 +1042,46 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                     if (step.Target.Equals("retry", StringComparison.OrdinalIgnoreCase))
                     {
+                        if (!AbyssRewardVisualPolicy.TryDetect(frame, out var retryArea, out var initialProof) ||
+                            !retryArea.Contains(found.Center))
+                        {
+                            Log?.Invoke($"[던전 결과] 결과 화면 또는 가운데 버튼 미확인: {initialProof}");
+                            await Task.Delay(_settings.PollIntervalMs, ct);
+                            continue;
+                        }
+
                         await RetryClickDelay.WaitAsync(ct);
                         using var settledRetryFrame = await CaptureGameWindowAsync(ct);
-                        var settledRetry = await _detector.DetectAsync("retry_ocr_strict", settledRetryFrame, ct);
-                        if (!settledRetry.Found || !settledRetry.Bounds.IntersectsWith(found.Bounds)) continue;
-                        found = settledRetry;
+                        var settledRetry = await FindDungeonResultRetryAsync(settledRetryFrame, ct);
+                        if (!settledRetry.Found || !settledRetry.Bounds.IntersectsWith(found.Bounds))
+                        {
+                            Log?.Invoke("[던전 결과] 새 화면에서 결과 화면 또는 다시 하기 위치 재확인 실패");
+                            continue;
+                        }
+
                         var retryGuardSelected = await _detector.DetectAsync("selected_ocr_strict", settledRetryFrame, ct);
                         var retryGuardChallenge = await _detector.DetectAsync("challenge_confirm_strict", settledRetryFrame, ct);
                         var retryGuardEnter = await _detector.DetectAsync("enter_bottom", settledRetryFrame, ct);
-
                         if (retryGuardSelected.Found || retryGuardChallenge.Found || retryGuardEnter.Found)
                         {
                             Log?.Invoke(
                                 $"[retry guard] 입장 화면에서는 다시 하기 클릭 금지 " +
                                 $"selected={(retryGuardSelected.Found ? 1 : 0)} " +
                                 $"challenge={(retryGuardChallenge.Found ? 1 : 0)} " +
-                                $"enter={(retryGuardEnter.Found ? 1 : 0)} " +
-                                $"retryCandidate={found.Bounds}");
-                            await Task.Delay(Math.Max(250, _settings.PollIntervalMs), ct);
+                                $"enter={(retryGuardEnter.Found ? 1 : 0)}");
+                            await Task.Delay(_settings.PollIntervalMs, ct);
                             continue;
                         }
+
+                        Log?.Invoke($"[던전 결과] 다시 하기 클릭 @ {settledRetry.Center}");
+                        _input.ClickClientPoint(_hwnd, settledRetry.Center);
+                        await Task.Delay(Math.Max(900, _settings.ClickSettleMs), ct);
+                        using var afterRetryFrame = await CaptureGameWindowAsync(ct);
+                        if (AbyssRewardVisualPolicy.TryDetect(afterRetryFrame, out _, out var remainingProof))
+                            throw new TimeoutException($"다시 하기 클릭 후 결과 화면 유지: {remainingProof}");
+
+                        Log?.Invoke("[던전 결과] 다시 하기 화면 이탈 확인");
+                        return;
                     }
 
                     if (step.Target.Equals("abyss_touch_screen", StringComparison.OrdinalIgnoreCase))
