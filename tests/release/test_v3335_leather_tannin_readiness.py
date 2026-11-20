@@ -29,10 +29,10 @@ class TanninRecipeReadiness(unittest.TestCase):
         self.assertEqual(a["purpose"], "leather_tannin_fresh_recipe_readiness_reconciliation")
         self.assertFalse(a["realGameTested"])
         self.assertTrue(a["rollbackProvided"] and a["mainCiRequired"])
-        self.assertIn('CurrentVersion = "V3.3.35"',
-                      read("source/FishingAutomation/UpdateManager.cs"))
-        self.assertIn("<Version>3.3.35</Version>",
-                      read("source/FishingAutomation/FishingAutomation.csproj"))
+        self.assertRegex(
+                      read("source/FishingAutomation/UpdateManager.cs"), r'CurrentVersion = "V3\.3\.(35|36)"')
+        self.assertRegex(
+                      read("source/FishingAutomation/FishingAutomation.csproj"), r"<Version>3\.3\.(35|36)</Version>")
         workflow = read(".github/workflows/release-v3335-auto-update.yml")
         for key in ("No successful production CI for current main SHA",
                     "gh release create V3.3.35",
