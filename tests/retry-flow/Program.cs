@@ -158,14 +158,14 @@ namespace DungeonVisionBot
     g.FillRectangle(greenButton, 480, 921, 140, 57);
     Check(!AbyssRewardVisualPolicy.TryDetect(dungeonResult, out _, out _),
      "existing Abyss gap rule rejects green background");
-    Check(AbyssRewardVisualPolicy.TryDetect(dungeonResult, out var dungeonRetry, out _, compareGapContrast: true)
+    Check(AbyssRewardVisualPolicy.TryDetectDungeon(dungeonResult, out var dungeonRetry, out _)
      && dungeonRetry.Contains(400, 950), "dungeon retry accepts separated buttons on green background");
     g.FillRectangle(greenButton, 320, 921, 10, 57);
-    Check(!AbyssRewardVisualPolicy.TryDetect(dungeonResult, out _, out _, compareGapContrast: true),
+    Check(!AbyssRewardVisualPolicy.TryDetectDungeon(dungeonResult, out _, out _),
      "merged dungeon buttons fail contrast");
     g.FillRectangle(greenBackground, 180, 921, 150, 57);
     g.FillRectangle(greenBackground, 470, 921, 150, 57);
-    Check(!AbyssRewardVisualPolicy.TryDetect(dungeonResult, out _, out _, compareGapContrast: true),
+    Check(!AbyssRewardVisualPolicy.TryDetectDungeon(dungeonResult, out _, out _),
      "single dungeon button fails reward proof");
    }
    if(args.Contains("--visual-confirmed-only")) return;

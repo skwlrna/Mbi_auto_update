@@ -5,8 +5,14 @@ namespace DungeonVisionBot;
 // Only the chest + three separate actions establish a reward screen; no OCR or combat veto.
 internal static class AbyssRewardVisualPolicy
 {
-    internal static bool TryDetect(Bitmap frame, out Rectangle retry, out string diagnostic,
-        bool compareGapContrast = false)
+    internal static bool TryDetect(Bitmap frame, out Rectangle retry, out string diagnostic) =>
+        TryDetectLayout(frame, out retry, out diagnostic, compareGapContrast: false);
+
+    internal static bool TryDetectDungeon(Bitmap frame, out Rectangle retry, out string diagnostic) =>
+        TryDetectLayout(frame, out retry, out diagnostic, compareGapContrast: true);
+
+    private static bool TryDetectLayout(Bitmap frame, out Rectangle retry, out string diagnostic,
+        bool compareGapContrast)
     {
         retry = Rectangle.Empty;
         diagnostic = "invalid reward frame";
