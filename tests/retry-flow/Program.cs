@@ -146,6 +146,28 @@ namespace DungeonVisionBot
     Check(!(await reader.DetectAbyssResultRetryAsync(frame,default)).Found,"buttons alone do not establish rewards");
     OcrRecognizer.ForceRetryOcrMiss=false;
    }
+   using (var dungeonResult = new Bitmap(800, 1000))
+   {
+    using var greenBackground = new SolidBrush(Color.FromArgb(42, 76, 57));
+    using var greenButton = new SolidBrush(Color.FromArgb(10, 179, 112));
+    using var g = Graphics.FromImage(dungeonResult);
+    g.Clear(greenBackground.Color);
+    g.FillRectangle(Brushes.Goldenrod, 350, 105, 100, 100);
+    g.FillRectangle(greenButton, 180, 921, 140, 57);
+    g.FillRectangle(greenButton, 330, 921, 140, 57);
+    g.FillRectangle(greenButton, 480, 921, 140, 57);
+    Check(!AbyssRewardVisualPolicy.TryDetect(dungeonResult, out _, out _),
+     "existing Abyss gap rule rejects green background");
+    Check(AbyssRewardVisualPolicy.TryDetectDungeon(dungeonResult, out var dungeonRetry, out _)
+     && dungeonRetry.Contains(400, 950), "dungeon retry accepts separated buttons on green background");
+    g.FillRectangle(greenButton, 320, 921, 10, 57);
+    Check(!AbyssRewardVisualPolicy.TryDetectDungeon(dungeonResult, out _, out _),
+     "merged dungeon buttons fail contrast");
+    g.FillRectangle(greenBackground, 180, 921, 150, 57);
+    g.FillRectangle(greenBackground, 470, 921, 150, 57);
+    Check(!AbyssRewardVisualPolicy.TryDetectDungeon(dungeonResult, out _, out _),
+     "single dungeon button fails reward proof");
+   }
    if(args.Contains("--visual-confirmed-only")) return;
    if(args.Contains("--clear-only")) return;
    Check(!AbyssOutsidePolicy.CanAccept(false,4,false,false),"outside HUD cannot count without explicit exit");

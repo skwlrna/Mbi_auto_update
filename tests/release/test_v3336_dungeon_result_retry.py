@@ -18,14 +18,14 @@ class DungeonRetryRegression(unittest.TestCase):
         step = ENGINE.split('if (step.Target.Equals("retry",', 1)[1]
         step = step.split('if (step.Target.Equals("abyss_touch_screen"', 1)[0]
         ordered = [
-            "TryDetect(frame",
+            "TryDetectDungeon(frame",
             "RetryClickDelay.WaitAsync",
             "CaptureGameWindowAsync",
             "FindDungeonResultRetryAsync",
             "IntersectsWith(found.Bounds)",
             "retryGuardSelected.Found || retryGuardChallenge.Found || retryGuardEnter.Found",
             "_input.ClickClientPoint",
-            "TryDetect(afterRetryFrame",
+            "TryDetectDungeon(afterRetryFrame",
             "throw new TimeoutException",
         ]
         positions = [step.index(item) for item in ordered]
