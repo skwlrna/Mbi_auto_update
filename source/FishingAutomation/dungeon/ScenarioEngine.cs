@@ -699,7 +699,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
     private async Task<DetectionResult> FindDungeonResultRetryAsync(Bitmap frame, CancellationToken ct)
     {
-        if (!AbyssRewardVisualPolicy.TryDetect(frame, out var retryArea, out _))
+        if (!AbyssRewardVisualPolicy.TryDetect(frame, out var retryArea, out _, compareGapContrast: true))
             return DetectionResult.NotFound;
 
         var retry = await _detector.DetectAsync("retry", frame, ct);
@@ -894,7 +894,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 await Task.Delay(Math.Max(900, _settings.ClickSettleMs), ct);
 
                 using var afterRetryFrame = await CaptureGameWindowAsync(ct);
-                if (!AbyssRewardVisualPolicy.TryDetect(afterRetryFrame, out _, out _))
+                if (!AbyssRewardVisualPolicy.TryDetect(afterRetryFrame, out _, out _, compareGapContrast: true))
                 {
                     timer.Restart();
                     lastSelectedClick = 0;
@@ -1090,7 +1090,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                     if (step.Target.Equals("retry", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!AbyssRewardVisualPolicy.TryDetect(frame, out var retryArea, out var initialProof) ||
+                        if (!AbyssRewardVisualPolicy.TryDetect(frame, out var retryArea, out var initialProof, compareGapContrast: true) ||
                             !retryArea.Contains(found.Center))
                         {
                             Log?.Invoke($"[던전 결과] 결과 화면 또는 가운데 버튼 미확인: {initialProof}");
@@ -1125,7 +1125,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                         _input.ClickClientPoint(_hwnd, settledRetry.Center);
                         await Task.Delay(Math.Max(900, _settings.ClickSettleMs), ct);
                         using var afterRetryFrame = await CaptureGameWindowAsync(ct);
-                        if (AbyssRewardVisualPolicy.TryDetect(afterRetryFrame, out _, out var remainingProof))
+                        if (AbyssRewardVisualPolicy.TryDetect(afterRetryFrame, out _, out var remainingProof, compareGapContrast: true))
                             throw new TimeoutException($"다시 하기 클릭 후 결과 화면 유지: {remainingProof}");
 
                         Log?.Invoke("[던전 결과] 다시 하기 화면 이탈 확인");
