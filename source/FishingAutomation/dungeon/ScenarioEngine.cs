@@ -330,6 +330,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             var challenge = await _detector.DetectAsync("challenge_confirm_strict", frame, ct);
             var enter = await _detector.DetectAsync("enter_bottom", frame, ct);
 
+            if (!selected.Found && !challenge.Found && enter.Found &&
+                DungeonEntryKeyArea.Contains(enter.Center))
+                selected = await DetectDungeonSelectedVisualAsync(frame, ct);
+
             if (selected.Found || challenge.Found || enter.Found)
             {
                 int step = FindDungeonStepIndex("enter_bottom");
@@ -702,6 +706,16 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         return retry.Found && retryArea.Contains(retry.Center) ? retry : DetectionResult.NotFound;
     }
 
+    private static readonly Rectangle DungeonSelectedClickArea = new(430, 640, 330, 230);
+    private static readonly Rectangle DungeonEntryKeyArea = new(360, 900, 440, 100);
+
+    private async Task<DetectionResult> DetectDungeonSelectedVisualAsync(Bitmap frame, CancellationToken ct)
+    {
+        var selected = await _detector.DetectAsync("selected_red_visual", frame, ct);
+        return selected.Found && DungeonSelectedClickArea.Contains(selected.Center)
+            ? selected : DetectionResult.NotFound;
+    }
+
     // DUNGEON_CURRENT_CHALLENGE_DIRECT_ENTRY_V9
     // Current-screen rule:
     // 1) exact '도전' + exact right-bottom '입장하기' means the screen is already ready;
@@ -715,12 +729,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         const int ConfirmIntervalMs = 250;
         const int MaxVerifySeconds = 45;
 
-        var selectedClickSafe = new Rectangle(430, 640, 330, 230);
-        var entryKeySafe = new Rectangle(360, 900, 440, 100);
+        var selectedClickSafe = DungeonSelectedClickArea;
+        var entryKeySafe = DungeonEntryKeyArea;
 
         int readyConsecutive = 0;
         int normalResultRetryClicks = 0;
         long lastSelectedClick = 0;
+        bool visualSelectedClicked = false;
         long lastStateLog = 0;
         var timer = Stopwatch.StartNew();
 
@@ -763,6 +778,13 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
             readyConsecutive = 0;
 
+            bool visualSelected = false;
+            if (!selected.Found && !challenge.Found && enter.Found && entryKeySafe.Contains(enter.Center))
+            {
+                selected = await DetectDungeonSelectedVisualAsync(frame, ct);
+                visualSelected = selected.Found;
+            }
+
             // Selected means the toggle still needs one safe card click to return to challenge.
             if (selected.Found)
             {
@@ -774,10 +796,30 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 }
 
                 long now = Environment.TickCount64;
-                if (now - lastSelectedClick >= 1200)
+                if (!visualSelectedClicked && now - lastSelectedClick >= 1200)
                 {
                     _hwnd = await ResolveRequiredGameWindowAsync(ct);
                     NativeMethods.SetForegroundWindow(_hwnd);
+                    if (visualSelected)
+                    {
+                        await Task.Delay(ConfirmIntervalMs, ct);
+                        using var confirmFrame = await CaptureGameWindowAsync(ct);
+                        var freshEnter = await _detector.DetectAsync("enter_bottom", confirmFrame, ct);
+                        var freshChallenge = await _detector.DetectAsync("challenge_confirm_strict", confirmFrame, ct);
+                        var freshSelected = await DetectDungeonSelectedVisualAsync(confirmFrame, ct);
+                        if (!freshEnter.Found || !entryKeySafe.Contains(freshEnter.Center) ||
+                            freshChallenge.Found || !freshSelected.Found ||
+                            !freshSelected.Bounds.Contains(selected.Center) ||
+                            !selected.Bounds.Contains(freshSelected.Center))
+                        {
+                            Log?.Invoke("[도전 안전확인] 선택됨 이미지 재확인 실패 -> 클릭 보류");
+                            continue;
+                        }
+
+                        selected = freshSelected;
+                        visualSelectedClicked = true;
+                        Log?.Invoke($"[도전 안전확인] 선택됨 이미지 2프레임 확인 score={selected.Score:0.000}");
+                    }
                     Log?.Invoke($"[도전 안전확인] 선택됨 확인 -> 카드 안 선택됨만 1회 클릭하여 도전으로 전환 @ {selected.Center}");
                     _input.ClickClientPoint(_hwnd, selected.Center);
                     lastSelectedClick = now;
@@ -785,6 +827,11 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 }
                 else
                 {
+                    if (visualSelectedClicked && now - lastStateLog >= 1200)
+                    {
+                        Log?.Invoke("[도전 안전확인] 선택됨 이미지 클릭 후 도전 전환 대기");
+                        lastStateLog = now;
+                    }
                     await Task.Delay(ConfirmIntervalMs, ct);
                 }
                 continue;
@@ -851,6 +898,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 {
                     timer.Restart();
                     lastSelectedClick = 0;
+                    visualSelectedClicked = false;
                     Log?.Invoke("[던전 결과] 다시 하기 화면 이탈 확인 -> 45초 검증 타이머 재시작");
                 }
                 else
@@ -1123,7 +1171,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                         if (step.Target.Equals("enter_bottom", StringComparison.OrdinalIgnoreCase))
                         {
                             string exactEntry = FuzzyText.Normalize(found.ReadText ?? "");
-                            var entryKeySafe = new Rectangle(360, 900, 440, 100);
+                            var entryKeySafe = DungeonEntryKeyArea;
 
                             if (!exactEntry.Equals(FuzzyText.Normalize("입장하기"), StringComparison.OrdinalIgnoreCase))
                             {
