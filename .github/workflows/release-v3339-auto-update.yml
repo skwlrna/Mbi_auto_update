@@ -391,7 +391,8 @@ jobs:
              $scene -match 'DetectManagedWorldHudTemplates|DetectManagedWorldHudKeys|HasManagedKEntryFieldHudVisual' -or
              $last -notmatch 'ClassifyManagedProductionSceneAsync' -or
              $last -match 'DetectManagedWorldHudTemplates|HasManagedKEntryFieldHudVisual|DetectManagedWorldHudKeys' -or
-             $space -notmatch 'HasManagedKIShortcutGlyphs' -or
+             $space -notmatch 'DetectManagedKIShortcutGlyphs' -or
+           $space -notmatch 'k\.Found && i\.Found' -or
              $space -notmatch 'FindCompactAsync' -or
              $space -match 'DetectManagedWorldHudTemplates|HasManagedKEntryFieldHudVisual'){
             throw 'F9 K-I-Space exclusive preflight/classifier/final-screen contract missing'
