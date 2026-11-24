@@ -2812,22 +2812,42 @@ internal sealed class AlteringScreen : IAlteringScreen, IAlteringCoordinatorQueu
     {
         if (frame.Width != 800 || frame.Height != 1000)
             return false;
+        var (k, i) = DetectManagedKIShortcutGlyphs(frame);
+        return k.Found && i.Found;
+    }
+
+    private static (DetectionResult K, DetectionResult I) DetectManagedKIShortcutGlyphs(Bitmap frame)
+    {
         var matcher = new TemplateMatcher(AppContext.BaseDirectory);
-        bool Key(Rectangle roi, string name) => matcher.FindBrightGlyphMultiScale(
-            frame, roi, "abyss/templates/" + name, 0.90, 0.95, 1.05, 0.05).Found;
-        return Key(new Rectangle(50, 905, 40, 40), "managed_k_key.png") &&
-               Key(new Rectangle(755, 905, 45, 40), "managed_i_key.png");
+        DetectionResult Key(Rectangle roi, string name) => matcher.FindBrightGlyphMultiScale(
+            frame, roi, "abyss/templates/" + name, 0.90, 0.95, 1.05, 0.05);
+
+        var kArea = new Rectangle(50, 905, 40, 40);
+        var k = Key(kArea, "managed_k_key.png");
+        if (!k.Found)
+            k = Key(kArea, "managed_k_key_workshop.png");
+        var i = Key(new Rectangle(755, 905, 45, 40), "managed_i_key.png");
+        return (k, i);
     }
 
     private async Task<bool> HasManagedKISpaceFieldHudAsync(Bitmap frame, CancellationToken ct)
     {
-        if (!HasManagedKIShortcutGlyphs(frame))
+        if (frame.Width != 800 || frame.Height != 1000)
             return false;
-        // Read Space only in its real bottom-centre key pill. Never accept
-        // the word in quests, chat, tooltips, or a different screen location.
+
+        var (k, i) = DetectManagedKIShortcutGlyphs(frame);
+        // Read Space only in its real bottom-centre key pill.
         var spaceArea = new Rectangle(396, 882, 66, 43);
-        var space = await _ui.FindCompactAsync(frame, spaceArea, "Space", ct);
-        return space is not null && spaceArea.Contains(space.Value.Bounds);
+        var space = k.Found && i.Found
+            ? await _ui.FindCompactAsync(frame, spaceArea, "Space", ct)
+            : null;
+        bool spaceFound = space is not null && spaceArea.Contains(space.Value.Bounds);
+        if (!spaceFound)
+        {
+            string spaceStatus = k.Found && i.Found ? $"미확인 @ {space?.Bounds}" : "K/I 미확인으로 생략";
+            Log?.Invoke($"[자동 가공][필드 키] K={k.Found} @ {k.Bounds} · I={i.Found} @ {i.Bounds} · Space={spaceStatus}");
+        }
+        return spaceFound;
     }
 
     private async Task<ManagedWorldHudKeys> FindManagedWorldHudKeysAsync(Bitmap frame, bool allowOcr, CancellationToken ct)
