@@ -642,7 +642,7 @@ try
           !Has(scene, "DetectManagedWorldHudKeys") &&
           !Has(scene, "HasManagedKEntryFieldHudVisual"),
         "F9 scene WorldHud proof is K/I/Space only with real menu/popup vetoes");
-    Check(Has(independentSpace, "HasManagedKIShortcutGlyphs") &&
+    Check(Has(independentSpace, "DetectManagedKIShortcutGlyphs") &&
           Has(independentSpace, "FindCompactAsync") &&
           !Has(independentSpace, "DetectManagedWorldHudTemplates") &&
           !Has(independentSpace, "HasManagedKEntryFieldHudVisual") &&
@@ -1345,6 +1345,21 @@ try
                   !PixelGate("HasManagedKIShortcutGlyphs", noK) &&
                   !PixelGate("HasManagedKIShortcutGlyphs", noI),
                 "F9 K/I exact lower glyphs survive Home/End/ESC removal, but never missing K/I: " + file);
+        }
+        using (var workshopKeys = BlackFrame())
+        using (var workshopK = new Bitmap(Path.Combine(AppContext.BaseDirectory, "abyss", "templates", "managed_k_key_workshop.png")))
+        using (var shortcutI = new Bitmap(Path.Combine(AppContext.BaseDirectory, "abyss", "templates", "managed_i_key.png")))
+        {
+            using (var graphics = Graphics.FromImage(workshopKeys))
+            {
+                graphics.DrawImageUnscaled(workshopK, 61, 916);
+                graphics.DrawImageUnscaled(shortcutI, 770, 916);
+            }
+            Check(PixelGate("HasManagedKIShortcutGlyphs", workshopKeys),
+                "workshop K glyph and existing I glyph pass in their fixed HUD areas");
+            Paint(workshopKeys, new Rectangle(755, 905, 45, 40), Color.Black);
+            Check(!PixelGate("HasManagedKIShortcutGlyphs", workshopKeys),
+                "workshop K glyph alone never establishes K/I");
         }
         using var wrongSize = new Bitmap(799, 1000);
         using var empty = BlackFrame();
