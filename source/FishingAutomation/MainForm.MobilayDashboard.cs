@@ -71,8 +71,8 @@ public sealed partial class MainForm
 
             Card(g, new(256, 574, 1166, 350));
             TextAt(g, "최근 기록", new(280, 593, 1060, 45), 22, true);
-            var lines = _owner._progressLogPreview.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries).TakeLast(5);
-            TextAt(g, string.Join("\n", lines), new(280, 654, 1106, 228), 17, false, Muted, multiline: true);
+            var lines = _owner._progressLogPreview.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries).TakeLast(5).ToArray();
+            TextAt(g, lines.Length == 0 ? "최근 기록이 없습니다." : string.Join("\n", lines), new(280, 654, 1106, 228), 17, false, Muted, multiline: true);
         }
     }
 }

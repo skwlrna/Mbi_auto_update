@@ -196,7 +196,9 @@ public sealed partial class MainForm
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 58)); header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
-            header.Controls.Add(owner.SectionTitle("제작", 26), 0, 0);
+            var title = owner.SectionTitle("제작", 26);
+            title.ForeColor = TitleText;
+            header.Controls.Add(title, 0, 0);
             header.Controls.Add(new Label { Text = "전체 제작 품목을 한 목록에서 검색해 빠르게 찾습니다.", Dock = DockStyle.Fill, ForeColor = Muted, TextAlign = ContentAlignment.MiddleLeft }, 0, 1);
             root.Controls.Add(header, 0, 0);
 

@@ -285,6 +285,13 @@ public sealed partial class MainForm
             owner._logView = owner.BuildLogPanel();
             owner._logView.Dock = DockStyle.None;
             owner._logView.Visible = false;
+            owner._logView.BackColor = CardBg;
+            foreach (Control control in owner._logView.Controls)
+            {
+                control.BackColor = CardBg;
+                control.ForeColor = TitleText;
+                foreach (Control child in control.Controls) child.ForeColor = TitleText;
+            }
             Controls.Add(owner._logView);
             _positions.Add((owner._logView, new(256, 175, 1166, 770)));
             owner._alteringPage = new ProductionPage(owner, true);
