@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>매크로</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101827;color:#f1f5fb;font:16px system-ui,sans-serif}
+main{width:min(100% - 32px,620px);margin:28px auto}
+h1{font-size:32px;margin:0 0 16px} h2{font-size:20px;margin:0 0 12px}
+nav,.actions{display:flex;gap:10px;flex-wrap:wrap}
+section,article{background:#1b2840;border-radius:14px;padding:18px;margin:14px 0}
+button,input,select{font:inherit;border-radius:8px;min-height:44px;padding:9px 12px}
+button{background:#62f0c7;border:0;color:#102421;font-weight:700;cursor:pointer}
+button:disabled{opacity:.42;cursor:default}
+nav button{background:#253652;color:#eaf0f8} nav button[aria-pressed=true]{color:#62f0c7}
+input,select{background:#111c30;border:1px solid #60708a;color:#fff;width:100%}
+label{display:block;margin:10px 0}.stop{background:transparent;color:#ff9898;border:1px solid #ff9898}
+pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#cedaeb}
+#message{color:#ffe095;min-height:1.4em;overflow-wrap:anywhere}
+article{background:#111c30;margin:10px 0} article p{margin:6px 0 0;color:#cedaeb}
+</style>
+<main>
+<h1>매크로</h1>
+<form id="connect">
+<label>접속 키 <input id="key" type="password" required autocomplete="current-password"></label>
+<button>연결</button>
+</form>
+<p id="message" role="status"></p>
+<div id="dashboard" hidden>
+<nav aria-label="화면"><button id="homeTab" aria-pressed="true">홈</button><button id="orderTab" aria-pressed="false">가공</button></nav>
+<section id="home"><h2>PC 작업 상태</h2><pre id="status"></pre></section>
+<section id="orderPane" hidden>
+<h2>가공 요청</h2>
+<form id="order">
+<label>품목 <input id="name" required maxlength="120" placeholder="가죽+"></label>
+<label>수량 <input id="quantity" type="number" required min="1" max="1000000" step="1" inputmode="numeric"></label>
+<label>목표 방식 <select id="mode"><option value="total">보유량 포함 목표 수량</option><option value="extra">새로 만들 수량</option></select></label>
+<button id="add">대기열에 등록</button>
+</form>
+</section>
+<section><h2>가공 대기열</h2>
+<div class="actions"><button id="start" disabled>대기열 시작</button><button class="stop" id="stop" disabled>가공 중지</button></div>
+<div id="orders"></div></section>
+</div>
+</main>
+<script src="/app.js" defer></script>
+</html>

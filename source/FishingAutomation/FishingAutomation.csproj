@@ -22,6 +22,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="BrowserControl\index.html" LogicalName="BrowserControl.index.html" />
+    <EmbeddedResource Include="BrowserControl\app.js" LogicalName="BrowserControl.app.js" />
     <EmbeddedResource Include="ui\reference.png" LogicalName="FishingAutomation.ReferenceArtwork.png" Condition="Exists('ui\reference.png')" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.13.0.20260627" />
     <PackageReference Include="OpenCvSharp4.Extensions" Version="4.13.0.20260627" />
