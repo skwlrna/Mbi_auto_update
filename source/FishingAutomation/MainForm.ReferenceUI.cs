@@ -146,6 +146,7 @@ public sealed partial class MainForm
             _owner._gatheringPage.SetTaskTheme(_darkTheme);
             _owner._craftingPage.SetTaskTheme(_darkTheme);
             _owner._schedulerPage.SetTaskTheme(_darkTheme);
+            StyleWorkspaceLog(_owner._logView);
             Invalidate(true);
         }
         private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";
@@ -285,13 +286,7 @@ public sealed partial class MainForm
             owner._logView = owner.BuildLogPanel();
             owner._logView.Dock = DockStyle.None;
             owner._logView.Visible = false;
-            owner._logView.BackColor = CardBg;
-            foreach (Control control in owner._logView.Controls)
-            {
-                control.BackColor = CardBg;
-                control.ForeColor = TitleText;
-                foreach (Control child in control.Controls) child.ForeColor = TitleText;
-            }
+            StyleWorkspaceLog(owner._logView);
             Controls.Add(owner._logView);
             _positions.Add((owner._logView, new(256, 175, 1166, 770)));
             owner._alteringPage = new ProductionPage(owner, true);
@@ -307,6 +302,21 @@ public sealed partial class MainForm
             }
             UpdateAbyssDungeonPickerVisibility();
             AccessibleName = "Mabi Auto 대시보드";
+        }
+
+        private void StyleWorkspaceLog(Control view)
+        {
+            view.BackColor = CardBg;
+            foreach (Control control in view.Controls)
+            {
+                control.BackColor = CardBg;
+                control.ForeColor = TitleText;
+                foreach (Control child in control.Controls)
+                {
+                    if (child is TextBoxBase) child.BackColor = CardBg;
+                    child.ForeColor = TitleText;
+                }
+            }
         }
 
         public void NavigateToMode(int mode) => SelectMode(mode);
