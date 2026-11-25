@@ -66,6 +66,12 @@ public sealed partial class MainForm
             TextAt(g, "메인", new(22, 104, 180, 29), 15, true, Muted);
             TextAt(g, "자동화", new(22, 186, 180, 29), 15, true, Muted);
             TextAt(g, "관리", new(22, 528, 180, 29), 15, true, Muted);
+            // Keep live recognition status visible without restoring the old diagnostics card.
+            // This is read-only; detailed recognition testing remains in environment settings.
+            TextAt(g, "시스템 진단", new(22, 730, 190, 26), 15, true, Muted);
+            Icon(g, "ocr", new(22, 763, 23, 23), Blue);
+            TextAt(g, "화면 인식", new(51, 758, 160, 25), 15, true);
+            TextAt(g, _owner._sysOcrValue.Text, new(51, 783, 160, 25), 15, false, Muted);
             using var pen = new Pen(Line);
             g.DrawLine(pen, 16, 929, 216, 929);
             Icon(g, "game", new(21, 945, 25, 25), Blue);
