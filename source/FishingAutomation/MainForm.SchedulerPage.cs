@@ -96,6 +96,7 @@ public sealed partial class MainForm
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
             var heading = owner.SectionTitle("스케줄러", 20);
+            heading.ForeColor = TitleText;
             heading.Font = new Font("맑은 고딕", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
             header.Controls.Add(heading, 0, 0);
             header.Controls.Add(Txt("제작 → 가공 → 대기 중 어비스를 순서대로 실행합니다. 시작 전 각 작업을 확인하세요.", Muted, 17), 0, 1);

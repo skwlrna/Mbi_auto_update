@@ -221,7 +221,9 @@ public sealed partial class MainForm
 
             var header = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = Padding.Empty, BackColor = Color.Transparent };
             header.RowStyles.Add(new RowStyle(SizeType.Percent, 58)); header.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
-            header.Controls.Add(owner.SectionTitle(AccessibleName, 26), 0, 0);
+            var title = owner.SectionTitle(AccessibleName, 26);
+            title.ForeColor = TitleText;
+            header.Controls.Add(title, 0, 0);
             header.Controls.Add(new Label
             {
                 Text = altering ? "품목과 추가 생산량을 설정하세요. 시설별 작업을 관리하고, 같은 시설 품목은 순서대로 가공합니다." : "분류 탭 없이 검색으로 원하는 채집 재료를 빠르게 찾습니다.",
@@ -276,19 +278,18 @@ public sealed partial class MainForm
             left.Controls.Add(BuildLabeledField("품목 검색", _search, "production-field"), 0, row++);
             left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             left.Controls.Add(BuildListArea(altering ? "가공 품목" : "채집 품목"), 0, row++);
-            leftCard.Controls.Add(left); body.Controls.Add(leftCard, 0, 0);
+            leftCard.Controls.Add(left);
 
             var right = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Margin = Padding.Empty,
-                BackColor = Color.Transparent, AccessibleName = "실행 상태"
+                Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty,
+                BackColor = Color.Transparent, AccessibleName = "가공·채집 진행"
             };
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 294));
             right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 294));
             var goalCard = new LauncherCard { Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 0, 10) };
-            goalCard.Controls.Add(BuildLabeledField(altering ? "목표 수량" : "채집 수량", Quantity, "production-field"));
-            right.Controls.Add(goalCard, 0, 0);
+            goalCard.Controls.Add(BuildLabeledField(altering ? "추가 생산량" : "목표 보유량", Quantity, "production-field"));
+
             var statusCard = new LauncherCard { Padding = new Padding(14, 10, 14, 10), Margin = new Padding(0, 0, 0, 10) };
             var status = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = Padding.Empty, BackColor = Color.Transparent };
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
@@ -296,7 +297,9 @@ public sealed partial class MainForm
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 14)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); status.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
             status.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            status.Controls.Add(owner.SectionTitle("실행 상태", 15), 0, 0);
+            var statusTitle = owner.SectionTitle("실행 상태", 15);
+            statusTitle.ForeColor = TitleText;
+            status.Controls.Add(statusTitle, 0, 0);
             var progressLine = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, BackColor = Color.Transparent };
             progressLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); progressLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
             progressLine.Controls.Add(_progressText, 0, 0); progressLine.Controls.Add(_percentage, 1, 0);
@@ -315,9 +318,18 @@ public sealed partial class MainForm
             {
                 var queueCard = new LauncherCard { Padding = new Padding(12, 8, 12, 8), Margin = Padding.Empty };
                 queueCard.Controls.Add(BuildAlteringQueueArea());
-                right.Controls.Add(queueCard, 0, 2);
+                right.Controls.Add(queueCard, 0, 0);
             }
-            body.Controls.Add(right, 1, 0); root.Controls.Add(body, 0, 1);
+            body.Controls.Add(right, 0, 0);
+            var form = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+                Margin = new Padding(10, 0, 0, 0), BackColor = Color.Transparent };
+            form.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            form.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
+            leftCard.Margin = Padding.Empty;
+            form.Controls.Add(leftCard, 0, 0);
+            form.Controls.Add(goalCard, 0, 1);
+            body.Controls.Add(form, 1, 0);
+            root.Controls.Add(body, 0, 1);
 
             // Both pages preserve their existing start/stop shortcuts; queue editing is read-only.
             var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = altering ? 3 : 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 이어하기 정지" };

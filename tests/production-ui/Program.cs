@@ -129,25 +129,20 @@ internal static class Program
                 .Single(x => x.AccessibleName?.EndsWith("목표 수량", StringComparison.Ordinal) == true);
             int QuantityValue(TextBox input) => int.Parse(input.Text, System.Globalization.CultureInfo.InvariantCulture);
             void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
-            // Select actual visible sidebar buttons, not the duplicate mode tabs.
             var dashboardControl = Field<Control>(form, "_referenceDashboard");
-            Button Sidebar(string caption) => controls.OfType<Button>().Single(x =>
-                x.Parent == dashboardControl && x.Left < dashboardControl.Width * 232 / 1448 &&
+            Button HeaderTab(string caption) => controls.OfType<Button>().Single(x =>
+                x.Parent == dashboardControl && x.Top < dashboardControl.Height * 65 / 1086 &&
                 x.Text == caption && x.Visible);
             void Menu(string name)
             {
-                if (name is "자동 채집" or "제작")
+                if (name is "어비스" or "던전")
                 {
-                    Sidebar("채집 / 제작").PerformClick();
-                    Pump();
-                    var popup = Field<ContextMenuStrip>(dashboardControl, "_openMenu");
-                    Check(popup.Visible, "gathering and crafting menu opens from sidebar");
-                    popup.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == name).PerformClick();
+                    HeaderTab("전투").PerformClick(); Pump();
+                    controls.OfType<Button>().Single(x => x.Parent == dashboardControl && x.Visible &&
+                        x.Text == name).PerformClick();
                     return;
                 }
-                string caption = name switch { "홈" => "대시보드", "낚시" => "자동낚시",
-                    "자동 가공" => "자동가공", _ => name };
-                Sidebar(caption).PerformClick();
+                HeaderTab(name switch { "자동 채집" => "채집", "자동 가공" => "가공", _ => name }).PerformClick();
             }
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             // Real V3.1.88 report: neither the visible start button nor F9
@@ -155,7 +150,7 @@ internal static class Program
             // Assert that both routes now show a persistent actionable reason.
             var scheduler = controls.Single(x => x.Name == "SchedulerPage");
             Menu("스케줄러"); Pump();
-            Check(scheduler.Visible, "scheduler page is visible after selecting sidebar");
+            Check(scheduler.Visible, "scheduler page is visible after selecting the top tab");
             var globalStart = Field<Button>(form, "_mainActionButton");
             Check(globalStart.Visible && globalStart.Enabled,
                 "global bottom start is clickable while scheduler page is open");
@@ -174,7 +169,7 @@ internal static class Program
             Check(ReferenceEquals(schedulerCardHeader.Parent, schedulerTabs.Parent) &&
                   schedulerCardHeader.Parent!.Controls.GetChildIndex(schedulerCardHeader) <
                       schedulerCardHeader.Parent.Controls.GetChildIndex(schedulerTabs) &&
-                  schedulerCardHeader.BackColor == Color.FromArgb(245, 246, 248) &&
+                  schedulerCardHeader.BackColor == scheduler.BackColor &&
                   schedulerCardHeader.Width == schedulerTabs.Width &&
                   schedulerCardHeader.Height >= firstNativeTab.Bottom + 5,
                 "opaque card header covers native tab separators and the dark horizontal seam");
@@ -277,38 +272,20 @@ internal static class Program
             Menu("홈"); Pump();
             var dashboard = Field<Control>(form, "_referenceDashboard");
             var updateCheck = Field<Button>(form, "_updateButton");
-            Check(updateCheck.Visible && updateCheck.Text == "업데이트 확인",
-                "update check appears on home dashboard");
-            Check(Field<string>(dashboard, "_selectedNavigation") == "대시보드",
-                "home is the sole selected navigation destination");
-            var navOrder = new[] { "대시보드", "자동낚시", "자동가공", "어비스", "던전",
-                "채집 / 제작", "스케줄러", "실행 기록", "알림 관리", "환경 설정" };
-            var navButtons = controls.OfType<Button>().Where(x => x.Parent == dashboardControl &&
-                x.Left < dashboardControl.Width * 232 / 1448 && navOrder.Contains(x.Text))
-                .OrderBy(x => x.Top).Select(x => x.Text).ToArray();
-            Check(navButtons.SequenceEqual(navOrder),
-                "workspace navigation order and icon destinations are consistent");
-            var sidebarToggle = controls.OfType<Button>().Single(x => x.AccessibleName == "사이드바 접기 / 펼치기");
+            Check(!updateCheck.Visible, "manual update is hidden on home");
+            Check(Field<string>(dashboard, "_selectedNavigation") == "홈", "home is selected");
+            var navOrder = new[] { "홈", "가공", "채집", "제작", "낚시", "전투", "스케줄러", "기록", "설정" };
+            var navButtons = navOrder.Select(HeaderTab).ToArray();
+            Check(navButtons.Select(x => x.Left).SequenceEqual(navButtons.Select(x => x.Left).Order()),
+                "all nine top tabs appear in order");
+            Menu("설정"); Pump();
+            Check(updateCheck.Visible && updateCheck.Text == "업데이트 확인", "manual update appears in settings");
             var themeToggle = controls.OfType<Button>().Single(x => x.AccessibleName == "테마 전환");
-            var sidebarHome = Sidebar("대시보드");
-            var expandedHomeBounds = sidebarHome.Bounds;
-            var expandedWorkBounds = globalStart.Bounds;
-            sidebarToggle.PerformClick(); Pump();
-            Check(sidebarHome.Width < expandedHomeBounds.Width && globalStart.Width > expandedWorkBounds.Width &&
-                  globalStart.Left < expandedWorkBounds.Left && sidebarHome.Visible,
-                "collapsed sidebar gives the real workspace more room");
-            Check(Field<string>(dashboard, "_selectedNavigation") == "대시보드",
-                "sidebar collapse does not change the selected mode");
-            sidebarToggle.PerformClick(); Pump();
-            Check(sidebarHome.Bounds == expandedHomeBounds && globalStart.Bounds == expandedWorkBounds,
-                "expanding the sidebar restores original geometry");
             var lightColor = dashboard.BackColor;
             themeToggle.PerformClick(); Pump();
-            Check(dashboard.BackColor != lightColor && themeToggle.Text == "라이트 모드",
-                "dark theme changes dashboard palette without navigating");
+            Check(dashboard.BackColor != lightColor, "theme changes the dashboard canvas");
             themeToggle.PerformClick(); Pump();
-            Check(dashboard.BackColor == lightColor && themeToggle.Text == "다크 모드",
-                "light theme restores initial dashboard palette");
+            Check(dashboard.BackColor == lightColor, "light theme restores the dashboard canvas");
             var themedPages = new[] { altering, gathering, crafting, scheduler };
             Check(themedPages.All(page => page.BackColor == lightColor),
                 "all task workspaces use the same light canvas as dashboard");
@@ -335,8 +312,9 @@ internal static class Program
 
             Menu("자동 가공"); PumpUntil(() => All(altering).OfType<ListBox>().Single(x => x.AccessibleName == "가공 제법").Items.Count > 0);
             Exclusive(true);
-            Check(globalStart.Visible && globalStart.Enabled,
-                "global bottom start stays clickable on altering page");
+            Check(!globalStart.Visible && All(altering).OfType<Button>().Any(x =>
+                    x.Visible && x.AccessibleName == "자동 가공 시작"),
+                "altering exposes one start action on its own page");
             Check(!All(gathering).Any(x => x.Visible), "home to altering does not require gathering first");
             Menu("홈"); Check(!altering.Visible && !gathering.Visible, "home restores existing central content");
             Menu("자동 채집"); PumpUntil(() => All(gathering).OfType<ListBox>().Any(x => x.Items.Count == 3)); Exclusive(false);
@@ -661,8 +639,8 @@ internal static class Program
                 Menu(mode);
                 Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
                 Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") ==
-                    (mode == "낚시" ? "자동낚시" : mode),
-                    "mode tab keeps the correct sidebar selection: " + mode);
+                    (mode == "낚시" ? "낚시" : "전투"),
+                    "mode tab keeps the correct top tab selection: " + mode);
             }
             fake.Fail = true; Menu("자동 채집");
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick();
@@ -769,7 +747,7 @@ internal static class Program
                               FullyContained(queueFeedback, altering) &&
                               FullyContained(addAlteringQueue, altering),
                             "multi-altering add button and explanation stay visible at " + size);
-                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "자동가공",
+                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "가공",
                             "production navigation remains exclusively selected at " + size);
                     }
                     if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }
@@ -782,7 +760,13 @@ internal static class Program
                 InvokeTask(form, "RefreshProductionStateAsync", gathering); Pump(); Save(form, Path.Combine(args[0], "automatic-gathering.png"));
                 Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump(); ai.SelectedIndex = 0; SetQuantity(aq, 50);
                 InvokeTask(form, "RefreshProductionStateAsync", altering); Pump(); Save(form, Path.Combine(args[0], "automatic-altering.png"));
-                Menu("홈"); Pump(); Save(form, Path.Combine(args[0], "home.png"));
+                foreach (var (screen, file) in new[] { ("홈", "home"), ("제작", "crafting"),
+                    ("낚시", "fishing"), ("어비스", "combat"), ("스케줄러", "scheduler"),
+                    ("기록", "history"), ("설정", "settings") })
+                {
+                    Menu(screen); Pump();
+                    Save(form, Path.Combine(args[0], file + ".png"));
+                }
             }
             form.Close(); Console.WriteLine($"PASS {_checks} production UI checks"); return 0;
         }

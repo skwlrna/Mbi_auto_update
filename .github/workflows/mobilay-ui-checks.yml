@@ -44,8 +44,16 @@ jobs:
       - name: Exercise real WinForms UI with isolated fake CLI
         shell: pwsh
         run: |
-          dotnet run --project tests/production-ui/Regression.csproj -c Release
+          dotnet run --project tests/production-ui/Regression.csproj -c Release -- _workspace-screenshots
           if ($LASTEXITCODE -ne 0) { throw 'Real Mobilay-layout WinForms UI regression failed' }
+      - name: Upload actual WinForms screenshots
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MabiAuto-Workspace-Screenshots
+          path: _workspace-screenshots/*.png
+          if-no-files-found: error
+          retention-days: 14
       - name: Package UI preview for isolated Windows comparison only
         if: github.event_name == 'pull_request'
         shell: pwsh
@@ -58,8 +66,8 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $sha.Length -ne 40) { throw 'Cannot verify preview source SHA' }
           $sha | Set-Content -LiteralPath (Join-Path $dest 'UI_PREVIEW_BUILD_COMMIT.txt') -Encoding ASCII
           @(
-            'MabiAuto Mobilay-inspired UI preview for visual comparison only.',
-            'Based on the existing MabiAuto V3.2.26 source with navigation and palette-only changes.',
+            'MabiAuto desktop workspace preview for visual comparison.',
+            'See UI_PREVIEW_BUILD_COMMIT.txt for the exact source revision.',
             'NOT a production release. Do not overwrite your current working install.',
             'Stop the existing macro first; unzip into a SEPARATE directory for visual inspection.',
             'This GUI build has not been tested with your actual live game.',

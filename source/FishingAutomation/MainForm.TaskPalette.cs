@@ -16,11 +16,11 @@ public sealed partial class MainForm
         internal static readonly TaskPalette Light = new(false);
         internal static readonly TaskPalette Dark = new(true);
 
-        internal Color WindowBg => _dark ? Color.FromArgb(23, 23, 29) : Color.FromArgb(245, 246, 248);
+        internal Color WindowBg => _dark ? Color.FromArgb(23, 23, 29) : Color.FromArgb(250, 251, 252);
         internal Color PanelBg => _dark ? Color.FromArgb(30, 31, 40) : Color.FromArgb(239, 241, 247);
         internal Color Border => _dark ? Color.FromArgb(60, 63, 79) : Color.FromArgb(214, 219, 230);
         internal Color TitleText => _dark ? Color.FromArgb(239, 241, 250) : Color.FromArgb(35, 39, 56);
-        internal Color Blue => _dark ? Color.FromArgb(173, 186, 255) : Color.FromArgb(75, 90, 184);
+        internal Color Blue => _dark ? Color.FromArgb(173, 186, 255) : Color.FromArgb(7, 81, 213);
         internal Color Green => _dark ? Color.FromArgb(107, 222, 164) : Color.FromArgb(22, 128, 81);
         internal Color CardBg => _dark ? Color.FromArgb(35, 37, 46) : Color.FromArgb(255, 255, 255);
         internal Color CardBg2 => _dark ? Color.FromArgb(48, 51, 64) : Color.FromArgb(235, 238, 245);
