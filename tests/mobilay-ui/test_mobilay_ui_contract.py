@@ -28,19 +28,16 @@ class MobilayPresentationContract(unittest.TestCase):
         self.assertIn("53, 53, 57", self.palette)
         self.assertNotIn("private static readonly Color NavBg = Color.White", self.palette)
 
-    def test_legacy_engine_palette_and_bento_shell_are_separate(self):
-        self.assertIn("Color.FromArgb(245, 246, 248)", self.shell)
+    def test_workspace_and_engine_palettes_are_separate(self):
         self.assertIn("Color NavBg => _darkTheme", self.shell)
         self.assertIn(": Color.White;", self.shell)
-        self.assertIn("Color.FromArgb(36, 40, 59)", self.grid)
+        self.assertIn("Color.FromArgb(7, 81, 213)", self.shell)
 
-    def test_sidebar_reflow_and_theme_are_presentation_only(self):
-        for marker in ("MapBounds(r)", "UnmapX(e.X)", "MapX(x)",
-                       "ContentScaleX", "ToggleSidebar()", "ToggleTheme()"):
+    def test_header_and_body_resize_independently(self):
+        for marker in ("MapBounds(r)", "UnmapX(e.X)", "MapX(x)", "ContentScaleX", "ToggleTheme()"):
             self.assertIn(marker, self.shell)
-        self.assertIn("if (_sidebarCollapsed)", self.grid)
-        self.assertIn('owner.StopSelected, "stop", "danger"', self.grid)
-        self.assertIn('themeToggle.AccessibleName = "테마 전환"', self.grid)
+        self.assertIn("bool header = r.Y < 65f", self.shell)
+        self.assertIn('Setting("테마 전환", ToggleTheme', self.grid)
 
     def test_task_pages_share_presentation_palette(self):
         palette = (UI / "MainForm.TaskPalette.cs").read_text(encoding="utf-8")
@@ -71,31 +68,17 @@ class MobilayPresentationContract(unittest.TestCase):
         self.assertNotIn("http://+", server)
         self.assertNotIn("http://*", server)
 
-    def test_six_real_dashboard_cards_and_clickable_links(self):
-        titles = ("자동낚시", "자동가공", "어비스", "스케줄러", "자동채집", "제작")
-        for title in titles:
-            self.assertIn('"' + title + '"', self.grid)
-        self.assertIn("row * 174", self.grid)
-        self.assertIn("col * 390", self.grid)
-        self.assertIn("new RectangleF(x, y, 374, 154)", self.grid)
-        self.assertIn("Card(g, new(256, 817, 1166, 130))", self.grid)
-        self.assertIn('TextAt(g, "실행 기록"', self.grid)
-        self.assertIn('new(16, 135, 200, 49)', self.grid)
-        self.assertIn('new(16, 560, 200, 49)', self.grid)
-        self.assertIn('new(1139, 881, 265, 41)', self.shell)
-        self.assertIn("private void PaintHome(Graphics g) => PaintMobilayHome(g);",
-                      self.shell)
-        self.assertIn("_homeLinks.Add(AddButton(", self.grid)
-        self.assertIn('case "arrow-up-right":', self.shell)
-        self.assertIn('if (_kind == "card-link")', self.shell)
+    def test_home_has_live_tasks_and_no_duplicate_navigation(self):
+        for heading in ("현재 작업", "작업 상세", "최근 기록"):
+            self.assertIn(f'TextAt(g, "{heading}"', self.grid)
+        self.assertIn("PaintWorkspaceHome(g)", self.shell)
+        self.assertNotIn("카드 열기", self.grid)
+        self.assertIn('if (_kind == "nav")', self.shell)
 
-    def test_compact_footer_keeps_manual_updates_and_runtime_separate(self):
+    def test_updates_remain_available_in_settings(self):
         self.assertIn('owner.CheckForUpdatesAsync(true)', self.shell)
-        self.assertIn('new(278, 870, 1115, 65)', self.grid)
-        self.assertIn('F8 테스트  ·  F9 시작  ·  F10 정지', self.grid)
-        self.assertIn('_owner._progressLogPreview.Text', self.grid)
+        self.assertIn('_settingsControls.Add(owner._updateButton)', self.shell)
         self.assertIn('owner.TopMost = !owner.TopMost', self.grid)
-        # The compact visual layout must not alter the keyboard/game actions.
         self.assertNotIn('SendKeys.', self.grid)
         self.assertNotIn('SendInput(', self.grid)
 
@@ -103,8 +86,7 @@ class MobilayPresentationContract(unittest.TestCase):
         for existing in (
             "_owner._statusValue.Text", "_owner._elapsedValue.Text",
             "_owner._currentModeValue.Text", "_owner._progress.Value",
-            "_owner._successValue.Text", "_owner._roundValue.Text",
-            "_owner._sysGameValue", "_owner._sysOcrValue",
+            "_owner._currentStepValue.Text", "_owner._recentDetectValue.Text",
             "_owner._progressLogPreview.Text",
         ):
             self.assertIn(existing, self.grid)
@@ -115,40 +97,29 @@ class MobilayPresentationContract(unittest.TestCase):
         ):
             self.assertNotIn(prohibited, self.grid)
 
-    def test_sidebar_routes_reuse_existing_macro_handlers(self):
-        for existing in (
-            "SelectMode(0)", "SelectMode(7)",
-            "SelectMode(1)", "SelectMode(2)", "SelectMode(4)", "new[] { 5, 6 }",
-            "ShowTelegramSettings()", "ShowErrorUploadSettings()",
-            "ShowVisualRecognitionTest()", "owner.ToggleMini(true)",
-            "owner.TopMost = !owner.TopMost", "owner.TestOrRefresh",
-            "owner.ApplyLogVisibility()"
-        ):
-            self.assertIn(existing, self.grid)
-        self.assertIn('4 => "자동가공"', self.shell)
-        self.assertIn('2 or 3 => "어비스"', self.shell)
-        self.assertIn('owner.StopSelected', self.grid)
-        self.assertIn('control.Visible = _showHome && !_owner._logExpanded',
-                      self.shell)
-        self.assertIn('if (_owner.AnyRunning || _owner._activeMode is not null) return;',
-                      self.shell)
+    def test_nine_tabs_reuse_existing_macro_handlers(self):
+        for title in ("홈", "가공", "채집", "제작", "낚시", "전투", "스케줄러", "기록", "설정"):
+            self.assertIn(f'("{title}",', self.grid)
+        for handler in ("SelectMode(0)", "SelectMode(4)", "SelectMode(5)", "SelectMode(6)",
+                        "SelectMode(7)", "owner.ShowTelegramSettings", "owner.ShowErrorUploadSettings",
+                        "owner.ShowVisualRecognitionTest", "owner.ToggleMini(true)", "owner.ApplyLogVisibility()"):
+            self.assertIn(handler, self.grid)
+        self.assertIn('if (_owner.AnyRunning || _owner._activeMode is not null) return;', self.shell)
         self.assertIn("owner.StartSelected()", self.shell)
         self.assertIn("owner.StopSelected()", self.shell)
 
-    def test_peaca_deep_is_not_offered_in_dungeon_sidebar(self):
-        self.assertIn('AddButton("던전",', self.grid)
-        self.assertIn('AddButton("어비스",', self.grid)
-        self.assertNotIn('AddButton("페카 심층",', self.grid)
-        self.assertNotIn('new[] { "던전", "어비스", "페카 심층" }', self.grid)
+    def test_combat_offers_only_abyss_and_regular_dungeons(self):
+        for title in ("던전", "어비스"):
+            self.assertIn(f'_modeTabs.Add(AddButton("{title}",', self.shell)
+        self.assertNotIn('_modeTabs.Add(AddButton("페카 심층",', self.shell)
+        self.assertNotIn("페카 심층", self.grid)
         self.assertIn('new[] { "허상의 정박지", "광기의 동굴", "흩어진 물길" }', self.shell)
-        # The implementation remains in place; this change only hides the nav entry.
-        self.assertIn('if (string.Equals(mode, "페카 심층"', self.shell)
 
     def test_error_logging_remains_available_after_ai_removal(self):
         self.assertIn("new RuntimeErrorUploader(_log, runtimeLogPath)", self.main)
         self.assertNotIn("AutoStartAiAutopilot", self.main)
         self.assertNotIn("BuildAiAutopilotPanel", self.main)
-        self.assertIn("ShowErrorUploadSettings()", self.grid)
+        self.assertIn("owner.ShowErrorUploadSettings", self.grid)
 
     def test_dashboard_reuses_gdi_fonts_and_skips_unchanged_layout(self):
         self.assertIn("_textFonts.TryGetValue", self.shell)
@@ -166,7 +137,7 @@ class MobilayPresentationContract(unittest.TestCase):
             self.assertNotIn("www.mobilay", value)
         # Styling does not alter core automation classes, and all read-only
         # data accesses use the existing MainForm runtime state.
-        self.assertIn("presentation", self.grid.lower())
+        self.assertIn("PaintWorkspaceHome", self.grid)
 
 
 if __name__ == "__main__":

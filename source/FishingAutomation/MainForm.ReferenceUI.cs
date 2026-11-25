@@ -86,17 +86,18 @@ public sealed partial class MainForm
         private readonly List<ReferenceButton> _gallery = new();
         private readonly List<ReferenceButton> _modeTabs = new();
         private readonly List<ReferenceButton> _navigationButtons = new();
-        private readonly List<ReferenceButton> _homeLinks = new();
-        private string _selectedNavigation = "대시보드";
+        private readonly List<Control> _settingsControls = new();
+        private bool _showSettings;
+        private string _selectedNavigation = "홈";
         // Presentation-only, per-window theme. Task pages retain their existing palette.
         private bool _darkTheme;
-        private bool _sidebarCollapsed;
-        private Color WindowBg => _darkTheme ? Color.FromArgb(23, 23, 29) : Color.FromArgb(245, 246, 248);
+        
+        private Color WindowBg => _darkTheme ? Color.FromArgb(23, 23, 29) : Color.FromArgb(250, 251, 252);
         private Color NavBg => _darkTheme ? Color.FromArgb(29, 30, 38) : Color.White;
         private Color CardBg => _darkTheme ? Color.FromArgb(35, 37, 46) : Color.White;
         private Color CardBg2 => _darkTheme ? Color.FromArgb(48, 51, 64) : Color.FromArgb(235, 238, 245);
         private Color TitleText => _darkTheme ? Color.FromArgb(239, 241, 250) : Color.FromArgb(35, 39, 56);
-        private Color Blue => _darkTheme ? Color.FromArgb(173, 186, 255) : Color.FromArgb(75, 90, 184);
+        private Color Blue => _darkTheme ? Color.FromArgb(173, 186, 255) : Color.FromArgb(7, 81, 213);
         private Color Green => _darkTheme ? Color.FromArgb(107, 222, 164) : Color.FromArgb(22, 128, 81);
         private Color Accent => _darkTheme ? Color.FromArgb(59, 70, 113) : Color.FromArgb(224, 231, 255);
         private Color AccentSoft => _darkTheme ? Color.FromArgb(48, 57, 87) : Color.FromArgb(233, 237, 255);
@@ -115,32 +116,17 @@ public sealed partial class MainForm
         private Color _line => Line;
         private float ScaleX => Math.Max(1, Width) / 1448f;
         private float ScaleY => Math.Max(1, Height) / 1086f;
-        private float SidebarWidth => _sidebarCollapsed ? 88f : 232f;
-        private float SidebarPixels => SidebarWidth * ScaleX;
-        private float ContentScaleX => Math.Max(1f, Width - SidebarPixels) / 1216f;
-        private float ContentOffset => SidebarPixels - 232f * ContentScaleX;
-        private float MapX(float x) => x >= 232f
-            ? ContentOffset + x * ContentScaleX
-            : Math.Min(x, SidebarWidth - 4f) * ScaleX;
-        private float UnmapX(float x) => x >= SidebarPixels
-            ? (x - ContentOffset) / ContentScaleX : x / ScaleX;
+        private float ContentScaleX => Math.Max(1, Width) / 1216f;
+        private float ContentOffset => -232f * ContentScaleX;
+        private float MapX(float x) => ContentOffset + x * ContentScaleX;
+        private float UnmapX(float x) => (x - ContentOffset) / ContentScaleX;
 
         private Rectangle MapBounds(RectangleF r)
         {
-            if (r.X < 232f)
-                return Rectangle.Round(new RectangleF(
-                    (_sidebarCollapsed ? 12f : r.X) * ScaleX, r.Y * ScaleY,
-                    (_sidebarCollapsed ? 64f : r.Width) * ScaleX, r.Height * ScaleY));
-            return Rectangle.Round(new RectangleF(MapX(r.X), r.Y * ScaleY,
-                r.Width * ContentScaleX, r.Height * ScaleY));
-        }
-
-        private void ToggleSidebar()
-        {
-            _openMenu?.Close();
-            _sidebarCollapsed = !_sidebarCollapsed;
-            LayoutPositions();
-            Invalidate(true);
+            bool header = r.Y < 65f;
+            float scale = header ? ScaleX : ContentScaleX;
+            return Rectangle.Round(new RectangleF(header ? r.X * scale : MapX(r.X),
+                r.Y * ScaleY, r.Width * scale, r.Height * ScaleY));
         }
 
         private void ToggleTheme()
@@ -261,8 +247,8 @@ public sealed partial class MainForm
 
             // At the normal 0.65 HOME scale these become roughly 104px + 86px wide,
             // enough for the complete caption and HH:mm without touching nearby cards.
-            var autoStopCheckBounds = new RectangleF(1110, 110, 170, 38);
-            var autoStopTimeBounds = new RectangleF(1300, 112, 110, 34);
+            var autoStopCheckBounds = new RectangleF(1010, 195, 170, 38);
+            var autoStopTimeBounds = new RectangleF(1190, 197, 110, 34);
             _positions.Add((autoStopCheck, autoStopCheckBounds));
             _positions.Add((autoStopTime, autoStopTimeBounds));
             autoStopCheck.Bounds = Rectangle.Round(new RectangleF(autoStopCheckBounds.X * ScaleX, autoStopCheckBounds.Y * ScaleY, autoStopCheckBounds.Width * ScaleX, autoStopCheckBounds.Height * ScaleY));
@@ -275,16 +261,14 @@ public sealed partial class MainForm
                 owner.WindowState = owner.WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
             }, "max", "chrome");
             AddButton("닫기", new(1377, 8, 64, 48), owner.Close, "close", "chrome");
-            // Navigations are drawn from the user-provided Mobilay screenshot.
-            BuildMobilayNavigation(owner);
-            _modeTabs.Add(AddButton("낚시", new(276, 190, 210, 62), () => SelectMode(0), "fish", "mode-tab"));
-            _modeTabs.Add(AddButton("던전", new(496, 190, 210, 62), () => SelectMode(1), "swords", "mode-tab"));
-            _modeTabs.Add(AddButton("어비스", new(716, 190, 210, 62), () => SelectMode(2), "abyss", "mode-tab"));
-            // Mini mode is now available in the Mobilay-style utility rail.
+            BuildWorkspaceNavigation(owner);
+            _modeTabs.Add(AddButton("던전", new(412, 175, 148, 54), () => SelectMode(1), "swords", "mode-tab"));
+            _modeTabs.Add(AddButton("어비스", new(256, 175, 148, 54), () => SelectMode(2), "abyss", "mode-tab"));
 
             // The mode cards have no chevron. Their caption area still opens the
             // existing destination selector when a dungeon/abyss mode is active.
-            owner._updateButton = AddButton("업데이트 확인", new(1139, 881, 265, 41), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
+            owner._updateButton = AddButton("업데이트 확인", new(270, 485, 310, 56), () => _ = owner.CheckForUpdatesAsync(true), "", "quiet");
+            _settingsControls.Add(owner._updateButton);
             for (int i = 0; i < 3; i++)
             {
                 int index = i;
@@ -293,10 +277,8 @@ public sealed partial class MainForm
                 _gallery.Add(choose);
                 owner._dungeonButtons.Add(choose);
             }
-            // Logs can only be opened from the sidebar. Preserve the legacy
-            // detached control so ApplyLogVisibility remains safe.
             owner._logToggle = new Button { Visible = false };
-            owner._mainActionButton = AddButton("자동 실행 시작", new(256, 962, 1166, 75), () =>
+            owner._mainActionButton = AddButton("자동 실행 시작", new(1040, 962, 380, 75), () =>
             {
                 if (owner.AnyRunning) owner.StopSelected(); else owner.StartSelected();
             }, "play", "action");
@@ -304,7 +286,7 @@ public sealed partial class MainForm
             owner._logView.Dock = DockStyle.None;
             owner._logView.Visible = false;
             Controls.Add(owner._logView);
-            _positions.Add((owner._logView, new(256, 659, 1166, 278)));
+            _positions.Add((owner._logView, new(256, 175, 1166, 770)));
             owner._alteringPage = new ProductionPage(owner, true);
             owner._gatheringPage = new ProductionPage(owner, false);
             owner._craftingPage = new CraftingPage(owner);
@@ -329,6 +311,7 @@ public sealed partial class MainForm
                 if (_owner.AnyRunning || _owner._activeMode is not null) return;
                 if (mode < 0 || mode >= _owner._mode.Items.Count) return;
                 _showHome = false;
+                _showSettings = false;
                 // Log diagnostics is a separate destination, not an overlay
                 // that should remain above automation, production or scheduling.
                 if (_owner._logExpanded)
@@ -336,7 +319,7 @@ public sealed partial class MainForm
                     _owner._logExpanded = false;
                     _owner.ApplyLogVisibility();
                 }
-                _selectedNavigation = mode switch { 0 => "자동낚시", 1 => "던전", 2 or 3 => "어비스", 4 => "자동가공", 5 or 6 => "채집 / 제작", 7 => "스케줄러", _ => "대시보드" };
+                _selectedNavigation = mode switch { 0 => "낚시", 1 or 2 or 3 => "전투", 4 => "가공", 5 => "채집", 6 => "제작", 7 => "스케줄러", _ => "홈" };
                 _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : mode == 7 ? "스케줄러" : null;
                 _owner._mode.SelectedIndex = mode;
                 UpdateAbyssDungeonPickerVisibility();
@@ -465,33 +448,27 @@ public sealed partial class MainForm
 
         public void UpdateAbyssDungeonPickerVisibility()
         {
-            bool showButtons = !_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded;
-            foreach (var button in _gallery) button.Visible = showButtons;
+            bool log = _owner._logExpanded;
+            bool production = ShouldShowProductionPage && !_showHome && !_showSettings && !log;
+            bool execution = !_showHome && !_showSettings && !log && !production;
+            foreach (var button in _gallery) button.Visible = execution && ShouldShowAbyssDungeonPicker;
+            foreach (var tab in _modeTabs) tab.Visible = execution && _selectedNavigation == "전투";
             if (_owner._alteringPage is not null)
             {
-                bool production = ShouldShowProductionPage;
-                foreach (var tab in _modeTabs) tab.Visible = !_showHome && !production;
                 _owner._alteringPage.Visible = production && _owner._productionPageMode == "가공";
                 _owner._gatheringPage.Visible = production && _owner._productionPageMode == "채집";
                 _owner._craftingPage.Visible = production && _owner._productionPageMode == "제작";
                 _owner._schedulerPage.Visible = production && _owner._productionPageMode == "스케줄러";
-                foreach (var (control, bounds) in _positions)
-                {
-                    if (control is ReferenceButton link && _homeLinks.Contains(link))
-                    {
-                        control.Visible = _showHome && !_owner._logExpanded;
-                        continue;
-                    }
-                    // The fixed bottom "자동 실행 시작" remains interactive on every
-                    // production/scheduler page. Previously it was hidden while the
-                    // painted dashboard still suggested a start control existed.
-                    if (control is ProductionPage || control is CraftingPage || control is SchedulerPage || control == _owner._logView || control == _owner._logToggle || control == _owner._mainActionButton || _gallery.Contains(control as ReferenceButton ?? null!)) continue;
-                    if (bounds.X >= 219 && bounds.Y >= 81) control.Visible = !_showHome && !production;
-                }
-                _owner._mainActionButton.Visible = !_showHome || _owner.AnyRunning;
+                foreach (var control in _settingsControls) control.Visible = _showSettings && !log;
+                foreach (var (control, _) in _positions)
+                    if (control is CheckBox or MaskedTextBox)
+                        control.Visible = execution && _selectedNavigation == "낚시";
+                _owner._mainActionButton.Visible = execution ||
+                    (_owner.AnyRunning && (_showHome || log || _showSettings)) ||
+                    (production && _owner._productionPageMode == "스케줄러");
+                if (production && _owner._productionPageMode == "스케줄러") _owner._mainActionButton.BringToFront();
                 _owner._logToggle.Visible = false;
-                _owner._updateButton.Visible = _showHome;
-                if (_owner._logExpanded) _owner._logView.BringToFront();
+                if (log) _owner._logView.BringToFront();
             }
             // Each WinForms owner-drawn button keeps its own paint surface.
             // Explicitly repaint previous choices when the active page changes.
@@ -539,14 +516,14 @@ public sealed partial class MainForm
             if (y < 65) { _owner.DragReferenceWindow(); return; }
             // Clicking the painted mode-card heading replaces the old down-arrow
             // hit target, so removing its icon doesn't remove dungeon selection.
-            if (!_showHome && !ShouldShowProductionPage && !_owner._logExpanded &&
+            if (!_showHome && !_showSettings && !ShouldShowProductionPage && !_owner._logExpanded &&
                 x >= 256 && x <= 996 && y >= 273 && y <= 396 &&
                 EffectiveMode is "던전" or "어비스" or "페카 심층")
             {
                 ShowDungeonMenu();
                 return;
             }
-            if (!_showHome && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 1412)
+            if (!_showHome && !_showSettings && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 1412)
                 SelectDungeon(Math.Clamp((int)((x - 270) / 380), 0, 2));
         }
 
@@ -645,40 +622,33 @@ public sealed partial class MainForm
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            var sidebarState = g.Save();
+            var headerState = g.Save();
             g.ScaleTransform(ScaleX, ScaleY);
-            using (var nav = new SolidBrush(NavBg)) g.FillRectangle(nav, 0, 0, SidebarWidth, 1086);
-            using (var line = new Pen(Line)) g.DrawLine(line, SidebarWidth, 0, SidebarWidth, 1086);
-            if (!_sidebarCollapsed)
-            {
-                TextAt(g, "MOBI", new(28, 8, 130, 43), 32, true, TitleText);
-                TextAt(g, "Automation", new(30, 49, 140, 27), 15, false, Muted);
-            }
-            PaintBentoSidebar(g);
-            g.Restore(sidebarState);
+            TextAt(g, "MABI AUTO", new(23, 7, 210, 51), 29, true, Blue);
+            using (var line = new Pen(Line)) g.DrawLine(line, 0, 64, 1448, 64);
+            g.Restore(headerState);
 
             var bodyState = g.Save();
             g.TranslateTransform(ContentOffset, 0);
             g.ScaleTransform(ContentScaleX, ScaleY);
-            using (var line = new Pen(Line)) g.DrawLine(line, 232, 100, 1448, 100);
-            TextAt(g, UpdateManager.CurrentVersion, new(280, 21, 160, 40), 16, false, Muted);
-            TextAt(g, "F9 시작  ·  F10 정지", new(480, 22, 310, 39), 14, false, Muted);
-            if (!ShouldShowProductionPage)
-            {
-                if (_showHome) PaintHome(g);
-                else PaintAutomation(g);
-            }
+            if (_owner._logExpanded)
+                TextAt(g, "기록", new(256, 82, 530, 78), 34, true);
+            else if (_showSettings)
+                PaintWorkspaceSettings(g);
+            else if (_showHome)
+                PaintHome(g);
+            else if (!ShouldShowProductionPage)
+                PaintAutomation(g);
             g.Restore(bodyState);
         }
 
         // Read-only home. Every value is taken from the existing live runtime state,
         // rather than mock statistics or an invented scheduling calendar.
-        private void PaintHome(Graphics g) => PaintMobilayHome(g);
+        private void PaintHome(Graphics g) => PaintWorkspaceHome(g);
 
         private void PaintAutomation(Graphics g)
         {
-            TextAt(g, "자동화 실행", new(278, 91, 800, 60), 34, true, TitleText);
-            TextAt(g, "낚시 · 던전 · 어비스 중 실행할 작업을 선택하세요.", new(279, 151, 1000, 30), 18, false, Muted);
+            TextAt(g, _selectedNavigation, new(256, 91, 800, 60), 34, true, TitleText);
 
             Card(g, new(256, 273, 740, 372));
             TextAt(g, EffectiveMode + " 모드", new(280, 295, 635, 42), 24, true, TitleText);
@@ -690,7 +660,6 @@ public sealed partial class MainForm
             TextAt(g, _owner._currentStepValue.Text, new(454, 464, 472, 52), 18, true, TitleText, multiline: true);
             TextAt(g, "최근 인식", new(280, 530, 168, 36), 17, false, Muted);
             TextAt(g, _owner._recentDetectValue.Text, new(454, 529, 469, 40), 18, true, TitleText);
-            TextAt(g, "F8 테스트  ·  F9 시작  ·  F10 정지", new(280, 589, 680, 32), 16, false, Muted);
 
             Card(g, new(1012, 273, 410, 372));
             TextAt(g, "실행 상태", new(1037, 295, 350, 40), 23, true, TitleText);
@@ -731,7 +700,7 @@ public sealed partial class MainForm
                 string guide = EffectiveMode == "낚시" ? "낚시 자동화 · F8로 실제 키 입력을 테스트할 수 있습니다."
                     : "던전 자동화 · 게임 화면과 대상 상태를 확인하고 실행하세요.";
                 TextAt(g, guide, new(279, 741, 1065, 58), 18, false, Muted, multiline: true);
-                TextAt(g, "로그 기록은 왼쪽 실행 기록 메뉴에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
+                TextAt(g, "최근 기록은 상단 기록 탭에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
             }
         }
 
@@ -888,10 +857,23 @@ public sealed partial class MainForm
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-                bool sidebar = Left < _ui.SidebarPixels;
-                float sx = sidebar ? _ui.ScaleX : _ui.ContentScaleX, sy = _ui.ScaleY;
+                float sx = Top < 65f * _ui.ScaleY ? _ui.ScaleX : _ui.ContentScaleX, sy = _ui.ScaleY;
                 g.ScaleTransform(sx, sy);
                 float w = Width / sx, h = Height / sy;
+                if (_kind == "nav")
+                {
+                    bool active = Text == (_ui._owner._logExpanded ? "기록" : _ui._selectedNavigation);
+                    using var fill = new SolidBrush(_hover && !active ? _ui.CardBg2 : _ui.NavBg);
+                    g.FillRectangle(fill, 0, 0, w, h);
+                    if (active)
+                    {
+                        using var marker = new SolidBrush(_ui.Blue);
+                        g.FillRectangle(marker, 0, h - 4, w, 4);
+                    }
+                    _ui.TextAt(g, Text, new(0, 0, w, h), 19, active,
+                        active ? _ui.Blue : _ui.TitleText, StringAlignment.Center);
+                    return;
+                }
                 if (_kind == "card-link")
                 {
                     using var bg = new SolidBrush(_pressed ? _ui.AccentSoft : _hover ? _ui.CardBg2 : _ui.AccentSoft);
@@ -955,7 +937,7 @@ public sealed partial class MainForm
                 {
                     string caption = Text.TrimStart('●', '○', '▶', '■', '▤', ' ');
                     float font = action ? 19 : nav ? 19 : _kind == "mode-tab" ? 19 : _kind == "log" ? 19 : _kind == "quiet" && w < 150 ? 14 : 18;
-                    if ((sidebar && _ui._sidebarCollapsed) || _kind == "sidebar-toggle")
+                    if (_kind == "sidebar-toggle")
                         _ui.Icon(g, _icon, new((w - 28) / 2, (h - 28) / 2, 28, 28), fg);
                     else if (nav || _kind == "mode-tab") { _ui.Icon(g, _icon, new(18, (h - 30) / 2, 30, 30), fg); _ui.TextAt(g, caption, new(67, 0, w - 73, h), font, strong, fg); }
                     else if (_kind == "choose")
