@@ -1,6 +1,6 @@
 name: Publish V3.3.42 Browser Altering Controls After Main CI
 
- # V3.3.42 rollout: fix 21:32 managed F9 verified K first-card recovery; preserve safe stops.
+# V3.3.42 includes browser altering controls and retains production regressions.
 # User-approved release; game acceptance for V3.3.42 remains pending.
 # Retained V3.3.30 gathering policy now accepts V3.3.42; rerun gated publication.
 # Publish from exact CI-approved main only, once. Preserve rollback and
