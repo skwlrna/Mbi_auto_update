@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace FishingAutomation;
 
@@ -117,15 +116,11 @@ public sealed partial class MainForm
             return $"#{number} 가공 요청 취소";
         }
 
-        var add = Regex.Match(command, @"\A가공 추가 (?<name>[^\r\n]{1,120}?) (?<mode>총|추가) (?<count>[0-9]{1,7})\z",
-            RegexOptions.CultureInvariant);
-        if (!add.Success || !int.TryParse(add.Groups["count"].Value, out int quantity) || quantity is < 1 or > 1000000)
-            return "사용법 · 가공 추가 가죽+ 총 200 / 가공 추가 철괴 추가 100 / 가공 목록 / 가공 시작 / 가공 정지 / 가공 취소 번호";
-        var order = new PhoneAlteringOrder(queue.Next, add.Groups["name"].Value.Trim(),
-            add.Groups["mode"].Value == "총", quantity, messageKey);
-        if (order.Name.Length == 0) return "가공 품목 이름을 입력하세요.";
+        if (TelegramCommandParser.ParseAlteringOrder(command) is not { } add)
+            return TelegramCommandParser.AlteringHelp;
+        var order = new PhoneAlteringOrder(queue.Next, add.Name, add.Total, add.Quantity, messageKey);
         SavePhoneAlteringQueue(updated with { Next = checked(queue.Next + 1), Orders = queue.Orders.Append(order).ToArray() });
-        return $"#{order.Number} 등록 · {order.Name} · {(order.Total ? "총" : "추가")} {quantity:N0}개 · 시작 대기";
+        return $"#{order.Number} 등록 · {order.Name} · {(order.Total ? "총" : "추가")} {order.Quantity:N0}개 · 시작 대기";
     }
 
     private async Task RunPhoneAlteringQueueAsync(CancellationTokenSource run)

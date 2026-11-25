@@ -1897,6 +1897,19 @@ Check(AlteringFacilityTravelConfirmPolicy.ManagedTravelTimeout == TimeSpan.FromM
 
 // Next-release Telegram status: only the exact Korean read-only alias is
 // accepted. Unsafe controls must remain explicit slash commands.
+Check(TelegramCommandParser.ParseAlteringOrder("가공 가죽+ 200") == ("가죽+", true, 200) &&
+      TelegramCommandParser.ParseAlteringOrder("가공 가죽+ 추가 100") == ("가죽+", false, 100) &&
+      TelegramCommandParser.ParseAlteringOrder("가공 가죽+ 총 200") == ("가죽+", true, 200) &&
+      TelegramCommandParser.ParseAlteringOrder("가공 추가 가죽+ 총 200") == ("가죽+", true, 200) &&
+      TelegramCommandParser.ParseAlteringOrder("가공 추가 철괴 추가 100") == ("철괴", false, 100) &&
+      TelegramCommandParser.ParseAlteringOrder("가공 나무 진액 200") == ("나무 진액", true, 200),
+    "short and legacy phone commands resolve the same item, stock mode and quantity");
+Check(TelegramCommandParser.ParseAlteringOrder("가공 시작 200") is null &&
+      TelegramCommandParser.ParseAlteringOrder("가공 취소 2") is null &&
+      TelegramCommandParser.ParseAlteringOrder("가공 가죽+ 0") is null &&
+      TelegramCommandParser.ParseAlteringOrder("가공 가죽+ 1000001") is null,
+    "control words and out-of-range quantities are not phone orders");
+
 Check(TelegramCommandParser.Parse("가공 추가 가죽+ 총 200") == "가공 추가 가죽+ 총 200" &&
       TelegramCommandParser.Parse("가공 추가 철괴 추가 100") == "가공 추가 철괴 추가 100" &&
       TelegramCommandParser.Parse("가공 시작") == "가공 시작" &&
