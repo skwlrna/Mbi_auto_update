@@ -30,7 +30,7 @@ class TanninRecipeReadiness(unittest.TestCase):
         self.assertFalse(a["realGameTested"])
         self.assertTrue(a["rollbackProvided"] and a["mainCiRequired"])
         self.assertRegex(
-                      read("source/FishingAutomation/UpdateManager.cs"), r'CurrentVersion = "V3\.3\.(35|36|37|38|39|40|41|42)"')
+                      read("source/FishingAutomation/UpdateManager.cs"), r'CurrentVersion = "V3\.3\.(35|36|37|38|39|40|41|42|43)"')
         self.assertRegex(
                       read("source/FishingAutomation/FishingAutomation.csproj"), r"<Version>3\.3\.(35|36|37|38|39|40|41|42)</Version>")
         workflow = read(".github/workflows/release-v3335-auto-update.yml")
