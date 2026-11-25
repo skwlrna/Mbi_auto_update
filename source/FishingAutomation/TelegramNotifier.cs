@@ -38,7 +38,7 @@ public sealed class TelegramNotifier : IDisposable
     private readonly AppLog _log;
     private CancellationTokenSource? _remoteCts;
     private Task? _remoteTask;
-    private Func<string, Task<string>>? _remoteHandler;
+    private Func<string, string, Task<string>>? _remoteHandler;
     private long _updateOffset;
     private DateTime _lastPollErrorAt = DateTime.MinValue;
     private long _remoteStartedAtUnix;
@@ -65,7 +65,7 @@ public sealed class TelegramNotifier : IDisposable
         catch { return false; }
     }
 
-    public void StartRemoteControl(Func<string, Task<string>> handler)
+    public void StartRemoteControl(Func<string, string, Task<string>> handler)
     {
         _remoteHandler = handler;
         if (_remoteTask is { IsCompleted: false }) return;
@@ -152,14 +152,26 @@ public sealed class TelegramNotifier : IDisposable
                     string? command = TelegramCommandParser.Parse(text);
                     if (command is null) continue;
 
+                    string messageKey = "";
+                    if (command.StartsWith("가공 ", StringComparison.Ordinal))
+                    {
+                        if (!chat.TryGetProperty("type", out var chatType) || chatType.GetString() != "private" ||
+                            !message.TryGetProperty("from", out var sender) ||
+                            !sender.TryGetProperty("id", out var senderId) || senderId.ToString() != chatId ||
+                            !message.TryGetProperty("message_id", out var messageId) ||
+                            !message.TryGetProperty("date", out var sentAt))
+                            continue;
+                        messageKey = $"{chatId}:{sentAt}:{messageId}";
+                    }
+
                     string reply;
                     if (command == "/help")
                     {
-                        reply = "MABI AUTO 원격 명령\n상태 또는 /status - 현재 상세 현황\n/item - 전리품 획득 현황\n/itemreset - 전리품 누적 초기화\n/stop - 매크로 정지\n/restart - 현재 선택 모드 재시작";
+                        reply = "MABI AUTO 원격 명령\n상태 또는 /status - 현재 상세 현황\n/item - 전리품 획득 현황\n/itemreset - 전리품 누적 초기화\n/stop - 매크로 정지\n/restart - 현재 선택 모드 재시작\n가공 추가 가죽+ 총 200\n가공 추가 철괴 추가 100\n가공 목록 / 가공 취소 번호 / 가공 시작 / 가공 정지";
                     }
                     else if (_remoteHandler is not null)
                     {
-                        reply = await _remoteHandler(command);
+                        reply = await _remoteHandler(command, messageKey);
                     }
                     else reply = "원격 제어가 아직 준비되지 않았습니다.";
 

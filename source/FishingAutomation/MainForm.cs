@@ -272,7 +272,7 @@ public sealed partial class MainForm : Form
         _ => "abyss_dungeon_hallucination_anchorage"
     };
     private bool DungeonRunning => _dungeonTask is { IsCompleted: false };
-    private bool AnyRunning => _schedulerRunning || _schedulerMonitor.IsRunning || _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
+    private bool AnyRunning => _phoneAlteringRun is not null || _schedulerRunning || _schedulerMonitor.IsRunning || _starting || _resumeUiBusy || _multiAlteringRunning || _fishingBot.IsRunning || DungeonRunning;
 
     private void UpdateAbyssSelectorVisibility()
     {
@@ -653,6 +653,7 @@ public sealed partial class MainForm : Form
 
     private void StopSelected()
     {
+        _phoneAlteringRun?.Cancel();
         if (_starting) _cancelStart = true;
         if (_schedulerRunning && _schedulerCts is { IsCancellationRequested: false })
         {
@@ -686,6 +687,7 @@ public sealed partial class MainForm : Form
 
     private void StopAll()
     {
+        _phoneAlteringRun?.Cancel();
         _cancelStart = true;
         _schedulerMonitor.RequestStop();
         if (_schedulerCts is { IsCancellationRequested: false }) _schedulerCts.Cancel();

@@ -8,19 +8,20 @@ public sealed partial class MainForm
     private CancellationTokenSource? _multiAlteringCts;
     private bool _resumeUiBusy;
 
-    private async Task StartMultiAlteringAsync(
+    private async Task<bool> StartMultiAlteringAsync(
         IReadOnlyList<AlteringPlan> plans, string? resumeDirectory = null,
         string? expectedResumeBatchId = null,
-        bool confirmedSingleCharacterResume = false)
+        bool confirmedSingleCharacterResume = false,
+        bool remoteOrder = false)
     {
         if (_multiAlteringRunning)
-            return;
+            return false;
 
         bool isResume = resumeDirectory is not null;
         // UI shortage evidence can be masked by a later global queue_full
         // response. Capture the selected entries before any asynchronous F9
         // work; live CLI inventory is still checked before gathering.
-        var queuedMaterialEvidence = isResume
+        var queuedMaterialEvidence = isResume || remoteOrder
             ? Array.Empty<MultiAlteringSupplyPreflight>()
             : _alteringPage.QueuedAlteringMaterialEvidence;
         // Snapshot once before awaits; F7 cannot change it while this batch runs.
@@ -33,6 +34,7 @@ public sealed partial class MainForm
         string combinedAbyssDungeonName = SelectedAbyssDungeon;
         string combinedAbyssTargetId = SelectedAbyssTargetId;
         bool completed = false;
+        bool reachedTarget = false;
         MultiAlteringBatchStore? batchStore = null;
         MultiAlteringBatchStore? verifiedBatchLease = null;
         LifeSkillManagerState? managerState = null;
@@ -178,7 +180,7 @@ public sealed partial class MainForm
                 _log.Write("[다중가공] 전체 완료 확정 기록 복원 · 게임 입력 없이 정리만 완료");
                 SetStatus("다중가공 완료", Green);
                 completed = true;
-                return;
+                return true;
             }
 
             var windows = WindowTools.EnumerateVisibleWindows();
@@ -1071,6 +1073,7 @@ public sealed partial class MainForm
                 NoteMultiAlteringAction("모든 다중가공 작업 완료 · 수령 및 확인 완료");
                 _log.Write("[다중가공] 전체 작업 정상 완료 · 시설별 7칸 품목 순차 배치 운용");
                 SetStatus("다중가공 완료", Green);
+                reachedTarget = true;
             }
 
         }
@@ -1216,12 +1219,13 @@ public sealed partial class MainForm
             {
                 if (completed)
                 {
-                    _alteringPage.ClearQueuedAlteringPlans();
+                    if (!remoteOrder) _alteringPage.ClearQueuedAlteringPlans();
                     if (batchStore is not null) await Task.Run(batchStore.AcknowledgeClearedPlan);
                 }
             }
             catch (Exception ex)
             {
+                reachedTarget = false;
                 _runError = ex.Message;
                 _log.Write("[다중가공] 완료 정리 저장 실패 · 완료 기록 보존: " + ex.Message);
                 SetStatus("다중가공 완료 정리 확인 필요", Color.DarkOrange);
@@ -1233,5 +1237,6 @@ public sealed partial class MainForm
             UpdateStats();
             RefreshProductionDashboard();
         }
+        return reachedTarget;
     }
 }
