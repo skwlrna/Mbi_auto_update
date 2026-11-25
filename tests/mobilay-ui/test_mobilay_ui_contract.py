@@ -30,8 +30,17 @@ class MobilayPresentationContract(unittest.TestCase):
 
     def test_legacy_task_palette_and_bento_shell_are_separate(self):
         self.assertIn("Color.FromArgb(245, 246, 248)", self.shell)
-        self.assertIn("Color NavBg = Color.White", self.shell)
+        self.assertIn("Color NavBg => _darkTheme", self.shell)
+        self.assertIn(": Color.White;", self.shell)
         self.assertIn("Color.FromArgb(36, 40, 59)", self.grid)
+
+    def test_sidebar_reflow_and_theme_are_presentation_only(self):
+        for marker in ("MapBounds(r)", "UnmapX(e.X)", "MapX(x)",
+                       "ContentScaleX", "ToggleSidebar()", "ToggleTheme()"):
+            self.assertIn(marker, self.shell)
+        self.assertIn("if (_sidebarCollapsed)", self.grid)
+        self.assertIn('owner.StopSelected, "stop", "danger"', self.grid)
+        self.assertIn('themeToggle.AccessibleName = "테마 전환"', self.grid)
 
     def test_six_real_dashboard_cards_and_clickable_links(self):
         titles = ("자동낚시", "자동가공", "어비스", "스케줄러", "자동채집", "제작")

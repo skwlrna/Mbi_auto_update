@@ -196,6 +196,27 @@ internal static class Program
                 .OrderBy(x => x.Top).Select(x => x.Text).ToArray();
             Check(navButtons.SequenceEqual(navOrder),
                 "workspace navigation order and icon destinations are consistent");
+            var sidebarToggle = controls.OfType<Button>().Single(x => x.AccessibleName == "사이드바 접기 / 펼치기");
+            var themeToggle = controls.OfType<Button>().Single(x => x.AccessibleName == "테마 전환");
+            var sidebarHome = Sidebar("대시보드");
+            var expandedHomeBounds = sidebarHome.Bounds;
+            var expandedWorkBounds = globalStart.Bounds;
+            sidebarToggle.PerformClick(); Pump();
+            Check(sidebarHome.Width < expandedHomeBounds.Width && globalStart.Width > expandedWorkBounds.Width &&
+                  globalStart.Left < expandedWorkBounds.Left && sidebarHome.Visible,
+                "collapsed sidebar gives the real workspace more room");
+            Check(Field<string>(dashboard, "_selectedNavigation") == "대시보드",
+                "sidebar collapse does not change the selected mode");
+            sidebarToggle.PerformClick(); Pump();
+            Check(sidebarHome.Bounds == expandedHomeBounds && globalStart.Bounds == expandedWorkBounds,
+                "expanding the sidebar restores original geometry");
+            var lightColor = dashboard.BackColor;
+            themeToggle.PerformClick(); Pump();
+            Check(dashboard.BackColor != lightColor && themeToggle.Text == "라이트 모드",
+                "dark theme changes dashboard palette without navigating");
+            themeToggle.PerformClick(); Pump();
+            Check(dashboard.BackColor == lightColor && themeToggle.Text == "다크 모드",
+                "light theme restores initial dashboard palette");
             Check(!controls.OfType<Button>().Any(x => x.Text == "현재 모드 선택"),
                 "remove redundant mode-selection arrow beside fishing/dungeon/abyss");
             Check(!Field<Button>(form, "_logToggle").Visible &&

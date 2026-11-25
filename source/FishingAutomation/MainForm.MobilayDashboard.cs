@@ -15,6 +15,13 @@ public sealed partial class MainForm
                 owner.ApplyLogVisibility();
                 UpdateAbyssDungeonPickerVisibility();
             }
+            var sidebarToggle = AddButton("메뉴 접기 / 펼치기", new(174, 22, 42, 42),
+                ToggleSidebar, "sidebar", "sidebar-toggle");
+            sidebarToggle.AccessibleName = "사이드바 접기 / 펼치기";
+            var themeToggle = AddButton("다크 모드", new(856, 8, 170, 48),
+                ToggleTheme, "", "quiet");
+            themeToggle.AccessibleName = "테마 전환";
+            themeToggle.Click += (_, _) => themeToggle.Text = _darkTheme ? "라이트 모드" : "다크 모드";
             AddButton("대시보드", new(16, 135, 200, 49), () =>
             {
                 _showHome = true;
@@ -34,12 +41,12 @@ public sealed partial class MainForm
             AddButton("실행 기록", new(16, 560, 200, 49), OpenLog, "log", "nav");
             AddButton("알림 관리", new(16, 611, 200, 49), owner.ShowTelegramSettings, "bell", "nav");
             AddButton("환경 설정", new(16, 662, 200, 49), () => ShowSettingsMenu(228, 662), "settings", "nav");
-            AddButton("미니 모드", new(16, 822, 200, 40), () => owner.ToggleMini(true), "", "quiet");
+            AddButton("미니 모드", new(16, 822, 200, 40), () => owner.ToggleMini(true), "min", "quiet");
             var alwaysTop = AddButton("전체 최상단", new(16, 869, 200, 40),
-                () => owner.TopMost = !owner.TopMost, "", "quiet");
+                () => owner.TopMost = !owner.TopMost, "pin", "quiet");
             alwaysTop.Click += (_, _) =>
                 alwaysTop.Text = owner.TopMost ? "최상단 해제" : "전체 최상단";
-            AddButton("전체 중지", new(16, 1001, 200, 55), owner.StopSelected, "", "danger");
+            AddButton("전체 중지", new(16, 1001, 200, 55), owner.StopSelected, "stop", "danger");
             AddButton("F8 테스트", new(1032, 8, 169, 48), owner.TestOrRefresh, "refresh", "quiet");
 
             Action[] targets = { () => SelectMode(0), () => SelectMode(4), () => SelectMode(2),
@@ -63,6 +70,14 @@ public sealed partial class MainForm
 
         private void PaintBentoSidebar(Graphics g)
         {
+            if (_sidebarCollapsed)
+            {
+                Icon(g, "ocr", new(30, 753, 28, 28), Blue);
+                TextAt(g, _owner._sysOcrValue.Text, new(3, 782, 82, 30), 12, false, Muted, StringAlignment.Center);
+                Icon(g, "game", new(30, 932, 28, 28), Blue);
+                TextAt(g, _owner._sysGameValue.Text, new(3, 963, 82, 30), 12, false, Muted, StringAlignment.Center);
+                return;
+            }
             TextAt(g, "메인", new(22, 104, 180, 29), 15, true, Muted);
             TextAt(g, "자동화", new(22, 186, 180, 29), 15, true, Muted);
             TextAt(g, "관리", new(22, 528, 180, 29), 15, true, Muted);
@@ -108,6 +123,7 @@ public sealed partial class MainForm
             void Tile(int col, int row, string title, string detail, string icon, Color bg)
             {
                 int x = 256 + col * 390, y = 469 + row * 174;
+                if (_darkTheme) bg = Color.FromArgb((bg.R + 4 * 34) / 5, (bg.G + 4 * 36) / 5, (bg.B + 4 * 46) / 5);
                 using (var fill = new SolidBrush(bg))
                 using (var path = Round(new RectangleF(x, y, 374, 154), 18))
                     g.FillPath(fill, path);
