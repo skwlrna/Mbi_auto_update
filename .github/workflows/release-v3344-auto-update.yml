@@ -276,7 +276,7 @@ jobs:
           python -m unittest discover -s tests/release -p 'test_v3335_leather_tannin_readiness.py' -v
           if($LASTEXITCODE-ne0){throw 'V3.3.44 leather readiness release policy failed'}
 
-      - name: Verify browser previous batch reset regression
+      - name: Verify dungeon result retry regression
         shell: pwsh
         run: |
           python -m unittest discover -s tests/release -p 'test_v3336_dungeon_result_retry.py' -v

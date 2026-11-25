@@ -53,6 +53,19 @@ internal static class Program
             "real HTTP accepts one order, rejects changed replay and blocks unknown commands");
         var getCommand = await Send("GET", "/api/command", server.Token).ConfigureAwait(false);
         Check(getCommand.Code == 404 && calls == 2, "GET cannot perform a browser mutation");
+        var deniedBatch = await Send("GET", "/api/previous-batch").ConfigureAwait(false);
+        var priorBatch = await Send("GET", "/api/previous-batch", server.Token).ConfigureAwait(false);
+        string batchId = Guid.NewGuid().ToString("N");
+        var reset = new BrowserControlRequest("queue-reset-previous", Guid.NewGuid().ToString("D"), BatchId: batchId);
+        var invalidReset = await Send("POST", "/api/command", server.Token, reset with { BatchId = "invalid" }).ConfigureAwait(false);
+        var deniedReset = await Send("POST", "/api/command", body: reset).ConfigureAwait(false);
+        var resetReply = await Send("POST", "/api/command", server.Token, reset).ConfigureAwait(false);
+        var resetReplay = await Send("POST", "/api/command", server.Token, reset).ConfigureAwait(false);
+        Check(deniedBatch.Code == 401 && priorBatch.Code == 200 &&
+              invalidReset.Code == 400 && deniedReset.Code == 401 &&
+              resetReply.Code == 200 && resetReplay == resetReply && calls == 4 &&
+              JsonDocument.Parse(resetReply.Text).RootElement.GetProperty("message").GetString() == "브라우저 가공 초기화 " + batchId,
+            "browser reads and resets the confirmed batch only with authentication and one dispatch");
         string oldKey = server.Token;
         server.Dispose();
         Check(!server.IsRunning, "disabling browser control closes its listener");
