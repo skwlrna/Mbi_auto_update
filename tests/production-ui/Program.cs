@@ -760,7 +760,13 @@ internal static class Program
                 InvokeTask(form, "RefreshProductionStateAsync", gathering); Pump(); Save(form, Path.Combine(args[0], "automatic-gathering.png"));
                 Menu("자동 가공"); facilityTabs.Single(x => x.Text == "목재").PerformClick(); Pump(); ai.SelectedIndex = 0; SetQuantity(aq, 50);
                 InvokeTask(form, "RefreshProductionStateAsync", altering); Pump(); Save(form, Path.Combine(args[0], "automatic-altering.png"));
-                Menu("홈"); Pump(); Save(form, Path.Combine(args[0], "home.png"));
+                foreach (var (screen, file) in new[] { ("홈", "home"), ("제작", "crafting"),
+                    ("낚시", "fishing"), ("어비스", "combat"), ("스케줄러", "scheduler"),
+                    ("기록", "history"), ("설정", "settings") })
+                {
+                    Menu(screen); Pump();
+                    Save(form, Path.Combine(args[0], file + ".png"));
+                }
             }
             form.Close(); Console.WriteLine($"PASS {_checks} production UI checks"); return 0;
         }
