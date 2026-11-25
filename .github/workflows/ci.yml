@@ -577,7 +577,7 @@ jobs:
           $layout = (Get-Content source/FishingAutomation/MainForm.ReferenceUI.cs -Raw) + "`n" +
                     (Get-Content source/FishingAutomation/MainForm.MobilayDashboard.cs -Raw)
           if($layout -match 'new ProductionDashboard\(this\)'){throw 'separate production dashboard is still attached'}
-          foreach($text in @('자동 가공','자동 채집','제작','작업 대상')){
+          foreach($text in @('자동가공','자동 채집','제작','작업 대상')){
             if($layout -notmatch [regex]::Escape($text)){throw "unified UI text missing: $text"}
           }
           # V3.1.91 shows quantities in the production workspace, not the home summary.
@@ -585,13 +585,13 @@ jobs:
           foreach($text in @('목표 수량','진행 수량')){
             if($productionPage -notmatch [regex]::Escape($text)){throw "production quantity UI missing: $text"}
           }
-          # V3.1.92 groups production destinations under one accessible menu.
-          if($layout -notmatch [regex]::Escape('AddButton("생활 생산"') -and
-             $layout -notmatch [regex]::Escape('AddButton("생산 관리"')){throw 'new production navigation is missing'}
-          foreach($text in @('자동 가공','자동 채집','제작')){
+          # Bento shell: direct processing entry and grouped gathering/crafting.
+          foreach($route in @('AddButton("자동가공"', 'AddButton("채집 / 제작"', 'SelectMode(4)', 'new[] { 5, 6 }')){
+            if($layout -notmatch [regex]::Escape($route)){throw "production navigation route missing: $route"}
+          }
+          foreach($text in @('자동가공','자동 채집','제작')){
             if($layout -notmatch [regex]::Escape($text)){throw "production menu option missing: $text"}
           }
-          if($layout -match '자동채집'){throw 'automatic gathering spacing is inconsistent in reference UI'}
           $main = Get-Content source/FishingAutomation/MainForm.cs -Raw
           if($main -notmatch 'DisplayModeName'){throw 'display mode normalization missing'}
           if($main -notmatch 'mode is "가공" or "채집" or "제작"'){throw 'production statistics branch missing'}

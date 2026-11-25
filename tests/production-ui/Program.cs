@@ -37,32 +37,25 @@ internal static class Program
                 .Single(x => x.AccessibleName?.EndsWith("목표 수량", StringComparison.Ordinal) == true);
             int QuantityValue(TextBox input) => int.Parse(input.Text, System.Globalization.CultureInfo.InvariantCulture);
             void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
+            // Select actual visible sidebar buttons, not the duplicate mode tabs.
+            var dashboardControl = Field<Control>(form, "_referenceDashboard");
+            Button Sidebar(string caption) => controls.OfType<Button>().Single(x =>
+                x.Parent == dashboardControl && x.Left < dashboardControl.Width * 232 / 1448 &&
+                x.Text == caption && x.Visible);
             void Menu(string name)
             {
-                if (name is "낚시" or "던전" or "어비스")
+                if (name is "자동 채집" or "제작")
                 {
-                    // Enter the automation workspace first; modes are its three
-                    // visible tabs, not independent top-level sidebar entries.
-                    controls.OfType<Button>().Single(x => x.Text == "자동화 실행").PerformClick();
+                    Sidebar("채집 / 제작").PerformClick();
                     Pump();
-                    controls.OfType<Button>().Single(x => x.Text == name).PerformClick();
+                    var popup = Field<ContextMenuStrip>(dashboardControl, "_openMenu");
+                    Check(popup.Visible, "gathering and crafting menu opens from sidebar");
+                    popup.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == name).PerformClick();
                     return;
                 }
-                if (name is "자동 가공" or "자동 채집" or "제작")
-                {
-                    // The dark Mobilay-style navigation still groups these three modes.
-                    // Exercise the actual visible production menu, not an obsolete hidden shortcut.
-                    controls.OfType<Button>().Single(x => x.Text == "생활 생산").PerformClick();
-                    Pump();
-                    var dashboard = Field<Control>(form, "_referenceDashboard");
-                    var popup = Field<ContextMenuStrip>(dashboard, "_openMenu");
-                    Check(popup.Visible, "production menu opens from the sidebar");
-                    var item = popup.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == name);
-                    item.PerformClick();
-                    return;
-                }
-                controls.OfType<Button>().Single(x => x.Text == name &&
-                    !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
+                string caption = name switch { "홈" => "대시보드", "낚시" => "자동낚시",
+                    "자동 가공" => "자동가공", _ => name };
+                Sidebar(caption).PerformClick();
             }
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             // Real V3.1.88 report: neither the visible start button nor F9
@@ -194,11 +187,12 @@ internal static class Program
             var updateCheck = Field<Button>(form, "_updateButton");
             Check(updateCheck.Visible && updateCheck.Text == "업데이트 확인",
                 "update check appears on home dashboard");
-            Check(Field<string>(dashboard, "_selectedNavigation") == "홈",
+            Check(Field<string>(dashboard, "_selectedNavigation") == "대시보드",
                 "home is the sole selected navigation destination");
-            var navOrder = new[] { "홈", "자동화 실행", "던전 / 어비스", "생활 생산",
-                "스케줄러", "기타 / 설정", "로그 / 진단" };
-            var navButtons = controls.OfType<Button>().Where(x => navOrder.Contains(x.Text))
+            var navOrder = new[] { "대시보드", "자동낚시", "자동가공", "어비스", "던전",
+                "채집 / 제작", "스케줄러", "실행 기록", "알림 관리", "환경 설정" };
+            var navButtons = controls.OfType<Button>().Where(x => x.Parent == dashboardControl &&
+                x.Left < dashboardControl.Width * 232 / 1448 && navOrder.Contains(x.Text))
                 .OrderBy(x => x.Top).Select(x => x.Text).ToArray();
             Check(navButtons.SequenceEqual(navOrder),
                 "workspace navigation order and icon destinations are consistent");
@@ -536,7 +530,7 @@ internal static class Program
                 Menu(mode);
                 Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
                 Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") ==
-                    (mode == "낚시" ? "자동화 실행" : "던전 / 어비스"),
+                    (mode == "낚시" ? "자동낚시" : mode),
                     "mode tab keeps the correct sidebar selection: " + mode);
             }
             fake.Fail = true; Menu("자동 채집");
@@ -644,7 +638,7 @@ internal static class Program
                               FullyContained(queueFeedback, altering) &&
                               FullyContained(addAlteringQueue, altering),
                             "multi-altering add button and explanation stay visible at " + size);
-                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "생활 생산",
+                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "자동가공",
                             "production navigation remains exclusively selected at " + size);
                     }
                     if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }

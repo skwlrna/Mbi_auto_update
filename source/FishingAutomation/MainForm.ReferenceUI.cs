@@ -668,7 +668,7 @@ public sealed partial class MainForm
                 string guide = EffectiveMode == "낚시" ? "낚시 자동화 · F8로 실제 키 입력을 테스트할 수 있습니다."
                     : "던전 자동화 · 게임 화면과 대상 상태를 확인하고 실행하세요.";
                 TextAt(g, guide, new(279, 741, 1065, 58), 18, false, Muted, multiline: true);
-                TextAt(g, "로그 기록은 왼쪽 로그 / 진단 메뉴에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
+                TextAt(g, "로그 기록은 왼쪽 실행 기록 메뉴에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
             }
         }
 
