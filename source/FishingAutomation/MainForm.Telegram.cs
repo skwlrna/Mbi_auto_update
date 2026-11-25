@@ -2,8 +2,22 @@ namespace FishingAutomation;
 
 public sealed partial class MainForm
 {
-    private async Task<string> HandleTelegramCommandAsync(string command)
+    private async Task<string> HandleTelegramCommandAsync(string command, string messageKey)
     {
+        if (command.StartsWith("가공 ", StringComparison.Ordinal))
+        {
+            try
+            {
+                return InvokeRequired
+                    ? (string)Invoke(new Func<string>(() => HandlePhoneAlteringCommand(command, messageKey)))
+                    : HandlePhoneAlteringCommand(command, messageKey);
+            }
+            catch (Exception ex)
+            {
+                _log.Write("[휴대폰 가공] 명령 처리 실패: " + ex.GetType().Name);
+                return "가공 요청을 처리하지 못했습니다. PC의 작업 기록을 확인하세요.";
+            }
+        }
         switch (command)
         {
             case "/status":

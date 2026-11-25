@@ -1897,6 +1897,13 @@ Check(AlteringFacilityTravelConfirmPolicy.ManagedTravelTimeout == TimeSpan.FromM
 
 // Next-release Telegram status: only the exact Korean read-only alias is
 // accepted. Unsafe controls must remain explicit slash commands.
+Check(TelegramCommandParser.Parse("가공 추가 가죽+ 총 200") == "가공 추가 가죽+ 총 200" &&
+      TelegramCommandParser.Parse("가공 추가 철괴 추가 100") == "가공 추가 철괴 추가 100" &&
+      TelegramCommandParser.Parse("가공 시작") == "가공 시작" &&
+      TelegramCommandParser.Parse("가공 정지") == "가공 정지" &&
+      TelegramCommandParser.Parse("가공") is null,
+    "phone altering routes complete command text without losing item, total or quantity");
+
 Check(TelegramCommandParser.Parse("상태") == "/status" &&
       TelegramCommandParser.Parse(" 상태 ") == "/status" &&
       TelegramCommandParser.Parse("/status") == "/status" &&
