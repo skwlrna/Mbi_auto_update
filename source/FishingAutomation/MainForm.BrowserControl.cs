@@ -104,6 +104,11 @@ public sealed partial class MainForm
                     if (command == "/status") reply.TrySetResult(GetRemoteStatus());
                     else if (command == "/stop")
                     { StopSelected(); reply.TrySetResult("전체 정지 요청 접수"); }
+                    else if (command == "브라우저 이전 배치")
+                        reply.TrySetResult(GetBrowserPreviousAlteringBatch());
+                    else if (command.StartsWith("브라우저 가공 초기화 ", StringComparison.Ordinal) &&
+                             key.StartsWith("browser:", StringComparison.Ordinal))
+                        reply.TrySetResult(ResetBrowserPreviousAlteringBatch(command["브라우저 가공 초기화 ".Length..]));
                     else if (command == "가공 목록")
                         reply.TrySetResult(HandlePhoneAlteringCommand(command, "browser:read"));
                     else if (command.StartsWith("가공 ", StringComparison.Ordinal) && key.StartsWith("browser:", StringComparison.Ordinal))
@@ -121,6 +126,39 @@ public sealed partial class MainForm
         }
         catch (InvalidOperationException) { reply.TrySetResult("PC 연결이 종료되었습니다."); }
         return reply.Task.WaitAsync(ct);
+    }
+
+    private static string BrowserAlteringBatchRoot =>
+        Path.Combine(Path.GetDirectoryName(PhoneAlteringPath)!, "multi-altering");
+
+    private bool CanResetBrowserPreviousAlteringBatch() =>
+        !AnyRunning && _activeMode is null && !_gatheringDiagnosticRunning &&
+        LoadPhoneAlteringQueue().Orders.Any(order => order.State == "시작 대기");
+
+    private string GetBrowserPreviousAlteringBatch()
+    {
+        if (!CanResetBrowserPreviousAlteringBatch()) return "null";
+        var recent = MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot);
+        return recent is null ? "null" : System.Text.Json.JsonSerializer.Serialize(new
+        {
+            id = recent.BatchId,
+            startedAt = recent.StartedAt,
+            plans = recent.Plans.Select(plan => new { name = plan.DisplayName, quantity = plan.TargetQuantity })
+        });
+    }
+
+    private string ResetBrowserPreviousAlteringBatch(string expectedBatchId)
+    {
+        if (!CanResetBrowserPreviousAlteringBatch())
+            return "실행 중인 작업과 가공 대기열을 확인하세요.";
+        string root = BrowserAlteringBatchRoot;
+        using var lease = new MultiAlteringBatchStore(root);
+        if (MultiAlteringRecentResume.Latest(root)?.BatchId != expectedBatchId)
+            return "초기화 대상이 변경되었습니다. 이전 배치를 다시 확인하세요.";
+
+        MultiAlteringRecentResume.HideLatest(root, expectedBatchId);
+        _log.Write("[다중가공] 브라우저에서 최근 이어하기 대상 초기화 · " + expectedBatchId);
+        return "이전 배치 초기화 완료 · 가공 시작을 누르면 대기열을 실행합니다.";
     }
 
     private string StartBrowserAbyss(string dungeon)
