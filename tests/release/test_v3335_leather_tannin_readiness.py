@@ -32,7 +32,7 @@ class TanninRecipeReadiness(unittest.TestCase):
         self.assertRegex(
                       read("source/FishingAutomation/UpdateManager.cs"), r'CurrentVersion = "V3\.3\.(35|36|37|38|39|40|41|42|43)"')
         self.assertRegex(
-                      read("source/FishingAutomation/FishingAutomation.csproj"), r"<Version>3\.3\.(35|36|37|38|39|40|41|42)</Version>")
+                      read("source/FishingAutomation/FishingAutomation.csproj"), r"<Version>3\.3\.(35|36|37|38|39|40|41|42|43)</Version>")
         workflow = read(".github/workflows/release-v3335-auto-update.yml")
         for key in ("No successful production CI for current main SHA",
                     "gh release create V3.3.35",
