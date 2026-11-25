@@ -4,6 +4,25 @@ public sealed partial class MainForm
 {
     private BrowserControlServer? _browserControl;
 
+    // Preserve the existing V3.3.42 explicit environment-variable opt-in.
+    // A manual restart from the settings dialog uses a new random key.
+    private void StartBrowserControl()
+    {
+        string? configuredToken = Environment.GetEnvironmentVariable("MABIAUTO_BROWSER_TOKEN");
+        if (string.IsNullOrEmpty(configuredToken) || _browserControl?.IsRunning == true) return;
+        try
+        {
+            StopBrowserControl();
+            _browserControl = new BrowserControlServer(DispatchBrowserCommandAsync, configuredToken: configuredToken);
+            _log.Write("[브라우저 제어] 로컬 연결 활성화");
+        }
+        catch (Exception ex)
+        {
+            StopBrowserControl();
+            _log.Write("[브라우저 제어] 시작 실패: " + ex.GetType().Name);
+        }
+    }
+
     private void StopBrowserControl()
     {
         _browserControl?.Dispose();
@@ -28,7 +47,7 @@ public sealed partial class MainForm
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var help = new Label { Dock = DockStyle.Fill, Text =
-            "기본 비활성화 · PC에서 직접 켜야 합니다. 휴대폰 접속은 별도 비공개 HTTPS 프록시가 필요하며 포트 공개는 금지합니다." };
+            "기본 비활성화 · PC에서 직접 켜거나 기존 환경 변수로 활성화합니다. 휴대폰 접속은 별도 비공개 HTTPS 프록시가 필요하며 포트 공개는 금지합니다." };
         var address = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Text = BrowserControlServer.Address };
         var key = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, AccessibleName = "브라우저 연결 키" };
         var status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
@@ -63,7 +82,7 @@ public sealed partial class MainForm
         buttons.Controls.Add(start); buttons.Controls.Add(stop); buttons.Controls.Add(close);
         layout.Controls.Add(help, 0, 0); layout.Controls.Add(address, 0, 1);
         layout.Controls.Add(key, 0, 2); layout.Controls.Add(status, 0, 3); layout.Controls.Add(buttons, 0, 4);
-        layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = "주소와 연결 키는 직접 복사하세요. 끄거나 PC 프로그램을 종료하면 키가 폐기됩니다." }, 0, 5);
+        layout.Controls.Add(new Label { Dock = DockStyle.Fill, Text = "주소와 키를 복사하세요. 환경 변수로 설정한 키는 PC 재시작 시 다시 활성화될 수 있습니다." }, 0, 5);
         dialog.Controls.Add(layout); dialog.CancelButton = close;
         RefreshState();
         dialog.ShowDialog(this);

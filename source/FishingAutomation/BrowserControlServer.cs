@@ -59,12 +59,15 @@ internal sealed class BrowserControlServer : IDisposable
     private readonly Dictionary<string, (string Command, string Reply)> _recent = new();
     private readonly Queue<string> _recentOrder = new();
     private int _disposed;
-    internal string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    internal string Token { get; }
     internal bool IsRunning => Volatile.Read(ref _disposed) == 0 && _listener.IsListening;
 
-    internal BrowserControlServer(Func<string, string, CancellationToken, Task<string>> dispatch, int port = 18765)
+    internal BrowserControlServer(Func<string, string, CancellationToken, Task<string>> dispatch, int port = 18765, string? configuredToken = null)
     {
         if (port is < 1024 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
+        if (configuredToken is not null && (configuredToken.Length < 32 || configuredToken.Length > 256 || configuredToken.Any(c => !char.IsAsciiLetterOrDigit(c))))
+            throw new ArgumentException("Invalid configured browser key.", nameof(configuredToken));
+        Token = configuredToken ?? Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         _dispatch = dispatch;
         BoundAddress = port == 18765 ? Address : $"http://127.0.0.1:{port}/";
         _listener.Prefixes.Add(BoundAddress);

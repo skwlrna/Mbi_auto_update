@@ -1,9 +1,9 @@
 # MOBI browser control — isolated preview
 
-Default off. PC Settings > Browser remote control enables the fixed loopback endpoint
+Default off unless the existing V3.3.42 MABIAUTO_BROWSER_TOKEN environment variable is explicitly configured. PC Settings > Browser remote control enables the fixed loopback endpoint
 `http://127.0.0.1:18765/` and generates a fresh 256-bit key. Enter the key in
 the browser; it is not stored in browser storage or placed in a URL. Turning
-control off or closing the PC application revokes it.
+control off or closing the PC application ends the active session. A configured environment-variable key can be reused on a future PC app launch; remove that variable to disable startup activation.
 
 The preview supports existing status, queue list, total/additional processing
 orders, queue start/stop/cancel, global stop, and selecting an allowed Abyss
