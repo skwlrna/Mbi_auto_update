@@ -52,6 +52,7 @@ internal static class BrowserCommandPolicy
 internal sealed class BrowserControlServer : IDisposable
 {
     internal const string Address = "http://127.0.0.1:18765/";
+    internal string BoundAddress { get; }
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Func<string, string, CancellationToken, Task<string>> _dispatch;
@@ -61,10 +62,12 @@ internal sealed class BrowserControlServer : IDisposable
     internal string Token { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     internal bool IsRunning => Volatile.Read(ref _disposed) == 0 && _listener.IsListening;
 
-    internal BrowserControlServer(Func<string, string, CancellationToken, Task<string>> dispatch)
+    internal BrowserControlServer(Func<string, string, CancellationToken, Task<string>> dispatch, int port = 18765)
     {
+        if (port is < 1024 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
         _dispatch = dispatch;
-        _listener.Prefixes.Add(Address);
+        BoundAddress = port == 18765 ? Address : $"http://127.0.0.1:{port}/";
+        _listener.Prefixes.Add(BoundAddress);
         try
         {
             _listener.Start();
@@ -124,7 +127,7 @@ internal sealed class BrowserControlServer : IDisposable
         if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue")
         {
             string command = path == "/api/status" ? "/status" : "가공 목록";
-            await JsonAsync(response, 200, await _dispatch(command, "", ct), ct);
+            await JsonAsync(response, 200, await DispatchWithDeadlineAsync(command, "", ct), ct);
             return;
         }
         if (request.HttpMethod != "POST" || path != "/api/command")
@@ -159,9 +162,23 @@ internal sealed class BrowserControlServer : IDisposable
         _recent[key] = (action, "이미 접수한 요청입니다. PC 상태를 확인하세요.");
         _recentOrder.Enqueue(key);
         if (_recentOrder.Count > 128) _recent.Remove(_recentOrder.Dequeue());
-        string reply = await _dispatch(action, key, ct);
+        string reply = await DispatchWithDeadlineAsync(action, key, ct);
         _recent[key] = (action, reply);
         await JsonAsync(response, 200, reply, ct);
+    }
+
+    private async Task<string> DispatchWithDeadlineAsync(string command, string key, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(15));
+        try
+        {
+            return await _dispatch(command, key, deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return "PC 응답 시간 초과 · 실행 여부를 PC에서 확인하세요. 같은 작업을 다시 보내지 마세요.";
+        }
     }
 
     private static Task JsonAsync(HttpListenerResponse response, int code, string message, CancellationToken ct) =>

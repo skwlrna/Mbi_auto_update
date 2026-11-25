@@ -18,7 +18,7 @@ internal static class BrowserControlAssets
 <button id="start" disabled>가공 시작</button><button id="qstop" disabled>가공 정지</button></div>
 <pre id="orders">등록된 작업을 확인하세요.</pre><label for="number">취소할 대기 작업 번호</label><input id="number" type="number" min="1" inputmode="numeric"><button id="cancel" disabled>대기 작업 취소</button></section>
 <section><h2>어비스</h2><label for="dungeon">던전 선택</label><select id="dungeon"><option>허상의 정박지</option><option>광기의 동굴</option><option>흩어진 물길</option></select>
-<p class="hint">PC에 설정된 실행 조건을 사용합니다. 반복 횟수는 PC에서 설정하세요.</p><button id="abyss" disabled>어비스 시작</button></section>
+<p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button></section>
 <section aria-live="polite"><h2>명령 응답</h2><pre id="reply">—</pre></section></main></body></html>
 """;
     internal const string Css = """
@@ -55,6 +55,7 @@ async function command(operation,fields={}){
   if(!online||busy)return;
   busy=true;enabled(online);
   try{
+    if(!globalThis.isSecureContext||!crypto.randomUUID)throw Error('보안 연결(HTTPS 또는 PC 로컬 주소)이 필요합니다.');
     const request={Operation:operation,RequestId:crypto.randomUUID(),...fields};
     el('reply').textContent=await api('/api/command',request);
     if(operation.startsWith('queue-')||operation==='order')el('orders').textContent=await api('/api/queue');
@@ -69,7 +70,7 @@ el('queue').onclick=async()=>{if(!online||busy)return;busy=true;enabled(online);
 el('start').onclick=()=>{if(confirm('등록된 가공 작업을 시작할까요?'))command('queue-start');};
 el('qstop').onclick=()=>command('queue-stop');
 el('cancel').onclick=()=>{const n=Number(el('number').value);if(Number.isSafeInteger(n)&&n>0)command('queue-cancel',{Number:n});};
-el('abyss').onclick=()=>{const d=el('dungeon').value;if(confirm(d+' · PC 설정으로 시작할까요?'))command('abyss-start',{Dungeon:d});};
+el('abyss').onclick=()=>{const d=el('dungeon').value;if(confirm(d+' · 무한 반복으로 시작할까요?'))command('abyss-start',{Dungeon:d});};
 setInterval(status,5000);
 """;
 }

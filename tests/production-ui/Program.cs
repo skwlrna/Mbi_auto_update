@@ -7,6 +7,67 @@ using System.Drawing.Imaging;
 internal static class Program
 {
     private static int _checks;
+
+    // Actual HTTP round trip with a fake dispatcher, never the game or PC automation.
+    private static async Task CheckBrowserHttpAsync()
+    {
+        var reserve = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        reserve.Start();
+        int port = ((System.Net.IPEndPoint)reserve.LocalEndpoint).Port;
+        reserve.Stop();
+        int calls = 0;
+        using var server = new BrowserControlServer((command, key, ct) =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult(command == "/status" ? "fake-status" : command);
+        }, port);
+        using var client = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { UseProxy = false })
+        { BaseAddress = new Uri(server.BoundAddress), Timeout = TimeSpan.FromSeconds(10) };
+        async Task<(int Code, string Text)> Send(string method, string path, string? key = null,
+            BrowserControlRequest? body = null, string? site = null)
+        {
+            using var request = new System.Net.Http.HttpRequestMessage(new System.Net.Http.HttpMethod(method), path);
+            if (key != null) request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + key);
+            if (site != null) request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", site);
+            if (body != null) request.Content = new System.Net.Http.StringContent(
+                JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+            using var response = await client.SendAsync(request).ConfigureAwait(false);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+        }
+        var page = await Send("GET", "/").ConfigureAwait(false);
+        Check(page.Code == 200 && page.Text.Contains("MOBI", StringComparison.Ordinal), "browser serves responsive shell on loopback");
+        var missing = await Send("GET", "/api/status").ConfigureAwait(false);
+        var wrong = await Send("GET", "/api/status", new string('Z', 64)).ConfigureAwait(false);
+        var cross = await Send("GET", "/api/status", server.Token, site: "cross-site").ConfigureAwait(false);
+        Check(missing.Code == 401 && wrong.Code == 401 && cross.Code == 401 && calls == 0,
+            "real HTTP rejects missing/wrong credentials and cross-site requests before dispatch");
+        var status = await Send("GET", "/api/status", server.Token).ConfigureAwait(false);
+        Check(status.Code == 200 && status.Text.Contains("fake-status", StringComparison.Ordinal) && calls == 1,
+            "authenticated read-only status reaches fake handler");
+        var body = new BrowserControlRequest("order", Guid.NewGuid().ToString("D"), "가죽+", 200);
+        var first = await Send("POST", "/api/command", server.Token, body).ConfigureAwait(false);
+        var replay = await Send("POST", "/api/command", server.Token, body).ConfigureAwait(false);
+        var conflict = await Send("POST", "/api/command", server.Token, body with { Quantity = 201 }).ConfigureAwait(false);
+        var bad = await Send("POST", "/api/command", server.Token, body with { Operation = "unknown" }).ConfigureAwait(false);
+        Check(first.Code == 200 && replay == first && conflict.Code == 409 && bad.Code == 400 && calls == 2,
+            "real HTTP accepts one order, rejects changed replay and blocks unknown commands");
+        var getCommand = await Send("GET", "/api/command", server.Token).ConfigureAwait(false);
+        Check(getCommand.Code == 404 && calls == 2, "GET cannot perform a browser mutation");
+        string oldKey = server.Token;
+        server.Dispose();
+        Check(!server.IsRunning, "disabling browser control closes its listener");
+        // Use a different available port so the test does not depend on HTTP.sys
+        // releasing its original port immediately.
+        reserve = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        reserve.Start();
+        int nextPort = ((System.Net.IPEndPoint)reserve.LocalEndpoint).Port;
+        reserve.Stop();
+        using var restarted = new BrowserControlServer((command, key, ct) =>
+            Task.FromResult("never dispatched"), nextPort);
+        Check(restarted.Token != oldKey && !BrowserCommandPolicy.IsAuthorized("Bearer " + oldKey, restarted.Token),
+            "re-enabling browser control revokes the previous key");
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -31,6 +92,7 @@ internal static class Program
             Check(BrowserCommandPolicy.Build(new BrowserControlRequest("abyss-start", requestId, Dungeon: "흩어진 물길")) == "어비스 시작 흩어진 물길" &&
                   BrowserCommandPolicy.Build(new BrowserControlRequest("abyss-start", requestId, Dungeon: "unknown")) is null,
                 "browser accepts only supported abyss destinations");
+            CheckBrowserHttpAsync().GetAwaiter().GetResult();
             var fake = new FakeCli();
             MabinogiMobileCli? connector = null;
             using var form = new MainForm(log => connector = new MabinogiMobileCli(log, true, fake.Query, fake.Action)
