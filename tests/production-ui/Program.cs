@@ -150,7 +150,7 @@ internal static class Program
             // Assert that both routes now show a persistent actionable reason.
             var scheduler = controls.Single(x => x.Name == "SchedulerPage");
             Menu("스케줄러"); Pump();
-            Check(scheduler.Visible, "scheduler page is visible after selecting sidebar");
+            Check(scheduler.Visible, "scheduler page is visible after selecting the top tab");
             var globalStart = Field<Button>(form, "_mainActionButton");
             Check(globalStart.Visible && globalStart.Enabled,
                 "global bottom start is clickable while scheduler page is open");
@@ -169,7 +169,7 @@ internal static class Program
             Check(ReferenceEquals(schedulerCardHeader.Parent, schedulerTabs.Parent) &&
                   schedulerCardHeader.Parent!.Controls.GetChildIndex(schedulerCardHeader) <
                       schedulerCardHeader.Parent.Controls.GetChildIndex(schedulerTabs) &&
-                  schedulerCardHeader.BackColor == Color.FromArgb(245, 246, 248) &&
+                  schedulerCardHeader.BackColor == scheduler.BackColor &&
                   schedulerCardHeader.Width == schedulerTabs.Width &&
                   schedulerCardHeader.Height >= firstNativeTab.Bottom + 5,
                 "opaque card header covers native tab separators and the dark horizontal seam");
@@ -640,7 +640,7 @@ internal static class Program
                 Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
                 Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") ==
                     (mode == "낚시" ? "낚시" : "전투"),
-                    "mode tab keeps the correct sidebar selection: " + mode);
+                    "mode tab keeps the correct top tab selection: " + mode);
             }
             fake.Fail = true; Menu("자동 채집");
             All(gathering).OfType<Button>().Single(x => x.Text == "목록 새로고침").PerformClick();
