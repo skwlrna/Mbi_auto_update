@@ -156,6 +156,10 @@ public sealed partial class MainForm
                     control.ForeColor = TitleText;
                 }
             }
+            _owner._alteringPage.SetTaskTheme(_darkTheme);
+            _owner._gatheringPage.SetTaskTheme(_darkTheme);
+            _owner._craftingPage.SetTaskTheme(_darkTheme);
+            _owner._schedulerPage.SetTaskTheme(_darkTheme);
             Invalidate(true);
         }
         private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";

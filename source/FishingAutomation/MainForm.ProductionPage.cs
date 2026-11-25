@@ -124,8 +124,30 @@ public sealed partial class MainForm
 
     // Native controls in the existing central content region, sharing its palette.
     // Independent pages retain their own selections and never appear together.
-    private sealed class ProductionPage : Panel
+    private sealed class ProductionPage : Panel, ITaskThemePage
     {
+        private TaskPalette _taskPalette = TaskPalette.Light;
+        TaskPalette ITaskThemePage.Palette => _taskPalette;
+        private Color WindowBg => _taskPalette.WindowBg;
+        private Color PanelBg => _taskPalette.PanelBg;
+        private Color Border => _taskPalette.Border;
+        private Color TitleText => _taskPalette.TitleText;
+        private Color Blue => _taskPalette.Blue;
+        private Color Green => _taskPalette.Green;
+        private Color CardBg => _taskPalette.CardBg;
+        private Color CardBg2 => _taskPalette.CardBg2;
+        private Color Accent => _taskPalette.Accent;
+        private Color AccentSoft => _taskPalette.AccentSoft;
+        private Color Muted => _taskPalette.Muted;
+        private Color Line => _taskPalette.Line;
+        internal void SetTaskTheme(bool dark)
+        {
+            var next = dark ? TaskPalette.Dark : TaskPalette.Light;
+            if (ReferenceEquals(_taskPalette, next)) return;
+            var previous = _taskPalette;
+            _taskPalette = next;
+            ApplyTaskPalette(this, previous, next);
+        }
         private readonly MainForm _owner;
         internal bool IsAltering { get; }
         private readonly Button? _inspect;
@@ -302,7 +324,7 @@ public sealed partial class MainForm
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 40 : 70));
             if (altering) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.ForeColor = Color.FromArgb(22, 22, 25); _start.AccessibleName = AccessibleName + " 시작";
+            _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.ForeColor = _taskPalette.PrimaryText; _start.AccessibleName = AccessibleName + " 시작";
             _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
             actions.Controls.Add(_start, 0, 0);
             if (altering)
@@ -409,7 +431,7 @@ public sealed partial class MainForm
             foreach (var pair in _facilityTabButtons)
             {
                 pair.Value.BackColor = pair.Key == selected ? Accent : CardBg2;
-                pair.Value.ForeColor = pair.Key == selected ? Color.White : TitleText;
+                pair.Value.ForeColor = pair.Key == selected ? _taskPalette.PrimaryText : TitleText;
                 pair.Value.Invalidate();
             }
         }
@@ -417,7 +439,7 @@ public sealed partial class MainForm
         private static string? RecipeFacility(AlteringRecipe recipe)
             => AlteringFacilityResolver.Resolve(recipe);
 
-        private static void StyleField(Control control)
+        private void StyleField(Control control)
         {
             control.Dock = DockStyle.Fill; control.BackColor = CardBg2; control.ForeColor = TitleText;
             control.Margin = new Padding(3, 5, 3, 5);
@@ -425,7 +447,7 @@ public sealed partial class MainForm
             if (control is TextBox text) text.BorderStyle = BorderStyle.None;
         }
 
-        private static void StyleListBox(ListBox list)
+        private void StyleListBox(ListBox list)
         {
             list.Dock = DockStyle.Fill; list.BorderStyle = BorderStyle.None; list.BackColor = CardBg2; list.ForeColor = TitleText;
             list.IntegralHeight = false; list.DrawMode = DrawMode.OwnerDrawFixed; list.ItemHeight = 32; list.Margin = Padding.Empty;
@@ -527,7 +549,7 @@ public sealed partial class MainForm
         {
             // Always visible on the configuration page; not a game action.
             _queueFeedback.Text = message;
-            _queueFeedback.ForeColor = success ? Green : Color.DarkOrange;
+            _queueFeedback.ForeColor = success ? Green : _taskPalette.Warning;
             _owner._log.Write((IsAltering ? "[다중가공 설정] " : "[순차채집 설정] ") + message);
         }
 
@@ -720,6 +742,18 @@ public sealed partial class MainForm
 
         private sealed class LauncherCard : Panel
         {
+            private Color WindowBg => TaskPalette.For(this).WindowBg;
+            private Color PanelBg => TaskPalette.For(this).PanelBg;
+            private Color Border => TaskPalette.For(this).Border;
+            private Color TitleText => TaskPalette.For(this).TitleText;
+            private Color Blue => TaskPalette.For(this).Blue;
+            private Color Green => TaskPalette.For(this).Green;
+            private Color CardBg => TaskPalette.For(this).CardBg;
+            private Color CardBg2 => TaskPalette.For(this).CardBg2;
+            private Color Accent => TaskPalette.For(this).Accent;
+            private Color AccentSoft => TaskPalette.For(this).AccentSoft;
+            private Color Muted => TaskPalette.For(this).Muted;
+            private Color Line => TaskPalette.For(this).Line;
             internal LauncherCard()
             {
                 Dock = DockStyle.Fill; BackColor = CardBg;
@@ -732,7 +766,7 @@ public sealed partial class MainForm
                 e.Graphics.Clear(SurfaceColor(Parent));
                 var bounds = new RectangleF(1, 1, Width-2, Height-2);
                 using var shape = Rounded(bounds, 12);
-                using var fill = new SolidBrush(CardBg);
+                using var fill = new SolidBrush(BackColor);
                 using var border = new Pen(Line);
                 e.Graphics.FillPath(fill, shape); e.Graphics.DrawPath(border, shape);
             }
@@ -785,6 +819,18 @@ public sealed partial class MainForm
         }
         private sealed class LauncherCombo : ComboBox
         {
+            private Color WindowBg => TaskPalette.For(this).WindowBg;
+            private Color PanelBg => TaskPalette.For(this).PanelBg;
+            private Color Border => TaskPalette.For(this).Border;
+            private Color TitleText => TaskPalette.For(this).TitleText;
+            private Color Blue => TaskPalette.For(this).Blue;
+            private Color Green => TaskPalette.For(this).Green;
+            private Color CardBg => TaskPalette.For(this).CardBg;
+            private Color CardBg2 => TaskPalette.For(this).CardBg2;
+            private Color Accent => TaskPalette.For(this).Accent;
+            private Color AccentSoft => TaskPalette.For(this).AccentSoft;
+            private Color Muted => TaskPalette.For(this).Muted;
+            private Color Line => TaskPalette.For(this).Line;
             internal LauncherCombo() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -796,7 +842,7 @@ public sealed partial class MainForm
             }
             protected override void OnSelectedIndexChanged(EventArgs e) { base.OnSelectedIndexChanged(e); Invalidate(); }
         }
-        private static void StyleCombo(ComboBox combo)
+        private void StyleCombo(ComboBox combo)
         {
             combo.FlatStyle = FlatStyle.Flat;
             combo.DrawMode = DrawMode.OwnerDrawFixed;
@@ -809,7 +855,7 @@ public sealed partial class MainForm
                     combo.Enabled ? TitleText : Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             };
         }
-        private static Button PageButton(string caption, Action action)
+        private Button PageButton(string caption, Action action)
         {
             var button = new ProductionButton { Text = caption, Dock = DockStyle.Fill, BackColor = CardBg2, ForeColor = TitleText,
                 Font = new Font("맑은 고딕", 15f, FontStyle.Bold), Margin = new Padding(3), Cursor = Cursors.Hand };
@@ -817,6 +863,18 @@ public sealed partial class MainForm
         }
         private sealed class ProductionButton : Button
         {
+            private Color WindowBg => TaskPalette.For(this).WindowBg;
+            private Color PanelBg => TaskPalette.For(this).PanelBg;
+            private Color Border => TaskPalette.For(this).Border;
+            private Color TitleText => TaskPalette.For(this).TitleText;
+            private Color Blue => TaskPalette.For(this).Blue;
+            private Color Green => TaskPalette.For(this).Green;
+            private Color CardBg => TaskPalette.For(this).CardBg;
+            private Color CardBg2 => TaskPalette.For(this).CardBg2;
+            private Color Accent => TaskPalette.For(this).Accent;
+            private Color AccentSoft => TaskPalette.For(this).AccentSoft;
+            private Color Muted => TaskPalette.For(this).Muted;
+            private Color Line => TaskPalette.For(this).Line;
             internal ProductionButton() { SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true); }
             protected override void OnPaint(PaintEventArgs e)
             {
@@ -869,7 +927,7 @@ public sealed partial class MainForm
                 if (control.BackColor.A == 255) return control.BackColor;
                 control = control.Parent;
             }
-            return WindowBg;
+            return TaskPalette.Light.WindowBg;
         }
 
         internal async Task LoadCatalogAsync(bool force = false)
@@ -1012,12 +1070,12 @@ public sealed partial class MainForm
             _selectedName.Text = SelectedName ?? "품목을 선택하세요";
             _itemIcon.Invalidate();
             if (Items.SelectedItem is GatheringChoice g)
-            { _condition.Text = g.Item.ToolOk ? "사용 가능" : "확인 필요"; _condition.ForeColor = g.Item.ToolOk ? Green : Color.Orange; _materials.Text = g.Item.ToolOk ? "선택 품목의 도구 사용 가능" : "채집 도구를 확인하세요"; }
+            { _condition.Text = g.Item.ToolOk ? "사용 가능" : "확인 필요"; _condition.ForeColor = g.Item.ToolOk ? Green : _taskPalette.Warning; _materials.Text = g.Item.ToolOk ? "선택 품목의 도구 사용 가능" : "채집 도구를 확인하세요"; }
             else if (Items.SelectedItem is RecipeChoice r)
             {
                 _condition.Text = r.Ambiguous ? "제법 구분 필요" :
                     r.Recipe.Alterable ? "가능" : r.Recipe.MissingIngredients.Count > 0 ? "재료 부족" : "확인 필요";
-                _condition.ForeColor = r.Recipe.Alterable ? Green : Color.Orange;
+                _condition.ForeColor = r.Recipe.Alterable ? Green : _taskPalette.Warning;
                 string facility = Facility.SelectedItem?.ToString() ?? FacilityUiOrder[0];
                 var previewPlan = new AlteringPlan(
                     facility, r.Recipe.DisplayName, (int)Quantity.Value, r.Recipe.ProducedPerWork, false, r.Ordinal);
@@ -1083,7 +1141,7 @@ public sealed partial class MainForm
             _collection.Text = IsAltering ? $"완료 작업  {CompletedWorks?.ToString() ?? "0"}회   ·   획득 수량  {current:N0}개" : $"획득 수량  {current:N0}개";
             _character.Text = $"오류 횟수  {(_owner._runError is null ? 0 : 1)}회";
             _cli.Text = $"CLI 상태  {CliStatus}"; _cli.ForeColor = CliStatus == "정상" ? Green : Muted;
-            _character.ForeColor = _owner._runError is null ? Muted : Color.Salmon;
+            _character.ForeColor = _owner._runError is null ? Muted : _taskPalette.Error;
         }
     }
     private string? _productionLastMode;

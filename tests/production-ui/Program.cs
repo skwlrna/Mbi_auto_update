@@ -82,7 +82,7 @@ internal static class Program
             Check(ReferenceEquals(schedulerCardHeader.Parent, schedulerTabs.Parent) &&
                   schedulerCardHeader.Parent!.Controls.GetChildIndex(schedulerCardHeader) <
                       schedulerCardHeader.Parent.Controls.GetChildIndex(schedulerTabs) &&
-                  schedulerCardHeader.BackColor == Color.FromArgb(23, 23, 24) &&
+                  schedulerCardHeader.BackColor == Color.FromArgb(245, 246, 248) &&
                   schedulerCardHeader.Width == schedulerTabs.Width &&
                   schedulerCardHeader.Height >= firstNativeTab.Bottom + 5,
                 "opaque card header covers native tab separators and the dark horizontal seam");
@@ -138,7 +138,7 @@ internal static class Program
             Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
                   x.Text.StartsWith("2. ") || x.Text.StartsWith("3. ")).All(x =>
                   x.Font.Size == Math.Max(13f, MathF.Round(18f * InitialSchedulerFontScale())) &&
-                  x.ForeColor == Color.FromArgb(238, 238, 244) && x.BackColor == Color.FromArgb(29, 29, 31)),
+                  x.ForeColor == Color.FromArgb(35, 39, 56) && x.BackColor == Color.FromArgb(255, 255, 255)),
                 "scheduler checkbox captions use the same scaled font and constant contrast as production");
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:"),
@@ -146,7 +146,7 @@ internal static class Program
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:") &&
                   schedulerStatus.Text.Contains("게임 창 없음") &&
-                  schedulerStatus.ForeColor == Color.DarkOrange,
+                  schedulerStatus.ForeColor == Color.FromArgb(151, 79, 13),
                 "one shared F9 button explains preflight game-window veto visibly");
             var firstFeedback = schedulerStatus.Text;
             scheduler.GetType().GetMethod("RefreshSnapshot",
@@ -217,6 +217,24 @@ internal static class Program
             themeToggle.PerformClick(); Pump();
             Check(dashboard.BackColor == lightColor && themeToggle.Text == "다크 모드",
                 "light theme restores initial dashboard palette");
+            var themedPages = new[] { altering, gathering, crafting, scheduler };
+            Check(themedPages.All(page => page.BackColor == lightColor),
+                "all task workspaces use the same light canvas as dashboard");
+            var retainedSchedulerTab = schedulerTabs.SelectedIndex;
+            var retainedAlteringQuantity = QuantityValue(QuantityInput(altering));
+            var retainedGatheringQuantity = QuantityValue(QuantityInput(gathering));
+            themeToggle.PerformClick(); Pump();
+            Check(themedPages.All(page => page.BackColor == dashboard.BackColor) &&
+                  schedulerCardHeader.BackColor == dashboard.BackColor,
+                "all task workspaces and scheduler tab strip switch to dark together");
+            Check(schedulerTabs.SelectedIndex == retainedSchedulerTab &&
+                  QuantityValue(QuantityInput(altering)) == retainedAlteringQuantity &&
+                  QuantityValue(QuantityInput(gathering)) == retainedGatheringQuantity,
+                "theme toggle preserves task tab and quantities");
+            themeToggle.PerformClick(); Pump();
+            Check(themedPages.All(page => page.BackColor == lightColor) &&
+                  schedulerCardHeader.BackColor == lightColor,
+                "all task workspaces restore light palette");
             Check(!controls.OfType<Button>().Any(x => x.Text == "현재 모드 선택"),
                 "remove redundant mode-selection arrow beside fishing/dungeon/abyss");
             Check(!Field<Button>(form, "_logToggle").Visible &&

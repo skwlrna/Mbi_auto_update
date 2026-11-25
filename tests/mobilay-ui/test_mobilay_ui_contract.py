@@ -28,7 +28,7 @@ class MobilayPresentationContract(unittest.TestCase):
         self.assertIn("53, 53, 57", self.palette)
         self.assertNotIn("private static readonly Color NavBg = Color.White", self.palette)
 
-    def test_legacy_task_palette_and_bento_shell_are_separate(self):
+    def test_legacy_engine_palette_and_bento_shell_are_separate(self):
         self.assertIn("Color.FromArgb(245, 246, 248)", self.shell)
         self.assertIn("Color NavBg => _darkTheme", self.shell)
         self.assertIn(": Color.White;", self.shell)
@@ -41,6 +41,17 @@ class MobilayPresentationContract(unittest.TestCase):
         self.assertIn("if (_sidebarCollapsed)", self.grid)
         self.assertIn('owner.StopSelected, "stop", "danger"', self.grid)
         self.assertIn('themeToggle.AccessibleName = "테마 전환"', self.grid)
+
+    def test_task_pages_share_presentation_palette(self):
+        palette = (UI / "MainForm.TaskPalette.cs").read_text(encoding="utf-8")
+        self.assertIn("private static void ApplyTaskPalette", palette)
+        self.assertIn("TaskPalette For(Control? control)", palette)
+        for page in ("ProductionPage", "CraftingPage", "SchedulerPage"):
+            source = (UI / ("MainForm." + page + ".cs")).read_text(encoding="utf-8")
+            self.assertIn("ITaskThemePage", source)
+            self.assertIn("ApplyTaskPalette(this, previous, next)", source)
+        for field in ("_alteringPage", "_gatheringPage", "_craftingPage", "_schedulerPage"):
+            self.assertIn(field + ".SetTaskTheme(_darkTheme)", self.shell)
 
     def test_six_real_dashboard_cards_and_clickable_links(self):
         titles = ("자동낚시", "자동가공", "어비스", "스케줄러", "자동채집", "제작")
