@@ -167,7 +167,7 @@ public sealed class TelegramNotifier : IDisposable
                     string reply;
                     if (command == "/help")
                     {
-                        reply = "MABI AUTO 원격 명령\n상태 또는 /status - 현재 상세 현황\n/item - 전리품 획득 현황\n/itemreset - 전리품 누적 초기화\n/stop - 매크로 정지\n/restart - 현재 선택 모드 재시작\n가공 추가 가죽+ 총 200\n가공 추가 철괴 추가 100\n가공 목록 / 가공 취소 번호 / 가공 시작 / 가공 정지";
+                        reply = "MABI AUTO 원격 명령\n상태 또는 /status - 현재 상세 현황\n/item - 전리품 획득 현황\n/itemreset - 전리품 누적 초기화\n/stop - 매크로 정지\n/restart - 현재 선택 모드 재시작\n" + TelegramCommandParser.AlteringHelp;
                     }
                     else if (_remoteHandler is not null)
                     {

@@ -50,6 +50,10 @@ class F9FirstHubAfterKRecovery(unittest.TestCase):
         updater = load("source/FishingAutomation/UpdateManager.cs")
         if 'CurrentVersion = "V3.3.31"' in updater:
             self.assertIn('<Version>3.3.31</Version>', project)
+        elif 'CurrentVersion = "V3.3.41"' in updater:
+            self.assertIn('<Version>3.3.41</Version>', project)
+            self.assertIn("gh release create V3.3.41",
+                          load(".github/workflows/release-v3341-auto-update.yml"))
         elif 'CurrentVersion = "V3.3.40"' in updater:
             self.assertIn('<Version>3.3.40</Version>', project)
             self.assertIn("gh release create V3.3.40",
