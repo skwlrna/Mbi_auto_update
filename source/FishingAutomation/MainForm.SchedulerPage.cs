@@ -8,8 +8,30 @@ public sealed partial class MainForm
 
     // This is UI state, not a second production engine. Existing altering and
     // crafting pages are the source of truth for their searchable selections.
-    private sealed class SchedulerPage : Panel
+    private sealed class SchedulerPage : Panel, ITaskThemePage
     {
+        private TaskPalette _taskPalette = TaskPalette.Light;
+        TaskPalette ITaskThemePage.Palette => _taskPalette;
+        private Color WindowBg => _taskPalette.WindowBg;
+        private Color PanelBg => _taskPalette.PanelBg;
+        private Color Border => _taskPalette.Border;
+        private Color TitleText => _taskPalette.TitleText;
+        private Color Blue => _taskPalette.Blue;
+        private Color Green => _taskPalette.Green;
+        private Color CardBg => _taskPalette.CardBg;
+        private Color CardBg2 => _taskPalette.CardBg2;
+        private Color Accent => _taskPalette.Accent;
+        private Color AccentSoft => _taskPalette.AccentSoft;
+        private Color Muted => _taskPalette.Muted;
+        private Color Line => _taskPalette.Line;
+        internal void SetTaskTheme(bool dark)
+        {
+            var next = dark ? TaskPalette.Dark : TaskPalette.Light;
+            if (ReferenceEquals(_taskPalette, next)) return;
+            var previous = _taskPalette;
+            _taskPalette = next;
+            ApplyTaskPalette(this, previous, next);
+        }
         private readonly MainForm _owner;
         private readonly CheckBox _alters = new();
         private readonly CheckBox _crafts = new();
@@ -28,7 +50,7 @@ public sealed partial class MainForm
         {
             _lastStartFeedback = message;
             _runStatus.Text = message;
-            _runStatus.ForeColor = Color.DarkOrange;
+            _runStatus.ForeColor = _taskPalette.Warning;
             _runStatus.AccessibleDescription = message;
             _runStatus.Invalidate();
         }
@@ -444,12 +466,12 @@ public sealed partial class MainForm
             TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = false
         };
 
-        private static Button ActionButton(string label, Action run, bool primary = false) 
+        private Button ActionButton(string label, Action run, bool primary = false) 
         {
             var button = new Button
             {
                 Text = label, Dock = DockStyle.Fill, FlatStyle = FlatStyle.Flat,
-                BackColor = primary ? Blue : CardBg2, ForeColor = primary ? Color.FromArgb(22, 22, 25) : TitleText,
+                BackColor = primary ? Blue : CardBg2, ForeColor = primary ? _taskPalette.PrimaryText : TitleText,
                 Font = new Font("맑은 고딕", 17f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand, Margin = new Padding(3), TextAlign = ContentAlignment.MiddleCenter,
                 UseVisualStyleBackColor = false
@@ -464,7 +486,7 @@ public sealed partial class MainForm
             return button;
         }
 
-        private static TableLayoutPanel Vertical(int rows)
+        private TableLayoutPanel Vertical(int rows)
         {
             var table = new TableLayoutPanel
             {
@@ -488,7 +510,7 @@ public sealed partial class MainForm
             return path;
         }
 
-        private static TabPage Tab(string title)
+        private TabPage Tab(string title)
         {
             var tab = new TabPage(title) { BackColor = WindowBg, ForeColor = TitleText };
             return tab;
@@ -517,7 +539,7 @@ public sealed partial class MainForm
         }
 
         // Read-only preview of the existing scheduler order; no execution state is owned here.
-        private static Control BuildSequencePreview()
+        private Control BuildSequencePreview()
         {
             var flow = new TableLayoutPanel
             {
@@ -540,7 +562,7 @@ public sealed partial class MainForm
             return flow;
         }
 
-        private static void LayoutCheck(CheckBox cb, string caption, TableLayoutPanel table, int row)
+        private void LayoutCheck(CheckBox cb, string caption, TableLayoutPanel table, int row)
         {
             // One bordered card per step; wrapped labels must not disappear into
             // the nearly identical surrounding white surfaces.
@@ -620,7 +642,7 @@ public sealed partial class MainForm
             layout.Controls.Add(_minimumWaitChoice, 0, 3);
             layout.Controls.Add(_abyssSummary, 0, 4);
             layout.Controls.Add(Txt("어비스 결과마다 CLI 가공 대기열을 조회하며, 실제 가공 작업이 필요하면 나갑니다.", Muted, 16), 0, 5);
-            layout.Controls.Add(Txt("실제 게임에서 던전 종료 및 복귀 확인이 필요합니다.", Color.DarkOrange, 16), 0, 6);
+            layout.Controls.Add(Txt("실제 게임에서 던전 종료 및 복귀 확인이 필요합니다.", _taskPalette.Warning, 16), 0, 6);
             tab.Controls.Add(layout);
             return tab;
         }
@@ -650,7 +672,7 @@ public sealed partial class MainForm
                 : _lastStartFeedback ?? ("준비 · " + (_crafts.Checked ? "제작 " : "") +
                   (_alters.Checked ? "가공 " : "") +
                   (_abyss.Checked ? "어비스" : ""));
-            _runStatus.ForeColor = _lastStartFeedback is not null ? Color.DarkOrange : TitleText;
+            _runStatus.ForeColor = _lastStartFeedback is not null ? _taskPalette.Warning : TitleText;
             // Allow an attempted click even if a different runner holds input;
             // the guarded handler explains why it cannot start. Never run twice.
             _crafts.Enabled = _alters.Enabled = _abyss.Enabled = !running;

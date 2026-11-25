@@ -7,6 +7,67 @@ using System.Drawing.Imaging;
 internal static class Program
 {
     private static int _checks;
+
+    // Actual HTTP round trip with a fake dispatcher, never the game or PC automation.
+    private static async Task CheckBrowserHttpAsync()
+    {
+        var reserve = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        reserve.Start();
+        int port = ((System.Net.IPEndPoint)reserve.LocalEndpoint).Port;
+        reserve.Stop();
+        int calls = 0;
+        using var server = new BrowserControlServer((command, key, ct) =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult(command == "/status" ? "fake-status" : command);
+        }, port);
+        using var client = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler { UseProxy = false })
+        { BaseAddress = new Uri(server.BoundAddress), Timeout = TimeSpan.FromSeconds(10) };
+        async Task<(int Code, string Text)> Send(string method, string path, string? key = null,
+            BrowserControlRequest? body = null, string? site = null)
+        {
+            using var request = new System.Net.Http.HttpRequestMessage(new System.Net.Http.HttpMethod(method), path);
+            if (key != null) request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + key);
+            if (site != null) request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", site);
+            if (body != null) request.Content = new System.Net.Http.StringContent(
+                JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+            using var response = await client.SendAsync(request).ConfigureAwait(false);
+            return ((int)response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+        }
+        var page = await Send("GET", "/").ConfigureAwait(false);
+        Check(page.Code == 200 && page.Text.Contains("MOBI", StringComparison.Ordinal), "browser serves responsive shell on loopback");
+        var missing = await Send("GET", "/api/status").ConfigureAwait(false);
+        var wrong = await Send("GET", "/api/status", new string('Z', 64)).ConfigureAwait(false);
+        var cross = await Send("GET", "/api/status", server.Token, site: "cross-site").ConfigureAwait(false);
+        Check(missing.Code == 401 && wrong.Code == 401 && cross.Code == 401 && calls == 0,
+            "real HTTP rejects missing/wrong credentials and cross-site requests before dispatch");
+        var status = await Send("GET", "/api/status", server.Token).ConfigureAwait(false);
+        Check(status.Code == 200 && status.Text.Contains("fake-status", StringComparison.Ordinal) && calls == 1,
+            "authenticated read-only status reaches fake handler");
+        var body = new BrowserControlRequest("order", Guid.NewGuid().ToString("D"), "가죽+", 200);
+        var first = await Send("POST", "/api/command", server.Token, body).ConfigureAwait(false);
+        var replay = await Send("POST", "/api/command", server.Token, body).ConfigureAwait(false);
+        var conflict = await Send("POST", "/api/command", server.Token, body with { Quantity = 201 }).ConfigureAwait(false);
+        var bad = await Send("POST", "/api/command", server.Token, body with { Operation = "unknown" }).ConfigureAwait(false);
+        Check(first.Code == 200 && replay == first && conflict.Code == 409 && bad.Code == 400 && calls == 2,
+            "real HTTP accepts one order, rejects changed replay and blocks unknown commands");
+        var getCommand = await Send("GET", "/api/command", server.Token).ConfigureAwait(false);
+        Check(getCommand.Code == 404 && calls == 2, "GET cannot perform a browser mutation");
+        string oldKey = server.Token;
+        server.Dispose();
+        Check(!server.IsRunning, "disabling browser control closes its listener");
+        // Use a different available port so the test does not depend on HTTP.sys
+        // releasing its original port immediately.
+        reserve = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        reserve.Start();
+        int nextPort = ((System.Net.IPEndPoint)reserve.LocalEndpoint).Port;
+        reserve.Stop();
+        using var restarted = new BrowserControlServer((command, key, ct) =>
+            Task.FromResult("never dispatched"), nextPort);
+        Check(restarted.Token != oldKey && !BrowserCommandPolicy.IsAuthorized("Bearer " + oldKey, restarted.Token),
+            "re-enabling browser control revokes the previous key");
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -14,6 +75,24 @@ internal static class Program
         {
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
+            string browserKey = new string('A', 64);
+            string requestId = Guid.NewGuid().ToString("D");
+            Check(BrowserCommandPolicy.IsAuthorized("Bearer " + browserKey, browserKey) &&
+                  !BrowserCommandPolicy.IsAuthorized(null, browserKey) &&
+                  !BrowserCommandPolicy.IsAuthorized("Bearer " + new string('B', 64), browserKey),
+                "browser command authentication rejects missing and incorrect keys");
+            Check(BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+", 200)) == "가공 가죽+ 200" &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+", 100, true)) == "가공 가죽+ 추가 100",
+                "browser quantities reuse exact total and additional parsing");
+            Check(BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+", 0)) is null &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+\n/stop", 100)) is null &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("arbitrary", requestId)) is null &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("stop", "bad-id")) is null,
+                "browser rejects invalid orders, unknown actions and invalid request ids");
+            Check(BrowserCommandPolicy.Build(new BrowserControlRequest("abyss-start", requestId, Dungeon: "흩어진 물길")) == "어비스 시작 흩어진 물길" &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("abyss-start", requestId, Dungeon: "unknown")) is null,
+                "browser accepts only supported abyss destinations");
+            CheckBrowserHttpAsync().GetAwaiter().GetResult();
             var fake = new FakeCli();
             MabinogiMobileCli? connector = null;
             using var form = new MainForm(log => connector = new MabinogiMobileCli(log, true, fake.Query, fake.Action)
@@ -37,32 +116,25 @@ internal static class Program
                 .Single(x => x.AccessibleName?.EndsWith("목표 수량", StringComparison.Ordinal) == true);
             int QuantityValue(TextBox input) => int.Parse(input.Text, System.Globalization.CultureInfo.InvariantCulture);
             void SetQuantity(TextBox input, int value) { input.Text = value.ToString(System.Globalization.CultureInfo.InvariantCulture); Pump(); }
+            // Select actual visible sidebar buttons, not the duplicate mode tabs.
+            var dashboardControl = Field<Control>(form, "_referenceDashboard");
+            Button Sidebar(string caption) => controls.OfType<Button>().Single(x =>
+                x.Parent == dashboardControl && x.Left < dashboardControl.Width * 232 / 1448 &&
+                x.Text == caption && x.Visible);
             void Menu(string name)
             {
-                if (name is "낚시" or "던전" or "어비스")
+                if (name is "자동 채집" or "제작")
                 {
-                    // Enter the automation workspace first; modes are its three
-                    // visible tabs, not independent top-level sidebar entries.
-                    controls.OfType<Button>().Single(x => x.Text == "자동화 실행").PerformClick();
+                    Sidebar("채집 / 제작").PerformClick();
                     Pump();
-                    controls.OfType<Button>().Single(x => x.Text == name).PerformClick();
+                    var popup = Field<ContextMenuStrip>(dashboardControl, "_openMenu");
+                    Check(popup.Visible, "gathering and crafting menu opens from sidebar");
+                    popup.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == name).PerformClick();
                     return;
                 }
-                if (name is "자동 가공" or "자동 채집" or "제작")
-                {
-                    // The dark Mobilay-style navigation still groups these three modes.
-                    // Exercise the actual visible production menu, not an obsolete hidden shortcut.
-                    controls.OfType<Button>().Single(x => x.Text == "생활 생산").PerformClick();
-                    Pump();
-                    var dashboard = Field<Control>(form, "_referenceDashboard");
-                    var popup = Field<ContextMenuStrip>(dashboard, "_openMenu");
-                    Check(popup.Visible, "production menu opens from the sidebar");
-                    var item = popup.Items.OfType<ToolStripMenuItem>().Single(x => x.Text == name);
-                    item.PerformClick();
-                    return;
-                }
-                controls.OfType<Button>().Single(x => x.Text == name &&
-                    !Inside(x, gathering) && !Inside(x, altering) && !Inside(x, crafting)).PerformClick();
+                string caption = name switch { "홈" => "대시보드", "낚시" => "자동낚시",
+                    "자동 가공" => "자동가공", _ => name };
+                Sidebar(caption).PerformClick();
             }
             void Exclusive(bool isAltering) => Check(altering.Visible == isAltering && gathering.Visible != isAltering, "only selected production page visible");
             // Real V3.1.88 report: neither the visible start button nor F9
@@ -89,7 +161,7 @@ internal static class Program
             Check(ReferenceEquals(schedulerCardHeader.Parent, schedulerTabs.Parent) &&
                   schedulerCardHeader.Parent!.Controls.GetChildIndex(schedulerCardHeader) <
                       schedulerCardHeader.Parent.Controls.GetChildIndex(schedulerTabs) &&
-                  schedulerCardHeader.BackColor == Color.FromArgb(23, 23, 24) &&
+                  schedulerCardHeader.BackColor == Color.FromArgb(245, 246, 248) &&
                   schedulerCardHeader.Width == schedulerTabs.Width &&
                   schedulerCardHeader.Height >= firstNativeTab.Bottom + 5,
                 "opaque card header covers native tab separators and the dark horizontal seam");
@@ -145,7 +217,7 @@ internal static class Program
             Check(All(scheduler).OfType<CheckBox>().Where(x => x.Text.StartsWith("1. ") ||
                   x.Text.StartsWith("2. ") || x.Text.StartsWith("3. ")).All(x =>
                   x.Font.Size == Math.Max(13f, MathF.Round(18f * InitialSchedulerFontScale())) &&
-                  x.ForeColor == Color.FromArgb(238, 238, 244) && x.BackColor == Color.FromArgb(29, 29, 31)),
+                  x.ForeColor == Color.FromArgb(35, 39, 56) && x.BackColor == Color.FromArgb(255, 255, 255)),
                 "scheduler checkbox captions use the same scaled font and constant contrast as production");
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:"),
@@ -153,7 +225,7 @@ internal static class Program
             globalStart.PerformClick(); Pump();
             Check(schedulerStatus.Text.Contains("시작 차단:") &&
                   schedulerStatus.Text.Contains("게임 창 없음") &&
-                  schedulerStatus.ForeColor == Color.DarkOrange,
+                  schedulerStatus.ForeColor == Color.FromArgb(151, 79, 13),
                 "one shared F9 button explains preflight game-window veto visibly");
             var firstFeedback = schedulerStatus.Text;
             scheduler.GetType().GetMethod("RefreshSnapshot",
@@ -194,14 +266,54 @@ internal static class Program
             var updateCheck = Field<Button>(form, "_updateButton");
             Check(updateCheck.Visible && updateCheck.Text == "업데이트 확인",
                 "update check appears on home dashboard");
-            Check(Field<string>(dashboard, "_selectedNavigation") == "홈",
+            Check(Field<string>(dashboard, "_selectedNavigation") == "대시보드",
                 "home is the sole selected navigation destination");
-            var navOrder = new[] { "홈", "자동화 실행", "던전 / 어비스", "생활 생산",
-                "스케줄러", "기타 / 설정", "로그 / 진단" };
-            var navButtons = controls.OfType<Button>().Where(x => navOrder.Contains(x.Text))
+            var navOrder = new[] { "대시보드", "자동낚시", "자동가공", "어비스", "던전",
+                "채집 / 제작", "스케줄러", "실행 기록", "알림 관리", "환경 설정" };
+            var navButtons = controls.OfType<Button>().Where(x => x.Parent == dashboardControl &&
+                x.Left < dashboardControl.Width * 232 / 1448 && navOrder.Contains(x.Text))
                 .OrderBy(x => x.Top).Select(x => x.Text).ToArray();
             Check(navButtons.SequenceEqual(navOrder),
                 "workspace navigation order and icon destinations are consistent");
+            var sidebarToggle = controls.OfType<Button>().Single(x => x.AccessibleName == "사이드바 접기 / 펼치기");
+            var themeToggle = controls.OfType<Button>().Single(x => x.AccessibleName == "테마 전환");
+            var sidebarHome = Sidebar("대시보드");
+            var expandedHomeBounds = sidebarHome.Bounds;
+            var expandedWorkBounds = globalStart.Bounds;
+            sidebarToggle.PerformClick(); Pump();
+            Check(sidebarHome.Width < expandedHomeBounds.Width && globalStart.Width > expandedWorkBounds.Width &&
+                  globalStart.Left < expandedWorkBounds.Left && sidebarHome.Visible,
+                "collapsed sidebar gives the real workspace more room");
+            Check(Field<string>(dashboard, "_selectedNavigation") == "대시보드",
+                "sidebar collapse does not change the selected mode");
+            sidebarToggle.PerformClick(); Pump();
+            Check(sidebarHome.Bounds == expandedHomeBounds && globalStart.Bounds == expandedWorkBounds,
+                "expanding the sidebar restores original geometry");
+            var lightColor = dashboard.BackColor;
+            themeToggle.PerformClick(); Pump();
+            Check(dashboard.BackColor != lightColor && themeToggle.Text == "라이트 모드",
+                "dark theme changes dashboard palette without navigating");
+            themeToggle.PerformClick(); Pump();
+            Check(dashboard.BackColor == lightColor && themeToggle.Text == "다크 모드",
+                "light theme restores initial dashboard palette");
+            var themedPages = new[] { altering, gathering, crafting, scheduler };
+            Check(themedPages.All(page => page.BackColor == lightColor),
+                "all task workspaces use the same light canvas as dashboard");
+            var retainedSchedulerTab = schedulerTabs.SelectedIndex;
+            var retainedAlteringQuantity = QuantityValue(QuantityInput(altering));
+            var retainedGatheringQuantity = QuantityValue(QuantityInput(gathering));
+            themeToggle.PerformClick(); Pump();
+            Check(themedPages.All(page => page.BackColor == dashboard.BackColor) &&
+                  schedulerCardHeader.BackColor == dashboard.BackColor,
+                "all task workspaces and scheduler tab strip switch to dark together");
+            Check(schedulerTabs.SelectedIndex == retainedSchedulerTab &&
+                  QuantityValue(QuantityInput(altering)) == retainedAlteringQuantity &&
+                  QuantityValue(QuantityInput(gathering)) == retainedGatheringQuantity,
+                "theme toggle preserves task tab and quantities");
+            themeToggle.PerformClick(); Pump();
+            Check(themedPages.All(page => page.BackColor == lightColor) &&
+                  schedulerCardHeader.BackColor == lightColor,
+                "all task workspaces restore light palette");
             Check(!controls.OfType<Button>().Any(x => x.Text == "현재 모드 선택"),
                 "remove redundant mode-selection arrow beside fishing/dungeon/abyss");
             Check(!Field<Button>(form, "_logToggle").Visible &&
@@ -536,7 +648,7 @@ internal static class Program
                 Menu(mode);
                 Check(!altering.Visible && !gathering.Visible && !crafting.Visible, "legacy page preserved and untouched: " + mode);
                 Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") ==
-                    (mode == "낚시" ? "자동화 실행" : "던전 / 어비스"),
+                    (mode == "낚시" ? "자동낚시" : mode),
                     "mode tab keeps the correct sidebar selection: " + mode);
             }
             fake.Fail = true; Menu("자동 채집");
@@ -644,7 +756,7 @@ internal static class Program
                               FullyContained(queueFeedback, altering) &&
                               FullyContained(addAlteringQueue, altering),
                             "multi-altering add button and explanation stay visible at " + size);
-                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "생활 생산",
+                        Check(Field<string>(Field<Control>(form, "_referenceDashboard"), "_selectedNavigation") == "자동가공",
                             "production navigation remains exclusively selected at " + size);
                     }
                     if (args.Length > 0) { Directory.CreateDirectory(args[0]); Save(form, Path.Combine(args[0], page.Name + "-" + size.Width + ".png")); }

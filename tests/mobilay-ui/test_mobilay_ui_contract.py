@@ -28,19 +28,60 @@ class MobilayPresentationContract(unittest.TestCase):
         self.assertIn("53, 53, 57", self.palette)
         self.assertNotIn("private static readonly Color NavBg = Color.White", self.palette)
 
+    def test_legacy_engine_palette_and_bento_shell_are_separate(self):
+        self.assertIn("Color.FromArgb(245, 246, 248)", self.shell)
+        self.assertIn("Color NavBg => _darkTheme", self.shell)
+        self.assertIn(": Color.White;", self.shell)
+        self.assertIn("Color.FromArgb(36, 40, 59)", self.grid)
+
+    def test_sidebar_reflow_and_theme_are_presentation_only(self):
+        for marker in ("MapBounds(r)", "UnmapX(e.X)", "MapX(x)",
+                       "ContentScaleX", "ToggleSidebar()", "ToggleTheme()"):
+            self.assertIn(marker, self.shell)
+        self.assertIn("if (_sidebarCollapsed)", self.grid)
+        self.assertIn('owner.StopSelected, "stop", "danger"', self.grid)
+        self.assertIn('themeToggle.AccessibleName = "테마 전환"', self.grid)
+
+    def test_task_pages_share_presentation_palette(self):
+        palette = (UI / "MainForm.TaskPalette.cs").read_text(encoding="utf-8")
+        self.assertIn("private static void ApplyTaskPalette", palette)
+        self.assertIn("TaskPalette For(Control? control)", palette)
+        for page in ("ProductionPage", "CraftingPage", "SchedulerPage"):
+            source = (UI / ("MainForm." + page + ".cs")).read_text(encoding="utf-8")
+            self.assertIn("ITaskThemePage", source)
+            self.assertIn("ApplyTaskPalette(this, previous, next)", source)
+        for field in ("_alteringPage", "_gatheringPage", "_craftingPage", "_schedulerPage"):
+            self.assertIn(field + ".SetTaskTheme(_darkTheme)", self.shell)
+
+    def test_browser_control_is_explicit_loopback_and_authenticated(self):
+        server = (UI / "BrowserControlServer.cs").read_text(encoding="utf-8")
+        bridge = (UI / "MainForm.BrowserControl.cs").read_text(encoding="utf-8")
+        assets = (UI / "BrowserControlAssets.cs").read_text(encoding="utf-8")
+        self.assertIn("http://127.0.0.1:18765/", server)
+        self.assertIn("IPAddress.IsLoopback", server)
+        self.assertIn("FixedTimeEquals", server)
+        self.assertIn("request.HttpMethod != \"POST\"", server)
+        self.assertIn("RandomNumberGenerator.GetBytes(32)", server)
+        self.assertIn("HandlePhoneAlteringCommand(command, key)", bridge)
+        self.assertIn("BeginInvoke", bridge)
+        self.assertIn("StartSelected()", bridge)
+        self.assertIn("StopSelected()", bridge)
+        self.assertIn("StopBrowserControl();", self.main)
+        self.assertNotIn("localStorage", assets)
+        self.assertNotIn("http://+", server)
+        self.assertNotIn("http://*", server)
+
     def test_six_real_dashboard_cards_and_clickable_links(self):
-        titles = ("자동화 상태", "모드 / 진행 단계", "생활 생산",
-                  "실행 통계", "시스템 상태", "최근 활동")
+        titles = ("자동낚시", "자동가공", "어비스", "스케줄러", "자동채집", "제작")
         for title in titles:
             self.assertIn('"' + title + '"', self.grid)
-        self.assertIn("row * 315", self.grid)
-        self.assertIn("column * 390", self.grid)
-        self.assertIn("Card(g, new(x, y, 374, 302))", self.grid)
-        self.assertIn('Card(g, new(256, 829, 1166, 115))', self.grid)
+        self.assertIn("row * 174", self.grid)
+        self.assertIn("col * 390", self.grid)
+        self.assertIn("new RectangleF(x, y, 374, 154)", self.grid)
+        self.assertIn("Card(g, new(256, 817, 1166, 130))", self.grid)
         self.assertIn('TextAt(g, "실행 기록"', self.grid)
-        self.assertIn("int y = 265 + i * 36", self.grid)
-        self.assertIn('new(16, 123, 200, 49)', self.grid)
-        self.assertIn('new(16, 471, 200, 49)', self.grid)
+        self.assertIn('new(16, 135, 200, 49)', self.grid)
+        self.assertIn('new(16, 560, 200, 49)', self.grid)
         self.assertIn('new(1139, 881, 265, 41)', self.shell)
         self.assertIn("private void PaintHome(Graphics g) => PaintMobilayHome(g);",
                       self.shell)
@@ -50,7 +91,7 @@ class MobilayPresentationContract(unittest.TestCase):
 
     def test_compact_footer_keeps_manual_updates_and_runtime_separate(self):
         self.assertIn('owner.CheckForUpdatesAsync(true)', self.shell)
-        self.assertIn('new(277, 890, 831, 40)', self.grid)
+        self.assertIn('new(278, 870, 1115, 65)', self.grid)
         self.assertIn('F8 테스트  ·  F9 시작  ·  F10 정지', self.grid)
         self.assertIn('_owner._progressLogPreview.Text', self.grid)
         self.assertIn('owner.TopMost = !owner.TopMost', self.grid)
@@ -77,15 +118,16 @@ class MobilayPresentationContract(unittest.TestCase):
     def test_sidebar_routes_reuse_existing_macro_handlers(self):
         for existing in (
             "SelectMode(0)", "SelectMode(7)",
-            "new[] { 1, 2 }", "new[] { 4, 5, 6 }",
+            "SelectMode(1)", "SelectMode(2)", "SelectMode(4)", "new[] { 5, 6 }",
             "ShowTelegramSettings()", "ShowErrorUploadSettings()",
             "ShowVisualRecognitionTest()", "owner.ToggleMini(true)",
             "owner.TopMost = !owner.TopMost", "owner.TestOrRefresh",
             "owner.ApplyLogVisibility()"
         ):
             self.assertIn(existing, self.grid)
-        self.assertIn('mode is 4 or 5 or 6 ? "생활 생산"', self.shell)
-        self.assertIn('mode is 1 or 2 or 3 ? "던전 / 어비스"', self.shell)
+        self.assertIn('4 => "자동가공"', self.shell)
+        self.assertIn('2 or 3 => "어비스"', self.shell)
+        self.assertIn('owner.StopSelected', self.grid)
         self.assertIn('control.Visible = _showHome && !_owner._logExpanded',
                       self.shell)
         self.assertIn('if (_owner.AnyRunning || _owner._activeMode is not null) return;',
@@ -94,7 +136,9 @@ class MobilayPresentationContract(unittest.TestCase):
         self.assertIn("owner.StopSelected()", self.shell)
 
     def test_peaca_deep_is_not_offered_in_dungeon_sidebar(self):
-        self.assertIn('new[] { "던전", "어비스" }', self.grid)
+        self.assertIn('AddButton("던전",', self.grid)
+        self.assertIn('AddButton("어비스",', self.grid)
+        self.assertNotIn('AddButton("페카 심층",', self.grid)
         self.assertNotIn('new[] { "던전", "어비스", "페카 심층" }', self.grid)
         self.assertIn('new[] { "허상의 정박지", "광기의 동굴", "흩어진 물길" }', self.shell)
         # The implementation remains in place; this change only hides the nav entry.

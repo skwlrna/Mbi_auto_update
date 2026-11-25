@@ -87,7 +87,21 @@ public sealed partial class MainForm
         private readonly List<ReferenceButton> _modeTabs = new();
         private readonly List<ReferenceButton> _navigationButtons = new();
         private readonly List<ReferenceButton> _homeLinks = new();
-        private string _selectedNavigation = "홈";
+        private string _selectedNavigation = "대시보드";
+        // Presentation-only, per-window theme. Task pages retain their existing palette.
+        private bool _darkTheme;
+        private bool _sidebarCollapsed;
+        private Color WindowBg => _darkTheme ? Color.FromArgb(23, 23, 29) : Color.FromArgb(245, 246, 248);
+        private Color NavBg => _darkTheme ? Color.FromArgb(29, 30, 38) : Color.White;
+        private Color CardBg => _darkTheme ? Color.FromArgb(35, 37, 46) : Color.White;
+        private Color CardBg2 => _darkTheme ? Color.FromArgb(48, 51, 64) : Color.FromArgb(235, 238, 245);
+        private Color TitleText => _darkTheme ? Color.FromArgb(239, 241, 250) : Color.FromArgb(35, 39, 56);
+        private Color Blue => _darkTheme ? Color.FromArgb(173, 186, 255) : Color.FromArgb(75, 90, 184);
+        private Color Green => _darkTheme ? Color.FromArgb(107, 222, 164) : Color.FromArgb(22, 128, 81);
+        private Color Accent => _darkTheme ? Color.FromArgb(59, 70, 113) : Color.FromArgb(224, 231, 255);
+        private Color AccentSoft => _darkTheme ? Color.FromArgb(48, 57, 87) : Color.FromArgb(233, 237, 255);
+        private Color Muted => _darkTheme ? Color.FromArgb(170, 179, 200) : Color.FromArgb(93, 101, 117);
+        private Color Line => _darkTheme ? Color.FromArgb(62, 66, 82) : Color.FromArgb(218, 222, 230);
         private bool _showHome = true;
         private readonly ToolTip _tips = new();
         private ContextMenuStrip? _openMenu;
@@ -95,12 +109,59 @@ public sealed partial class MainForm
         // The dashboard paints many captions every refresh. Reuse GDI fonts by
         // integer pixel size instead of creating one for every text draw.
         private readonly Dictionary<(int Pixels, bool Bold), Font> _textFonts = new();
-        private readonly Color _text = TitleText;
-        private readonly Color _cyan = Blue;
-        private readonly Color _green = Green;
-        private readonly Color _line = Line;
+        private Color _text => TitleText;
+        private Color _cyan => Blue;
+        private Color _green => Green;
+        private Color _line => Line;
         private float ScaleX => Math.Max(1, Width) / 1448f;
         private float ScaleY => Math.Max(1, Height) / 1086f;
+        private float SidebarWidth => _sidebarCollapsed ? 88f : 232f;
+        private float SidebarPixels => SidebarWidth * ScaleX;
+        private float ContentScaleX => Math.Max(1f, Width - SidebarPixels) / 1216f;
+        private float ContentOffset => SidebarPixels - 232f * ContentScaleX;
+        private float MapX(float x) => x >= 232f
+            ? ContentOffset + x * ContentScaleX
+            : Math.Min(x, SidebarWidth - 4f) * ScaleX;
+        private float UnmapX(float x) => x >= SidebarPixels
+            ? (x - ContentOffset) / ContentScaleX : x / ScaleX;
+
+        private Rectangle MapBounds(RectangleF r)
+        {
+            if (r.X < 232f)
+                return Rectangle.Round(new RectangleF(
+                    (_sidebarCollapsed ? 12f : r.X) * ScaleX, r.Y * ScaleY,
+                    (_sidebarCollapsed ? 64f : r.Width) * ScaleX, r.Height * ScaleY));
+            return Rectangle.Round(new RectangleF(MapX(r.X), r.Y * ScaleY,
+                r.Width * ContentScaleX, r.Height * ScaleY));
+        }
+
+        private void ToggleSidebar()
+        {
+            _openMenu?.Close();
+            _sidebarCollapsed = !_sidebarCollapsed;
+            LayoutPositions();
+            Invalidate(true);
+        }
+
+        private void ToggleTheme()
+        {
+            _openMenu?.Close();
+            _darkTheme = !_darkTheme;
+            BackColor = WindowBg;
+            foreach (var (control, _) in _positions)
+            {
+                if (control is ReferenceButton || control is CheckBox || control is MaskedTextBox)
+                {
+                    control.BackColor = control is MaskedTextBox ? CardBg2 : CardBg;
+                    control.ForeColor = TitleText;
+                }
+            }
+            _owner._alteringPage.SetTaskTheme(_darkTheme);
+            _owner._gatheringPage.SetTaskTheme(_darkTheme);
+            _owner._craftingPage.SetTaskTheme(_darkTheme);
+            _owner._schedulerPage.SetTaskTheme(_darkTheme);
+            Invalidate(true);
+        }
         private string EffectiveMode => _owner._activeMode ?? _owner._mode.SelectedItem?.ToString() ?? "낚시";
         private bool ShouldShowAbyssDungeonPicker =>
             string.Equals(EffectiveMode, "어비스", StringComparison.Ordinal);
@@ -275,7 +336,7 @@ public sealed partial class MainForm
                     _owner._logExpanded = false;
                     _owner.ApplyLogVisibility();
                 }
-                _selectedNavigation = mode == 7 ? "스케줄러" : mode is 4 or 5 or 6 ? "생활 생산" : mode is 1 or 2 or 3 ? "던전 / 어비스" : "자동화 실행";
+                _selectedNavigation = mode switch { 0 => "자동낚시", 1 => "던전", 2 or 3 => "어비스", 4 => "자동가공", 5 or 6 => "채집 / 제작", 7 => "스케줄러", _ => "대시보드" };
                 _owner._productionPageMode = mode == 4 ? "가공" : mode == 5 ? "채집" : mode == 6 ? "제작" : mode == 7 ? "스케줄러" : null;
                 _owner._mode.SelectedIndex = mode;
                 UpdateAbyssDungeonPickerVisibility();
@@ -380,7 +441,7 @@ public sealed partial class MainForm
                     if (ReferenceEquals(_openMenu, menu)) _openMenu = null;
                 };
 
-                menu.Show(this, new Point((int)(x * ScaleX), (int)(y * ScaleY)));
+                menu.Show(this, new Point((int)MapX(x), (int)(y * ScaleY)));
             });
         }
 
@@ -397,6 +458,7 @@ public sealed partial class MainForm
             button.Click += (_, _) => _owner.SafeUiAction(text, action);
             Controls.Add(button);
             _positions.Add((button, bounds));
+            if (bounds.X < 232f) _tips.SetToolTip(button, text);
             if (kind == "nav") _navigationButtons.Add(button);
             return button;
         }
@@ -450,14 +512,18 @@ public sealed partial class MainForm
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
+            LayoutPositions();
+        }
+
+        private void LayoutPositions()
+        {
             if (_positions is null) return;
-            float sx = ScaleX, sy = ScaleY;
             SuspendLayout();
             try
             {
                 foreach (var (control, r) in _positions)
                 {
-                    var bounds = Rectangle.Round(new RectangleF(r.X * sx, r.Y * sy, r.Width * sx, r.Height * sy));
+                    var bounds = MapBounds(r);
                     // Avoid repeatedly invalidating unchanged child surfaces.
                     if (control.Bounds != bounds) control.Bounds = bounds;
                 }
@@ -469,7 +535,7 @@ public sealed partial class MainForm
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
-            float x = e.X / ScaleX, y = e.Y / ScaleY;
+            float x = UnmapX(e.X), y = e.Y / ScaleY;
             if (y < 65) { _owner.DragReferenceWindow(); return; }
             // Clicking the painted mode-card heading replaces the old down-arrow
             // hit target, so removing its icon doesn't remove dungeon selection.
@@ -575,23 +641,34 @@ public sealed partial class MainForm
         {
             base.OnPaint(e);
             var g = e.Graphics;
-            g.ScaleTransform(ScaleX, ScaleY);
+            g.Clear(WindowBg);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            using (var bg = new SolidBrush(WindowBg)) g.FillRectangle(bg, 0, 0, 1448, 1086);
-            using (var nav = new SolidBrush(NavBg)) g.FillRectangle(nav, 0, 100, 232, 986);
-            using (var line = new Pen(Line))
+            var sidebarState = g.Save();
+            g.ScaleTransform(ScaleX, ScaleY);
+            using (var nav = new SolidBrush(NavBg)) g.FillRectangle(nav, 0, 0, SidebarWidth, 1086);
+            using (var line = new Pen(Line)) g.DrawLine(line, SidebarWidth, 0, SidebarWidth, 1086);
+            if (!_sidebarCollapsed)
             {
-                g.DrawLine(line, 0, 100, 1448, 100);
-                g.DrawLine(line, 232, 100, 232, 1086);
+                TextAt(g, "MOBI", new(28, 8, 130, 43), 32, true, TitleText);
+                TextAt(g, "Automation", new(30, 49, 140, 27), 15, false, Muted);
             }
-            TextAt(g, "Mabi Auto", new(34, 12, 232, 63), 32, true, TitleText);
+            PaintBentoSidebar(g);
+            g.Restore(sidebarState);
+
+            var bodyState = g.Save();
+            g.TranslateTransform(ContentOffset, 0);
+            g.ScaleTransform(ContentScaleX, ScaleY);
+            using (var line = new Pen(Line)) g.DrawLine(line, 232, 100, 1448, 100);
             TextAt(g, UpdateManager.CurrentVersion, new(280, 21, 160, 40), 16, false, Muted);
             TextAt(g, "F9 시작  ·  F10 정지", new(480, 22, 310, 39), 14, false, Muted);
-            if (ShouldShowProductionPage) return;
-            if (_showHome) PaintHome(g);
-            else PaintAutomation(g);
+            if (!ShouldShowProductionPage)
+            {
+                if (_showHome) PaintHome(g);
+                else PaintAutomation(g);
+            }
+            g.Restore(bodyState);
         }
 
         // Read-only home. Every value is taken from the existing live runtime state,
@@ -654,7 +731,7 @@ public sealed partial class MainForm
                 string guide = EffectiveMode == "낚시" ? "낚시 자동화 · F8로 실제 키 입력을 테스트할 수 있습니다."
                     : "던전 자동화 · 게임 화면과 대상 상태를 확인하고 실행하세요.";
                 TextAt(g, guide, new(279, 741, 1065, 58), 18, false, Muted, multiline: true);
-                TextAt(g, "로그 기록은 왼쪽 로그 / 진단 메뉴에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
+                TextAt(g, "로그 기록은 왼쪽 실행 기록 메뉴에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
             }
         }
 
@@ -754,6 +831,12 @@ public sealed partial class MainForm
                 case "min": g.DrawLine(pen, 7, 16, 25, 16); break;
                 case "max": g.DrawRectangle(pen, 7, 7, 18, 18); break;
                 case "chevron": g.DrawLines(pen, new PointF[] { new(7, 12), new(16, 21), new(25, 12) }); break;
+                case "sidebar":
+                    g.DrawRectangle(pen, 3, 5, 26, 22); g.DrawLine(pen, 12, 5, 12, 27); break;
+                case "stop": g.FillRectangle(fill, 6, 6, 20, 20); break;
+                case "pin":
+                    g.DrawLines(pen, new PointF[] { new(12, 3), new(23, 14), new(19, 18), new(9, 8), new(12, 3) });
+                    g.DrawLine(pen, 15, 15, 4, 28); break;
                 case "arrow-up-right":
                     g.DrawLine(pen, 5, 27, 26, 6); g.DrawLine(pen, 12, 6, 26, 6);
                     g.DrawLine(pen, 26, 6, 26, 20); break;
@@ -790,8 +873,8 @@ public sealed partial class MainForm
                     // Do not let native Button focus/border visuals masquerade as hover.
                     FlatStyle = FlatStyle.Flat;
                     FlatAppearance.BorderSize = 0;
-                    FlatAppearance.MouseOverBackColor = NavBg;
-                    FlatAppearance.MouseDownBackColor = NavBg;
+                    FlatAppearance.MouseOverBackColor = _ui.NavBg;
+                    FlatAppearance.MouseDownBackColor = _ui.NavBg;
                     UseVisualStyleBackColor = false;
                     TabStop = false;
                 }
@@ -805,15 +888,16 @@ public sealed partial class MainForm
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-                float sx = _ui.ScaleX, sy = _ui.ScaleY;
+                bool sidebar = Left < _ui.SidebarPixels;
+                float sx = sidebar ? _ui.ScaleX : _ui.ContentScaleX, sy = _ui.ScaleY;
                 g.ScaleTransform(sx, sy);
                 float w = Width / sx, h = Height / sy;
                 if (_kind == "card-link")
                 {
-                    using var bg = new SolidBrush(_pressed ? AccentSoft : _hover ? CardBg2 : Color.FromArgb(43, 43, 46));
+                    using var bg = new SolidBrush(_pressed ? _ui.AccentSoft : _hover ? _ui.CardBg2 : _ui.AccentSoft);
                     using var cardLinkShape = Round(new RectangleF(0.5f, 0.5f, Math.Max(1, w - 1), Math.Max(1, h - 1)), 9);
                     g.FillPath(bg, cardLinkShape);
-                    _ui.Icon(g, "arrow-up-right", new(7, 7, w - 14, h - 14), TitleText);
+                    _ui.Icon(g, "arrow-up-right", new(7, 7, w - 14, h - 14), _ui.TitleText);
                     return;
                 }
                 if (_kind == "chrome")
@@ -822,54 +906,58 @@ public sealed partial class MainForm
                     // paints a box; Close uses the familiar red hover feedback.
                     bool hot = Enabled && (_hover || _pressed);
                     bool close = _icon == "close";
-                    Color surface = !hot ? NavBg : close
+                    Color surface = !hot ? _ui.NavBg : close
                         ? (_pressed ? Color.FromArgb(178, 34, 47) : Color.FromArgb(220, 53, 69))
-                        : (_pressed ? Color.FromArgb(43, 43, 49) : Color.FromArgb(51, 51, 59));
+                        : (_pressed ? _ui.AccentSoft : _ui.CardBg2);
                     using (var background = new SolidBrush(surface))
                         g.FillRectangle(background, 0, 0, w, h);
                     if (hot && !close)
                     {
-                        using var outline = new Pen(Line, 1);
+                        using var outline = new Pen(_ui.Line, 1);
                         g.DrawRectangle(outline, 0.5f, 0.5f, Math.Max(1, w - 1), Math.Max(1, h - 1));
                     }
-                    Color iconColor = !Enabled ? Muted : hot && close ? Color.White : TitleText;
+                    Color iconColor = !Enabled ? _ui.Muted : hot && close ? Color.White : _ui.TitleText;
                     _ui.Icon(g, _icon, new((w - 24) / 2, (h - 24) / 2, 24, 24), iconColor);
                     return;
                 }
                 bool selected = _kind == "choose" && Tag is int index && index == _ui._owner._abyssDungeon.SelectedIndex;
                 bool action = _kind == "action";
                 bool nav = _kind.StartsWith("nav");
-                bool navSelected = nav && (Text == "로그 / 진단"
+                bool navSelected = nav && (Text == "실행 기록"
                     ? _ui._owner._logExpanded
                     : !_ui._owner._logExpanded && Text == _ui._selectedNavigation);
                 bool modeSelected = _kind == "mode-tab" && Text == _ui.EffectiveMode;
                 bool strong = action || selected || navSelected || modeSelected;
                 // Unselected WORKSPACE entries retain visible card backgrounds and borders.
-                Color top = navSelected || modeSelected ? AccentSoft : action ? Accent : nav ? NavBg : CardBg;
+                Color top = navSelected || modeSelected ? _ui.AccentSoft : action ? _ui.Accent : nav ? _ui.NavBg : _ui.CardBg;
                 Color bottom = top;
                 if (action && _ui._owner.AnyRunning) { top = Color.FromArgb(170, 46, 63); bottom = Color.FromArgb(108, 25, 45); }
-                if (_pressed) top = action ? Color.FromArgb(29, 93, 209) : (navSelected || modeSelected ? AccentSoft : CardBg2);
-                else if (_hover && !navSelected && !modeSelected) top = action ? Color.FromArgb(29, 93, 209) : CardBg2;
-                if (!Enabled) { top = bottom = CardBg2; }
-                using (var baseFill = new SolidBrush(nav ? NavBg : WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
+                if (_kind == "danger") top = bottom = _ui._darkTheme ? Color.FromArgb(103, 43, 55) : Color.FromArgb(253, 232, 235);
+                if (_pressed) top = action ? _ui.AccentSoft : (navSelected || modeSelected ? _ui.AccentSoft : _ui.CardBg2);
+                else if (_hover && !navSelected && !modeSelected) top = action ? _ui.AccentSoft : _ui.CardBg2;
+                if (!Enabled) { top = bottom = _ui.CardBg2; }
+                using (var baseFill = new SolidBrush(nav ? _ui.NavBg : _ui.WindowBg)) g.FillRectangle(baseFill, 0, 0, w, h);
                 var r = new RectangleF(1, 1, Math.Max(1, w - 2), Math.Max(1, h - 2));
                 using var shape = Round(r, action ? 11 : 7);
                 {
                     using var fill = new SolidBrush(top);
                     g.FillPath(fill, shape);
                     using var border = new Pen(navSelected || modeSelected || selected ? _ui._cyan : _ui._line, navSelected || modeSelected || selected ? 1.7f : 1f);
-                    g.DrawPath(border, shape);
+                    if (!nav || navSelected) g.DrawPath(border, shape);
                     if (navSelected)
                     {
                         using var marker = new SolidBrush(_ui._cyan);
                         g.FillRectangle(marker, 4, 15, 4, Math.Max(4, h - 30));
                     }
                 }
-                Color fg = !Enabled ? Muted : action ? Color.FromArgb(22, 22, 25) : navSelected || modeSelected ? Blue : TitleText;
+                Color fg = !Enabled ? _ui.Muted : action && _ui._owner.AnyRunning ? Color.White : action ? _ui.TitleText : navSelected || modeSelected ? _ui.Blue : _ui.TitleText;
+                if (_kind == "danger") fg = _ui._darkTheme ? Color.FromArgb(255, 175, 184) : Color.FromArgb(175, 34, 48);
                 {
                     string caption = Text.TrimStart('●', '○', '▶', '■', '▤', ' ');
                     float font = action ? 19 : nav ? 19 : _kind == "mode-tab" ? 19 : _kind == "log" ? 19 : _kind == "quiet" && w < 150 ? 14 : 18;
-                    if (nav || _kind == "mode-tab") { _ui.Icon(g, _icon, new(18, (h - 30) / 2, 30, 30), fg); _ui.TextAt(g, caption, new(67, 0, w - 73, h), font, strong, fg); }
+                    if ((sidebar && _ui._sidebarCollapsed) || _kind == "sidebar-toggle")
+                        _ui.Icon(g, _icon, new((w - 28) / 2, (h - 28) / 2, 28, 28), fg);
+                    else if (nav || _kind == "mode-tab") { _ui.Icon(g, _icon, new(18, (h - 30) / 2, 30, 30), fg); _ui.TextAt(g, caption, new(67, 0, w - 73, h), font, strong, fg); }
                     else if (_kind == "choose")
                     {
                         using var ring = new Pen(selected ? _ui._cyan : fg, 2);
@@ -903,7 +991,7 @@ public sealed partial class MainForm
                 }
                 if (Focused && ShowFocusCues)
                 {
-                    using var focus = new Pen(Blue, 1) { DashStyle = DashStyle.Dot };
+                    using var focus = new Pen(_ui.Blue, 1) { DashStyle = DashStyle.Dot };
                     g.DrawRectangle(focus, 5, 5, Math.Max(1, w - 10), Math.Max(1, h - 10));
                 }
             }

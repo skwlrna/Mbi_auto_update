@@ -71,8 +71,30 @@ public sealed partial class MainForm
         }
     }
 
-    private sealed class CraftingPage : Panel
+    private sealed class CraftingPage : Panel, ITaskThemePage
     {
+        private TaskPalette _taskPalette = TaskPalette.Light;
+        TaskPalette ITaskThemePage.Palette => _taskPalette;
+        private Color WindowBg => _taskPalette.WindowBg;
+        private Color PanelBg => _taskPalette.PanelBg;
+        private Color Border => _taskPalette.Border;
+        private Color TitleText => _taskPalette.TitleText;
+        private Color Blue => _taskPalette.Blue;
+        private Color Green => _taskPalette.Green;
+        private Color CardBg => _taskPalette.CardBg;
+        private Color CardBg2 => _taskPalette.CardBg2;
+        private Color Accent => _taskPalette.Accent;
+        private Color AccentSoft => _taskPalette.AccentSoft;
+        private Color Muted => _taskPalette.Muted;
+        private Color Line => _taskPalette.Line;
+        internal void SetTaskTheme(bool dark)
+        {
+            var next = dark ? TaskPalette.Dark : TaskPalette.Light;
+            if (ReferenceEquals(_taskPalette, next)) return;
+            var previous = _taskPalette;
+            _taskPalette = next;
+            ApplyTaskPalette(this, previous, next);
+        }
         private readonly MainForm _owner;
         private readonly TextBox _search = new();
         private readonly Button _start;
@@ -249,7 +271,7 @@ public sealed partial class MainForm
                 Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "제작 하단 시작 정지"
             };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent; _start.ForeColor = Color.FromArgb(22, 22, 25);
+            _start = Button("▶   제작 시작 (F9)", owner.StartSelected); _start.AccessibleName = "제작 시작"; _start.BackColor = Accent; _start.ForeColor = _taskPalette.PrimaryText;
             _stop = Button("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "제작 정지";
             actions.Controls.Add(_start, 0, 0); actions.Controls.Add(_stop, 1, 0); root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
@@ -293,11 +315,23 @@ public sealed partial class MainForm
             Quantity.ValueChanged += (_, _) => SelectionChanged(); UpdateExecution();
         }
 
-        private static Panel Card()
+        private Panel Card()
             => new CraftingCard { Dock = DockStyle.Fill, Margin = new Padding(4) };
 
         private sealed class CraftingCard : Panel
         {
+            private Color WindowBg => TaskPalette.For(this).WindowBg;
+            private Color PanelBg => TaskPalette.For(this).PanelBg;
+            private Color Border => TaskPalette.For(this).Border;
+            private Color TitleText => TaskPalette.For(this).TitleText;
+            private Color Blue => TaskPalette.For(this).Blue;
+            private Color Green => TaskPalette.For(this).Green;
+            private Color CardBg => TaskPalette.For(this).CardBg;
+            private Color CardBg2 => TaskPalette.For(this).CardBg2;
+            private Color Accent => TaskPalette.For(this).Accent;
+            private Color AccentSoft => TaskPalette.For(this).AccentSoft;
+            private Color Muted => TaskPalette.For(this).Muted;
+            private Color Line => TaskPalette.For(this).Line;
             internal CraftingCard()
             {
                 BackColor = CardBg;
@@ -316,14 +350,14 @@ public sealed partial class MainForm
                 e.Graphics.Clear(SurfaceColor(Parent));
                 var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
                 using var shape = Rounded(bounds, 12);
-                using var fill = new SolidBrush(CardBg);
+                using var fill = new SolidBrush(BackColor);
                 using var border = new Pen(Line);
                 e.Graphics.FillPath(fill, shape);
                 e.Graphics.DrawPath(border, shape);
             }
         }
 
-        private static Label Label(string text, float size, bool bold = false) => new()
+        private Label Label(string text, float size, bool bold = false) => new()
         {
             Text = text,
             Dock = DockStyle.Fill,
@@ -332,7 +366,7 @@ public sealed partial class MainForm
             TextAlign = ContentAlignment.MiddleLeft
         };
 
-        private static Button Button(string text, Action action)
+        private Button Button(string text, Action action)
         {
             var button = new CraftingButton
             {
@@ -350,6 +384,18 @@ public sealed partial class MainForm
 
         private sealed class CraftingButton : Button
         {
+            private Color WindowBg => TaskPalette.For(this).WindowBg;
+            private Color PanelBg => TaskPalette.For(this).PanelBg;
+            private Color Border => TaskPalette.For(this).Border;
+            private Color TitleText => TaskPalette.For(this).TitleText;
+            private Color Blue => TaskPalette.For(this).Blue;
+            private Color Green => TaskPalette.For(this).Green;
+            private Color CardBg => TaskPalette.For(this).CardBg;
+            private Color CardBg2 => TaskPalette.For(this).CardBg2;
+            private Color Accent => TaskPalette.For(this).Accent;
+            private Color AccentSoft => TaskPalette.For(this).AccentSoft;
+            private Color Muted => TaskPalette.For(this).Muted;
+            private Color Line => TaskPalette.For(this).Line;
             internal CraftingButton()
             {
                 FlatStyle = FlatStyle.Flat;
@@ -393,6 +439,18 @@ public sealed partial class MainForm
 
         private sealed class CraftingCombo : ComboBox
         {
+            private Color WindowBg => TaskPalette.For(this).WindowBg;
+            private Color PanelBg => TaskPalette.For(this).PanelBg;
+            private Color Border => TaskPalette.For(this).Border;
+            private Color TitleText => TaskPalette.For(this).TitleText;
+            private Color Blue => TaskPalette.For(this).Blue;
+            private Color Green => TaskPalette.For(this).Green;
+            private Color CardBg => TaskPalette.For(this).CardBg;
+            private Color CardBg2 => TaskPalette.For(this).CardBg2;
+            private Color Accent => TaskPalette.For(this).Accent;
+            private Color AccentSoft => TaskPalette.For(this).AccentSoft;
+            private Color Muted => TaskPalette.For(this).Muted;
+            private Color Line => TaskPalette.For(this).Line;
             internal CraftingCombo()
             {
                 SetStyle(
@@ -464,10 +522,10 @@ public sealed partial class MainForm
                 if (control.BackColor.A == 255) return control.BackColor;
                 control = control.Parent;
             }
-            return WindowBg;
+            return TaskPalette.Light.WindowBg;
         }
 
-        private static void StyleField(Control control)
+        private void StyleField(Control control)
         {
             control.Dock = DockStyle.Fill;
             control.BackColor = CardBg2;
@@ -477,7 +535,7 @@ public sealed partial class MainForm
             if (control is TextBox text) text.BorderStyle = BorderStyle.None;
         }
 
-        private static void StyleListBox(ListBox list)
+        private void StyleListBox(ListBox list)
         {
             list.Dock = DockStyle.Fill; list.BorderStyle = BorderStyle.None; list.BackColor = CardBg2; list.ForeColor = TitleText;
             list.IntegralHeight = false; list.DrawMode = DrawMode.OwnerDrawFixed; list.ItemHeight = 32; list.Margin = Padding.Empty;
@@ -601,7 +659,7 @@ public sealed partial class MainForm
             _craftingQueue.SelectedIndex = to;
         }
 
-        private static void StyleCombo(ComboBox combo)
+        private void StyleCombo(ComboBox combo)
         {
             combo.FlatStyle = FlatStyle.Flat;
             combo.DrawMode = DrawMode.OwnerDrawFixed;

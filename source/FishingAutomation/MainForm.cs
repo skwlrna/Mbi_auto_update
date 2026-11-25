@@ -243,7 +243,7 @@ public sealed partial class MainForm : Form
         FormClosed += (_, _) =>
         {
             _uiTimer.Stop();
-            _browserControl?.Close();
+            StopBrowserControl();
             StopAll();
             _watchdog.Dispose();
             _notifier.Dispose();
