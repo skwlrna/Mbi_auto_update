@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/release-v3343-auto-update.yml'
       - 'source/V3.3.43_RELEASE_AUTHORIZATION.json'
+      - 'tests/release/test_v3335_leather_tannin_readiness.py'
   workflow_dispatch:
 
 permissions:
