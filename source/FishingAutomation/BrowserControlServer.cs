@@ -9,7 +9,7 @@ namespace FishingAutomation;
 // separately configured private HTTPS proxy. Never expose a public listener.
 internal sealed record BrowserControlRequest(string? Operation = null, string? RequestId = null,
     string? Name = null, int? Quantity = null, bool Additional = false,
-    long? Number = null, string? Dungeon = null);
+    long? Number = null, string? Dungeon = null, string? BatchId = null);
 
 internal static class BrowserCommandPolicy
 {
@@ -28,6 +28,9 @@ internal static class BrowserCommandPolicy
         {
             case "stop": return "/stop";
             case "queue-start": return "가공 시작";
+            case "queue-reset-previous":
+                return Guid.TryParseExact(request.BatchId, "N", out var batchId)
+                    ? "브라우저 가공 초기화 " + batchId.ToString("N") : null;
             case "queue-stop": return "가공 정지";
             case "queue-cancel":
                 return request.Number is > 0 ? $"가공 취소 {request.Number.Value}" : null;
@@ -127,9 +130,14 @@ internal sealed class BrowserControlServer : IDisposable
         if (request.Headers["Sec-Fetch-Site"] is "cross-site" or "same-site" ||
             !BrowserCommandPolicy.IsAuthorized(request.Headers["Authorization"], Token))
         { await JsonAsync(response, 401, "인증이 필요합니다.", ct); return; }
-        if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue")
+        if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue" or "/api/previous-batch")
         {
-            string command = path == "/api/status" ? "/status" : "가공 목록";
+            string command = path switch
+            {
+                "/api/status" => "/status",
+                "/api/queue" => "가공 목록",
+                _ => "브라우저 이전 배치"
+            };
             await JsonAsync(response, 200, await DispatchWithDeadlineAsync(command, "", ct), ct);
             return;
         }

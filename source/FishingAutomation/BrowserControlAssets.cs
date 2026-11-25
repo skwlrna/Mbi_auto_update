@@ -16,6 +16,7 @@ internal static class BrowserControlAssets
 <label for="mode">수량 방식</label><select id="mode"><option value="total">총 수량까지 채우기</option><option value="additional">추가 생산</option></select>
 <div class="buttons"><button id="order" disabled>작업 등록</button><button id="queue" disabled>대기열 확인</button>
 <button id="start" disabled>가공 시작</button><button id="qstop" disabled>가공 정지</button></div>
+<div id="previousBatch" hidden><pre id="previousDetail"></pre><button id="resetPrevious" class="danger" disabled>이전 배치 초기화</button></div>
 <pre id="orders">등록된 작업을 확인하세요.</pre><label for="number">취소할 대기 작업 번호</label><input id="number" type="number" min="1" inputmode="numeric"><button id="cancel" disabled>대기 작업 취소</button></section>
 <section><h2>어비스</h2><label for="dungeon">던전 선택</label><select id="dungeon"><option>허상의 정박지</option><option>광기의 동굴</option><option>흩어진 물길</option></select>
 <p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button></section>
@@ -35,8 +36,13 @@ button:disabled{opacity:.43;cursor:default}.buttons{display:grid;grid-template-c
 'use strict';
 const el=id=>document.getElementById(id);
 const controls=['stop','order','queue','start','qstop','cancel','abyss'];
-let key='', busy=false, online=false;
-function enabled(value){online=value;for(const id of controls)el(id).disabled=!value||busy;}
+let key='', busy=false, online=false, previousBatch=null;
+function enabled(value){
+  online=value;
+  for(const id of controls)el(id).disabled=!value||busy;
+  el('start').disabled=!value||busy||Boolean(previousBatch);
+  el('resetPrevious').disabled=!value||busy||!previousBatch;
+}
 async function api(path,payload){
   const options={cache:'no-store',headers:{Authorization:'Bearer '+key}};
   if(payload){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(payload);}
@@ -44,10 +50,20 @@ async function api(path,payload){
   if(!r.ok)throw Error(data.message||'요청 실패');
   return data.message;
 }
+async function refreshPreviousBatch(){
+  previousBatch=null;
+  el('previousBatch').hidden=true;
+  const batch=JSON.parse(await api('/api/previous-batch'));
+  if(!batch)return;
+  previousBatch=batch;
+  const plans=batch.plans.map(plan=>plan.name+' · 목표 '+plan.quantity.toLocaleString('ko-KR')+'개');
+  el('previousDetail').textContent=['기존 배치 확인 필요',new Date(batch.startedAt).toLocaleString('ko-KR'),...plans].join('\n');
+  el('previousBatch').hidden=false;
+}
 async function status(){
   if(!key||busy)return;
   busy=true;enabled(online);
-  try{el('status').textContent=await api('/api/status');online=true;}
+  try{el('status').textContent=await api('/api/status');await refreshPreviousBatch();online=true;}
   catch(e){el('status').textContent=e.message;online=false;}
   finally{busy=false;enabled(online);}
 }
@@ -60,6 +76,7 @@ async function command(operation,fields={}){
     el('reply').textContent=await api('/api/command',request);
     if(operation.startsWith('queue-')||operation==='order')el('orders').textContent=await api('/api/queue');
     el('status').textContent=await api('/api/status');
+    await refreshPreviousBatch();
   }catch(e){el('reply').textContent=e.message+' · 중복 실행하지 말고 PC 상태를 확인하세요.';}
   finally{busy=false;enabled(online);}
 }
@@ -68,6 +85,12 @@ el('stop').onclick=()=>command('stop');
 el('order').onclick=()=>{const name=el('name').value.trim(),n=Number(el('quantity').value);if(!name||!Number.isInteger(n)||n<1||n>1000000){el('reply').textContent='품목과 수량을 확인하세요.';return;}command('order',{Name:name,Quantity:n,Additional:el('mode').value==='additional'});};
 el('queue').onclick=async()=>{if(!online||busy)return;busy=true;enabled(online);try{el('orders').textContent=await api('/api/queue');}catch(e){el('reply').textContent=e.message;}finally{busy=false;enabled(online);}};
 el('start').onclick=()=>{if(confirm('등록된 가공 작업을 시작할까요?'))command('queue-start');};
+el('resetPrevious').onclick=()=>{
+  if(!online||busy||!previousBatch)return;
+  const batchId=previousBatch.id;
+  const notice=el('previousDetail').textContent+'\n\n이어하기 목록에서 이 배치를 숨길까요? 게임 작업, 완성품, 원본 기록과 휴대폰 대기열은 보존됩니다.';
+  if(confirm(notice))command('queue-reset-previous',{BatchId:batchId});
+};
 el('qstop').onclick=()=>command('queue-stop');
 el('cancel').onclick=()=>{const n=Number(el('number').value);if(Number.isSafeInteger(n)&&n>0)command('queue-cancel',{Number:n});};
 el('abyss').onclick=()=>{const d=el('dungeon').value;if(confirm(d+' · 무한 반복으로 시작할까요?'))command('abyss-start',{Dungeon:d});};

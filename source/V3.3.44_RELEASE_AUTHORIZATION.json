@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "version": "V3.3.44",
+  "purpose": "browser_previous_batch_reset",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "pr에 올려두고 바로 업데이트 할수 있게해",
+  "sourcePullRequest": 464,
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true,
+  "realPhoneTested": false
+}
