@@ -149,6 +149,7 @@ public sealed partial class MainForm : Form
                 UpdateManager.LaunchAutoRepairRetirement();
 
             _notifier.StartRemoteControl(HandleTelegramCommandAsync);
+            StartBrowserControl();
             await RunStartupDiagnosticsAsync();
             await CheckForUpdatesAsync(false);
         };
@@ -242,7 +243,7 @@ public sealed partial class MainForm : Form
         FormClosed += (_, _) =>
         {
             _uiTimer.Stop();
-            
+            _browserControl?.Close();
             StopAll();
             _watchdog.Dispose();
             _notifier.Dispose();

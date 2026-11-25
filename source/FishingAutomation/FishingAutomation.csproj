@@ -10,9 +10,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>3.3.41</Version>
-    <AssemblyVersion>3.3.41.0</AssemblyVersion>
-    <FileVersion>3.3.41.0</FileVersion>
+    <Version>3.3.42</Version>
+    <AssemblyVersion>3.3.42.0</AssemblyVersion>
+    <FileVersion>3.3.42.0</FileVersion>
     <RunAnalyzers>false</RunAnalyzers>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>false</RunAnalyzersDuringLiveAnalysis>
@@ -22,6 +22,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="BrowserControl\index.html" LogicalName="BrowserControl.index.html" />
+    <EmbeddedResource Include="BrowserControl\app.js" LogicalName="BrowserControl.app.js" />
     <EmbeddedResource Include="ui\reference.png" LogicalName="FishingAutomation.ReferenceArtwork.png" Condition="Exists('ui\reference.png')" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.13.0.20260627" />
     <PackageReference Include="OpenCvSharp4.Extensions" Version="4.13.0.20260627" />
