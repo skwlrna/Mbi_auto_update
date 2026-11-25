@@ -241,6 +241,7 @@ public sealed partial class MainForm : Form
 
         FormClosed += (_, _) =>
         {
+            StopBrowserControl();
             _uiTimer.Stop();
             
             StopAll();

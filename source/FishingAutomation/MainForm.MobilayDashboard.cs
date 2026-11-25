@@ -61,11 +61,12 @@ public sealed partial class MainForm
         }
 
         private void ShowSettingsMenu(int x, int y) => ShowMenu(
-            new[] { "텔레그램 알림", "오류 전송", "인식 테스트" }, i =>
+            new[] { "텔레그램 알림", "오류 전송", "인식 테스트", "브라우저 원격 제어" }, i =>
             {
                 if (i == 0) _owner.ShowTelegramSettings();
                 else if (i == 1) _owner.ShowErrorUploadSettings();
-                else _owner.ShowVisualRecognitionTest();
+                else if (i == 2) _owner.ShowVisualRecognitionTest();
+                else _owner.ShowBrowserControlSettings();
             }, x, y);
 
         private void PaintBentoSidebar(Graphics g)

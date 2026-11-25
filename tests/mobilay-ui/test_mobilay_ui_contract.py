@@ -53,6 +53,24 @@ class MobilayPresentationContract(unittest.TestCase):
         for field in ("_alteringPage", "_gatheringPage", "_craftingPage", "_schedulerPage"):
             self.assertIn(field + ".SetTaskTheme(_darkTheme)", self.shell)
 
+    def test_browser_control_is_explicit_loopback_and_authenticated(self):
+        server = (UI / "BrowserControlServer.cs").read_text(encoding="utf-8")
+        bridge = (UI / "MainForm.BrowserControl.cs").read_text(encoding="utf-8")
+        assets = (UI / "BrowserControlAssets.cs").read_text(encoding="utf-8")
+        self.assertIn("http://127.0.0.1:18765/", server)
+        self.assertIn("IPAddress.IsLoopback", server)
+        self.assertIn("FixedTimeEquals", server)
+        self.assertIn("request.HttpMethod != \"POST\"", server)
+        self.assertIn("RandomNumberGenerator.GetBytes(32)", server)
+        self.assertIn("HandlePhoneAlteringCommand(command, key)", bridge)
+        self.assertIn("BeginInvoke", bridge)
+        self.assertIn("StartSelected()", bridge)
+        self.assertIn("StopSelected()", bridge)
+        self.assertIn("StopBrowserControl();", self.main)
+        self.assertNotIn("localStorage", assets)
+        self.assertNotIn("http://+", server)
+        self.assertNotIn("http://*", server)
+
     def test_six_real_dashboard_cards_and_clickable_links(self):
         titles = ("자동낚시", "자동가공", "어비스", "스케줄러", "자동채집", "제작")
         for title in titles:

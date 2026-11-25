@@ -14,6 +14,23 @@ internal static class Program
         {
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
+            string browserKey = new string('A', 64);
+            string requestId = Guid.NewGuid().ToString("D");
+            Check(BrowserCommandPolicy.IsAuthorized("Bearer " + browserKey, browserKey) &&
+                  !BrowserCommandPolicy.IsAuthorized(null, browserKey) &&
+                  !BrowserCommandPolicy.IsAuthorized("Bearer " + new string('B', 64), browserKey),
+                "browser command authentication rejects missing and incorrect keys");
+            Check(BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+", 200)) == "가공 가죽+ 200" &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+", 100, true)) == "가공 가죽+ 추가 100",
+                "browser quantities reuse exact total and additional parsing");
+            Check(BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+", 0)) is null &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("order", requestId, "가죽+\n/stop", 100)) is null &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("arbitrary", requestId)) is null &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("stop", "bad-id")) is null,
+                "browser rejects invalid orders, unknown actions and invalid request ids");
+            Check(BrowserCommandPolicy.Build(new BrowserControlRequest("abyss-start", requestId, Dungeon: "흩어진 물길")) == "어비스 시작 흩어진 물길" &&
+                  BrowserCommandPolicy.Build(new BrowserControlRequest("abyss-start", requestId, Dungeon: "unknown")) is null,
+                "browser accepts only supported abyss destinations");
             var fake = new FakeCli();
             MabinogiMobileCli? connector = null;
             using var form = new MainForm(log => connector = new MabinogiMobileCli(log, true, fake.Query, fake.Action)
