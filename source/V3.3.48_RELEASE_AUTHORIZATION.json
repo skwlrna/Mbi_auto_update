@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "version": "V3.3.48",
+  "purpose": "mobile_altering_resume_diagnostics",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "배포해",
+  "sourcePullRequest": 471,
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true,
+  "realPhoneTested": false
+}
