@@ -89,7 +89,7 @@ public sealed partial class MainForm
             token.ThrowIfCancellationRequested();
             if (IsDisposed || Disposing) return "PC 연결이 종료되었습니다.";
             if (!RunAutomationStartPreflight("가공")) return _statusValue.Text;
-            if (!WindowTools.IsRequiredGameWindow(NativeMethods.GetForegroundWindow()))
+            if (!WindowTools.IsRequiredGameWindow(DungeonVisionBot.NativeMethods.GetForegroundWindow()))
                 return WindowTools.RemoteFocusError;
 
             // The common start path rechecks identity, pending plans, and the live queue
