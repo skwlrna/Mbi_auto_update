@@ -109,6 +109,10 @@ public sealed partial class MainForm
                     else if (command.StartsWith("브라우저 가공 초기화 ", StringComparison.Ordinal) &&
                              key.StartsWith("browser:", StringComparison.Ordinal))
                         reply.TrySetResult(ResetBrowserPreviousAlteringBatch(command["브라우저 가공 초기화 ".Length..]));
+                    else if (command == "브라우저 상태 요약")
+                        reply.TrySetResult(GetBrowserMobileState());
+                    else if (command == "브라우저 가공 대기열")
+                        reply.TrySetResult(GetBrowserAlteringQueue());
                     else if (command == "가공 목록")
                         reply.TrySetResult(HandlePhoneAlteringCommand(command, "browser:read"));
                     else if (command.StartsWith("가공 ", StringComparison.Ordinal) && key.StartsWith("browser:", StringComparison.Ordinal))
@@ -132,25 +136,56 @@ public sealed partial class MainForm
         Path.Combine(Path.GetDirectoryName(PhoneAlteringPath)!, "multi-altering");
 
     private bool CanResetBrowserPreviousAlteringBatch() =>
-        !AnyRunning && _activeMode is null && !_gatheringDiagnosticRunning &&
-        LoadPhoneAlteringQueue().Orders.Any(order => order.State == "시작 대기");
+        !AnyRunning && _activeMode is null && !_gatheringDiagnosticRunning;
 
-    private string GetBrowserPreviousAlteringBatch()
-    {
-        if (!CanResetBrowserPreviousAlteringBatch()) return "null";
-        var recent = MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot);
-        return recent is null ? "null" : System.Text.Json.JsonSerializer.Serialize(new
+    private string GetBrowserAlteringQueue() =>
+        System.Text.Json.JsonSerializer.Serialize(BrowserAlteringRows());
+
+    private object BrowserAlteringRows() =>
+        LoadPhoneAlteringQueue().Orders.OrderBy(order => order.Number)
+            .Select(order => new
+            {
+                number = order.Number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                name = order.Name, total = order.Total, quantity = order.Quantity,
+                state = order.State, detail = order.Detail
+            }).ToArray();
+
+    private string GetBrowserMobileState() =>
+        System.Text.Json.JsonSerializer.Serialize(new
         {
-            id = recent.BatchId,
-            startedAt = recent.StartedAt,
-            plans = recent.Plans.Select(plan => new { name = plan.DisplayName, quantity = plan.TargetQuantity })
+            status = GetRemoteStatus(),
+            detail = _statusValue.Text,
+            running = AnyRunning || _activeMode is not null || _gatheringDiagnosticRunning,
+            phoneAltering = _phoneAlteringRun is not null,
+            altering = _activeMode == "가공" && _multiAlteringRunning,
+            abyss = _activeMode == "어비스",
+            abyssPreparing = _starting && SelectedMode == "어비스",
+            orders = BrowserAlteringRows(),
+            previousBatch = BrowserPreviousAlteringBatch()
         });
+
+    private string GetBrowserPreviousAlteringBatch() =>
+        System.Text.Json.JsonSerializer.Serialize(BrowserPreviousAlteringBatch());
+
+    private object BrowserPreviousAlteringBatch()
+    {
+        if (!CanResetBrowserPreviousAlteringBatch())
+            return new { message = "PC 작업이 진행 중입니다. 종료 후 이전 배치를 확인할 수 있습니다." };
+        var recent = MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot);
+        return recent is null
+            ? new { message = "이어할 최근 작업이 없습니다." }
+            : new
+            {
+                id = recent.BatchId,
+                startedAt = recent.StartedAt,
+                plans = recent.Plans.Select(plan => new { name = plan.DisplayName, quantity = plan.TargetQuantity })
+            };
     }
 
     private string ResetBrowserPreviousAlteringBatch(string expectedBatchId)
     {
         if (!CanResetBrowserPreviousAlteringBatch())
-            return "실행 중인 작업과 가공 대기열을 확인하세요.";
+            return "PC 작업이 진행 중입니다. 작업 종료 후 초기화하세요.";
         string root = BrowserAlteringBatchRoot;
         using var lease = new MultiAlteringBatchStore(root);
         if (MultiAlteringRecentResume.Latest(root)?.BatchId != expectedBatchId)
@@ -173,6 +208,8 @@ public sealed partial class MainForm
         if (SelectedMode != "어비스") return "어비스 모드 선택 실패";
         _abyssDungeon.SelectedIndex = index;
         if (SelectedAbyssDungeon != dungeon) return "던전 선택 실패";
+        if (DungeonVisionBot.WindowTools.ActivateGameForRemoteStart() is { } focusError)
+            return focusError;
         StartSelected();
         return _statusValue.Text;
     }

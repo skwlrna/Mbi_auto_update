@@ -12,7 +12,14 @@ class V3301ProductionReleaseSafety(unittest.TestCase):
     def test_version_and_real_game_state_are_explicit(self):
         current = read("source/FishingAutomation/UpdateManager.cs")
         project = read("source/FishingAutomation/FishingAutomation.csproj")
-        if 'CurrentVersion = "V3.3.45"' in current:
+        if 'CurrentVersion = "V3.3.46"' in current:
+            expected = ("3.3.46", "3.3.46.0", "3.3.46.0")
+            workflow = read(".github/workflows/release-v3346-auto-update.yml")
+            for marker in ("gh release create V3.3.46",
+                           "tests/altering/Regression.csproj",
+                           "No successful production CI for current main SHA"):
+                self.assertIn(marker, workflow)
+        elif 'CurrentVersion = "V3.3.45"' in current:
             expected = ("3.3.45", "3.3.45.0", "3.3.45.0")
             workflow = read(".github/workflows/release-v3345-auto-update.yml")
             for marker in ("gh release create V3.3.45",

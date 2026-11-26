@@ -66,6 +66,16 @@ internal static class WindowTools
         return item?.Handle ?? 0;
     }
 
+    public static string? ActivateGameForRemoteStart()
+    {
+        nint window = FindRequiredGameWindow();
+        if (window == 0) return "마비노기 창을 찾지 못했습니다. PC에서 게임 창을 열어 주세요.";
+        if (NativeMethods.GetForegroundWindow() != window)
+            NativeMethods.SetForegroundWindow(window);
+        return NativeMethods.GetForegroundWindow() == window && IsRequiredGameWindow(window)
+            ? null : "마비노기 창을 활성화하지 못했습니다. PC에서 게임 창을 앞으로 가져온 뒤 다시 시작하세요.";
+    }
+
     private static long GetClientArea(nint hwnd)
     {
         if (!NativeMethods.GetClientRect(hwnd, out var r))
