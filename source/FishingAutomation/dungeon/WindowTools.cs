@@ -8,7 +8,9 @@ internal static class WindowTools
 {
     public const string RequiredGameWindowTitle = "마비노기 모바일";
 
-    public static List<WindowItem> EnumerateVisibleWindows()
+    public static List<WindowItem> EnumerateVisibleWindows() => EnumerateGameWindows(includeMinimized: false);
+
+    private static List<WindowItem> EnumerateGameWindows(bool includeMinimized)
     {
         var list = new List<WindowItem>();
 
@@ -16,7 +18,7 @@ internal static class WindowTools
         {
             if (!NativeMethods.IsWindow(h)) return true;
             if (!NativeMethods.IsWindowVisible(h)) return true;
-            if (NativeMethods.IsIconic(h)) return true;
+            if (!includeMinimized && NativeMethods.IsIconic(h)) return true;
 
             var title = GetWindowTitle(h);
             if (string.IsNullOrWhiteSpace(title)) return true;
@@ -66,14 +68,40 @@ internal static class WindowTools
         return item?.Handle ?? 0;
     }
 
-    public static string? ActivateGameForRemoteStart()
+    internal const string RemoteFocusError =
+        "Windows에서 마비노기 창 활성화를 확인하지 못했습니다. PC에서 게임 창을 클릭한 뒤 다시 시작하세요.";
+
+    public static async Task<string?> ActivateGameForRemoteStartAsync(CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
+        nint foreground = NativeMethods.GetForegroundWindow();
+        if (IsRequiredGameWindow(foreground)) return null;
+
         nint window = FindRequiredGameWindow();
+        if (window == 0)
+            window = EnumerateGameWindows(includeMinimized: true).FirstOrDefault()?.Handle ?? 0;
         if (window == 0) return "마비노기 창을 찾지 못했습니다. PC에서 게임 창을 열어 주세요.";
-        if (NativeMethods.GetForegroundWindow() != window)
-            NativeMethods.SetForegroundWindow(window);
-        return NativeMethods.GetForegroundWindow() == window && IsRequiredGameWindow(window)
-            ? null : "마비노기 창을 활성화하지 못했습니다. PC에서 게임 창을 앞으로 가져온 뒤 다시 시작하세요.";
+
+        if (NativeMethods.IsIconic(window))
+            NativeMethods.ShowWindowAsync(window, NativeMethods.SW_RESTORE);
+
+        bool requested = false;
+        for (int attempt = 0; attempt < 12; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!NativeMethods.IsWindow(window)) return "마비노기 창이 닫혔습니다.";
+            if (IsRequiredGameWindow(window))
+            {
+                if (NativeMethods.GetForegroundWindow() == window) return null;
+                if (!requested || attempt is 4 or 8)
+                {
+                    NativeMethods.SetForegroundWindow(window);
+                    requested = true;
+                }
+            }
+            await Task.Delay(75, token);
+        }
+        return NativeMethods.GetForegroundWindow() == window && IsRequiredGameWindow(window) ? null : RemoteFocusError;
     }
 
     private static long GetClientArea(nint hwnd)

@@ -48,6 +48,8 @@ public sealed partial class MainForm
         }
     }
 
+    private Guid _phoneAlteringRevision = Guid.NewGuid();
+
     private void SavePhoneAlteringQueue(PhoneAlteringQueue queue)
     {
         string temp = PhoneAlteringPath + ".tmp";
@@ -58,6 +60,7 @@ public sealed partial class MainForm
         }
         File.Move(temp, PhoneAlteringPath, overwrite: true);
         _phoneAlteringQueue = queue;
+        _phoneAlteringRevision = Guid.NewGuid();
     }
 
     private void SetPhoneAlteringState(long number, string state, string detail = "")
@@ -97,8 +100,8 @@ public sealed partial class MainForm
             {
                 if (MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot) is not null)
                     return "이전 배치 확인 필요 · 이전 배치를 초기화하거나 PC에서 이어하기를 선택하세요.";
-                if (DungeonVisionBot.WindowTools.ActivateGameForRemoteStart() is { } focusError)
-                    return focusError;
+                if (!DungeonVisionBot.WindowTools.IsRequiredGameWindow(DungeonVisionBot.NativeMethods.GetForegroundWindow()))
+                    return DungeonVisionBot.WindowTools.RemoteFocusError;
             }
             SavePhoneAlteringQueue(updated);
             _phoneAlteringRun = new CancellationTokenSource();

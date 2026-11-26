@@ -11,13 +11,16 @@ internal static class BrowserControlAssets
 <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="연결 키 입력"><button id="connect">연결</button>
 <p class="hint">키는 이 화면을 닫으면 사라집니다.</p></section>
 <section class="hero"><h2>현재 작업</h2><pre id="status">연결 대기</pre><button class="danger" id="stop" disabled>전체 작업 중지</button><p id="stopReply" role="status"></p></section>
-<section><h2>자동가공</h2><label for="name">품목</label><input id="name" maxlength="120" placeholder="예: 가죽+">
+<section><h2>자동가공</h2><label for="itemSearch">품목 검색</label><input id="itemSearch" maxlength="120" placeholder="예: 가죽" disabled>
+<button id="catalog" disabled>가공 품목 불러오기</button><p id="catalogReply" role="status"></p>
+<label for="name">가공 품목 선택</label><select id="name" disabled><option value="">품목을 선택하세요</option></select>
 <label for="quantity">수량</label><input id="quantity" type="number" min="1" max="1000000" value="100" inputmode="numeric">
 <label for="mode">수량 방식</label><select id="mode"><option value="total">총 수량까지 채우기</option><option value="additional">추가 생산</option></select>
 <div class="buttons"><button id="order" disabled>작업 등록</button><button id="queue" disabled>대기열 확인</button>
 <button id="start" disabled>가공 시작</button><button id="qstop" disabled>가공 정지</button></div>
 <p id="startReply" role="status"></p>
 <div id="previousBatch"><pre id="previousDetail">PC 연결 후 이전 배치를 확인할 수 있습니다.</pre><button id="resetPrevious" class="danger" disabled>이전 배치 초기화</button><p id="resetReply" role="status"></p></div>
+<button id="clearQueue" class="danger" disabled>가공 목록 전체 비우기 · #1부터</button>
 <div id="orders">등록된 작업을 확인하세요.</div><p id="queueReply" role="status"></p></section>
 <section><h2>어비스</h2><label for="dungeon">던전 선택</label><select id="dungeon"><option>허상의 정박지</option><option>광기의 동굴</option><option>흩어진 물길</option></select>
 <p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button><p id="abyssReply" role="status"></p></section>
@@ -41,11 +44,17 @@ const el=id=>document.getElementById(id);
 const controls=['stop','order','queue','start','qstop','abyss'];
 let key='', busy=false, online=false, previousBatch=null;
 let poll=null, queueSignature='', startWatch=null, stopWatch=null;
+let queueRevision='', canClearQueue=false, orderCount=0;
+let catalog=[], catalogLoading=false;
 function enabled(value){
   online=value;
   for(const id of controls)el(id).disabled=!value||busy;
   for(const button of el("orders").querySelectorAll("button"))button.disabled=!value||busy;
   el('resetPrevious').disabled=!value||busy||!previousBatch;
+  el('clearQueue').disabled=!value||busy||!canClearQueue;
+  el('catalog').disabled=!value||busy||catalogLoading;
+  el('itemSearch').disabled=el('name').disabled=!value||busy||catalog.length===0;
+  el('order').disabled=!value||busy||!el('name').value;
 }
 async function api(path,payload,signal){
   const options={cache:'no-store',signal,headers:{Authorization:'Bearer '+key}};
@@ -61,8 +70,8 @@ function renderPreviousBatch(batch){
   const plans=batch.plans.map(plan=>plan.name+' · 목표 '+plan.quantity.toLocaleString('ko-KR')+'개');
   el('previousDetail').textContent=['이전 배치',new Date(batch.startedAt).toLocaleString('ko-KR'),...plans].join('\n');
 }
-function renderQueue(orders){
-  const signature=JSON.stringify(orders);
+function renderQueue(orders,revision){
+  const signature=JSON.stringify([revision,orders]);
   if(signature===queueSignature)return;
   queueSignature=signature;
   const rows=orders.map(order=>{
@@ -77,7 +86,7 @@ function renderQueue(orders){
       button.onclick=()=>{
         const number=Number(order.number);
         if(Number.isSafeInteger(number)&&number>0)
-          command('queue-cancel',{Number:number},feedback);
+          command('queue-cancel',{Number:number,QueueRevision:revision},feedback);
         else feedback.textContent='이 작업 번호를 처리할 수 없습니다.';
       };
       row.append(button,feedback);
@@ -89,7 +98,10 @@ function renderQueue(orders){
 function renderState(state){
   el('status').textContent=state.status;
   renderPreviousBatch(state.previousBatch);
-  renderQueue(state.orders);
+  queueRevision=state.queueRevision;
+  canClearQueue=state.canClearQueue;
+  orderCount=state.orders.length;
+  renderQueue(state.orders,queueRevision);
   if(startWatch){
     const {operation,feedback,reply}=startWatch;
     const preparing=operation==='queue-start' ? state.phoneAltering && !state.altering : state.abyssPreparing;
@@ -137,7 +149,7 @@ async function command(operation,fields={},feedback=el('reply')){
     const request={Operation:operation,RequestId:crypto.randomUUID(),...fields};
     const reply=await api('/api/command',request);
     feedback.textContent=el('reply').textContent=reply;
-    if(operation==='queue-cancel')el('queueReply').textContent=reply;
+    if(operation==='queue-cancel'||operation==='queue-clear')el('queueReply').textContent=reply;
     if(stopping && reply.includes('정지 요청 접수')){
       startWatch=null;
       stopWatch={operation,feedback};
@@ -152,15 +164,49 @@ async function command(operation,fields={},feedback=el('reply')){
   }
 }
 el('connect').onclick=()=>{
-  if(busy)return;
+  if(busy||catalogLoading)return;
   poll?.abort();poll=null;
   key=el('key').value.trim();el('key').value='';
+  catalog=[];el('itemSearch').value='';renderCatalog();
   online=false;queueSignature='';startWatch=null;stopWatch=null;
   enabled(false);void status();
 };
 el('stop').onclick=()=>command('stop',{},el('stopReply'));
-el('order').onclick=()=>{const name=el('name').value.trim(),n=Number(el('quantity').value);if(!name||!Number.isInteger(n)||n<1||n>1000000){el('reply').textContent='품목과 수량을 확인하세요.';return;}command('order',{Name:name,Quantity:n,Additional:el('mode').value==='additional'});};
+function renderCatalog(){
+  const selected=el('name').value;
+  const query=el('itemSearch').value.trim().toLocaleLowerCase('ko-KR');
+  const matching=catalog.filter(name=>name.toLocaleLowerCase('ko-KR').includes(query));
+  const placeholder=document.createElement('option');
+  placeholder.value='';placeholder.textContent=query&&!matching.length?'검색 결과 없음':'품목을 선택하세요';
+  el('name').replaceChildren(placeholder,...matching.map(name=>{
+    const option=document.createElement('option');option.value=name;option.textContent=name;return option;
+  }));
+  el('name').value=matching.includes(selected)?selected:'';
+  enabled(online);
+}
+el('catalog').onclick=async()=>{
+  if(!online||busy||catalogLoading)return;
+  catalogLoading=true;enabled(online);
+  el('catalogReply').textContent='가공 품목을 불러오는 중';
+  try{
+    const result=JSON.parse(await api('/api/altering-catalog'));
+    if(!result.names){el('catalogReply').textContent=result.message;return;}
+    catalog=result.names;
+    renderCatalog();
+    el('catalogReply').textContent=catalog.length?'품목을 검색하고 선택하세요.':'선택 가능한 가공 품목이 없습니다.';
+  }catch(e){el('catalogReply').textContent=e.message;}
+  finally{catalogLoading=false;enabled(online);}
+};
+el('itemSearch').oninput=renderCatalog;
+el('name').onchange=()=>enabled(online);
+el('order').onclick=()=>{const name=el('name').value,n=Number(el('quantity').value);if(!catalog.includes(name)||!Number.isInteger(n)||n<1||n>1000000){el('reply').textContent='품목과 수량을 확인하세요.';return;}command('order',{Name:name,Quantity:n,Additional:el('mode').value==='additional'});};
 el('queue').onclick=()=>status();
+el('clearQueue').onclick=()=>{
+  if(!online||busy||!canClearQueue)return;
+  const revision=queueRevision;
+  const message='가공 목록 '+orderCount+'건을 모두 비울까요? 시작 대기 요청도 지워지며, 다음 등록은 #1부터 시작합니다.';
+  if(confirm(message))command('queue-clear',{QueueRevision:revision},el('queueReply'));
+};
 el('start').onclick=()=>{if(confirm('등록된 가공 작업을 시작할까요?'))command('queue-start',{},el('startReply'));};
 el('resetPrevious').onclick=()=>{
   if(!online||busy||!previousBatch)return;

@@ -95,12 +95,31 @@ public sealed partial class MainForm
             return Task.FromResult("PC 연결이 종료되었습니다.");
         try
         {
-            BeginInvoke(new Action(() =>
+            BeginInvoke(new Action(async () =>
             {
                 if (IsDisposed || Disposing || ct.IsCancellationRequested)
                 { reply.TrySetResult("PC 연결이 종료되었습니다."); return; }
                 try
                 {
+                    bool browserStart = key.StartsWith("browser:", StringComparison.Ordinal) &&
+                        (command == "가공 시작" || command.StartsWith("어비스 시작 ", StringComparison.Ordinal));
+                    if (browserStart && CanResetBrowserPreviousAlteringBatch() &&
+                        (command != "가공 시작" || (LoadPhoneAlteringQueue().Orders.Any(order => order.State == "시작 대기") &&
+                            MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot) is null)))
+                    {
+                        var failure = await DungeonVisionBot.WindowTools.ActivateGameForRemoteStartAsync(ct);
+                        if (failure is not null)
+                        {
+                            reply.TrySetResult(failure);
+                            return;
+                        }
+                        ct.ThrowIfCancellationRequested();
+                        if (IsDisposed || Disposing)
+                        {
+                            reply.TrySetResult("PC 연결이 종료되었습니다.");
+                            return;
+                        }
+                    }
                     if (command == "/status") reply.TrySetResult(GetRemoteStatus());
                     else if (command == "/stop")
                     { StopSelected(); reply.TrySetResult("전체 정지 요청 접수"); }
@@ -111,6 +130,12 @@ public sealed partial class MainForm
                         reply.TrySetResult(ResetBrowserPreviousAlteringBatch(command["브라우저 가공 초기화 ".Length..]));
                     else if (command == "브라우저 상태 요약")
                         reply.TrySetResult(GetBrowserMobileState());
+                    else if (command.StartsWith("브라우저 가공 목록 비우기 ", StringComparison.Ordinal))
+                        reply.TrySetResult(ClearBrowserAlteringQueue(command["브라우저 가공 목록 비우기 ".Length..], key));
+                    else if (command.StartsWith("브라우저 가공 취소 ", StringComparison.Ordinal))
+                        reply.TrySetResult(CancelBrowserAlteringOrder(command["브라우저 가공 취소 ".Length..], key));
+                    else if (command == "브라우저 가공 품목")
+                        reply.TrySetResult(await GetBrowserAlteringCatalogAsync(ct));
                     else if (command == "브라우저 가공 대기열")
                         reply.TrySetResult(GetBrowserAlteringQueue());
                     else if (command == "가공 목록")
@@ -121,6 +146,8 @@ public sealed partial class MainForm
                         reply.TrySetResult(StartBrowserAbyss(command["어비스 시작 ".Length..]));
                     else reply.TrySetResult("지원하지 않는 명령입니다.");
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                { reply.TrySetCanceled(ct); }
                 catch (Exception ex)
                 {
                     _log.Write("[브라우저 제어] 명령 실패: " + ex.GetType().Name);
@@ -137,6 +164,50 @@ public sealed partial class MainForm
 
     private bool CanResetBrowserPreviousAlteringBatch() =>
         !AnyRunning && _activeMode is null && !_gatheringDiagnosticRunning;
+
+    private string ClearBrowserAlteringQueue(string revision, string key)
+    {
+        var queue = LoadPhoneAlteringQueue();
+        if (queue.RecentMessages.Contains(key)) return "이미 접수한 명령입니다.";
+        if (!CanResetBrowserPreviousAlteringBatch())
+            return "PC 작업이 진행 중입니다. 정지 후 목록을 비워 주세요.";
+        if (revision != _phoneAlteringRevision.ToString("N"))
+            return "가공 목록이 변경되었습니다. 갱신된 목록을 확인해 주세요.";
+
+        SavePhoneAlteringQueue(queue with
+        {
+            Next = 1,
+            Orders = [],
+            RecentMessages = queue.RecentMessages.Concat(queue.Orders.Select(order => order.MessageKey))
+                .Append(key).Where(message => !string.IsNullOrEmpty(message)).Distinct().TakeLast(128).ToArray()
+        });
+        return "가공 목록을 비웠습니다. 다음 작업은 #1부터 등록됩니다.";
+    }
+
+    private string CancelBrowserAlteringOrder(string arguments, string key)
+    {
+        LoadPhoneAlteringQueue();
+        string[] parts = arguments.Split(' ', 2);
+        if (parts.Length != 2 || parts[0] != _phoneAlteringRevision.ToString("N"))
+            return "가공 목록이 변경되었습니다. 갱신된 목록을 확인해 주세요.";
+        return HandlePhoneAlteringCommand("가공 취소 " + parts[1], key);
+    }
+
+    private async Task<string> GetBrowserAlteringCatalogAsync(CancellationToken token)
+    {
+        if (!CanResetBrowserPreviousAlteringBatch())
+            return System.Text.Json.JsonSerializer.Serialize(new { message = "PC 작업 종료 후 가공 품목을 불러와 주세요." });
+
+        var recipes = await new AlteringCliData(_cli).RecipesAsync(token);
+        var names = recipes.GroupBy(recipe => recipe.DisplayName, StringComparer.Ordinal)
+            .Where(group => group.Count() == 1 && AlteringFacilityResolver.Resolve(group.First()) is not null)
+            .Select(group => group.Key)
+            .Where(name => TelegramCommandParser.ParseAlteringOrder($"가공 {name} 1") is { } order &&
+                order.Name == name)
+            .OrderBy(name => name, StringComparer.CurrentCulture)
+            .ToArray();
+        return System.Text.Json.JsonSerializer.Serialize(new { names });
+    }
 
     private string GetBrowserAlteringQueue() =>
         System.Text.Json.JsonSerializer.Serialize(BrowserAlteringRows());
@@ -161,6 +232,9 @@ public sealed partial class MainForm
             abyss = _activeMode == "어비스",
             abyssPreparing = _starting && SelectedMode == "어비스",
             orders = BrowserAlteringRows(),
+            queueRevision = _phoneAlteringRevision.ToString("N"),
+            canClearQueue = CanResetBrowserPreviousAlteringBatch() &&
+                (LoadPhoneAlteringQueue().Orders.Length > 0 || LoadPhoneAlteringQueue().Next != 1),
             previousBatch = BrowserPreviousAlteringBatch()
         });
 
@@ -208,8 +282,8 @@ public sealed partial class MainForm
         if (SelectedMode != "어비스") return "어비스 모드 선택 실패";
         _abyssDungeon.SelectedIndex = index;
         if (SelectedAbyssDungeon != dungeon) return "던전 선택 실패";
-        if (DungeonVisionBot.WindowTools.ActivateGameForRemoteStart() is { } focusError)
-            return focusError;
+        if (!DungeonVisionBot.WindowTools.IsRequiredGameWindow(DungeonVisionBot.NativeMethods.GetForegroundWindow()))
+            return DungeonVisionBot.WindowTools.RemoteFocusError;
         StartSelected();
         return _statusValue.Text;
     }

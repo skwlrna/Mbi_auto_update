@@ -9,7 +9,7 @@ namespace FishingAutomation;
 // separately configured private HTTPS proxy. Never expose a public listener.
 internal sealed record BrowserControlRequest(string? Operation = null, string? RequestId = null,
     string? Name = null, int? Quantity = null, bool Additional = false,
-    long? Number = null, string? Dungeon = null, string? BatchId = null);
+    long? Number = null, string? Dungeon = null, string? BatchId = null, string? QueueRevision = null);
 
 internal static class BrowserCommandPolicy
 {
@@ -32,8 +32,13 @@ internal static class BrowserCommandPolicy
                 return Guid.TryParseExact(request.BatchId, "N", out var batchId)
                     ? "브라우저 가공 초기화 " + batchId.ToString("N") : null;
             case "queue-stop": return "가공 정지";
+            case "queue-clear":
+                return Guid.TryParseExact(request.QueueRevision, "N", out var clearRevision)
+                    ? "브라우저 가공 목록 비우기 " + clearRevision.ToString("N") : null;
             case "queue-cancel":
-                return request.Number is > 0 ? $"가공 취소 {request.Number.Value}" : null;
+                return request.Number is > 0 && Guid.TryParseExact(request.QueueRevision, "N", out var cancelRevision)
+                    ? $"브라우저 가공 취소 {cancelRevision:N} {request.Number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                    : null;
             case "abyss-start":
                 return request.Dungeon is "허상의 정박지" or "광기의 동굴" or "흩어진 물길"
                     ? "어비스 시작 " + request.Dungeon : null;
@@ -130,7 +135,7 @@ internal sealed class BrowserControlServer : IDisposable
         if (request.Headers["Sec-Fetch-Site"] is "cross-site" or "same-site" ||
             !BrowserCommandPolicy.IsAuthorized(request.Headers["Authorization"], Token))
         { await JsonAsync(response, 401, "인증이 필요합니다.", ct); return; }
-        if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue" or "/api/queue-items" or "/api/previous-batch" or "/api/mobile-state")
+        if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue" or "/api/queue-items" or "/api/previous-batch" or "/api/mobile-state" or "/api/altering-catalog")
         {
             string command = path switch
             {
@@ -138,6 +143,7 @@ internal sealed class BrowserControlServer : IDisposable
                 "/api/queue" => "가공 목록",
                 "/api/queue-items" => "브라우저 가공 대기열",
                 "/api/mobile-state" => "브라우저 상태 요약",
+                "/api/altering-catalog" => "브라우저 가공 품목",
                 _ => "브라우저 이전 배치"
             };
             await JsonAsync(response, 200, await DispatchWithDeadlineAsync(command, "", ct), ct);
