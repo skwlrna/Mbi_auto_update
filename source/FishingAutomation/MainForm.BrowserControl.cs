@@ -111,6 +111,10 @@ public sealed partial class MainForm
                         reply.TrySetResult(ResetBrowserPreviousAlteringBatch(command["브라우저 가공 초기화 ".Length..]));
                     else if (command == "브라우저 상태 요약")
                         reply.TrySetResult(GetBrowserMobileState());
+                    else if (command.StartsWith("브라우저 가공 목록 비우기 ", StringComparison.Ordinal))
+                        reply.TrySetResult(ClearBrowserAlteringQueue(command["브라우저 가공 목록 비우기 ".Length..], key));
+                    else if (command.StartsWith("브라우저 가공 취소 ", StringComparison.Ordinal))
+                        reply.TrySetResult(CancelBrowserAlteringOrder(command["브라우저 가공 취소 ".Length..], key));
                     else if (command == "브라우저 가공 대기열")
                         reply.TrySetResult(GetBrowserAlteringQueue());
                     else if (command == "가공 목록")
@@ -138,6 +142,34 @@ public sealed partial class MainForm
     private bool CanResetBrowserPreviousAlteringBatch() =>
         !AnyRunning && _activeMode is null && !_gatheringDiagnosticRunning;
 
+    private string ClearBrowserAlteringQueue(string revision, string key)
+    {
+        var queue = LoadPhoneAlteringQueue();
+        if (queue.RecentMessages.Contains(key)) return "이미 접수한 명령입니다.";
+        if (!CanResetBrowserPreviousAlteringBatch())
+            return "PC 작업이 진행 중입니다. 정지 후 목록을 비워 주세요.";
+        if (revision != _phoneAlteringRevision.ToString("N"))
+            return "가공 목록이 변경되었습니다. 갱신된 목록을 확인해 주세요.";
+
+        SavePhoneAlteringQueue(queue with
+        {
+            Next = 1,
+            Orders = [],
+            RecentMessages = queue.RecentMessages.Concat(queue.Orders.Select(order => order.MessageKey))
+                .Append(key).Where(message => !string.IsNullOrEmpty(message)).Distinct().TakeLast(128).ToArray()
+        });
+        return "가공 목록을 비웠습니다. 다음 작업은 #1부터 등록됩니다.";
+    }
+
+    private string CancelBrowserAlteringOrder(string arguments, string key)
+    {
+        LoadPhoneAlteringQueue();
+        string[] parts = arguments.Split(' ', 2);
+        if (parts.Length != 2 || parts[0] != _phoneAlteringRevision.ToString("N"))
+            return "가공 목록이 변경되었습니다. 갱신된 목록을 확인해 주세요.";
+        return HandlePhoneAlteringCommand("가공 취소 " + parts[1], key);
+    }
+
     private string GetBrowserAlteringQueue() =>
         System.Text.Json.JsonSerializer.Serialize(BrowserAlteringRows());
 
@@ -161,6 +193,9 @@ public sealed partial class MainForm
             abyss = _activeMode == "어비스",
             abyssPreparing = _starting && SelectedMode == "어비스",
             orders = BrowserAlteringRows(),
+            queueRevision = _phoneAlteringRevision.ToString("N"),
+            canClearQueue = CanResetBrowserPreviousAlteringBatch() &&
+                (LoadPhoneAlteringQueue().Orders.Length > 0 || LoadPhoneAlteringQueue().Next != 1),
             previousBatch = BrowserPreviousAlteringBatch()
         });
 

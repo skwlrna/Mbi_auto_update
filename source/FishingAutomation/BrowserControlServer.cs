@@ -9,7 +9,7 @@ namespace FishingAutomation;
 // separately configured private HTTPS proxy. Never expose a public listener.
 internal sealed record BrowserControlRequest(string? Operation = null, string? RequestId = null,
     string? Name = null, int? Quantity = null, bool Additional = false,
-    long? Number = null, string? Dungeon = null, string? BatchId = null);
+    long? Number = null, string? Dungeon = null, string? BatchId = null, string? QueueRevision = null);
 
 internal static class BrowserCommandPolicy
 {
@@ -32,8 +32,13 @@ internal static class BrowserCommandPolicy
                 return Guid.TryParseExact(request.BatchId, "N", out var batchId)
                     ? "브라우저 가공 초기화 " + batchId.ToString("N") : null;
             case "queue-stop": return "가공 정지";
+            case "queue-clear":
+                return Guid.TryParseExact(request.QueueRevision, "N", out var clearRevision)
+                    ? "브라우저 가공 목록 비우기 " + clearRevision.ToString("N") : null;
             case "queue-cancel":
-                return request.Number is > 0 ? $"가공 취소 {request.Number.Value}" : null;
+                return request.Number is > 0 && Guid.TryParseExact(request.QueueRevision, "N", out var cancelRevision)
+                    ? $"브라우저 가공 취소 {cancelRevision:N} {request.Number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                    : null;
             case "abyss-start":
                 return request.Dungeon is "허상의 정박지" or "광기의 동굴" or "흩어진 물길"
                     ? "어비스 시작 " + request.Dungeon : null;

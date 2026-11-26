@@ -48,6 +48,8 @@ public sealed partial class MainForm
         }
     }
 
+    private Guid _phoneAlteringRevision = Guid.NewGuid();
+
     private void SavePhoneAlteringQueue(PhoneAlteringQueue queue)
     {
         string temp = PhoneAlteringPath + ".tmp";
@@ -58,6 +60,7 @@ public sealed partial class MainForm
         }
         File.Move(temp, PhoneAlteringPath, overwrite: true);
         _phoneAlteringQueue = queue;
+        _phoneAlteringRevision = Guid.NewGuid();
     }
 
     private void SetPhoneAlteringState(long number, string state, string detail = "")
