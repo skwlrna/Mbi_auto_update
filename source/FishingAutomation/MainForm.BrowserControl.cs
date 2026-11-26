@@ -109,6 +109,8 @@ public sealed partial class MainForm
                     else if (command.StartsWith("브라우저 가공 초기화 ", StringComparison.Ordinal) &&
                              key.StartsWith("browser:", StringComparison.Ordinal))
                         reply.TrySetResult(ResetBrowserPreviousAlteringBatch(command["브라우저 가공 초기화 ".Length..]));
+                    else if (command == "브라우저 상태 요약")
+                        reply.TrySetResult(GetBrowserMobileState());
                     else if (command == "브라우저 가공 대기열")
                         reply.TrySetResult(GetBrowserAlteringQueue());
                     else if (command == "가공 목록")
@@ -136,31 +138,47 @@ public sealed partial class MainForm
     private bool CanResetBrowserPreviousAlteringBatch() =>
         !AnyRunning && _activeMode is null && !_gatheringDiagnosticRunning;
 
-    private string GetBrowserAlteringQueue()
-    {
-        var orders = LoadPhoneAlteringQueue().Orders;
-        return System.Text.Json.JsonSerializer.Serialize(orders.OrderBy(order => order.Number)
+    private string GetBrowserAlteringQueue() =>
+        System.Text.Json.JsonSerializer.Serialize(BrowserAlteringRows());
+
+    private object BrowserAlteringRows() =>
+        LoadPhoneAlteringQueue().Orders.OrderBy(order => order.Number)
             .Select(order => new
             {
                 number = order.Number.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 name = order.Name, total = order.Total, quantity = order.Quantity,
                 state = order.State, detail = order.Detail
-            }));
-    }
+            }).ToArray();
 
-    private string GetBrowserPreviousAlteringBatch()
+    private string GetBrowserMobileState() =>
+        System.Text.Json.JsonSerializer.Serialize(new
+        {
+            status = GetRemoteStatus(),
+            detail = _statusValue.Text,
+            running = AnyRunning || _activeMode is not null || _gatheringDiagnosticRunning,
+            phoneAltering = _phoneAlteringRun is not null,
+            altering = _activeMode == "가공" && _multiAlteringRunning,
+            abyss = _activeMode == "어비스",
+            orders = BrowserAlteringRows(),
+            previousBatch = BrowserPreviousAlteringBatch()
+        });
+
+    private string GetBrowserPreviousAlteringBatch() =>
+        System.Text.Json.JsonSerializer.Serialize(BrowserPreviousAlteringBatch());
+
+    private object BrowserPreviousAlteringBatch()
     {
         if (!CanResetBrowserPreviousAlteringBatch())
-            return "{\"message\":\"PC 작업이 진행 중입니다. 종료 후 이전 배치를 확인할 수 있습니다.\"}";
+            return new { message = "PC 작업이 진행 중입니다. 종료 후 이전 배치를 확인할 수 있습니다." };
         var recent = MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot);
         return recent is null
-            ? "{\"message\":\"이어할 최근 작업이 없습니다.\"}"
-            : System.Text.Json.JsonSerializer.Serialize(new
+            ? new { message = "이어할 최근 작업이 없습니다." }
+            : new
             {
                 id = recent.BatchId,
                 startedAt = recent.StartedAt,
                 plans = recent.Plans.Select(plan => new { name = plan.DisplayName, quantity = plan.TargetQuantity })
-            });
+            };
     }
 
     private string ResetBrowserPreviousAlteringBatch(string expectedBatchId)

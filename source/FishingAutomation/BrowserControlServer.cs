@@ -130,13 +130,14 @@ internal sealed class BrowserControlServer : IDisposable
         if (request.Headers["Sec-Fetch-Site"] is "cross-site" or "same-site" ||
             !BrowserCommandPolicy.IsAuthorized(request.Headers["Authorization"], Token))
         { await JsonAsync(response, 401, "인증이 필요합니다.", ct); return; }
-        if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue" or "/api/queue-items" or "/api/previous-batch")
+        if (request.HttpMethod == "GET" && path is "/api/status" or "/api/queue" or "/api/queue-items" or "/api/previous-batch" or "/api/mobile-state")
         {
             string command = path switch
             {
                 "/api/status" => "/status",
                 "/api/queue" => "가공 목록",
                 "/api/queue-items" => "브라우저 가공 대기열",
+                "/api/mobile-state" => "브라우저 상태 요약",
                 _ => "브라우저 이전 배치"
             };
             await JsonAsync(response, 200, await DispatchWithDeadlineAsync(command, "", ct), ct);

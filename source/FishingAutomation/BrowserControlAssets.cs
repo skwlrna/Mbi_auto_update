@@ -10,7 +10,7 @@ internal static class BrowserControlAssets
 <section><h2>PC 인증</h2><label for="key">PC 환경 설정에서 발급한 연결 키</label>
 <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="연결 키 입력"><button id="connect">연결</button>
 <p class="hint">키는 이 화면을 닫으면 사라집니다.</p></section>
-<section class="hero"><h2>현재 작업</h2><pre id="status">연결 대기</pre><button class="danger" id="stop" disabled>전체 작업 중지</button></section>
+<section class="hero"><h2>현재 작업</h2><pre id="status">연결 대기</pre><button class="danger" id="stop" disabled>전체 작업 중지</button><p id="stopReply" role="status"></p></section>
 <section><h2>자동가공</h2><label for="name">품목</label><input id="name" maxlength="120" placeholder="예: 가죽+">
 <label for="quantity">수량</label><input id="quantity" type="number" min="1" max="1000000" value="100" inputmode="numeric">
 <label for="mode">수량 방식</label><select id="mode"><option value="total">총 수량까지 채우기</option><option value="additional">추가 생산</option></select>
@@ -40,29 +40,31 @@ button:disabled{opacity:.43;cursor:default}.buttons{display:grid;grid-template-c
 const el=id=>document.getElementById(id);
 const controls=['stop','order','queue','start','qstop','abyss'];
 let key='', busy=false, online=false, previousBatch=null;
+let poll=null, queueSignature='', startWatch=null, stopWatch=null;
 function enabled(value){
   online=value;
   for(const id of controls)el(id).disabled=!value||busy;
   for(const button of el("orders").querySelectorAll("button"))button.disabled=!value||busy;
   el('resetPrevious').disabled=!value||busy||!previousBatch;
 }
-async function api(path,payload){
-  const options={cache:'no-store',headers:{Authorization:'Bearer '+key}};
+async function api(path,payload,signal){
+  const options={cache:'no-store',signal,headers:{Authorization:'Bearer '+key}};
   if(payload){options.method='POST';options.headers['Content-Type']='application/json';options.body=JSON.stringify(payload);}
   const r=await fetch(path,options); const data=await r.json();
   if(!r.ok)throw Error(data.message||'요청 실패');
   return data.message;
 }
-async function refreshPreviousBatch(){
+function renderPreviousBatch(batch){
   previousBatch=null;
-  const batch=JSON.parse(await api('/api/previous-batch'));
   if(!batch.id){el('previousDetail').textContent=batch.message;return;}
   previousBatch=batch;
   const plans=batch.plans.map(plan=>plan.name+' · 목표 '+plan.quantity.toLocaleString('ko-KR')+'개');
   el('previousDetail').textContent=['이전 배치',new Date(batch.startedAt).toLocaleString('ko-KR'),...plans].join('\n');
 }
-async function refreshQueue(){
-  const orders=JSON.parse(await api('/api/queue-items'));
+function renderQueue(orders){
+  const signature=JSON.stringify(orders);
+  if(signature===queueSignature)return;
+  queueSignature=signature;
   const rows=orders.map(order=>{
     const row=document.createElement('div');row.className='queue-row';
     const label=document.createElement('div');
@@ -84,35 +86,81 @@ async function refreshQueue(){
   });
   el('orders').replaceChildren(...(rows.length?rows:['등록된 가공 요청이 없습니다.']));
 }
+function renderState(state){
+  el('status').textContent=state.status;
+  renderPreviousBatch(state.previousBatch);
+  renderQueue(state.orders);
+  if(startWatch){
+    const {operation,feedback,reply}=startWatch;
+    const preparing=operation==='queue-start' && state.phoneAltering && !state.altering;
+    const active=operation==='queue-start' ? state.phoneAltering && state.altering : state.abyss;
+    if(preparing || active){
+      startWatch.observed=true;
+      const needsAttention=operation==='queue-start' && state.orders.some(order=>order.state==='확인 필요');
+      const stage=preparing?'품목·재고 확인 중':needsAttention?'가공 실행 중 · 확인 필요 항목 있음':'실행 중';
+      feedback.textContent=stage+' · '+state.detail;
+    }else{
+      feedback.textContent=startWatch.observed ? '실행 종료 · '+state.detail : reply+' · '+state.detail;
+      startWatch=null;
+    }
+  }
+  if(stopWatch){
+    const active=stopWatch.operation==='queue-stop'?state.phoneAltering:state.running;
+    stopWatch.feedback.textContent=active?'정지 요청 중 · '+state.detail:'정지 확인 · '+state.detail;
+    if(!active)stopWatch=null;
+  }
+}
 async function status(){
-  if(!key||busy)return;
-  busy=true;enabled(online);
-  try{el('status').textContent=await api('/api/status');await refreshPreviousBatch();if(!online)await refreshQueue();online=true;}
-  catch(e){el('status').textContent=e.message;online=false;}
-  finally{busy=false;enabled(online);}
+  if(!key||busy||poll)return;
+  const current=new AbortController();
+  poll=current;
+  try{
+    const state=JSON.parse(await api('/api/mobile-state',null,current.signal));
+    if(!current.signal.aborted){renderState(state);online=true;}
+  }catch(e){
+    if(!current.signal.aborted){el('status').textContent=e.message;online=false;}
+  }finally{
+    if(poll===current)poll=null;
+    enabled(online);
+  }
 }
 async function command(operation,fields={},feedback=el('reply')){
   if(!online||busy)return;
+  poll?.abort();poll=null;
   busy=true;enabled(online);
+  const stopping=operation==='stop'||operation==='queue-stop';
+  const starting=operation==='queue-start'||operation==='abyss-start';
+  if(starting){startWatch=null;stopWatch=null;}
+  if(stopping||starting)feedback.textContent=stopping?'정지 요청 중':'시작 요청 중';
   try{
     if(!globalThis.isSecureContext||!crypto.randomUUID)throw Error('보안 연결(HTTPS 또는 PC 로컬 주소)이 필요합니다.');
     const request={Operation:operation,RequestId:crypto.randomUUID(),...fields};
     const reply=await api('/api/command',request);
     feedback.textContent=el('reply').textContent=reply;
-    if(operation==='queue-cancel'){
-      if(reply==='#'+fields.Number+' 가공 요청 취소'){
-        await refreshQueue();el('queueReply').textContent=reply;
-      }
-    }else if(operation.startsWith('queue-')||operation==='order')await refreshQueue();
-    el('status').textContent=await api('/api/status');
-    await refreshPreviousBatch();
-  }catch(e){feedback.textContent=el('reply').textContent=e.message+' · 중복 실행하지 말고 PC 상태를 확인하세요.';}
-  finally{busy=false;enabled(online);}
+    if(operation==='queue-cancel')el('queueReply').textContent=reply;
+    if(stopping && reply.includes('정지 요청 접수')){
+      startWatch=null;
+      stopWatch={operation,feedback};
+    }
+    if(starting && reply.includes('시작 요청 접수'))
+      startWatch={operation,feedback,reply,observed:false};
+  }catch(e){
+    feedback.textContent=el('reply').textContent=e.message+' · 중복 실행하지 말고 PC 상태를 확인하세요.';
+  }finally{
+    busy=false;enabled(online);
+    void status();
+  }
 }
-el('connect').onclick=()=>{if(busy)return;key=el('key').value.trim();el('key').value='';online=false;enabled(false);status();};
-el('stop').onclick=()=>command('stop');
+el('connect').onclick=()=>{
+  if(busy)return;
+  poll?.abort();poll=null;
+  key=el('key').value.trim();el('key').value='';
+  online=false;queueSignature='';startWatch=null;stopWatch=null;
+  enabled(false);void status();
+};
+el('stop').onclick=()=>command('stop',{},el('stopReply'));
 el('order').onclick=()=>{const name=el('name').value.trim(),n=Number(el('quantity').value);if(!name||!Number.isInteger(n)||n<1||n>1000000){el('reply').textContent='품목과 수량을 확인하세요.';return;}command('order',{Name:name,Quantity:n,Additional:el('mode').value==='additional'});};
-el('queue').onclick=async()=>{if(!online||busy)return;busy=true;enabled(online);try{await refreshQueue();el('queueReply').textContent='';}catch(e){el('queueReply').textContent=e.message;}finally{busy=false;enabled(online);}};
+el('queue').onclick=()=>status();
 el('start').onclick=()=>{if(confirm('등록된 가공 작업을 시작할까요?'))command('queue-start',{},el('startReply'));};
 el('resetPrevious').onclick=()=>{
   if(!online||busy||!previousBatch)return;
@@ -120,7 +168,7 @@ el('resetPrevious').onclick=()=>{
   const notice=el('previousDetail').textContent+'\n\n이어하기 목록에서 이 배치를 숨길까요? 게임 작업, 완성품, 원본 기록과 휴대폰 대기열은 보존됩니다.';
   if(confirm(notice))command('queue-reset-previous',{BatchId:batchId},el('resetReply'));
 };
-el('qstop').onclick=()=>command('queue-stop');
+el('qstop').onclick=()=>command('queue-stop',{},el('startReply'));
 el('abyss').onclick=()=>{const d=el('dungeon').value;if(confirm(d+' · 무한 반복으로 시작할까요?'))command('abyss-start',{Dungeon:d},el('abyssReply'));};
 setInterval(status,5000);
 """;
