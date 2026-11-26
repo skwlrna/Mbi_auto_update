@@ -93,6 +93,13 @@ public sealed partial class MainForm
                 return "다른 작업이 진행 중입니다. 작업 종료 후 가공 시작을 보내세요.";
             if (!queue.Orders.Any(x => x.State == "시작 대기")) return "시작 대기 중인 가공 요청이 없습니다.";
             if (!RunAutomationStartPreflight("가공")) return _statusValue.Text;
+            if (messageKey.StartsWith("browser:", StringComparison.Ordinal))
+            {
+                if (MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot) is not null)
+                    return "이전 배치 확인 필요 · 이전 배치를 초기화하거나 PC에서 이어하기를 선택하세요.";
+                if (DungeonVisionBot.WindowTools.ActivateGameForRemoteStart() is { } focusError)
+                    return focusError;
+            }
             SavePhoneAlteringQueue(updated);
             _phoneAlteringRun = new CancellationTokenSource();
             _ = RunPhoneAlteringQueueAsync(_phoneAlteringRun);
