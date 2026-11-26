@@ -27,6 +27,7 @@ public sealed partial class MainForm
     {
         _browserControl?.Dispose();
         _browserControl = null;
+        _browserResumeTicket = null;
     }
 
     private void ShowBrowserControlSettings()
@@ -123,6 +124,10 @@ public sealed partial class MainForm
                     if (command == "/status") reply.TrySetResult(GetRemoteStatus());
                     else if (command == "/stop")
                     { StopSelected(); reply.TrySetResult("전체 정지 요청 접수"); }
+                    else if (command.StartsWith("브라우저 이어하기 검증 ", StringComparison.Ordinal))
+                        reply.TrySetResult(await VerifyBrowserAlteringResumeAsync(command["브라우저 이어하기 검증 ".Length..], ct));
+                    else if (command.StartsWith("브라우저 이어하기 시작 ", StringComparison.Ordinal))
+                        reply.TrySetResult(await StartBrowserAlteringResumeAsync(command["브라우저 이어하기 시작 ".Length..], ct));
                     else if (command == "브라우저 이전 배치")
                         reply.TrySetResult(GetBrowserPreviousAlteringBatch());
                     else if (command.StartsWith("브라우저 가공 초기화 ", StringComparison.Ordinal) &&
@@ -226,6 +231,7 @@ public sealed partial class MainForm
         {
             status = GetRemoteStatus(),
             detail = _statusValue.Text,
+            alteringIssue = GetBrowserAlteringIssue(),
             running = AnyRunning || _activeMode is not null || _gatheringDiagnosticRunning,
             phoneAltering = _phoneAlteringRun is not null,
             altering = _activeMode == "가공" && _multiAlteringRunning,
@@ -237,6 +243,16 @@ public sealed partial class MainForm
                 (LoadPhoneAlteringQueue().Orders.Length > 0 || LoadPhoneAlteringQueue().Next != 1),
             previousBatch = BrowserPreviousAlteringBatch()
         });
+
+    private string? GetBrowserAlteringIssue()
+    {
+        string detail = _runError ?? _statusValue.Text;
+        if (detail.Contains("가까운 위치 전환 후 90초", StringComparison.Ordinal))
+            return "채집 이동·시작 미확인 · " + detail.Split(new[] { " · 전환 화면:", " 진단:" }, 2, StringSplitOptions.None)[0];
+        if (detail.Contains("K/I/Space 연속 2프레임 인증 실패", StringComparison.Ordinal))
+            return "가공 메뉴 진입 전 화면 인식 실패 · K/I/Space 재확인 후 입력 없이 정지했습니다.";
+        return null;
+    }
 
     private string GetBrowserPreviousAlteringBatch() =>
         System.Text.Json.JsonSerializer.Serialize(BrowserPreviousAlteringBatch());
