@@ -159,6 +159,7 @@ public sealed partial class MainForm
             phoneAltering = _phoneAlteringRun is not null,
             altering = _activeMode == "가공" && _multiAlteringRunning,
             abyss = _activeMode == "어비스",
+            abyssPreparing = _starting && SelectedMode == "어비스",
             orders = BrowserAlteringRows(),
             previousBatch = BrowserPreviousAlteringBatch()
         });

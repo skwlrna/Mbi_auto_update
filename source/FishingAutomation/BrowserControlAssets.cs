@@ -92,12 +92,12 @@ function renderState(state){
   renderQueue(state.orders);
   if(startWatch){
     const {operation,feedback,reply}=startWatch;
-    const preparing=operation==='queue-start' && state.phoneAltering && !state.altering;
+    const preparing=operation==='queue-start' ? state.phoneAltering && !state.altering : state.abyssPreparing;
     const active=operation==='queue-start' ? state.phoneAltering && state.altering : state.abyss;
     if(preparing || active){
       startWatch.observed=true;
       const needsAttention=operation==='queue-start' && state.orders.some(order=>order.state==='확인 필요');
-      const stage=preparing?'품목·재고 확인 중':needsAttention?'가공 실행 중 · 확인 필요 항목 있음':'실행 중';
+      const stage=preparing?(operation==='queue-start'?'품목·재고 확인 중':'어비스 시작 준비 중'):needsAttention?'가공 실행 중 · 확인 필요 항목 있음':'실행 중';
       feedback.textContent=stage+' · '+state.detail;
     }else{
       feedback.textContent=startWatch.observed ? '실행 종료 · '+state.detail : reply+' · '+state.detail;
