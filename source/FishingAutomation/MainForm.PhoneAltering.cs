@@ -100,8 +100,8 @@ public sealed partial class MainForm
             {
                 if (MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot) is not null)
                     return "이전 배치 확인 필요 · 이전 배치를 초기화하거나 PC에서 이어하기를 선택하세요.";
-                if (DungeonVisionBot.WindowTools.ActivateGameForRemoteStart() is { } focusError)
-                    return focusError;
+                if (!DungeonVisionBot.WindowTools.IsRequiredGameWindow(DungeonVisionBot.NativeMethods.GetForegroundWindow()))
+                    return DungeonVisionBot.WindowTools.RemoteFocusError;
             }
             SavePhoneAlteringQueue(updated);
             _phoneAlteringRun = new CancellationTokenSource();
