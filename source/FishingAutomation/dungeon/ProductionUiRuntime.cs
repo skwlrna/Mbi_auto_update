@@ -500,7 +500,7 @@ internal sealed class ProductionUiRuntime : IDisposable
 
     internal void NoteDiagnostic(string kind, string summary) => _evidence.Note(kind, summary);
 
-    internal InvalidOperationException Failure(Bitmap frame, string message)
+    internal InvalidOperationException Failure(Bitmap frame, string message, Bitmap? transition = null)
     {
         Directory.CreateDirectory(_debugDir);
         string path = Path.Combine(
@@ -510,6 +510,12 @@ internal sealed class ProductionUiRuntime : IDisposable
         try
         {
             frame.Save(path, ImageFormat.Png);
+            if (transition is not null)
+            {
+                string transitionPath = Path.Combine(_debugDir, _debugStem + "-last-transition.png");
+                transition.Save(transitionPath, ImageFormat.Png);
+                message += " · 전환 화면: " + transitionPath;
+            }
             return new InvalidOperationException(message + " 진단: " + path +
                 (evidence.Length > 0 ? " · 시각 증거: " + evidence : ""));
         }

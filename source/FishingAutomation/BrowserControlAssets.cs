@@ -18,8 +18,8 @@ internal static class BrowserControlAssets
 <label for="mode">수량 방식</label><select id="mode"><option value="total">총 수량까지 채우기</option><option value="additional">추가 생산</option></select>
 <div class="buttons"><button id="order" disabled>작업 등록</button><button id="queue" disabled>대기열 확인</button>
 <button id="start" disabled>가공 시작</button><button id="qstop" disabled>가공 정지</button></div>
-<p id="startReply" role="status"></p>
-<div id="previousBatch"><pre id="previousDetail">PC 연결 후 이전 배치를 확인할 수 있습니다.</pre><button id="resetPrevious" class="danger" disabled>이전 배치 초기화</button><p id="resetReply" role="status"></p></div>
+<p id="startReply" role="status"></p><p id="alteringIssue" class="hint" role="status"></p>
+<div id="previousBatch"><pre id="previousDetail">PC 연결 후 이전 배치를 확인할 수 있습니다.</pre><button id="verifyResume" disabled>현재 상태 검증</button><pre id="resumeReply" role="status"></pre><button id="startResume" disabled>이어하기 시작</button><button id="resetPrevious" class="danger" disabled>이전 배치 초기화</button><p id="resetReply" role="status"></p></div>
 <button id="clearQueue" class="danger" disabled>가공 목록 전체 비우기 · #1부터</button>
 <div id="orders">등록된 작업을 확인하세요.</div><p id="queueReply" role="status"></p></section>
 <section><h2>어비스</h2><label for="dungeon">던전 선택</label><select id="dungeon"><option>허상의 정박지</option><option>광기의 동굴</option><option>흩어진 물길</option></select>
@@ -46,11 +46,14 @@ let key='', busy=false, online=false, previousBatch=null;
 let poll=null, queueSignature='', startWatch=null, stopWatch=null;
 let queueRevision='', canClearQueue=false, orderCount=0;
 let catalog=[], catalogLoading=false;
+let verifiedResume=null;
 function enabled(value){
   online=value;
   for(const id of controls)el(id).disabled=!value||busy;
   for(const button of el("orders").querySelectorAll("button"))button.disabled=!value||busy;
   el('resetPrevious').disabled=!value||busy||!previousBatch;
+  el('verifyResume').disabled=!value||busy||!previousBatch;
+  el('startResume').disabled=!value||busy||!verifiedResume||verifiedResume.batchId!==previousBatch?.id;
   el('clearQueue').disabled=!value||busy||!canClearQueue;
   el('catalog').disabled=!value||busy||catalogLoading;
   el('itemSearch').disabled=el('name').disabled=!value||busy||catalog.length===0;
@@ -97,6 +100,7 @@ function renderQueue(orders,revision){
 }
 function renderState(state){
   el('status').textContent=state.status;
+  el('alteringIssue').textContent=state.alteringIssue??'';
   renderPreviousBatch(state.previousBatch);
   queueRevision=state.queueRevision;
   canClearQueue=state.canClearQueue;
@@ -104,15 +108,15 @@ function renderState(state){
   renderQueue(state.orders,queueRevision);
   if(startWatch){
     const {operation,feedback,reply}=startWatch;
-    const preparing=operation==='queue-start' ? state.phoneAltering && !state.altering : state.abyssPreparing;
-    const active=operation==='queue-start' ? state.phoneAltering && state.altering : state.abyss;
+    const preparing=operation==='queue-start' ? state.phoneAltering && !state.altering : operation==='abyss-start' && state.abyssPreparing;
+    const active=operation==='resume-start'?state.altering:operation==='queue-start'?state.phoneAltering && state.altering:state.abyss;
     if(preparing || active){
       startWatch.observed=true;
       const needsAttention=operation==='queue-start' && state.orders.some(order=>order.state==='확인 필요');
       const stage=preparing?(operation==='queue-start'?'품목·재고 확인 중':'어비스 시작 준비 중'):needsAttention?'가공 실행 중 · 확인 필요 항목 있음':'실행 중';
       feedback.textContent=stage+' · '+state.detail;
     }else{
-      feedback.textContent=startWatch.observed ? '실행 종료 · '+state.detail : reply+' · '+state.detail;
+      feedback.textContent=state.alteringIssue ?? (startWatch.observed ? '실행 종료 · '+state.detail : reply+' · '+state.detail);
       startWatch=null;
     }
   }
@@ -141,14 +145,14 @@ async function command(operation,fields={},feedback=el('reply')){
   poll?.abort();poll=null;
   busy=true;enabled(online);
   const stopping=operation==='stop'||operation==='queue-stop';
-  const starting=operation==='queue-start'||operation==='abyss-start';
+  const starting=operation==='queue-start'||operation==='abyss-start'||operation==='resume-start';
   if(starting){startWatch=null;stopWatch=null;}
   if(stopping||starting)feedback.textContent=stopping?'정지 요청 중':'시작 요청 중';
   try{
     if(!globalThis.isSecureContext||!crypto.randomUUID)throw Error('보안 연결(HTTPS 또는 PC 로컬 주소)이 필요합니다.');
     const request={Operation:operation,RequestId:crypto.randomUUID(),...fields};
     const reply=await api('/api/command',request);
-    feedback.textContent=el('reply').textContent=reply;
+    if(operation!=='resume-verify')feedback.textContent=el('reply').textContent=reply;
     if(operation==='queue-cancel'||operation==='queue-clear')el('queueReply').textContent=reply;
     if(stopping && reply.includes('정지 요청 접수')){
       startWatch=null;
@@ -156,6 +160,7 @@ async function command(operation,fields={},feedback=el('reply')){
     }
     if(starting && reply.includes('시작 요청 접수'))
       startWatch={operation,feedback,reply,observed:false};
+    return reply;
   }catch(e){
     feedback.textContent=el('reply').textContent=e.message+' · 중복 실행하지 말고 PC 상태를 확인하세요.';
   }finally{
@@ -168,7 +173,7 @@ el('connect').onclick=()=>{
   poll?.abort();poll=null;
   key=el('key').value.trim();el('key').value='';
   catalog=[];el('itemSearch').value='';renderCatalog();
-  online=false;queueSignature='';startWatch=null;stopWatch=null;
+  online=false;queueSignature='';startWatch=null;stopWatch=null;verifiedResume=null;el('resumeReply').textContent='';
   enabled(false);void status();
 };
 el('stop').onclick=()=>command('stop',{},el('stopReply'));
@@ -208,6 +213,37 @@ el('clearQueue').onclick=()=>{
   if(confirm(message))command('queue-clear',{QueueRevision:revision},el('queueReply'));
 };
 el('start').onclick=()=>{if(confirm('등록된 가공 작업을 시작할까요?'))command('queue-start',{},el('startReply'));};
+function decodeResumeReply(reply){
+  if(!reply)return null;
+  try{return JSON.parse(reply);}catch{el('resumeReply').textContent=reply;return null;}
+}
+el('verifyResume').onclick=async()=>{
+  if(!online||busy||!previousBatch)return;
+  const batchId=previousBatch.id;
+  const feedback=el('resumeReply');
+  verifiedResume=null;
+  feedback.textContent='게임 대기열과 완성 수량을 검증하는 중';
+  let result=decodeResumeReply(await command('resume-verify',{BatchId:batchId},feedback));
+  if(result?.consent){
+    if(!confirm('현재 서버: '+result.realm+'\n이 서버에서 같은 캐릭터 하나로만 대량가공했나요? 다른 캐릭터라면 취소하세요.')){
+      feedback.textContent='이어하기 검증을 취소했습니다.';
+      return;
+    }
+    result=decodeResumeReply(await command('resume-verify',{BatchId:batchId,ResumeTicket:result.consent},feedback));
+  }
+  if(result?.ticket){
+    verifiedResume={batchId,id:result.ticket};
+    feedback.textContent=result.report;
+    enabled(online);
+  }
+};
+el('startResume').onclick=()=>{
+  if(!online||busy||!verifiedResume||verifiedResume.batchId!==previousBatch?.id)return;
+  if(!confirm('검증한 이전 가공 배치를 이어서 실행할까요?'))return;
+  const id=verifiedResume.id;
+  verifiedResume=null;
+  void command('resume-start',{ResumeTicket:id},el('resumeReply'));
+};
 el('resetPrevious').onclick=()=>{
   if(!online||busy||!previousBatch)return;
   const batchId=previousBatch.id;

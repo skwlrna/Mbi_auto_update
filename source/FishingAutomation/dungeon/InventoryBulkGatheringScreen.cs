@@ -19,6 +19,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
     private readonly ProductionUiRuntime _ui;
     private readonly ProductionStageMachine _stage = new("채집");
     private bool _requiresEmptyBottle;
+    private Bitmap? _nearestTransitionFrame;
     private static readonly Rectangle EmptyBottleMessageArea = new(217, 656, 391, 84);
     private static readonly Rectangle EmptyBottleItemArea = new(205, 743, 214, 72);
     private static readonly Rectangle EmptyBottleCountArea = new(512, 746, 99, 62);
@@ -276,6 +277,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
 
         _stage.Move(ProductionStage.Detail, source.TargetName);
         _stage.Move(ProductionStage.Travel, $"{source.TargetName} 가까운 위치");
+        _nearestTransitionFrame?.Dispose();
+        _nearestTransitionFrame = null;
         await ClickLifeSkillNearestLocationAsync(source.TargetName, ct);
         await ResolveLifeSkillNearestResultAsync(source.TargetName, ct);
 
@@ -666,6 +669,8 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                 if (helpGoneFrames >= 2 && detailAnchorGoneSince is null)
                 {
                     detailAnchorGoneSince = DateTime.UtcNow;
+                    _nearestTransitionFrame?.Dispose();
+                    _nearestTransitionFrame = new Bitmap(frame);
                     Log?.Invoke(
                         $"[대량 채집] 가까운 위치 클릭 반영 후보 · {targetName} · " +
                         "상세창 ? 2프레임 소실 · CLI/추천 장소 늦은 반영 대기");
@@ -681,7 +686,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
                         Log?.Invoke(
                             $"[대량 채집] 가까운 위치 결과=직접 전환형 · {targetName} · " +
                             "상세창 ? 소실 4초 유지 + 추천 장소 헤더 없음 · " +
-                            "클릭 성공으로 인계하고 CLI 활동/재고 증가는 100회 진행 감시에서 계속 확인");
+                            "위치 선택 반영 · 실제 이동/채집 여부는 CLI 활동과 재고로 계속 확인");
                     }
                     return;
                 }
@@ -943,8 +948,11 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
             if (!sawActive &&
                 !sawGain &&
                 watch.Elapsed >= TimeSpan.FromSeconds(90))
-                throw new InvalidOperationException(
-                    $"{displayName} 가까운 위치 전환 후 90초 동안 생활 스킬 이동/채집 상태나 재고 증가를 확인하지 못했습니다.");
+            {
+                const string reason = "가까운 위치 전환 후 90초 동안 생활 스킬 이동/채집 상태나 재고 증가를 확인하지 못했습니다.";
+                using var failed = Capture(ct);
+                throw _ui.Failure(failed, $"{displayName} {reason}", _nearestTransitionFrame);
+            }
 
             if (current >= targetTotal)
             {
@@ -1405,6 +1413,7 @@ internal sealed class InventoryBulkGatheringScreen : IGatheringScreen, IGatherin
 
     public void Dispose()
     {
+        _nearestTransitionFrame?.Dispose();
         _fallback.Dispose();
         _ui.Dispose();
     }

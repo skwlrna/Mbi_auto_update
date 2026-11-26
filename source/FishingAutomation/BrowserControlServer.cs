@@ -9,7 +9,7 @@ namespace FishingAutomation;
 // separately configured private HTTPS proxy. Never expose a public listener.
 internal sealed record BrowserControlRequest(string? Operation = null, string? RequestId = null,
     string? Name = null, int? Quantity = null, bool Additional = false,
-    long? Number = null, string? Dungeon = null, string? BatchId = null, string? QueueRevision = null);
+    long? Number = null, string? Dungeon = null, string? BatchId = null, string? QueueRevision = null, string? ResumeTicket = null);
 
 internal static class BrowserCommandPolicy
 {
@@ -28,6 +28,14 @@ internal static class BrowserCommandPolicy
         {
             case "stop": return "/stop";
             case "queue-start": return "가공 시작";
+            case "resume-verify":
+                if (!Guid.TryParseExact(request.BatchId, "N", out var verifyBatch)) return null;
+                if (request.ResumeTicket is null) return $"브라우저 이어하기 검증 {verifyBatch:N}";
+                return Guid.TryParseExact(request.ResumeTicket, "N", out var consentTicket)
+                    ? $"브라우저 이어하기 검증 {verifyBatch:N} {consentTicket:N}" : null;
+            case "resume-start":
+                return Guid.TryParseExact(request.ResumeTicket, "N", out var startTicket)
+                    ? $"브라우저 이어하기 시작 {startTicket:N}" : null;
             case "queue-reset-previous":
                 return Guid.TryParseExact(request.BatchId, "N", out var batchId)
                     ? "브라우저 가공 초기화 " + batchId.ToString("N") : null;

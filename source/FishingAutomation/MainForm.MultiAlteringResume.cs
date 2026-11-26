@@ -97,22 +97,8 @@ public sealed partial class MainForm
                 confirmedSingleCharacter = true;
                 _log.Write("[다중가공] 서버명 전용 이어하기 · 사용자가 동일 캐릭터 사용 확인");
             }
-            var data = new AlteringCliData(_cli);
-            IReadOnlyList<MultiAlteringResumeLine> lines;
-            using (var lease = new MultiAlteringBatchStore(root))
-            {
-                if (MultiAlteringRecentResume.Latest(root)?.BatchId != recent.BatchId)
-                    throw new InvalidOperationException("최근 이어하기 대상이 변경됐습니다.");
-                lines = await MultiAlteringRecentResume.VerifyAsync(
-                    recent, identity.Baseline, data, CancellationToken.None,
-                    allowSingleCharacter: confirmedSingleCharacter);
-            }
-
-            string report = string.Join(Environment.NewLine, lines.Select(line =>
-                line.Plan.DisplayName + " · 목표 " + line.Plan.TargetQuantity.ToString("N0") +
-                "개 / 완성 확정 " + line.Confirmed.ToString("N0") +
-                "개 / 등록 중 " + line.RegisteredOutput.ToString("N0") +
-                "개 상당 / 신규 필요 " + line.AdditionalOutput.ToString("N0") + "개 상당"));
+            string report = await VerifyRecentAlteringAsync(root, recent, identity.Baseline,
+                confirmedSingleCharacter, CancellationToken.None);
             using (var confirm = MakeResumeDialog("이어하기 검증 결과",
                 "현재 상태 검증 통과",
                 report + Environment.NewLine + Environment.NewLine +
@@ -141,6 +127,21 @@ public sealed partial class MainForm
             _resumeUiBusy = false;
             RefreshProductionDashboard();
         }
+    }
+
+    private async Task<string> VerifyRecentAlteringAsync(string root, MultiAlteringRecentRun recent,
+        CliIdentityContext identity, bool confirmedSingleCharacter, CancellationToken token)
+    {
+        using var lease = new MultiAlteringBatchStore(root);
+        if (MultiAlteringRecentResume.Latest(root)?.BatchId != recent.BatchId)
+            throw new InvalidOperationException("최근 이어하기 대상이 변경됐습니다.");
+        var lines = await MultiAlteringRecentResume.VerifyAsync(
+            recent, identity, new AlteringCliData(_cli), token, allowSingleCharacter: confirmedSingleCharacter);
+        return string.Join(Environment.NewLine, lines.Select(line =>
+            line.Plan.DisplayName + " · 목표 " + line.Plan.TargetQuantity.ToString("N0") +
+            "개 / 완성 확정 " + line.Confirmed.ToString("N0") +
+            "개 / 등록 중 " + line.RegisteredOutput.ToString("N0") +
+            "개 상당 / 신규 필요 " + line.AdditionalOutput.ToString("N0") + "개 상당"));
     }
 
     private void ShowResumeNotice(string title, string headline, string details)
