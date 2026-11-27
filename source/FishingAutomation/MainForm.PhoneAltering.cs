@@ -63,13 +63,13 @@ public sealed partial class MainForm
         _phoneAlteringRevision = Guid.NewGuid();
     }
 
-    private void SetPhoneAlteringState(long number, string state, string detail = "")
+    private void SavePhoneAlteringStates(IReadOnlyDictionary<long, PhoneAlteringOrder> changed)
     {
         var queue = LoadPhoneAlteringQueue();
         SavePhoneAlteringQueue(queue with
         {
-            Orders = queue.Orders.Select(x => x.Number == number
-                ? x with { State = state, Detail = detail } : x).ToArray()
+            Orders = queue.Orders.Select(order => changed.TryGetValue(order.Number, out var replacement)
+                ? replacement : order).ToArray()
         });
     }
 
@@ -136,55 +136,83 @@ public sealed partial class MainForm
     private async Task RunPhoneAlteringQueueAsync(CancellationTokenSource run)
     {
         CancellationToken token = run.Token;
-        PhoneAlteringOrder? current = null;
-        bool started = false;
+        Dictionary<long, PhoneAlteringOrder> running = new();
         try
         {
             await Task.Yield();
             var data = new AlteringCliData(_cli);
             while (!token.IsCancellationRequested)
             {
-                current = LoadPhoneAlteringQueue().Orders.FirstOrDefault(x => x.State == "시작 대기");
-                started = false;
-                if (current is null) return;
-                long number = current.Number;
-                var recipes = await data.RecipesAsync(token);
-                var matches = recipes.Where(x => x.DisplayName == current.Name).ToArray();
-                if (matches.Length != 1 || AlteringFacilityResolver.Resolve(matches[0]) is not { } facility)
-                {
-                    if (LoadPhoneAlteringQueue().Orders.Any(x => x.Number == number))
-                        SetPhoneAlteringState(number, "확인 필요", "제법 또는 시설을 하나로 확인할 수 없음");
-                    continue;
-                }
+                var pending = LoadPhoneAlteringQueue().Orders.Where(order => order.State == "시작 대기").ToArray();
+                if (pending.Length == 0) return;
 
-                var plan = new AlteringPlan(facility, current.Name, current.Quantity, matches[0].ProducedPerWork, false);
-                plan.Validate();
-                int amount = current.Quantity;
-                if (current.Total)
-                    amount = (int)Math.Max(0, (long)amount - await data.ItemCountAsync(plan.OutputName, token));
-
-                token.ThrowIfCancellationRequested();
-                if (!LoadPhoneAlteringQueue().Orders.Any(x => x.Number == number && x.State == "시작 대기")) continue;
-                if (amount == 0)
+                if (MultiAlteringRecentResume.Latest(BrowserAlteringBatchRoot) is not null)
                 {
-                    SetPhoneAlteringState(number, "완료", "가방·창고 합산 목표 충족");
-                    continue;
-                }
-
-                string root = Path.Combine(Path.GetDirectoryName(PhoneAlteringPath)!, "multi-altering");
-                if (MultiAlteringRecentResume.Latest(root) is not null)
-                {
-                    await _notifier.SendAlertAsync("휴대폰 가공 대기", "기존 미종료 가공 배치를 PC에서 확인하세요.", false);
+                    await _notifier.SendAlertAsync("휴대폰 가공 대기", "기존 미종료 가공 배치를 확인하세요.", false);
                     return;
                 }
 
-                plan = plan with { TargetQuantity = amount };
-                SetPhoneAlteringState(number, "실행 중", $"목표 생산 {amount:N0}개 · 예상 {plan.ExpectedQuantity:N0}개");
-                started = true;
-                bool completed = await StartMultiAlteringAsync([plan], remoteOrder: true);
-                SetPhoneAlteringState(number, completed ? "완료" : "확인 필요",
-                    completed ? $"목표 생산 {amount:N0}개 확인" : "최근 가공 작업 기록 확인");
-                started = false;
+                var recipes = (await data.RecipesAsync(token)).ToLookup(recipe => recipe.DisplayName);
+                var catalog = new Dictionary<string, AlteringPlan>(StringComparer.Ordinal);
+                foreach (var item in pending.GroupBy(order => order.Name))
+                {
+                    var matches = recipes[item.Key].ToArray();
+                    if (matches.Length != 1 || AlteringFacilityResolver.Resolve(matches[0]) is not { } facility)
+                        continue;
+
+                    catalog[item.Key] = new AlteringPlan(facility, item.Key, 1, matches[0].ProducedPerWork, false);
+                }
+
+                var stock = await data.ItemCountsAsync(pending
+                    .Where(order => order.Total && catalog.ContainsKey(order.Name))
+                    .Select(order => catalog[order.Name].OutputName).Distinct(StringComparer.Ordinal).ToArray(), token);
+                token.ThrowIfCancellationRequested();
+                var waiting = LoadPhoneAlteringQueue().Orders.Where(order => order.State == "시작 대기")
+                    .Select(order => order.Number).ToHashSet();
+                var changed = new Dictionary<long, PhoneAlteringOrder>();
+                var plans = new Dictionary<string, AlteringPlan>(StringComparer.Ordinal);
+                foreach (var order in pending.Where(order => waiting.Contains(order.Number)))
+                {
+                    if (!catalog.TryGetValue(order.Name, out var recipe))
+                    {
+                        changed[order.Number] = order with
+                        { State = "확인 필요", Detail = "제법 또는 시설을 하나로 확인할 수 없음" };
+                        continue;
+                    }
+
+                    int planned = plans.TryGetValue(order.Name, out var existing) ? existing.TargetQuantity : 0;
+                    int amount = order.Total
+                        ? (int)Math.Max(0L, (long)order.Quantity - stock[recipe.OutputName] - planned)
+                        : order.Quantity;
+                    if (order.Total && stock[recipe.OutputName] >= order.Quantity)
+                    {
+                        changed[order.Number] = order with
+                        { State = "완료", Detail = "가방·창고 합산 목표 충족" };
+                        continue;
+                    }
+
+                    var plan = recipe with { TargetQuantity = checked(planned + amount) };
+                    plan.Validate();
+                    plans[order.Name] = plan;
+                    changed[order.Number] = order with
+                    {
+                        State = "실행 중",
+                        Detail = amount == 0 ? "같은 품목의 앞선 요청과 함께 처리" : $"목표 생산 {amount:N0}개"
+                    };
+                }
+
+                if (changed.Count == 0) continue;
+                SavePhoneAlteringStates(changed);
+                if (plans.Count == 0) continue;
+
+                running = changed.Values.Where(order => order.State == "실행 중").ToDictionary(order => order.Number);
+                bool completed = await StartMultiAlteringAsync(plans.Values.ToArray(), remoteOrder: true);
+                SavePhoneAlteringStates(running.Values.ToDictionary(order => order.Number, order => order with
+                {
+                    State = completed ? "완료" : "확인 필요",
+                    Detail = completed ? "가공 배치 목표 생산 확인" : "최근 가공 작업 기록 확인"
+                }));
+                running.Clear();
                 if (!completed) return;
             }
         }
@@ -198,8 +226,9 @@ public sealed partial class MainForm
         {
             try
             {
-                if (started && current is not null)
-                    SetPhoneAlteringState(current.Number, "확인 필요", "최근 가공 작업 기록 확인");
+                if (running.Count > 0)
+                    SavePhoneAlteringStates(running.Values.ToDictionary(order => order.Number, order => order with
+                    { State = "확인 필요", Detail = "최근 가공 작업 기록 확인" }));
             }
             catch (Exception ex)
             {
