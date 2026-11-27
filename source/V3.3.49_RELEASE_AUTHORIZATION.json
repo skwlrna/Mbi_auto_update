@@ -9,5 +9,6 @@
   "offlineRegressionRequired": true,
   "mainCiRequired": true,
   "postUpdateGameTestingPending": true,
-  "realPhoneTested": false
+  "realPhoneTested": false,
+  "sourcePullRequest": 472
 }
