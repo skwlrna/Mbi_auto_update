@@ -98,10 +98,9 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         }
     }
 
-    private volatile bool _stopAfterRound;
     private bool _roundStopExitVerified;
 
-    internal void StopAfterRound() => _stopAfterRound = true;
+    internal void StopAfterRound() => _exitRequestedRound = ExitAbyssResultForScheduledProcessingAsync;
 
     public async Task RunAsync(CancellationToken ct)
     {

@@ -285,6 +285,9 @@ internal sealed partial class ScenarioEngine
     private static readonly Rectangle AbyssClearTitleRecoverySafeRoi =
         new(240, 170, 345, 135);
 
+    private volatile Func<CancellationToken, Task>? _exitRequestedRound;
+    private bool _stopAfterRound => _exitRequestedRound is not null;
+
     private async Task RetryAbyssResultAsync(CancellationToken ct)
     {
         if (!IsAbyss) throw new InvalidOperationException("어비스 결과 전용 처리입니다.");
@@ -349,9 +352,9 @@ internal sealed partial class ScenarioEngine
                 ct.ThrowIfCancellationRequested();
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                 VerifyAbyssClickClientGeometry(_hwnd, confirmedFrame.Size);
-                if (_stopAfterRound)
+                if (_exitRequestedRound is { } exitRound)
                 {
-                    await ExitAbyssResultForScheduledProcessingAsync(ct);
+                    await exitRound(ct);
                     return;
                 }
                 NativeMethods.SetForegroundWindow(_hwnd);
