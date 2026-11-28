@@ -912,8 +912,8 @@ public sealed partial class MainForm
                 if (_kind == "today-work")
                 {
                     using var bg = new SolidBrush(_hover || Focused ? _ui.AccentSoft : _ui.CardBg2);
-                    using var shape = Round(new RectangleF(0, 0, w, h), 9);
-                    g.FillPath(bg, shape);
+                    using var todayRowShape = Round(new RectangleF(0, 0, w, h), 9);
+                    g.FillPath(bg, todayRowShape);
                     _ui.TextAt(g, Text, new(15, 0, w - 57, h), 17, false, _ui.TitleText);
                     _ui.Icon(g, "arrow-up-right", new(w - 33, (h - 18) / 2, 18, 18), _ui.TitleText);
                     return;
