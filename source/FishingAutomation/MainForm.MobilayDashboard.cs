@@ -4,6 +4,8 @@ public sealed partial class MainForm
 {
     private sealed partial class ReferenceDashboard
     {
+        private readonly List<ReferenceButton> _todayWorkButtons = [];
+
         private void BuildWorkspaceNavigation(MainForm owner)
         {
             void OpenOverview(bool settings, bool log)
@@ -40,6 +42,13 @@ public sealed partial class MainForm
             Setting("인식 테스트", owner.ShowVisualRecognitionTest, 270, 385);
             Setting("F8 테스트 / 새로고침", owner.TestOrRefresh, 610, 385);
             Setting("게임 창 확인", owner.ShowGameWindowDiagnostic, 950, 385);
+
+            _todayWorkButtons.Add(AddButton("가공", new(280, 625, 1117, 47),
+                () => owner.ShowTodayProductionDetails("가공"), "", "today-work"));
+            _todayWorkButtons.Add(AddButton("어비스", new(280, 679, 1117, 47),
+                owner.ShowAbyssRoundHistory, "", "today-work"));
+            _todayWorkButtons.Add(AddButton("채집", new(280, 733, 1117, 47),
+                () => owner.ShowTodayProductionDetails("채집"), "", "today-work"));
         }
 
         private void PaintWorkspaceSettings(Graphics g)
@@ -71,9 +80,20 @@ public sealed partial class MainForm
             TextAt(g, _owner._recentDetectValue.Text, new(991, 443, 397, 60), 16, false, Muted);
 
             Card(g, new(256, 574, 1166, 350));
-            TextAt(g, "최근 기록", new(280, 593, 1060, 45), 22, true);
-            var lines = _owner._progressLogPreview.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries).TakeLast(5).ToArray();
-            TextAt(g, lines.Length == 0 ? "최근 기록이 없습니다." : string.Join("\n", lines), new(280, 654, 1106, 228), 17, false, Muted, multiline: true);
+            TextAt(g, "오늘 작업", new(280, 582, 1060, 39), 22, true);
+            var today = _owner.GetTodayWorkSummary();
+            string[] summaries = [$"가공 · {today.Altering}", $"어비스 · {today.Abyss}", $"채집 · {today.Gathering}"];
+            for (int i = 0; i < _todayWorkButtons.Count; i++)
+            {
+                if (_todayWorkButtons[i].Text == summaries[i]) continue;
+                _todayWorkButtons[i].Text = summaries[i];
+                _todayWorkButtons[i].AccessibleName = summaries[i];
+            }
+
+            TextAt(g, "최근 기록", new(280, 794, 1060, 37), 19, true);
+            var lines = _owner._progressLogPreview.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries).TakeLast(2).ToArray();
+            TextAt(g, lines.Length == 0 ? "최근 기록이 없습니다." : string.Join("\n", lines),
+                new(280, 832, 1106, 68), 16, false, Muted, multiline: true);
         }
     }
 }

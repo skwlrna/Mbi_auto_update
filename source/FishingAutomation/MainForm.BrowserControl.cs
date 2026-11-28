@@ -226,12 +226,19 @@ public sealed partial class MainForm
                 state = order.State, detail = _phoneAlteringLiveDetails.GetValueOrDefault(order.Number, order.Detail)
             }).ToArray();
 
-    private string GetBrowserMobileState() =>
-        System.Text.Json.JsonSerializer.Serialize(new
+    private string GetBrowserMobileState()
+    {
+        var today = GetTodayWorkSummary();
+        return System.Text.Json.JsonSerializer.Serialize(new
         {
             status = GetRemoteStatus(),
             detail = _statusValue.Text,
             abyssRounds = AbyssRoundHistory.Latest(10),
+            todayWork = new
+            {
+                altering = today.Altering, abyss = today.Abyss,
+                gathering = today.Gathering, gatheringDetails = today.GatheringDetails
+            },
             alteringIssue = GetBrowserAlteringIssue(),
             running = AnyRunning || _activeMode is not null || _gatheringDiagnosticRunning,
             phoneAltering = _phoneAlteringRun is not null,
@@ -244,6 +251,7 @@ public sealed partial class MainForm
                 (LoadPhoneAlteringQueue().Orders.Length > 0 || LoadPhoneAlteringQueue().Next != 1),
             previousBatch = BrowserPreviousAlteringBatch()
         });
+    }
 
     private string? GetBrowserAlteringIssue()
     {

@@ -6,7 +6,7 @@ namespace FishingAutomation;
 public sealed partial class MainForm
 {
     private sealed record PhoneAlteringOrder(long Number, string Name, bool Total, int Quantity,
-        string MessageKey, string State = "시작 대기", string Detail = "");
+        string MessageKey, string State = "시작 대기", string Detail = "", DateTimeOffset? ChangedAt = null);
     private sealed record PhoneAlteringQueue(long Next, PhoneAlteringOrder[] Orders, string[] RecentMessages);
 
     private static readonly string PhoneAlteringPath = Path.Combine(
@@ -70,7 +70,7 @@ public sealed partial class MainForm
         SavePhoneAlteringQueue(queue with
         {
             Orders = queue.Orders.Select(order => changed.TryGetValue(order.Number, out var replacement)
-                ? replacement : order).ToArray()
+                ? replacement with { ChangedAt = DateTimeOffset.Now } : order).ToArray()
         });
     }
 
@@ -133,7 +133,7 @@ public sealed partial class MainForm
 
         if (TelegramCommandParser.ParseAlteringOrder(command) is not { } add)
             return TelegramCommandParser.AlteringHelp;
-        var order = new PhoneAlteringOrder(queue.Next, add.Name, add.Total, add.Quantity, messageKey);
+        var order = new PhoneAlteringOrder(queue.Next, add.Name, add.Total, add.Quantity, messageKey, ChangedAt: DateTimeOffset.Now);
         SavePhoneAlteringQueue(updated with { Next = checked(queue.Next + 1), Orders = queue.Orders.Append(order).ToArray() });
         return $"#{order.Number} 등록 · {order.Name} · {(order.Total ? "총" : "추가")} {order.Quantity:N0}개 · 시작 대기";
     }
@@ -251,7 +251,7 @@ public sealed partial class MainForm
             {
                 if (running.Count > 0)
                     SavePhoneAlteringStates(running.Values.ToDictionary(order => order.Number, order => order with
-                    { State = "확인 필요", Detail = "최근 가공 작업 기록 확인" }));
+                    { State = "확인 필요", Detail = _phoneAlteringLiveDetails.GetValueOrDefault(order.Number, "최근 가공 작업 기록 확인") }));
             }
             catch (Exception ex)
             {

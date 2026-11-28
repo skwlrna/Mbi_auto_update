@@ -2,12 +2,13 @@ namespace FishingAutomation;
 
 public sealed partial class MainForm
 {
-    private void ShowAbyssRoundHistory()
+    private void ShowAbyssRoundHistory() => ShowWorkHistoryDialog("어비스 판별 기록", AbyssRoundHistory.Latest(50));
+
+    private void ShowWorkHistoryDialog(string title, string[] rounds)
     {
-        string[] rounds = AbyssRoundHistory.Latest(50);
         using var dialog = new Form
         {
-            Text = "어비스 판별 기록",
+            Text = title,
             StartPosition = FormStartPosition.CenterParent,
             Size = new Size(760, 490),
             MinimizeBox = false

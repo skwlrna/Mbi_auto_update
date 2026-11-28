@@ -185,6 +185,9 @@ public sealed partial class MainForm
             _dungeonCompleted = 0;
             _runError = null;
             _inputValue.Text = _dungeonInputName = visualAltering.InputMode;
+            if (!batchChild)
+                _todayAlteringRun = new TodayRun("가공", $"{plan.DisplayName} · 목표 {plan.TargetQuantity:N0}개",
+                    DateTimeOffset.Now, "진행 중");
             SetStatus(resuming ? "저장 작업 이어하기 준비" : "가공 시작 준비", Blue);
 
             automation.Log += text => Ui(() =>
@@ -199,6 +202,8 @@ public sealed partial class MainForm
             {
                 UpdateAlteringStatus(plan, progress);
                 _productionCurrentQuantity = progress.ConfirmedQuantity;
+                if (!batchChild && _todayAlteringRun is { } run)
+                    _todayAlteringRun = run with { Count = progress.ConfirmedQuantity };
                 _productionProgressSummary = progress.Summary(plan.DisplayName);
                 _dungeonCycles = progress.QueuedWorks;
                 UpdateStats();
@@ -212,6 +217,7 @@ public sealed partial class MainForm
 
             _dungeonTask = Task.Run(async () =>
             {
+                string todayState = "중단";
                 using var interruptions = ProductionInterruptionCheckpoint.Install(visualAltering.CheckInterruptionsAsync, token);
                 using (screen)
                 using (gatheringScreen)
@@ -219,6 +225,7 @@ public sealed partial class MainForm
                     try
                     {
                         var result = await automation.RunAsync(plan, token);
+                        todayState = result == AlteringRunResult.RawMaterialExhausted ? "재료 부족 · 목표 미달" : "완료";
                         Ui(() =>
                         {
                             _dungeonCompleted = automation.QueuedWorks;
@@ -267,6 +274,11 @@ public sealed partial class MainForm
                     {
                         Ui(() =>
                         {
+                            if (!batchChild)
+                            {
+                                SaveTodayRun(_todayAlteringRun, todayState);
+                                _todayAlteringRun = null;
+                            }
                             _dungeonStoppedAt = DateTime.Now;
                             if (batchChild && _multiAlteringRunning)
                             {

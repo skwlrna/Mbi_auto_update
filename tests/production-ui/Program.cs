@@ -36,6 +36,11 @@ internal static class Program
         }
         var page = await Send("GET", "/").ConfigureAwait(false);
         Check(page.Code == 200 && page.Text.Contains("MOBI", StringComparison.Ordinal), "browser serves responsive shell on loopback");
+        Check(page.Text.Contains("오늘 작업", StringComparison.Ordinal) &&
+            page.Text.Contains("href=\"#altering\"", StringComparison.Ordinal) &&
+            page.Text.Contains("href=\"#abyssHistory\"", StringComparison.Ordinal) &&
+            page.Text.Contains("href=\"#gatheringHistory\"", StringComparison.Ordinal),
+            "mobile home links each work summary to its detail");
         var missing = await Send("GET", "/api/status").ConfigureAwait(false);
         var wrong = await Send("GET", "/api/status", new string('Z', 64)).ConfigureAwait(false);
         var cross = await Send("GET", "/api/status", server.Token, site: "cross-site").ConfigureAwait(false);
