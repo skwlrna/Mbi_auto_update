@@ -70,6 +70,10 @@ public sealed partial class MainForm
         _productionCurrentQuantity = 0;
         _productionFacilityName = "시설별 병렬 배치";
         _productionProgressSummary = $"다중가공 준비 · {plans.Count}종 · 시설별 품목 순차 7칸 배치";
+        if (!remoteOrder)
+            _todayAlteringRun = new TodayRun("가공",
+                plans.Count == 1 ? $"{plans[0].DisplayName} · 목표 {plans[0].TargetQuantity:N0}개" : $"다중가공 {plans.Count}종",
+                DateTimeOffset.Now, "진행 중");
         ResetAlteringStatus(plans);
         SetStatus($"다중가공 병렬 배치 준비 · {plans.Count}종", Blue);
         _log.Write(
@@ -1250,6 +1254,11 @@ public sealed partial class MainForm
             }
             finally { batchStore?.Dispose(); verifiedBatchLease?.Dispose(); }
 
+            if (!remoteOrder)
+            {
+                SaveTodayRun(_todayAlteringRun, reachedTarget ? "완료" : completed ? "목표 미달 또는 확인 필요" : "중단");
+                _todayAlteringRun = null;
+            }
             UpdateAbyssSelectorVisibility();
             RefreshModeStatus();
             UpdateStats();

@@ -474,6 +474,7 @@ public sealed partial class MainForm
             bool log = _owner._logExpanded;
             bool production = ShouldShowProductionPage && !_showHome && !_showSettings && !log;
             bool execution = !_showHome && !_showSettings && !log && !production;
+            foreach (var button in _todayWorkButtons) button.Visible = _showHome && !log;
             foreach (var button in _gallery) button.Visible = execution && ShouldShowAbyssDungeonPicker;
             _abyssRoundStop.Visible = execution && ShouldShowAbyssDungeonPicker && _owner._activeAbyssEngine is not null;
             _abyssHistory.Visible = execution && ShouldShowAbyssDungeonPicker;
@@ -906,6 +907,15 @@ public sealed partial class MainForm
                     }
                     _ui.TextAt(g, Text, new(0, 0, w, h), 19, active,
                         active ? _ui.Blue : _ui.TitleText, StringAlignment.Center);
+                    return;
+                }
+                if (_kind == "today-work")
+                {
+                    using var bg = new SolidBrush(_hover || Focused ? _ui.AccentSoft : _ui.CardBg2);
+                    using var shape = Round(new RectangleF(0, 0, w, h), 9);
+                    g.FillPath(bg, shape);
+                    _ui.TextAt(g, Text, new(15, 0, w - 57, h), 17, false, _ui.TitleText);
+                    _ui.Icon(g, "arrow-up-right", new(w - 33, (h - 18) / 2, 18, 18), _ui.TitleText);
                     return;
                 }
                 if (_kind == "card-link")

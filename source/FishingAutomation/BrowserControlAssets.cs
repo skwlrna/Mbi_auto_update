@@ -11,7 +11,11 @@ internal static class BrowserControlAssets
 <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="연결 키 입력"><button id="connect">연결</button>
 <p class="hint">키는 이 화면을 닫으면 사라집니다.</p></section>
 <section class="hero"><h2>현재 작업</h2><pre id="status">연결 대기</pre><button class="danger" id="stop" disabled>전체 작업 중지</button><p id="stopReply" role="status"></p></section>
-<section><h2>자동가공</h2><label for="itemSearch">품목 검색</label><input id="itemSearch" maxlength="120" placeholder="예: 가죽" disabled>
+<section><h2>오늘 작업</h2>
+<ul class="today-work"><li><a href="#altering">가공</a><span id="todayAltering">PC 연결 대기</span></li>
+<li><a href="#abyssHistory">어비스</a><span id="todayAbyss">PC 연결 대기</span></li>
+<li><a href="#gatheringHistory">채집</a><span id="todayGathering">PC 연결 대기</span></li></ul></section>
+<section id="altering"><h2>자동가공</h2><label for="itemSearch">품목 검색</label><input id="itemSearch" maxlength="120" placeholder="예: 가죽" disabled>
 <button id="catalog" disabled>가공 품목 불러오기</button><p id="catalogReply" role="status"></p>
 <label for="name">가공 품목 선택</label><select id="name" disabled><option value="">품목을 선택하세요</option></select>
 <label for="quantity">수량</label><input id="quantity" type="number" min="1" max="1000000" value="100" inputmode="numeric">
@@ -23,7 +27,8 @@ internal static class BrowserControlAssets
 <button id="clearQueue" class="danger" disabled>가공 목록 전체 비우기 · #1부터</button>
 <div id="orders">등록된 작업을 확인하세요.</div><p id="queueReply" role="status"></p></section>
 <section><h2>어비스</h2><label for="dungeon">던전 선택</label><select id="dungeon"><option>허상의 정박지</option><option>광기의 동굴</option><option>흩어진 물길</option></select>
-<p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button><p id="abyssReply" role="status"></p><details><summary>최근 어비스 판별 기록</summary><pre id="abyssRounds">PC 연결 후 확인할 수 있습니다.</pre></details></section>
+<p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button><p id="abyssReply" role="status"></p><details id="abyssHistory"><summary>최근 어비스 판별 기록</summary><pre id="abyssRounds">PC 연결 후 확인할 수 있습니다.</pre></details></section>
+<section><details id="gatheringHistory"><summary>오늘 채집 상세</summary><pre id="gatheringDetails">PC 연결 후 확인할 수 있습니다.</pre></details></section>
 <section aria-live="polite"><h2>명령 응답</h2><pre id="reply">—</pre></section></main></body></html>
 """;
     internal const string Css = """
@@ -33,6 +38,8 @@ header strong{font-size:27px}header span,.hint{color:#656b7b;font-size:13px}sect
 h2{font-size:17px;margin:0 0 14px}label{display:block;font-size:14px;margin:10px 0 5px}input,select,button{width:100%;min-height:44px;border-radius:11px;font:inherit}
 input,select{border:1px solid #d9deeb;background:#f8f9fc;color:inherit;padding:8px 11px}button{border:0;background:#4b5ab8;color:white;padding:10px;margin-top:10px;font-weight:600;cursor:pointer}
 button:disabled{opacity:.43;cursor:default}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}.hero{background:#24283b;color:#f7f8ff;border-color:#24283b}
+.today-work{list-style:none;margin:0;padding:0}.today-work li{display:grid;grid-template-columns:64px 1fr;gap:8px;padding:9px 0;border-bottom:1px solid #9198a566}
+.today-work li:last-child{border:0}.today-work a{color:inherit;font-weight:650}.today-work span{overflow-wrap:anywhere}
 .queue-row{padding:10px 0;border-bottom:1px solid #9198a566}
 .queue-row button{width:auto;margin:6px 0 0}
 .danger{background:#b52b40}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.6 system-ui,sans-serif;margin:10px 0}
@@ -100,6 +107,10 @@ function renderQueue(orders,revision){
 }
 function renderState(state){
   el('status').textContent=state.status;
+  el('todayAltering').textContent=state.todayWork?.altering??'오늘 가공 기록 없음';
+  el('todayAbyss').textContent=state.todayWork?.abyss??'오늘 기록된 판 없음';
+  el('todayGathering').textContent=state.todayWork?.gathering??'오늘 채집 기록 없음';
+  el('gatheringDetails').textContent=(state.todayWork?.gatheringDetails??[]).join('\n')||'오늘 채집 기록 없음';
   el('abyssRounds').textContent=(state.abyssRounds??[]).join('\n\n')||'기록이 없습니다.';
   el('alteringIssue').textContent=state.alteringIssue??'';
   renderPreviousBatch(state.previousBatch);
@@ -252,6 +263,10 @@ el('resetPrevious').onclick=()=>{
   if(confirm(notice))command('queue-reset-previous',{BatchId:batchId},el('resetReply'));
 };
 el('qstop').onclick=()=>command('queue-stop',{},el('startReply'));
+for(const link of document.querySelectorAll('.today-work a')){
+  const detail=el(link.hash.slice(1));
+  if(detail instanceof HTMLDetailsElement)link.addEventListener('click',()=>{detail.open=true;});
+}
 el('abyss').onclick=()=>{const d=el('dungeon').value;if(confirm(d+' · 무한 반복으로 시작할까요?'))command('abyss-start',{Dungeon:d},el('abyssReply'));};
 setInterval(status,5000);
 """;

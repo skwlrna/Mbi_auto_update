@@ -32,6 +32,16 @@ internal static class AbyssRoundHistory
             return Records.TakeLast(count).Reverse().Select(record => record.Summary()).ToArray();
     }
 
+    internal static (int Rounds, int Rewards, int RetryMisses) TodayCounts(DateTime date)
+    {
+        lock (Gate)
+        {
+            var today = Records.Where(record => record.EndedAt.LocalDateTime.Date == date).ToArray();
+            return (today.Length, today.Count(record => record.RewardConfirmed),
+                today.Count(record => record.Outcome == "재입장 미확인"));
+        }
+    }
+
     internal static void Append(AbyssRoundRecord record)
     {
         lock (Gate)

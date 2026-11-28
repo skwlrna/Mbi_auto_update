@@ -151,6 +151,8 @@ public sealed partial class MainForm
                 _log.Write(text);
                 _dungeonCycles = checked((int)Math.Min(automation.Gained,int.MaxValue));
                 _productionCurrentQuantity = automation.Gained;
+                if (_todayGatheringRun is { } run && automation.Gained > 0)
+                    _todayGatheringRun = run with { Count = automation.Gained };
                 SetStatus(text.Replace("[자동 채집] ", ""), Blue);
                 UpdateStats();
                 RefreshProductionDashboard();
@@ -181,9 +183,13 @@ public sealed partial class MainForm
                 _productionTargetQuantity = checked((int)remainingTotal);
                 RefreshProductionDashboard();
             }
+            _todayGatheringRun = new TodayRun("채집", multiple
+                ? string.Join(", ", selected.Select(item => item.DisplayName)) : plan.DisplayName,
+                DateTimeOffset.Now, "진행 중");
             _log.Write("[자동 채집] 시작(F9) · " + _gatheringDisplay + " · CLI 조회 전용 / 일반 이동");
             _dungeonTask = Task.Run(async () =>
             {
+                string todayState = "중단";
                 using var interruptions = ProductionInterruptionCheckpoint.Install(visual.CheckInterruptionsAsync, token);
                 using (screen)
                 {
@@ -196,6 +202,7 @@ public sealed partial class MainForm
                             var requests = selected.Select(x =>
                                 new MultiGatheringRequest(x.DisplayName, x.TargetTotal)).ToArray();
                             await coordinator.RunAsync(requests, token);
+                            todayState = "목표 보유량 확인 완료";
                             Ui(() =>
                             {
                                 _dungeonCompleted = checked((int)Math.Min(_productionCurrentQuantity, int.MaxValue));
@@ -213,6 +220,7 @@ public sealed partial class MainForm
                             _ = await managerState.ReadFreshCountAsync(
                                 LifeSkillStage.Gathering, plan.DisplayName,
                                 data.ItemCountAsync, token);
+                            todayState = "완료";
                             Ui(() =>
                             {
                                 _dungeonCompleted = checked((int)Math.Min(automation.Gained, int.MaxValue));
@@ -237,6 +245,8 @@ public sealed partial class MainForm
                     {
                         Ui(() =>
                         {
+                            SaveTodayRun(_todayGatheringRun, todayState, !multiple && automation.Gained > 0 ? automation.Gained : null);
+                            _todayGatheringRun = null;
                             _dungeonStoppedAt = DateTime.Now; _activeMode = null; _mode.Enabled = true;
                             UpdateAbyssSelectorVisibility(); RefreshModeStatus();
                             if (_runError is not null) SetStatus("오류: " + _runError, Color.Salmon);
