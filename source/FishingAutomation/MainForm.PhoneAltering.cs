@@ -15,6 +15,7 @@ public sealed partial class MainForm
     private PhoneAlteringQueue? _phoneAlteringQueue;
     private FileStream? _phoneAlteringLease;
     private CancellationTokenSource? _phoneAlteringRun;
+    private readonly Dictionary<long, string> _phoneAlteringLiveDetails = new();
 
     // Commands and queue transitions run on the WinForms thread.
     private PhoneAlteringQueue LoadPhoneAlteringQueue()
@@ -81,8 +82,12 @@ public sealed partial class MainForm
         {
             var rows = queue.Orders.OrderBy(x => x.State is "실행 중" or "확인 필요" or "시작 대기" ? 0 : 1)
                 .ThenByDescending(x => x.Number).Take(16).OrderBy(x => x.Number)
-                .Select(x => $"#{x.Number} {x.Name} · {(x.Total ? "총" : "추가")} {x.Quantity:N0}개 · {x.State}" +
-                    (x.Detail.Length == 0 ? "" : $" · {x.Detail}"));
+                .Select(x =>
+                {
+                    string detail = _phoneAlteringLiveDetails.GetValueOrDefault(x.Number, x.Detail);
+                    return $"#{x.Number} {x.Name} · {(x.Total ? "총" : "추가")} {x.Quantity:N0}개 · {x.State}" +
+                        (detail.Length == 0 ? "" : $" · {detail}");
+                });
             return queue.Orders.Length == 0 ? "등록된 가공 요청이 없습니다." : string.Join("\n", rows);
         }
 
@@ -206,12 +211,30 @@ public sealed partial class MainForm
                 if (plans.Count == 0) continue;
 
                 running = changed.Values.Where(order => order.State == "실행 중").ToDictionary(order => order.Number);
-                bool completed = await StartMultiAlteringAsync(plans.Values.ToArray(), remoteOrder: true);
-                SavePhoneAlteringStates(running.Values.ToDictionary(order => order.Number, order => order with
+                var activeOrders = running.Values.ToArray();
+                var uniqueOrders = activeOrders.GroupBy(order => order.Name)
+                    .Where(group => group.Count() == 1)
+                    .ToDictionary(group => group.Key, group => group.Single());
+                var confirmedOrders = new HashSet<long>();
+                bool completed = await StartMultiAlteringAsync(plans.Values.ToArray(), remoteOrder: true,
+                    reportConfirmedQuantity: (plan, quantity) =>
+                    {
+                        foreach (var entry in plans)
+                        {
+                            if (entry.Value != plan || !uniqueOrders.TryGetValue(entry.Key, out var order)) continue;
+                            _phoneAlteringLiveDetails[order.Number] =
+                                $"수령 확인 {quantity:N0}/{plan.TargetQuantity:N0}개";
+                            if (quantity >= plan.TargetQuantity) confirmedOrders.Add(order.Number);
+                            break;
+                        }
+                    });
+                SavePhoneAlteringStates(activeOrders.ToDictionary(order => order.Number, order => order with
                 {
-                    State = completed ? "완료" : "확인 필요",
-                    Detail = completed ? "가공 배치 목표 생산 확인" : "최근 가공 작업 기록 확인"
+                    State = completed || confirmedOrders.Contains(order.Number) ? "완료" : "확인 필요",
+                    Detail = _phoneAlteringLiveDetails.GetValueOrDefault(order.Number,
+                        completed ? "가공 배치 목표 생산 확인" : "최근 가공 작업 기록 확인")
                 }));
+                _phoneAlteringLiveDetails.Clear();
                 running.Clear();
                 if (!completed) return;
             }
@@ -234,6 +257,7 @@ public sealed partial class MainForm
             {
                 _log.Write("[휴대폰 가공] 작업 상태 저장 실패: " + ex.GetType().Name);
             }
+            _phoneAlteringLiveDetails.Clear();
             _phoneAlteringRun = null;
             run.Dispose();
             if (!IsDisposed && !Disposing) RefreshProductionDashboard();

@@ -666,6 +666,18 @@ public sealed partial class MainForm
             _abyssSummary.Text = "선택 던전 : " + AbyssDungeon + "  ·  출발 기준 " +
                 MinimumAbyssWaitSeconds + "초 · 매 판 종료 시 CLI 가공 확인 · 필요 시 나가기";
 
+            _crafts.Text = _owner._craftingPage?.SelectedName is string selectedRecipe
+                ? $"1. 제작 · {selectedRecipe} {_owner._craftingPage.Quantity.Value:N0}개"
+                : "1. 제작 · 품목 선택 필요";
+            _alters.Text = plans.Count > 0
+                ? $"2. 가공 · {plans.Count}종 · " +
+                    string.Join(", ", plans.Take(2).Select(x => $"{x.DisplayName} {x.TargetQuantity:N0}개")) +
+                    (plans.Count > 2 ? $" 외 {plans.Count - 2}종" : "")
+                : _owner._alteringPage?.SelectedName is string selectedItem
+                    ? $"2. 가공 · {selectedItem} {_owner._alteringPage.Quantity.Value:N0}개"
+                    : "2. 가공 · 품목 선택 필요";
+            _abyss.Text = $"3. 어비스 · {AbyssDungeon} · 가공 남은 시간 {MinimumAbyssWaitSeconds}초 이상";
+
             bool running = _owner._schedulerRunning;
             if (running) ClearStartFeedback();
             _runStatus.Text = running

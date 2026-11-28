@@ -332,10 +332,14 @@ public sealed partial class MainForm
             root.Controls.Add(body, 0, 1);
 
             // Both pages preserve their existing start/stop shortcuts; queue editing is read-only.
-            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = altering ? 3 : 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 이어하기 정지" };
-            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 40 : 70));
-            if (altering) actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = altering ? 4 : 2, RowCount = 1, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent, AccessibleName = "하단 시작 이어하기 정지" };
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 32 : 70));
+            if (altering)
+            {
+                actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23));
+                actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23));
+            }
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, altering ? 22 : 30));
             _start = PageButton("▶   " + AccessibleName + " 시작 (F9)", owner.StartSelected); _start.BackColor = Accent; _start.ForeColor = _taskPalette.PrimaryText; _start.AccessibleName = AccessibleName + " 시작";
             _stop = PageButton("■   정지 (F10)", owner.StopSelected); _stop.AccessibleName = "정지";
             actions.Controls.Add(_start, 0, 0);
@@ -345,7 +349,8 @@ public sealed partial class MainForm
                 _resume.AccessibleName = "최근 대량가공 이어하기";
                 actions.Controls.Add(_resume, 1, 0);
             }
-            actions.Controls.Add(_stop, altering ? 2 : 1, 0); root.Controls.Add(actions, 0, 2);
+            if (altering) actions.Controls.Add(PageButton("품목 종료 후 정지", owner.RequestAlteringItemStop), 2, 0);
+            actions.Controls.Add(_stop, altering ? 3 : 1, 0); root.Controls.Add(actions, 0, 2);
             Controls.Add(root);
 
             foreach (var control in Descendants(root).Prepend(root)) control.Font = new Font("맑은 고딕", 18f, control.Font.Style, GraphicsUnit.Pixel);
@@ -469,8 +474,33 @@ public sealed partial class MainForm
                 bool selected = (e.State & DrawItemState.Selected) != 0;
                 using var background = new SolidBrush(selected ? AccentSoft : CardBg2);
                 e.Graphics.FillRectangle(background, e.Bounds);
-                TextRenderer.DrawText(e.Graphics, list.Items[e.Index]?.ToString() ?? "", list.Font, Rectangle.Inflate(e.Bounds, -9, 0),
-                    selected ? Blue : TitleText, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                var bounds = Rectangle.Inflate(e.Bounds, -9, 0);
+                Color foreground = selected ? Blue : TitleText;
+                const TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+                    TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+                var item = list.Items[e.Index];
+                (string name, string quantity) = item switch
+                {
+                    AlteringQueueChoice altering => (altering.Plan.DisplayName, $"{altering.Plan.TargetQuantity:N0}개"),
+                    GatheringQueueChoice gathering => (gathering.DisplayName, $"목표 {gathering.TargetTotal:N0}개"),
+                    _ => (item?.ToString() ?? "", "")
+                };
+                if (quantity.Length == 0)
+                    TextRenderer.DrawText(e.Graphics, name, list.Font, bounds, foreground, flags);
+                else
+                {
+                    string number = $"{e.Index + 1}.";
+                    int numberWidth = TextRenderer.MeasureText(number, list.Font).Width + 4;
+                    int quantityWidth = TextRenderer.MeasureText(quantity, list.Font).Width + 4;
+                    TextRenderer.DrawText(e.Graphics, number, list.Font,
+                        new Rectangle(bounds.X, bounds.Y, numberWidth, bounds.Height), foreground, flags);
+                    TextRenderer.DrawText(e.Graphics, name, list.Font,
+                        new Rectangle(bounds.X + numberWidth, bounds.Y, Math.Max(0, bounds.Width - numberWidth - quantityWidth), bounds.Height),
+                        foreground, flags);
+                    TextRenderer.DrawText(e.Graphics, quantity, list.Font,
+                        new Rectangle(bounds.Right - quantityWidth, bounds.Y, quantityWidth, bounds.Height),
+                        foreground, flags | TextFormatFlags.Right);
+                }
                 if ((e.State & DrawItemState.Focus) != 0) ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds);
             };
         }

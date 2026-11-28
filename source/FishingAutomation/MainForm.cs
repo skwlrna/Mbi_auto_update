@@ -50,6 +50,15 @@ public sealed partial class MainForm : Form
     private int _fishingSuccesses;
 
     private CancellationTokenSource? _dungeonCts;
+    private ScenarioEngine? _activeAbyssEngine;
+
+    private void RequestAbyssRoundStop()
+    {
+        if (_activeAbyssEngine is not { } engine) return;
+        engine.StopAfterRound();
+        _log.Write("[어비스] 이번 판 완료 후 정지 예약");
+        SetStatus("이번 판 완료 후 정지 예정", Blue);
+    }
     private Task? _dungeonTask;
     private DateTime? _dungeonStartedAt;
     private int _dungeonCycles;
@@ -494,6 +503,8 @@ public sealed partial class MainForm : Form
             IScenarioRunner engine = modeName == "페카 심층"
                 ? new PeacaRouteEngine(window.Handle, settings, targets, baseDir, _selectedPeacaRoute)
                 : new ScenarioEngine(window.Handle, settings, scenario, targets, baseDir, _cli);
+            _activeAbyssEngine = modeName == "어비스" ? engine as ScenarioEngine : null;
+            UpdateAbyssSelectorVisibility();
             if (modeName == "던전")
                 _log.Write("[던전] 현재 위치에서 시작");
             _dungeonInputName = engine.InputMode;
@@ -526,6 +537,7 @@ public sealed partial class MainForm : Form
                     {
                         Ui(() =>
                         {
+                            _activeAbyssEngine = null;
                             _dungeonStoppedAt = DateTime.Now;
                             _stageStartedAt = _restartAt = null;
                             _activeMode = null;

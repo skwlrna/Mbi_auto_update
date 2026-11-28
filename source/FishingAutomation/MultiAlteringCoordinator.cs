@@ -596,6 +596,8 @@ internal sealed class MultiAlteringFacilityEfficiencyTracker
                 x.Value.ReadyWaitPasses, x.Value.State)).ToArray();
 }
 
+internal sealed class MultiAlteringBoundaryStopException : OperationCanceledException { }
+
 internal sealed class MultiAlteringCoordinator
 {
     private readonly FacilityLaneState? _laneState;
@@ -659,7 +661,8 @@ internal sealed class MultiAlteringCoordinator
         Func<AlteringPlan, CancellationToken, Task>? verifySafePreInputRead = null,
         Action<MultiAlteringReadQuarantineSnapshot>? reportReadQuarantine = null,
         Action<string>? reportLongWaitAdvisory = null,
-        Func<AlteringPlan, string, CancellationToken, Task>? resumeDeferredIntermediate = null)
+        Func<AlteringPlan, string, CancellationToken, Task>? resumeDeferredIntermediate = null,
+        Func<bool>? stopAfterItem = null)
     {
         ArgumentNullException.ThrowIfNull(plans);
         ArgumentNullException.ThrowIfNull(runBatch);
@@ -1393,6 +1396,8 @@ internal sealed class MultiAlteringCoordinator
                         Log?.Invoke(
                             $"[다중가공] 품목 처리 종료 {completed.Count}/{plans.Count} · {plan.DisplayName} · " +
                             "목표 전량 완료 또는 원재료 소진");
+                        if (completed.Count < plans.Count && stopAfterItem?.Invoke() == true)
+                            throw new MultiAlteringBoundaryStopException();
                     }
 
                     works = await readWorks(ct);

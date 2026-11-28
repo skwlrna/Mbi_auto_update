@@ -39,6 +39,7 @@ public sealed partial class MainForm
             Setting("항상 위 전환", () => owner.TopMost = !owner.TopMost, 950, 285);
             Setting("인식 테스트", owner.ShowVisualRecognitionTest, 270, 385);
             Setting("F8 테스트 / 새로고침", owner.TestOrRefresh, 610, 385);
+            Setting("게임 창 확인", owner.ShowGameWindowDiagnostic, 950, 385);
         }
 
         private void PaintWorkspaceSettings(Graphics g)
