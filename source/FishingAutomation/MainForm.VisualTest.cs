@@ -30,10 +30,7 @@ public sealed partial class MainForm
             preview.Image = null;
             details.Text = $"선택한 게임 창  {window.Title}\n진단 시작 시 전면 창  {foregroundTitle}";
             if (window.Handle != foreground)
-            {
-                details.Text += "\n선택한 창을 전면에 띄운 상태에서 캡처할 수 있습니다.";
-                return;
-            }
+                details.Text += "\n게임 영역을 덮고 있는 창도 미리보기에 나타납니다.";
             try
             {
                 preview.Image = new DungeonVisionBot.WindowCapture().CaptureClient(window.Handle);

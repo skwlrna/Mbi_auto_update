@@ -349,14 +349,14 @@ internal sealed partial class ScenarioEngine
                 ct.ThrowIfCancellationRequested();
                 _hwnd = await ResolveRequiredGameWindowAsync(ct);
                 VerifyAbyssClickClientGeometry(_hwnd, confirmedFrame.Size);
-                NativeMethods.SetForegroundWindow(_hwnd);
-                Log?.Invoke($"[어비스] 결과 2회 재확인 + 초록 버튼 중앙 2회 검증 -> 고정좌표 다시 하기 1회 클릭 @ {click}");
-                DiagnosticObserveClick("abyss_result_retry_fixed", click);
                 if (_stopAfterRound)
                 {
                     await ExitAbyssResultForScheduledProcessingAsync(ct);
                     return;
                 }
+                NativeMethods.SetForegroundWindow(_hwnd);
+                Log?.Invoke($"[어비스] 결과 2회 재확인 + 초록 버튼 중앙 2회 검증 -> 고정좌표 다시 하기 1회 클릭 @ {click}");
+                DiagnosticObserveClick("abyss_result_retry_fixed", click);
                 _input.ClickClientPoint(_hwnd, click);
                 _inventoryNextRoundClicked = true;
                 _retryCompetitionConfirmationClicked = false;

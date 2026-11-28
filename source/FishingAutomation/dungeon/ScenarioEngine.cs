@@ -491,7 +491,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             {
                 // Recovery must use the same fresh CLI decision as the normal
                 // result path, never force an exit just because this is scheduled.
-                if (_stopAfterRound || (_scheduledResultExit && await ShouldExitScheduledAbyssAfterRoundAsync(ct)))
+                if (_scheduledResultExit && await ShouldExitScheduledAbyssAfterRoundAsync(ct))
                 {
                     Log?.Invoke("[병행 복구] 가공 필요 확인 -> 검증된 왼쪽 나가기");
                     await ExitAbyssResultForScheduledProcessingAsync(ct);
@@ -1002,7 +1002,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
         if (IsAbyss && step.Target == "abyss_result_retry")
         {
-            if (_stopAfterRound || (_scheduledResultExit && await ShouldExitScheduledAbyssAfterRoundAsync(ct)))
+            if (_scheduledResultExit && await ShouldExitScheduledAbyssAfterRoundAsync(ct))
                 await ExitAbyssResultForScheduledProcessingAsync(ct);
             else
                 await RetryAbyssResultAsync(ct);
