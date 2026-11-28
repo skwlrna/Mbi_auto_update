@@ -291,6 +291,7 @@ internal sealed partial class ScenarioEngine
     private async Task RetryAbyssResultAsync(CancellationToken ct)
     {
         if (!IsAbyss) throw new InvalidOperationException("어비스 결과 전용 처리입니다.");
+        ReportAbyssWait("다시 하기 버튼 확인 중", 120);
         var timer = Stopwatch.StartNew();
         DetectionResult previous = DetectionResult.NotFound;
         while (timer.Elapsed < TimeSpan.FromSeconds(120))
@@ -303,6 +304,8 @@ internal sealed partial class ScenarioEngine
                 // Two consecutive production detections are the authority for ResultConfirmed.
                 AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "다시 하기 결과 화면 2회 연속 확인");
                 AbyssRequireState(AbyssFlowState.ResultConfirmed, "다시 하기 클릭");
+                ReportAbyssReward();
+                ReportAbyssWait("전리품 확인 및 다시 하기 준비", null);
 
                 ct.ThrowIfCancellationRequested();
 
@@ -366,6 +369,7 @@ internal sealed partial class ScenarioEngine
                 AbyssTransitionTo(AbyssFlowState.RetryClicked, "가운데 다시 하기 클릭 완료");
                 await Task.Delay(Math.Max(700, _settings.ClickSettleMs), ct);
                 AbyssTransitionTo(AbyssFlowState.Reentering, "다시 하기 클릭 후 결과 화면 이탈 대기");
+                ReportAbyssWait("재입장 확인 중", null);
                 await WaitForAbyssRetryTransitionAsync(ct);
                 return;
             }
@@ -447,6 +451,7 @@ internal sealed partial class ScenarioEngine
                 if (!recruitmentConfirmed)
                 {
                     recruitmentConfirmed = true;
+                    ReportAbyssWait("파티 모집 및 입장 대기", null);
                     AbyssTransitionTo(AbyssFlowState.Recruiting, "모집창 제목+자동 입장 안내 2프레임 확인");
                     Log?.Invoke("[어비스] 파티 모집 대기 · 모집 중에는 30초 전환 제한 없음 · 추가 클릭 없음");
                 }

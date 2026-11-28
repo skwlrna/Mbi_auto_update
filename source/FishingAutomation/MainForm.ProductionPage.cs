@@ -1178,7 +1178,7 @@ public sealed partial class MainForm
                 : ownResult && stoppedAt.HasValue && startedAt.HasValue ? stoppedAt.Value - startedAt.Value : TimeSpan.Zero;
             string state = ownRun ? "실행 중" : _loading ? "목록 조회 중" : ownResult && _owner._runError is not null ? "오류" : "대기 중";
             _state.Text = $"현재 상태  {state}";
-            _condition.Text = $"현재 단계  {(ownRun ? _owner._statusValue.Text : "—")}"; _condition.ForeColor = TitleText;
+            _condition.Text = $"현재 단계  {(ownRun ? _owner.ActiveAlteringWait ?? _owner._statusValue.Text : "—")}"; _condition.ForeColor = TitleText;
             _elapsed.Text = $"경과 시간  {elapsed:hh\\:mm\\:ss}";
             _collection.Text = IsAltering ? $"완료 작업  {CompletedWorks?.ToString() ?? "0"}회   ·   획득 수량  {current:N0}개" : $"획득 수량  {current:N0}개";
             _character.Text = $"오류 횟수  {(_owner._runError is null ? 0 : 1)}회";

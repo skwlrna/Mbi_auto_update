@@ -11,6 +11,7 @@ internal sealed partial class ScenarioEngine
         if (!IsAbyss || (!_stopAfterRound && (!_scheduledResultExit || _scenario.Repeat)))
             throw new InvalidOperationException("예약되지 않은 결과 화면 퇴장 요청을 차단합니다.");
 
+        ReportAbyssWait("퇴장 버튼 확인 중", 120);
         var timer = Stopwatch.StartNew();
         DetectionResult previousRetry = DetectionResult.NotFound;
 
@@ -27,6 +28,7 @@ internal sealed partial class ScenarioEngine
                 AbyssTransitionTo(AbyssFlowState.ResultConfirmed,
                     "병행 어비스 종료 결과 화면 2회 연속 확인");
                 AbyssRequireState(AbyssFlowState.ResultConfirmed, "병행 나가기");
+                ReportAbyssReward();
 
                 // Preserve existing loot accounting but DO NOT prepare/commit
                 // another retry, because this is the last dungeon round.

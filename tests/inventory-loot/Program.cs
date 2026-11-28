@@ -105,6 +105,14 @@ if (args.Contains("--live"))
     Check(result.Confirmed, "LIVE inventory comparison parsed");
     Console.WriteLine("LIVE comparison only; no dungeon inputs or persisted counters");
 }
+var report = new AbyssRoundRecord(DateTimeOffset.Now, "허상의 정박지", 159, true,
+    new Dictionary<string, int> { ["stone"] = 3 }, 1, "재입장 미확인");
+Check(report.Summary().Contains("2분 39초 · 보상 확인 · 재입장 미확인 · 복구 1회 · stone +3"),
+    "round report distinguishes confirmed rewards and unverified reentry");
+Check((report with { Loot = null }).Summary().EndsWith("전리품 미확인"),
+    "unknown reward inventory does not appear as zero");
+Check((report with { Loot = new Dictionary<string, int>() }).Summary().EndsWith("추적 전리품 변화 없음"),
+    "confirmed unchanged inventory is separate from unknown loot");
 Console.WriteLine($"PASS {passed} inventory loot checks");
 
 namespace FishingAutomation

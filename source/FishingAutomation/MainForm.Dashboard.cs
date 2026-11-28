@@ -663,7 +663,7 @@ public sealed partial class MainForm
         string currentStepText = string.IsNullOrWhiteSpace(_statusValue.Text) ? "준비" : _statusValue.Text;
         if (abyss && currentStepText.StartsWith("어비스 준비 완료", StringComparison.Ordinal))
             currentStepText = $"어비스 준비 완료\n{SelectedAbyssDungeon}";
-        _currentStepValue.Text = currentStepText;
+        _currentStepValue.Text = ActiveAbyssWait ?? ActiveAlteringWait ?? currentStepText;
         _recentDetectValue.Text = _recentDetectText;
         _timeoutValue.Text = abyss ? _timeoutExits.ToString() : "0";
 
