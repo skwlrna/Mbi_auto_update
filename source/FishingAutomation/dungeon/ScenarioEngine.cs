@@ -27,6 +27,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     private void RecordScheduledOutsideExit(string source)
     {
         if (_stopAfterRound && _scheduledExitClicked) _roundStopExitVerified = true;
+        FinishAbyssReport("퇴장 확인");
         if (!_scheduledResultExit) return;
         _scheduledOutsideExitVerified = true;
         Log?.Invoke("[병행] 던전 밖 3프레임 검증 기록 확정 · " + source);
@@ -123,7 +124,15 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             }
             throw;
         }
-        finally { _input.Invalidate(); }
+        finally
+        {
+            _input.Invalidate();
+            _abyssWait = null;
+            var state = GetAbyssFlowState();
+            FinishAbyssReport(ct.IsCancellationRequested ? "사용자 정지"
+                : state is AbyssFlowState.RetryClicked or AbyssFlowState.Reentering or AbyssFlowState.Recruiting
+                    ? "재입장 미확인" : "다음 진행 미확인");
+        }
     }
 
     private async Task RunCoreAsync(CancellationToken ct)
@@ -145,6 +154,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
             if (IsAbyss && startStep == 0)
             {
+                FinishAbyssReport("다음 진행 미확인 · 새 판 시작");
+                ReportAbyssWait("어비스 입장 확인 중", null);
                 AbyssResetFlowState(resuming ? "전체 사이클 복구 재시작" : "새 어비스 사이클");
                 InvalidateInventoryLootRound();
             }
@@ -212,6 +223,8 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                     Log?.Invoke($"[자동복구] {recoveryFailures}/{max} 단계 시간초과: {ex.Message}");
                     if (IsAbyss)
                     {
+                        _reportedRecoveryAttempts++;
+                        ReportAbyssWait($"자동복구 {recoveryFailures}/{max} · 현재 화면 재확인", null);
                         Log?.Invoke($"[진단] {DiagnosticSummary()}");
                         DiagnosticPersistFailure($"timeout_step_{_currentStepIndex + 1}_attempt_{recoveryFailures}");
                     }
@@ -1356,6 +1369,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
     private async Task<DetectionResult> WaitForAbyssTouchPromptAsync(CancellationToken ct)
     {
+        ReportAbyssWait("클리어 터치 안내 확인 중", 20);
         var sw = Stopwatch.StartNew();
         int clearTitleConsecutive = 0;
         int visualTitleConsecutive = 0;
@@ -1373,6 +1387,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             if (result.Found && previousResult)
             {
                 AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "터치 대기 중 실제 결과 화면 2프레임 확인");
+                ReportAbyssReward();
                 Log?.Invoke("[어비스] 터치 문구 대기 중 실제 결과 화면 확인 -> 추가 터치 없이 결과 단계 진행");
                 return DetectionResult.NotFound;
             }
@@ -1416,6 +1431,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     {
         AbyssRequireState(AbyssFlowState.TouchClicked, "클리어 화면 클릭 후 결과 화면 대기");
 
+        ReportAbyssWait("어비스 결과 화면 확인 중", 30);
         var sw = Stopwatch.StartNew();
         int retryClicks = 0;
         int clearTitleConsecutive = 0;
@@ -1438,6 +1454,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 if (previousResult.Found && result.Bounds.IntersectsWith(previousResult.Bounds))
                 {
                     AbyssTransitionTo(AbyssFlowState.ResultConfirmed, "클리어 화면 클릭 후 실제 결과 화면 2프레임 연속 확인");
+                    ReportAbyssReward();
                     Log?.Invoke($"[어비스] 실제 결과 화면 2/2 확인 -> 다시 하기 단계 진행 @ {result.Bounds}");
                     return;
                 }

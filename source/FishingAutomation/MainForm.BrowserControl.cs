@@ -231,6 +231,7 @@ public sealed partial class MainForm
         {
             status = GetRemoteStatus(),
             detail = _statusValue.Text,
+            abyssRounds = AbyssRoundHistory.Latest(10),
             alteringIssue = GetBrowserAlteringIssue(),
             running = AnyRunning || _activeMode is not null || _gatheringDiagnosticRunning,
             phoneAltering = _phoneAlteringRun is not null,

@@ -38,7 +38,10 @@ public sealed partial class MainForm
             shouldExitForProcessingAfterRound: shouldExitForProcessingAfterRound);
 
         engine.Log += message => Ui(() => _log.Write("[병행 어비스] " + message));
-        await engine.RunAsync(token);
+        engine.AbyssDungeonName = dungeonName;
+        _combinedAbyssEngine = engine;
+        try { await engine.RunAsync(token); }
+        finally { _combinedAbyssEngine = null; }
         // Defence in depth: even if the scenario runner's completion path is
         // refactored, this handoff may return ONLY after a confirmed outside HUD.
         ScheduledAbyssReturnPolicy.RequireVerifiedOutside(

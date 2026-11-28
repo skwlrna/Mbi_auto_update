@@ -85,6 +85,7 @@ public sealed partial class MainForm
         private readonly List<(Control Control, RectangleF Bounds)> _positions = new();
         private readonly List<ReferenceButton> _gallery = new();
         private readonly ReferenceButton _abyssRoundStop;
+        private readonly ReferenceButton _abyssHistory;
         private readonly List<ReferenceButton> _modeTabs = new();
         private readonly List<ReferenceButton> _navigationButtons = new();
         private readonly List<Control> _settingsControls = new();
@@ -282,6 +283,7 @@ public sealed partial class MainForm
                 owner._dungeonButtons.Add(choose);
             }
             _abyssRoundStop = AddButton("이번 판까지만", new(776, 962, 238, 75), owner.RequestAbyssRoundStop, "", "quiet");
+            _abyssHistory = AddButton("어비스 판별 기록", new(280, 548, 240, 54), owner.ShowAbyssRoundHistory, "", "quiet");
             owner._logToggle = new Button { Visible = false };
             owner._mainActionButton = AddButton("자동 실행 시작", new(1040, 962, 380, 75), () =>
             {
@@ -474,6 +476,7 @@ public sealed partial class MainForm
             bool execution = !_showHome && !_showSettings && !log && !production;
             foreach (var button in _gallery) button.Visible = execution && ShouldShowAbyssDungeonPicker;
             _abyssRoundStop.Visible = execution && ShouldShowAbyssDungeonPicker && _owner._activeAbyssEngine is not null;
+            _abyssHistory.Visible = execution && ShouldShowAbyssDungeonPicker;
             foreach (var tab in _modeTabs) tab.Visible = execution && _selectedNavigation == "전투";
             if (_owner._alteringPage is not null)
             {
@@ -692,7 +695,7 @@ public sealed partial class MainForm
             Card(g, new(1012, 273, 410, 372));
             TextAt(g, "실행 상태", new(1037, 295, 350, 40), 23, true, TitleText);
             Dot(g, 1051, 379, 8, _owner._statusValue.ForeColor);
-            TextAt(g, _owner._statusValue.Text, new(1074, 352, 320, 76), 22, true, TitleText, multiline: true);
+            TextAt(g, _owner.ActiveAbyssWait ?? _owner._statusValue.Text, new(1074, 352, 320, 76), 22, true, TitleText, multiline: true);
             TextAt(g, "경과 시간", new(1037, 438, 160, 34), 16, false, Muted);
             TextAt(g, _owner._elapsedValue.Text, new(1200, 433, 196, 42), 19, true, TitleText, StringAlignment.Far);
             TextAt(g, "인식 상태", new(1037, 498, 160, 34), 16, false, Muted);

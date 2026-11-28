@@ -23,7 +23,7 @@ internal static class BrowserControlAssets
 <button id="clearQueue" class="danger" disabled>가공 목록 전체 비우기 · #1부터</button>
 <div id="orders">등록된 작업을 확인하세요.</div><p id="queueReply" role="status"></p></section>
 <section><h2>어비스</h2><label for="dungeon">던전 선택</label><select id="dungeon"><option>허상의 정박지</option><option>광기의 동굴</option><option>흩어진 물길</option></select>
-<p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button><p id="abyssReply" role="status"></p></section>
+<p class="hint">기존 어비스 방식으로 무한 반복합니다. 종료하려면 전체 작업 중지를 누르세요.</p><button id="abyss" disabled>어비스 시작</button><p id="abyssReply" role="status"></p><details><summary>최근 어비스 판별 기록</summary><pre id="abyssRounds">PC 연결 후 확인할 수 있습니다.</pre></details></section>
 <section aria-live="polite"><h2>명령 응답</h2><pre id="reply">—</pre></section></main></body></html>
 """;
     internal const string Css = """
@@ -100,6 +100,7 @@ function renderQueue(orders,revision){
 }
 function renderState(state){
   el('status').textContent=state.status;
+  el('abyssRounds').textContent=(state.abyssRounds??[]).join('\n\n')||'기록이 없습니다.';
   el('alteringIssue').textContent=state.alteringIssue??'';
   renderPreviousBatch(state.previousBatch);
   queueRevision=state.queueRevision;

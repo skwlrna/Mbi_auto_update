@@ -51,6 +51,13 @@ public sealed partial class MainForm : Form
 
     private CancellationTokenSource? _dungeonCts;
     private ScenarioEngine? _activeAbyssEngine;
+    private volatile ScenarioEngine? _combinedAbyssEngine;
+
+    private string? ActiveAbyssWait => (_activeAbyssEngine ?? _combinedAbyssEngine)?.AbyssWaitDescription;
+
+    private string? ActiveAlteringWait => _multiAlteringRunning && _multiTelegramLastActionAt != default
+        ? $"가공 최근 동작 · {Math.Max(0, (long)(DateTimeOffset.Now - _multiTelegramLastActionAt).TotalSeconds)}초 전 · {_multiTelegramLastAction}"
+        : null;
 
     private void RequestAbyssRoundStop()
     {
@@ -504,6 +511,7 @@ public sealed partial class MainForm : Form
                 ? new PeacaRouteEngine(window.Handle, settings, targets, baseDir, _selectedPeacaRoute)
                 : new ScenarioEngine(window.Handle, settings, scenario, targets, baseDir, _cli);
             _activeAbyssEngine = modeName == "어비스" ? engine as ScenarioEngine : null;
+            if (_activeAbyssEngine is { } abyssEngine) abyssEngine.AbyssDungeonName = SelectedAbyssDungeon;
             UpdateAbyssSelectorVisibility();
             if (modeName == "던전")
                 _log.Write("[던전] 현재 위치에서 시작");

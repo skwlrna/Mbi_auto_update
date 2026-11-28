@@ -106,6 +106,8 @@ internal sealed partial class ScenarioEngine
                     if (++gone >= 3)
                     {
                         _abyssCombatStartedAt = Environment.TickCount64;
+                        _reportedCombatStart ??= _abyssCombatStartedAt;
+                        ReportAbyssWait("전투 종료 화면 대기", 600);
                         Log?.Invoke("[어비스 입장] 선택/입장 화면 없음 + 던전 내부 증거 3프레임 -> 전투 타이머 시작");
                         return;
                     }

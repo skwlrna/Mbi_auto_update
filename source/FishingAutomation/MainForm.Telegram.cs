@@ -25,8 +25,10 @@ public sealed partial class MainForm
                 string summary = GetRemoteStatus();
                 string alteringDetail = await GetMultiAlteringTelegramDetailsAsync();
                 string craftingDetail = GetCraftingTelegramDetails();
+                string[] rounds = AbyssRoundHistory.Latest(3);
+                string abyssHistory = rounds.Length == 0 ? "" : "최근 어비스 기록\n" + string.Join("\n", rounds);
                 string detail = string.Join("\n\n",
-                    new[] { alteringDetail, craftingDetail }
+                    new[] { alteringDetail, craftingDetail, abyssHistory }
                         .Where(x => !string.IsNullOrWhiteSpace(x)));
                 return string.IsNullOrWhiteSpace(detail)
                     ? summary
@@ -74,6 +76,8 @@ public sealed partial class MainForm
         string altering = mode == "가공" ? GetAlteringRemoteStatus() : "";
         string alteringBlock = string.IsNullOrWhiteSpace(altering) ? "" : $"\n{altering}";
 
-        return $"MABI AUTO {UpdateManager.CurrentVersion}\n상태: {running}\n모드: {mode}{dungeon}\n화면 상태: {_statusValue.Text}{alteringBlock}\n시작: {started}\n성공: {_successValue.Text} / 진행: {_roundValue.Text}\n실패: {_failureValue.Text}";
+        string? wait = ActiveAbyssWait ?? ActiveAlteringWait;
+        string waitBlock = wait is null ? "" : $"\n진행 상세: {wait}";
+        return $"MABI AUTO {UpdateManager.CurrentVersion}\n상태: {running}\n모드: {mode}{dungeon}\n화면 상태: {_statusValue.Text}{waitBlock}{alteringBlock}\n시작: {started}\n성공: {_successValue.Text} / 진행: {_roundValue.Text}\n실패: {_failureValue.Text}";
     }
 }

@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../source/FishingAutomation/AbyssRoundHistory.cs" Link="AbyssRoundHistory.cs" />
     <Compile Include="../../source/FishingAutomation/InventoryLootTracker.cs" Link="InventoryLootTracker.cs" />
     <Compile Include="../../source/FishingAutomation/MabinogiMobileCli.cs" Link="MabinogiMobileCli.cs" />
     <Compile Include="../../source/FishingAutomation/AppLog.cs" Link="AppLog.cs" />

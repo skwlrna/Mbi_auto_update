@@ -108,6 +108,14 @@ internal sealed partial class ScenarioEngine
             }
         }
 
+        if (next == AbyssFlowState.CombatClearWait &&
+            previous is AbyssFlowState.Reentering or AbyssFlowState.Recruiting)
+        {
+            FinishAbyssReport("재입장 확인");
+            _reportedCombatStart = Environment.TickCount64;
+            ReportAbyssWait("전투 종료 화면 대기", 600);
+        }
+
         if (previous != next)
             Log?.Invoke($"[어비스 상태] {previous} -> {next} · {reason}");
     }
@@ -147,6 +155,11 @@ internal sealed partial class ScenarioEngine
                 throw new InvalidOperationException("한 판에서 결과 오인식 복구 3회 초과 -> 안전 정지합니다.");
             _abyssFlowState = AbyssFlowState.CombatClearWait;
         }
+        _reportedReward = false;
+        _reportedFightSeconds = null;
+        _reportedLoot = null;
+        _reportedRecoveryAttempts++;
+        ReportAbyssWait("전투 종료 화면 대기", null);
         _abyssClearPairedEvidenceFrames = 0;
         Log?.Invoke($"[어비스 상태] ResultConfirmed -> CombatClearWait · {reason} · 기존 전투 타이머 유지 · 복구={_abyssFalseResultCombatRecoveries}/3");
     }
