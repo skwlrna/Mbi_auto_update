@@ -2,6 +2,57 @@ namespace FishingAutomation;
 
 public sealed partial class MainForm
 {
+    private void ShowGameWindowDiagnostic()
+    {
+        var windows = DungeonVisionBot.WindowTools.EnumerateVisibleWindows();
+        nint foreground = DungeonVisionBot.NativeMethods.GetForegroundWindow();
+        string foregroundTitle = DungeonVisionBot.WindowTools.GetWindowTitle(foreground);
+        if (windows.Count == 0)
+        {
+            MessageBox.Show(this, "표시 중인 마비노기 모바일 창이 없습니다. 최소화 여부를 확인하세요.",
+                "게임 창 확인", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var dialog = new Form
+        {
+            Text = "게임 창 확인", StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(620, 430), MinimumSize = new Size(440, 300)
+        };
+        using var details = new Label { Dock = DockStyle.Top, Height = 72, Padding = new Padding(8) };
+        using var choices = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList };
+        using var preview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom };
+
+        void ShowSelection()
+        {
+            if (choices.SelectedItem is not DungeonVisionBot.WindowItem window) return;
+            preview.Image?.Dispose();
+            preview.Image = null;
+            details.Text = $"선택한 게임 창  {window.Title}\n진단 시작 시 전면 창  {foregroundTitle}";
+            if (window.Handle != foreground)
+                details.Text += "\n게임 영역을 덮고 있는 창도 미리보기에 나타납니다.";
+            try
+            {
+                preview.Image = new DungeonVisionBot.WindowCapture().CaptureClient(window.Handle);
+            }
+            catch (Exception ex)
+            {
+                details.Text += "\n캡처 실패  " + ex.Message;
+            }
+        }
+
+        choices.Items.AddRange(windows.Cast<object>().ToArray());
+        choices.Visible = windows.Count > 1;
+        choices.SelectedIndex = Math.Max(0, windows.FindIndex(window => window.Handle == foreground));
+        choices.SelectedIndexChanged += (_, _) => ShowSelection();
+        ShowSelection();
+        dialog.Controls.Add(preview);
+        dialog.Controls.Add(choices);
+        dialog.Controls.Add(details);
+        try { dialog.ShowDialog(this); }
+        finally { preview.Image?.Dispose(); }
+    }
+
     internal async void ShowVisualRecognitionTest()
     {
         if (AnyRunning)

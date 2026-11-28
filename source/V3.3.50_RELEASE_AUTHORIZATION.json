@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "version": "V3.3.50",
+  "purpose": "ui_execution_controls",
+  "approvedBy": "user_direct_request_in_conversation",
+  "request": "전부다 수정하고 배포해",
+  "realGameTested": false,
+  "rollbackProvided": true,
+  "offlineRegressionRequired": true,
+  "mainCiRequired": true,
+  "postUpdateGameTestingPending": true,
+  "realPhoneTested": false,
+  "sourcePullRequest": 473
+}

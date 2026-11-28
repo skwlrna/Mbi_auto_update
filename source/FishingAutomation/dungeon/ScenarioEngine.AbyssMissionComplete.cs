@@ -7,7 +7,7 @@ internal sealed partial class ScenarioEngine
     private async Task<bool> TryAcknowledgeScheduledMissionCompleteAsync(
         Bitmap initialFrame, CancellationToken ct)
     {
-        if (!_scheduledResultExit || !_scheduledExitClicked ||
+        if ((!_scheduledResultExit && !_stopAfterRound) || !_scheduledExitClicked ||
             _scheduledMissionConfirmationClicked ||
             !AbyssMissionCompletePolicy.HasVisualEvidence(initialFrame))
             return false;

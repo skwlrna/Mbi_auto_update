@@ -84,6 +84,7 @@ public sealed partial class MainForm
         private readonly Image?[] _dungeonPreviews;
         private readonly List<(Control Control, RectangleF Bounds)> _positions = new();
         private readonly List<ReferenceButton> _gallery = new();
+        private readonly ReferenceButton _abyssRoundStop;
         private readonly List<ReferenceButton> _modeTabs = new();
         private readonly List<ReferenceButton> _navigationButtons = new();
         private readonly List<Control> _settingsControls = new();
@@ -273,11 +274,14 @@ public sealed partial class MainForm
             for (int i = 0; i < 3; i++)
             {
                 int index = i;
-                var choose = AddButton("선택하기", new(278 + i * 380, 864, 346, 48), () => SelectDungeon(index), "radio", "choose");
+                var card = AbyssCardBounds(i);
+                var choose = AddButton("선택하기", new(card.X + 8, card.Bottom - 48, card.Width - 16, 38),
+                    () => SelectDungeon(index), "radio", "choose");
                 choose.Tag = i;
                 _gallery.Add(choose);
                 owner._dungeonButtons.Add(choose);
             }
+            _abyssRoundStop = AddButton("이번 판까지만", new(776, 962, 238, 75), owner.RequestAbyssRoundStop, "", "quiet");
             owner._logToggle = new Button { Visible = false };
             owner._mainActionButton = AddButton("자동 실행 시작", new(1040, 962, 380, 75), () =>
             {
@@ -469,6 +473,7 @@ public sealed partial class MainForm
             bool production = ShouldShowProductionPage && !_showHome && !_showSettings && !log;
             bool execution = !_showHome && !_showSettings && !log && !production;
             foreach (var button in _gallery) button.Visible = execution && ShouldShowAbyssDungeonPicker;
+            _abyssRoundStop.Visible = execution && ShouldShowAbyssDungeonPicker && _owner._activeAbyssEngine is not null;
             foreach (var tab in _modeTabs) tab.Visible = execution && _selectedNavigation == "전투";
             if (_owner._alteringPage is not null)
             {
@@ -540,8 +545,15 @@ public sealed partial class MainForm
                 ShowDungeonMenu();
                 return;
             }
-            if (!_showHome && !_showSettings && ShouldShowAbyssDungeonPicker && !_owner._logExpanded && y >= 731 && y <= 922 && x >= 270 && x < 1412)
-                SelectDungeon(Math.Clamp((int)((x - 270) / 380), 0, 2));
+            if (!_showHome && !_showSettings && ShouldShowAbyssDungeonPicker && !_owner._logExpanded)
+            {
+                for (int i = 0; i < _gallery.Count; i++)
+                {
+                    if (!AbyssCardBounds(i).Contains(x, y)) continue;
+                    SelectDungeon(i);
+                    return;
+                }
+            }
         }
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
@@ -597,7 +609,9 @@ public sealed partial class MainForm
             {
                 g.ResetTransform();
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-                var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.PreserveGraphicsClipping;
+                // The paint DC already clips to the invalidated area. The text bounds
+                // are in device pixels, so do not reapply the Graphics clipping region.
+                var flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
                 flags |= align == StringAlignment.Center ? TextFormatFlags.HorizontalCenter
                     : align == StringAlignment.Far ? TextFormatFlags.Right : TextFormatFlags.Left;
                 flags |= multiline || (text ?? "").Contains('\n')
@@ -669,19 +683,16 @@ public sealed partial class MainForm
 
             Card(g, new(256, 273, 740, 372));
             TextAt(g, EffectiveMode + " 모드", new(280, 295, 635, 42), 24, true, TitleText);
-            TextAt(g, "선택한 모드의 주요 정보", new(280, 348, 610, 30), 17, false, Muted);
             using (var divider = new Pen(Line)) g.DrawLine(divider, 280, 396, 963, 396);
             TextAt(g, "작업 대상", new(280, 417, 168, 36), 17, false, Muted);
             TextAt(g, _owner._currentDungeonValue.Text, new(454, 417, 450, 36), 18, true, TitleText);
-            TextAt(g, "현재 단계", new(280, 471, 168, 36), 17, false, Muted);
-            TextAt(g, _owner._currentStepValue.Text, new(454, 464, 472, 52), 18, true, TitleText, multiline: true);
-            TextAt(g, "최근 인식", new(280, 530, 168, 36), 17, false, Muted);
-            TextAt(g, _owner._recentDetectValue.Text, new(454, 529, 469, 40), 18, true, TitleText);
+            TextAt(g, "최근 인식", new(280, 483, 168, 36), 17, false, Muted);
+            TextAt(g, _owner._recentDetectValue.Text, new(454, 482, 469, 40), 18, true, TitleText);
 
             Card(g, new(1012, 273, 410, 372));
             TextAt(g, "실행 상태", new(1037, 295, 350, 40), 23, true, TitleText);
             Dot(g, 1051, 379, 8, _owner._statusValue.ForeColor);
-            TextAt(g, _owner._statusValue.Text, new(1074, 347, 320, 60), 22, true, TitleText);
+            TextAt(g, _owner._statusValue.Text, new(1074, 352, 320, 76), 22, true, TitleText, multiline: true);
             TextAt(g, "경과 시간", new(1037, 438, 160, 34), 16, false, Muted);
             TextAt(g, _owner._elapsedValue.Text, new(1200, 433, 196, 42), 19, true, TitleText, StringAlignment.Far);
             TextAt(g, "인식 상태", new(1037, 498, 160, 34), 16, false, Muted);
@@ -695,24 +706,25 @@ public sealed partial class MainForm
                 g.FillPath(fill, path);
             }
 
-            // Wider content card replaces the redundant Recent Log pane.
-            Card(g, new(256, 662, 1166, 275));
             if (ShouldShowAbyssDungeonPicker)
             {
-                TextAt(g, "어비스 목적지", new(279, 680, 1100, 35), 21, true, TitleText);
+                Card(g, new(256, 662, AbyssCardBounds(_gallery.Count - 1).Right - 256 + 14, 221));
+                TextAt(g, "어비스 목적지", new(279, 677, 400, 35), 21, true, TitleText);
                 string[] names = { "허상의 정박지", "광기의 동굴", "흩어진 물길" };
-                for (int i = 0; i < 3; i++)
+                for (int i = 0; i < names.Length; i++)
                 {
-                    int x = 270 + i * 380;
-                    Card(g, new(x, 731, 364, 191), i == _owner._abyssDungeon.SelectedIndex);
-                    var preview = new RectangleF(x + 7, 739, 350, 76);
+                    var card = AbyssCardBounds(i);
+                    Card(g, card, i == _owner._abyssDungeon.SelectedIndex);
+                    var preview = new RectangleF(card.X + 8, card.Y + 8, card.Width - 16, 60);
                     if (_dungeonPreviews[i] is Image picture) g.DrawImage(picture, preview);
                     else TextAt(g, "미리보기 없음", preview, 14, false, Muted, StringAlignment.Center);
-                    TextAt(g, names[i], new(x + 8, 823, 348, 34), 18, true, TitleText, StringAlignment.Center);
+                    TextAt(g, names[i], new(preview.X, preview.Bottom + 2, preview.Width, 32),
+                        18, true, TitleText, StringAlignment.Center);
                 }
             }
             else
             {
+                Card(g, new(256, 662, 1166, 275));
                 TextAt(g, "현재 작업 안내", new(279, 686, 1065, 40), 21, true, TitleText);
                 string guide = EffectiveMode == "낚시" ? "낚시 자동화 · F8로 실제 키 입력을 테스트할 수 있습니다."
                     : "던전 자동화 · 게임 화면과 대상 상태를 확인하고 실행하세요.";
@@ -720,6 +732,8 @@ public sealed partial class MainForm
                 TextAt(g, "최근 기록은 상단 기록 탭에서 확인할 수 있습니다.", new(279, 830, 1065, 60), 16, false, Muted, multiline: true);
             }
         }
+
+        private static RectangleF AbyssCardBounds(int index) => new(270 + index * 266, 718, 250, 152);
 
         private void Metric(Graphics g, RectangleF bounds, string caption, string? value, string icon, Color accent)
         {

@@ -223,7 +223,7 @@ public sealed partial class MainForm
             {
                 number = order.Number.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 name = order.Name, total = order.Total, quantity = order.Quantity,
-                state = order.State, detail = order.Detail
+                state = order.State, detail = _phoneAlteringLiveDetails.GetValueOrDefault(order.Number, order.Detail)
             }).ToArray();
 
     private string GetBrowserMobileState() =>

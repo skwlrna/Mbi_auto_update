@@ -34,7 +34,7 @@ class PostExitStellagramEsc(unittest.TestCase):
         n=read("source/FishingAutomation/dungeon/ScenarioEngine.cs")
         e=read("source/FishingAutomation/dungeon/ScenarioEngine.AbyssSchedulerExit.cs")
         normal=n.split('private async Task WaitForAbyssHomeAfterNormalExitAsync',1)[1].split('private async Task ClickTargetWithTimeoutAsync',1)[0]
-        recovery=n.split('if (_scheduledResultExit && _scheduledExitClicked)',1)[1].split('if ((await DetectAbyssResultRetryAsync',1)[0]
+        recovery=n.split('if ((_scheduledResultExit || _stopAfterRound) && _scheduledExitClicked)',1)[1].split('if ((await DetectAbyssResultRetryAsync',1)[0]
         self.assertIn('if (await TryDismissPostExitStellagramAsync(frame, ct))',normal)
         self.assertIn('if (await TryDismissPostExitStellagramAsync(frame, ct))',recovery)
         self.assertLess(normal.index('TryDismissPostExitStellagramAsync'),normal.index('TryAcknowledgeScheduledMissionCompleteAsync'))

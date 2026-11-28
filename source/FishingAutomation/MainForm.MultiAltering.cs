@@ -5,6 +5,15 @@ namespace FishingAutomation;
 public sealed partial class MainForm
 {
     private bool _multiAlteringRunning;
+    private volatile bool _stopAfterAlteringItem;
+
+    private void RequestAlteringItemStop()
+    {
+        if (!_multiAlteringRunning) return;
+        _stopAfterAlteringItem = true;
+        _log.Write("[다중가공] 다음 품목 종료 확인 후 정지 예약 · 이미 등록한 작업 유지");
+        SetStatus("품목 종료 확인 후 정지 예정", Blue);
+    }
     private CancellationTokenSource? _multiAlteringCts;
     private bool _resumeUiBusy;
 
@@ -12,7 +21,8 @@ public sealed partial class MainForm
         IReadOnlyList<AlteringPlan> plans, string? resumeDirectory = null,
         string? expectedResumeBatchId = null,
         bool confirmedSingleCharacterResume = false,
-        bool remoteOrder = false)
+        bool remoteOrder = false,
+        Action<AlteringPlan, long>? reportConfirmedQuantity = null)
     {
         if (_multiAlteringRunning)
             return false;
@@ -43,6 +53,7 @@ public sealed partial class MainForm
         MultiAlteringFacilityEfficiencyTracker? facilityEfficiency = null;
         MultiAlteringReadQuarantineTracker? facilityReadQuarantine = null;
         bool singleCharacterMode = false;
+        _stopAfterAlteringItem = false;
         _multiAlteringRunning = true;
         _multiAlteringCts?.Dispose();
         _multiAlteringCts = new CancellationTokenSource();
@@ -624,6 +635,7 @@ public sealed partial class MainForm
                 {
                     UpdateAlteringStatus(plan, p);
                     progress[key] = p.ConfirmedQuantity;
+                    reportConfirmedQuantity?.Invoke(plan, p.ConfirmedQuantity);
                     _productionCurrentQuantity = progress.Values.Sum();
                     _productionProgressSummary =
                         $"다중가공 {_productionCurrentQuantity:N0}/{_productionTargetQuantity:N0} · " +
@@ -1049,7 +1061,8 @@ public sealed partial class MainForm
                     _ = _notifier.SendAlertAsync("다중가공 장기 보류", message, false);
                 }),
                 resumeDeferredIntermediate: (parentPlan, facility, coordinatorCt) =>
-                    dependencyScheduler.ResumeSuspendedAsync(facility, coordinatorCt)), token);
+                    dependencyScheduler.ResumeSuspendedAsync(facility, coordinatorCt),
+                stopAfterItem: () => _stopAfterAlteringItem), token);
 
             await Task.Run(() => { batchStore.Complete(); batchStore.Cleanup(); }, token);
             completed = true;
@@ -1076,6 +1089,11 @@ public sealed partial class MainForm
                 reachedTarget = true;
             }
 
+        }
+        catch (MultiAlteringBoundaryStopException)
+        {
+            NoteMultiAlteringAction("품목 종료 확인 후 정지 · 배치 기록 보존");
+            SetStatus("품목 종료 확인 후 가공 정지", Color.DarkOrange);
         }
         catch (OperationCanceledException)
         {

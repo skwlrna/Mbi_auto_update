@@ -8,8 +8,8 @@ internal sealed partial class ScenarioEngine
 {
     private async Task ExitAbyssResultForScheduledProcessingAsync(CancellationToken ct)
     {
-        if (!IsAbyss || !_scheduledResultExit || _scenario.Repeat)
-            throw new InvalidOperationException("병행 모드가 아닌 결과 퇴장 요청을 차단합니다.");
+        if (!IsAbyss || (!_stopAfterRound && (!_scheduledResultExit || _scenario.Repeat)))
+            throw new InvalidOperationException("예약되지 않은 결과 화면 퇴장 요청을 차단합니다.");
 
         var timer = Stopwatch.StartNew();
         DetectionResult previousRetry = DetectionResult.NotFound;

@@ -26,6 +26,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
     // explicit exit input already observed. No recovery status alone can set it.
     private void RecordScheduledOutsideExit(string source)
     {
+        if (_stopAfterRound && _scheduledExitClicked) _roundStopExitVerified = true;
         if (!_scheduledResultExit) return;
         _scheduledOutsideExitVerified = true;
         Log?.Invoke("[병행] 던전 밖 3프레임 검증 기록 확정 · " + source);
@@ -97,6 +98,10 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
         }
     }
 
+    private bool _roundStopExitVerified;
+
+    internal void StopAfterRound() => _exitRequestedRound = ExitAbyssResultForScheduledProcessingAsync;
+
     public async Task RunAsync(CancellationToken ct)
     {
         _input.SetCancellation(ct);
@@ -167,6 +172,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
                 repeatedRecoveryCount = 0;
                 _resumeStepIndex = IsAbyss ? AbyssCombatStepIndex : 0;
                 Log?.Invoke($"===== {_cycle}판 완료 =====");
+                if (_roundStopExitVerified) return;
             }
             catch (AbyssResumeVerifiedCombatException)
             {
@@ -279,7 +285,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
 
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _settings.AutoRecoveryDelaySeconds)), ct);
             }
-        } while (!ct.IsCancellationRequested && AbyssMenuEntryPolicy.ShouldRunAnotherCycle(
+        } while (!_roundStopExitVerified && !ct.IsCancellationRequested && AbyssMenuEntryPolicy.ShouldRunAnotherCycle(
             _scenario.Repeat, _scheduledResultExit, _scheduledOutsideExitVerified,
             scheduledRecoveryCycles, MaxScheduledRecoveryCycles));
 
@@ -446,7 +452,7 @@ internal sealed partial class ScenarioEngine : IScenarioRunner
             // Never mistake the wide, single-button 협동 미션 완료 panel for
             // the usual three-button result row. After a verified exit click,
             // only the mission confirmation or 3-frame field HUD is allowed.
-            if (_scheduledResultExit && _scheduledExitClicked)
+            if ((_scheduledResultExit || _stopAfterRound) && _scheduledExitClicked)
             {
                 outsideCheckArmed = true;
                 if (await TryDismissPostExitStellagramAsync(frame, ct))
