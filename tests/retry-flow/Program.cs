@@ -146,6 +146,20 @@ namespace DungeonVisionBot
     Check(!(await reader.DetectAbyssResultRetryAsync(frame,default)).Found,"buttons alone do not establish rewards");
     OcrRecognizer.ForceRetryOcrMiss=false;
    }
+   using (var shiftedAbyssResult = new Bitmap(800, 1000))
+   {
+    using var g = Graphics.FromImage(shiftedAbyssResult);
+    g.Clear(Color.Black);
+    g.FillRectangle(Brushes.Goldenrod, 350, 105, 100, 100);
+    g.FillRectangle(Brushes.Lime, 180, 921, 140, 57);
+    g.FillRectangle(Brushes.Lime, 330, 921, 148, 57);
+    g.FillRectangle(Brushes.Lime, 487, 921, 133, 57);
+    Check(AbyssRewardVisualPolicy.TryDetect(shiftedAbyssResult, out var retry, out _)
+     && retry.Contains(400, 950), "Abyss accepts right gap shifted seven reference pixels");
+    g.FillRectangle(Brushes.Lime, 478, 921, 9, 57);
+    Check(!AbyssRewardVisualPolicy.TryDetect(shiftedAbyssResult, out _, out _),
+     "Abyss rejects merged buttons within the gap search range");
+   }
    using (var dungeonResult = new Bitmap(800, 1000))
    {
     using var greenBackground = new SolidBrush(Color.FromArgb(42, 76, 57));

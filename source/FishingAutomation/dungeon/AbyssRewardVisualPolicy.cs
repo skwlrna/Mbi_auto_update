@@ -50,6 +50,20 @@ internal static class AbyssRewardVisualPolicy
         double GapContrast(Rectangle gap, Rectangle before, Rectangle after) =>
             Math.Min(MeanGreen(before), MeanGreen(after)) - MeanGreen(gap);
 
+        const double maximumGapGreenRatio = 0.15;
+
+        double LowestGapGreenRatio(int expectedX)
+        {
+            // A narrow gap can land a few pixels to either side of the reference layout.
+            double lowest = Ratio(Scale(expectedX, 935, 9, 30));
+            for (int offset = 1; offset <= 8 && lowest > maximumGapGreenRatio; offset++)
+            {
+                lowest = Math.Min(lowest, Ratio(Scale(expectedX - offset, 935, 9, 30)));
+                lowest = Math.Min(lowest, Ratio(Scale(expectedX + offset, 935, 9, 30)));
+            }
+            return lowest;
+        }
+
         double chest = Ratio(Scale(350, 105, 100, 100), true);
         double left = Ratio(Scale(180, 925, 140, 50));
         double middle = Ratio(Scale(330, 925, 140, 50));
@@ -58,14 +72,14 @@ internal static class AbyssRewardVisualPolicy
         var rightGap = Scale(471, 935, 9, 30);
         double gap1 = compareGapContrast
             ? GapContrast(leftGap, Scale(300, 935, 16, 30), Scale(335, 935, 16, 30))
-            : Ratio(leftGap);
+            : LowestGapGreenRatio(320);
         double gap2 = compareGapContrast
             ? GapContrast(rightGap, Scale(448, 935, 16, 30), Scale(486, 935, 16, 30))
-            : Ratio(rightGap);
+            : LowestGapGreenRatio(471);
         const double minimumGapContrast = 32;
         bool gapsSeparated = compareGapContrast
             ? gap1 >= minimumGapContrast && gap2 >= minimumGapContrast
-            : gap1 <= 0.15 && gap2 <= 0.15;
+            : gap1 <= maximumGapGreenRatio && gap2 <= maximumGapGreenRatio;
         string gapMetric = compareGapContrast ? "gapGreenContrast" : "gapGreenRatio";
         double center = Ratio(Scale(376, 906, 48, 48));
         diagnostic = $"chest={chest:0.000}; buttons={left:0.000}/{middle:0.000}/{right:0.000}; {gapMetric}={gap1:0.000}/{gap2:0.000}; center={center:0.000}";
